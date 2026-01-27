@@ -1,6 +1,12 @@
+use std::collections::HashSet;
+use std::rc::Rc;
+use std::time::Duration;
+
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, ToBech32, Timestamp};
 use nostr_sdk::nips::nip19::Nip19Event;
+use nostr::nips::nip48::Protocol;
+
 use crate::routes::Route;
 use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_repost, delete_repost};
 use crate::hooks::use_reaction;
@@ -10,8 +16,6 @@ use crate::services::aggregation::InteractionCounts;
 use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal, ExternalContentList};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon, MastodonIcon, BlueskyIcon, RssIcon, GlobeIcon, ExternalLinkIcon};
 use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url, format_relative_time_or, truncate_pubkey};
-use nostr::nips::nip48::Protocol;
-use std::time::Duration;
 
 #[component]
 pub fn NoteCard(
@@ -19,6 +23,8 @@ pub fn NoteCard(
     #[props(default = None)] repost_info: Option<(PublicKey, Timestamp)>,
     #[props(default = None)] precomputed_counts: Option<InteractionCounts>,
     #[props(default = true)] collapsible: bool,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
 ) -> Element {
     // Clone values that will be used in multiple closures
     let author_pubkey = event.pubkey.to_string();
@@ -388,23 +394,55 @@ pub fn NoteCard(
     }));
 
     // Check if post is muted or author is blocked
+    // Using use_reactive! to re-run when cached data changes (fixes reactivity bug)
     let event_id_mute_check = event_id.clone();
     let author_pubkey_block_check = author_pubkey.clone();
-    use_effect(move || {
-        let event_id = event_id_mute_check.clone();
-        let author_pubkey = author_pubkey_block_check.clone();
-        spawn(async move {
-            // Check if post is muted
-            if let Ok(muted) = nostr_client::is_post_muted(event_id).await {
-                is_muted.set(muted);
+
+    use_effect(use_reactive!(
+        |(cached_muted_posts, cached_blocked_users, event_id_mute_check, author_pubkey_block_check)| {
+            let event_id = event_id_mute_check.clone();
+            let author_pubkey = author_pubkey_block_check.clone();
+
+            // Use cached data if available (synchronous O(1) check)
+            if let Some(ref muted_set) = cached_muted_posts {
+                if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
+                    is_muted.set(muted);
+                }
+            } else {
+                // Reset when cache is None (e.g., logout or not yet loaded)
+                is_muted.set(false);
             }
 
-            // Check if author is blocked
-            if let Ok(blocked) = nostr_client::is_user_blocked(author_pubkey).await {
-                is_author_blocked.set(blocked);
+            if let Some(ref blocked_set) = cached_blocked_users {
+                if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                    is_author_blocked.set(blocked);
+                }
+            } else {
+                // Reset when cache is None
+                is_author_blocked.set(false);
             }
-        });
-    });
+
+            // Fall back to async fetch only if no cached data provided
+            if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
+                let need_muted = cached_muted_posts.is_none();
+                let need_blocked = cached_blocked_users.is_none();
+                spawn(async move {
+                    if need_muted {
+                        match nostr_client::is_post_muted(event_id.clone()).await {
+                            Ok(muted) => is_muted.set(muted),
+                            Err(_) => is_muted.set(false), // Reset on error
+                        }
+                    }
+                    if need_blocked {
+                        match nostr_client::is_user_blocked(author_pubkey).await {
+                            Ok(blocked) => is_author_blocked.set(blocked),
+                            Err(_) => is_author_blocked.set(false), // Reset on error
+                        }
+                    }
+                });
+            }
+        }
+    ));
 
     // Format timestamp using shared utility
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");

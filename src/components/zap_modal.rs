@@ -180,7 +180,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             };
 
             // Create zap request builder
-            let msg_opt = if message.is_empty() { None } else { Some(message) };
+            // Clone message for later use in nutzap fallback
+            let msg_opt = if message.is_empty() { None } else { Some(message.clone()) };
             let builder = lnurl::create_zap_request_unsigned(
                 recipient_pubkey,
                 relays,
@@ -259,15 +260,22 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             // Try payment based on preference
             match payment_preference.as_str() {
                 "cashu_first" => {
-                    // Wait for nutzap eligibility check to complete before proceeding
-                    // This prevents premature fallback to Lightning while still checking
-                    let mut attempts = 0;
-                    while *checking_nutzap.read() && attempts < 50 {
-                        gloo_timers::future::TimeoutFuture::new(100).await;
-                        attempts += 1;
-                    }
-                    if *checking_nutzap.read() {
-                        log::warn!("Nutzap eligibility check timed out, proceeding with Lightning");
+                    // Wait for nutzap eligibility check to complete using select pattern
+                    // (nostr-sdk async pattern: use select! for racing, not busy-wait)
+                    use futures::future::{select, Either};
+
+                    let timeout = gloo_timers::future::TimeoutFuture::new(5000);
+                    let check_done = async {
+                        while *checking_nutzap.peek() { // Use peek() to avoid subscription
+                            gloo_timers::future::TimeoutFuture::new(50).await;
+                        }
+                    };
+
+                    match select(Box::pin(timeout), Box::pin(check_done)).await {
+                        Either::Left(_) => {
+                            log::warn!("Nutzap eligibility check timed out, proceeding with Lightning");
+                        }
+                        Either::Right(_) => {} // Check completed
                     }
 
                     // Check if nutzap is possible using per-mint balance
@@ -280,9 +288,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                             // Get event_id as hex string for nutzap
                             let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
-                            // Get comment from zap_message signal (message was moved earlier)
-                            let nutzap_comment = zap_message.read().clone();
-                            let nutzap_comment_opt = if nutzap_comment.is_empty() { None } else { Some(nutzap_comment) };
+                            // Use already-captured message (avoid redundant signal read)
+                            let nutzap_comment_opt = if message.is_empty() { None } else { Some(message.clone()) };
                             match cashu::send_nutzap(
                                 &recipient_pubkey_str,
                                 amount,
@@ -614,14 +621,15 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 }
                             } else if let Some(mint) = nutzap_mint.read().as_ref() {
                                 {
-                                    // Show per-mint balance for this specific mint
-                                    let balance = cashu::get_mint_balance(&mint.url);
+                                    // Show per-mint balance (normalize URL for consistent lookup)
+                                    let normalized_url = cashu::normalize_mint_url(&mint.url);
+                                    let balance = cashu::get_mint_balance(&normalized_url);
                                     rsx! {
                                         div {
                                             class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
                                             p {
                                                 class: "text-sm text-green-700 dark:text-green-300",
-                                                "✓ Nutzap available via {mint.url} ({balance} sats at mint)"
+                                                "✓ Nutzap available via {normalized_url} ({balance} sats at mint)"
                                             }
                                         }
                                     }

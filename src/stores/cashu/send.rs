@@ -134,7 +134,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         mint_url: mint_url.clone(),
         proof_secrets,
         amount,
-        operation_type: "send".to_string(),
+        operation_type: super::types::OperationType::Send,
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
@@ -178,7 +178,20 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         &pending_event_id,
     ).await {
         Ok(Some(event_id)) => Some(event_id),
-        Ok(None) => None,
+        Ok(None) => {
+            // Invariant: when publish returns None, keep_proofs should be empty
+            if !keep_proofs.is_empty() {
+                log::error!(
+                    "publish_send_events returned None but keep_proofs has {} entries",
+                    keep_proofs.len()
+                );
+            }
+            debug_assert!(
+                keep_proofs.is_empty(),
+                "publish_send_events returned None but keep_proofs is non-empty"
+            );
+            None
+        }
         Err(e) => {
             log::warn!("Nostr publish failed: {}", e);
             Some(pending_event_id.clone())
@@ -186,17 +199,25 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
     };
 
     // Create history event
-    let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
+    // Filter out pending_* IDs - they're not valid hex event IDs
+    let valid_created: Vec<String> = new_event_id
+        .iter()
+        .filter(|id| !id.starts_with("pending_"))
+        .cloned()
+        .collect();
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
 
-    if let Err(e) =
-        super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
-    {
-        log::error!("Failed to create history event: {}", e);
+    // Skip history event if both are empty (no valid event IDs to reference)
+    if !valid_created.is_empty() || !valid_destroyed.is_empty() {
+        if let Err(e) =
+            super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
+        {
+            log::error!("Failed to create history event: {}", e);
+        }
     }
 
     // Sync MultiMintWallet state (non-critical)
@@ -280,7 +301,7 @@ pub async fn send_tokens_p2pk(
         mint_url: mint_url.clone(),
         proof_secrets,
         amount,
-        operation_type: "send_p2pk".to_string(),
+        operation_type: super::types::OperationType::SendP2pk,
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
@@ -332,17 +353,25 @@ pub async fn send_tokens_p2pk(
     };
 
     // Create history event
-    let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
+    // Filter out pending_* IDs - they're not valid hex event IDs
+    let valid_created: Vec<String> = new_event_id
+        .iter()
+        .filter(|id| !id.starts_with("pending_"))
+        .cloned()
+        .collect();
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
 
-    if let Err(e) =
-        super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
-    {
-        log::error!("Failed to create history event: {}", e);
+    // Skip history event if both are empty (no valid event IDs to reference)
+    if !valid_created.is_empty() || !valid_destroyed.is_empty() {
+        if let Err(e) =
+            super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
+        {
+            log::error!("Failed to create history event: {}", e);
+        }
     }
 
     // Sync state

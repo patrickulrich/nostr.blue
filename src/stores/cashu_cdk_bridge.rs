@@ -235,7 +235,13 @@ pub async fn sync_wallet_state() -> Result<(), String> {
     Ok(())
 }
 
-/// Sync balance only (lighter weight than full sync)
+/// Recompute wallet balances from cached WALLET_TOKENS
+///
+/// **IMPORTANT**: This function does NOT query CDK or mint state.
+/// It only recomputes balances from the in-memory WALLET_TOKENS cache.
+/// Call `sync_wallet_state()` first to ensure WALLET_TOKENS is fresh.
+///
+/// This is a lightweight, no-network operation suitable for frequent calls.
 #[allow(dead_code)]
 pub async fn sync_balance_only() -> Result<u64, String> {
     super::cashu::signals::update_wallet_balances();

@@ -9,8 +9,9 @@ use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::get_all_list_members;
 use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
-use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug)]
 enum FeedType {
@@ -51,6 +52,10 @@ pub fn Home(list: String) -> Element {
     // First load: full fetch (no local data to reconcile)
     // Subsequent refreshes: use negentropy sync for incremental updates
     let mut interactions_loaded = use_signal(|| false);
+
+    // Cached mute/block lists for N+1 optimization (fetch once, pass to all NoteCards)
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
 
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
@@ -106,6 +111,44 @@ pub fn Home(list: String) -> Element {
                 log::warn!("Deep link: List with identifier '{}' not found", list_param);
             }
         }
+    });
+
+    // Fetch mute/block lists once when authenticated (N+1 optimization)
+    // Single fetch for both muted posts and blocked users
+    use_effect(move || {
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Clear caches on logout to prevent stale data on re-login
+        if !is_authenticated {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            return;
+        }
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        // Capture pubkey before spawn to guard against account switch during fetch
+        let auth_pubkey_snapshot = auth_store::AUTH_STATE.peek().pubkey.clone();
+        spawn(async move {
+            // Single fetch for both - avoids double fetch_mute_list() call
+            // Only set caches on success; leave as None on error so we can retry
+            if let Ok(data) = nostr_client::get_mute_list_data().await {
+                // Guard: only write if same user still logged in
+                let current_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
+                if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                    cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                    cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                }
+            }
+        });
     });
 
     // Load feed on mount and when refresh is triggered or feed type changes
@@ -1250,7 +1293,9 @@ pub fn Home(list: String) -> Element {
                                             event: event.clone(),
                                             repost_info: repost_info,
                                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                            collapsible: true
+                                            collapsible: true,
+                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                            cached_blocked_users: cached_blocked_users.read().clone()
                                         }
                                     }
                                 }

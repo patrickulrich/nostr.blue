@@ -173,6 +173,9 @@ pub enum UrgencyLevel {
 /// Stuck proof info for UI display
 #[derive(Debug, Clone, PartialEq)]
 pub struct StuckProofInfo {
+    /// Hashed identifier for stable UI keys (not the actual secret)
+    /// CDK pattern: proofs are identified by y-value, not raw secret
+    pub hashed_id: String,
     pub mint_url: String,
     pub amount: u64,
     pub state: ProofState,
@@ -180,6 +183,15 @@ pub struct StuckProofInfo {
     pub transaction_id: Option<u64>,
     pub urgency: UrgencyLevel,
     pub can_recover: bool,
+}
+
+/// Hash a proof secret for stable UI identification
+/// Uses truncated SHA-256 to avoid exposing raw secret in UI/logs
+fn hash_proof_id(secret: &str) -> String {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    format!("{:x}", hasher.finalize())[..16].to_string()
 }
 
 /// Health stats for UI display
@@ -563,17 +575,17 @@ pub(crate) fn recalculate_balance() {
 
 /// Calculate urgency level based on how long proof has been stuck
 ///
-/// Thresholds (checked in descending order):
-/// - > 1800s (30 min, PENDING_SPENT_TIMEOUT_DEFAULT) = Critical
-/// - > 600s (10 min, RESERVED_TIMEOUT_SECS) = High
-/// - > 300s (5 min, TRANSACTION_TIMEOUT_SECS) = Warning
-/// - <= 300s = Normal
+/// Thresholds (checked in descending order, inclusive boundaries):
+/// - >= 1800s (30 min, PENDING_SPENT_TIMEOUT_DEFAULT) = Critical
+/// - >= 600s (10 min, RESERVED_TIMEOUT_SECS) = High
+/// - >= 300s (5 min, TRANSACTION_TIMEOUT_SECS) = Warning
+/// - < 300s = Normal
 fn calculate_urgency(duration_secs: u64) -> UrgencyLevel {
-    if duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT {
+    if duration_secs >= PENDING_SPENT_TIMEOUT_DEFAULT {
         UrgencyLevel::Critical
-    } else if duration_secs > RESERVED_TIMEOUT_SECS {
+    } else if duration_secs >= RESERVED_TIMEOUT_SECS {
         UrgencyLevel::High
-    } else if duration_secs > TRANSACTION_TIMEOUT_SECS {
+    } else if duration_secs >= TRANSACTION_TIMEOUT_SECS {
         UrgencyLevel::Warning
     } else {
         UrgencyLevel::Normal
@@ -583,8 +595,9 @@ fn calculate_urgency(duration_secs: u64) -> UrgencyLevel {
 /// Determine if a proof can be recovered based on its state and duration
 fn can_recover_proof(state: ProofState, duration_secs: u64) -> bool {
     match state {
-        ProofState::PendingSpent => duration_secs > PENDING_SPENT_TIMEOUT_DEFAULT,
-        _ => duration_secs > RESERVED_TIMEOUT_SECS,
+        // Use inclusive >= to match documented thresholds
+        ProofState::PendingSpent => duration_secs >= PENDING_SPENT_TIMEOUT_DEFAULT,
+        _ => duration_secs >= RESERVED_TIMEOUT_SECS,
     }
 }
 
@@ -621,6 +634,7 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
                 if duration > TRANSACTION_TIMEOUT_SECS {
                     // Stuck - show in modal
                     stuck_proofs.push(StuckProofInfo {
+                        hashed_id: hash_proof_id(&proof.secret),
                         mint_url: token.mint.clone(),
                         amount: proof.amount,
                         state: proof.state,

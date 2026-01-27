@@ -33,7 +33,7 @@
 #![allow(dead_code)]
 
 use cdk::nuts::SpendingConditions;
-use dioxus::prelude::*;
+use dioxus::prelude::ReadableExt;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
@@ -53,6 +53,8 @@ use super::types::{
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
+
+use super::signals::InFlightGuard;
 
 // =============================================================================
 // Swap Options
@@ -318,14 +320,32 @@ pub async fn execute_swap_with_nip60(
         mint_url: mint_url.clone(),
         proof_secrets,
         amount: input_value,
-        operation_type: "swap".to_string(),
+        operation_type: super::types::OperationType::Swap,
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
+    let mut in_flight_guard = InFlightGuard::new(tx_id.clone());
 
     // 4. Get wallet and execute swap
     // NOTE: CDK's swap() has built-in try_proof_operation_or_reclaim - don't wrap again
     let wallet = get_or_create_wallet(&mint_url).await?;
+
+    // Snapshot pre-swap unspent Y values (CDK saga pattern - defensive filter data)
+    // Ensures only THIS swap's proofs are returned, not pre-existing ones
+    // Dioxus fail-fast pattern: use collect::<Result<_, _>>() instead of filter_map
+    let pre_swap_proofs = wallet
+        .get_unspent_proofs()
+        .await
+        .map_err(|e| format!("Failed to get pre-swap proofs: {}", e))?;
+
+    let pre_swap_ys: HashSet<String> = pre_swap_proofs
+        .iter()
+        .map(|p| p.y().map(|y| y.to_string()))
+        .collect::<Result<HashSet<_>, _>>()
+        .map_err(|e| format!("Failed to compute Y for pre-swap proof: {}", e))?;
+
+    log::debug!("Pre-swap snapshot: {} existing unspent proofs", pre_swap_ys.len());
+
     let amount = options.amount.map(cdk::Amount::from);
     let split_target = options.denomination.to_split_target();
 
@@ -339,7 +359,8 @@ pub async fn execute_swap_with_nip60(
         )
         .await;
 
-    // SAFETY: Remove in-flight tracking regardless of success/failure
+    // Dismiss guard and handle cleanup manually now that swap completed
+    in_flight_guard.dismiss();
     super::signals::remove_in_flight_send_request(&tx_id);
 
     let swap_result = swap_result.map_err(|e| format!("Swap failed: {}", e))?;
@@ -387,8 +408,8 @@ pub async fn execute_swap_with_nip60(
                 .collect::<Result<Vec<_>, String>>()? // Fail-fast on first Y() error
                 .into_iter()
                 .filter(|(_, y_str)| {
-                    // Skip if it's an input proof or already seen
-                    if input_ys.contains(y_str) || seen_ys.contains(y_str) {
+                    // Skip if it's an input proof, pre-existing proof, or already seen
+                    if input_ys.contains(y_str) || pre_swap_ys.contains(y_str) || seen_ys.contains(y_str) {
                         false
                     } else {
                         seen_ys.insert(y_str.clone());
@@ -417,23 +438,20 @@ pub async fn execute_swap_with_nip60(
                 .map_err(|e| format!("Failed to get swapped proofs: {}", e))?;
 
             // Filter to only NEW proofs (those with Y values not in input_ys)
-            all_unspent
-                .into_iter()
-                .filter(|p| {
-                    match p.y() {
-                        Ok(y) => !input_ys.contains(&y.to_string()),
-                        Err(e) => {
-                            // Escalate to error level for visibility - this should never happen
-                            // and indicates a potential fund loss scenario
-                            log::error!(
-                                "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - PROOF SKIPPED",
-                                u64::from(p.amount), e
-                            );
-                            false
-                        }
-                    }
-                })
-                .collect()
+            // Fail-fast on y() error to avoid silent fund loss (nostr-sdk pattern)
+            let mut new_proofs = Vec::new();
+            for p in all_unspent {
+                let y = p.y().map_err(|e| {
+                    format!(
+                        "CRITICAL: Y_VALUE_COMPUTATION_FAILED - proof_amount={} sats, error='{}' - aborting to prevent fund loss",
+                        u64::from(p.amount), e
+                    )
+                })?;
+                if !input_ys.contains(&y.to_string()) && !pre_swap_ys.contains(&y.to_string()) {
+                    new_proofs.push(p);
+                }
+            }
+            new_proofs
         }
     };
 
@@ -474,18 +492,26 @@ pub async fn execute_swap_with_nip60(
 
     // 8. Create history event using nostr-sdk SpendingHistory
     // Use "in" direction - we're receiving new proofs (swap creates new tokens)
-    let valid_created: Vec<String> = vec![final_event_id];
+    // Filter out pending_* IDs - they're not valid hex event IDs
+    let valid_created: Vec<String> = if final_event_id.starts_with("pending_") {
+        vec![]
+    } else {
+        vec![final_event_id]
+    };
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
 
-    if let Err(e) =
-        super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
-            .await
-    {
-        log::error!("Failed to create history event: {}", e);
+    // Skip history event if both are empty (no valid event IDs to reference)
+    if !valid_created.is_empty() || !valid_destroyed.is_empty() {
+        if let Err(e) =
+            super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
+                .await
+        {
+            log::error!("Failed to create history event: {}", e);
+        }
     }
 
     // 9. Sync CDK bridge state (non-critical)
@@ -539,14 +565,11 @@ fn update_local_state_after_swap(
     };
 
     // Crash-safe: ADD FIRST, then DELETE (via atomic_token_replace)
-    super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
+    // Note: atomic_token_replace already updates wallet balances internally
+    let new_balance = super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
 
     // Register proofs in event map
     register_proofs_in_event_map(new_event_id, &proof_data);
-
-    // Update balance from proof state
-    super::signals::update_wallet_balances();
-    let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
 
     log::info!(
         "Local state updated after swap. Balance: {} sats",
@@ -588,11 +611,18 @@ async fn publish_swap_events(
         .collect();
 
     // Build ExtendedTokenEvent with del tags for consumed events
+    // Filter out pending_* IDs - they're not valid hex event IDs for relay transmission
+    let valid_del_ids: Vec<String> = event_ids_to_delete
+        .iter()
+        .filter(|id| !id.starts_with("pending_"))
+        .cloned()
+        .collect();
+
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.to_string(),
         unit: "sat".to_string(),
         proofs: extended_proofs,
-        del: event_ids_to_delete.to_vec(),
+        del: valid_del_ids.clone(),
     };
 
     let json_content = serde_json::to_string(&token_event_data)
@@ -632,30 +662,7 @@ async fn publish_swap_events(
                 ).await;
 
                 // Queue deletion events for retry too
-                if !event_ids_to_delete.is_empty() {
-                    let valid_event_ids: Vec<_> = event_ids_to_delete
-                        .iter()
-                        .filter_map(|id| EventId::from_hex(id).ok())
-                        .collect();
-
-                    if !valid_event_ids.is_empty() {
-                        let mut tags = Vec::new();
-                        for eid in &valid_event_ids {
-                            tags.push(nostr_sdk::Tag::event(*eid));
-                        }
-                        tags.push(nostr_sdk::Tag::custom(
-                            nostr_sdk::TagKind::custom("k"),
-                            ["7375"],
-                        ));
-
-                        let deletion_builder = nostr_sdk::EventBuilder::new(
-                            Kind::from(5),
-                            "Swapped token"
-                        ).tags(tags);
-
-                        super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
-                    }
-                }
+                queue_deletion_event_retry(&valid_del_ids).await;
                 return Err("No relays accepted swap token event".to_string());
             }
 
@@ -667,7 +674,7 @@ async fn publish_swap_events(
             );
 
             // Publish deletion events for old tokens
-            publish_deletion_events(&client, event_ids_to_delete).await;
+            publish_deletion_events(&client, &valid_del_ids).await;
         }
         Err(e) => {
             log::warn!(
@@ -683,35 +690,50 @@ async fn publish_swap_events(
             ).await;
 
             // Also queue deletion events for retry if there are any
-            if !event_ids_to_delete.is_empty() {
-                let valid_event_ids: Vec<_> = event_ids_to_delete
-                    .iter()
-                    .filter_map(|id| EventId::from_hex(id).ok())
-                    .collect();
-
-                if !valid_event_ids.is_empty() {
-                    let mut tags = Vec::new();
-                    for eid in &valid_event_ids {
-                        tags.push(nostr_sdk::Tag::event(*eid));
-                    }
-                    tags.push(nostr_sdk::Tag::custom(
-                        nostr_sdk::TagKind::custom("k"),
-                        ["7375"],
-                    ));
-
-                    let deletion_builder = nostr_sdk::EventBuilder::new(
-                        Kind::from(5),
-                        "Swapped token"
-                    ).tags(tags);
-
-                    super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
-                }
-            }
+            queue_deletion_event_retry(&valid_del_ids).await;
             return Err(format!("Failed to publish swap token event: {}", e));
         }
     }
 
     Ok(event_id_hex)
+}
+
+/// Queue deletion event for retry (extracted helper to reduce duplication)
+///
+/// CDK pattern: centralize deletion event queueing logic
+async fn queue_deletion_event_retry(event_ids_to_delete: &[String]) {
+    if event_ids_to_delete.is_empty() {
+        return;
+    }
+
+    let valid_event_ids: Vec<EventId> = event_ids_to_delete
+        .iter()
+        .filter_map(|id| EventId::from_hex(id).ok())
+        .collect();
+
+    if valid_event_ids.is_empty() {
+        return;
+    }
+
+    let mut tags = Vec::new();
+    for eid in &valid_event_ids {
+        tags.push(nostr_sdk::Tag::event(*eid));
+    }
+    tags.push(nostr_sdk::Tag::custom(
+        nostr_sdk::TagKind::custom("k"),
+        ["7375"],
+    ));
+
+    let deletion_builder =
+        nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
+
+    super::events::queue_event_for_retry(
+        deletion_builder,
+        PendingEventType::DeletionEvent,
+        None,
+        None,
+    )
+    .await;
 }
 
 /// Publish deletion events for consumed token events
@@ -720,9 +742,10 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         return;
     }
 
-    let valid_event_ids: Vec<_> = event_ids_to_delete
+    // Parse once, store Vec<EventId> (avoid double parsing)
+    let valid_event_ids: Vec<EventId> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter_map(|id| EventId::from_hex(id).ok())
         .collect();
 
     if valid_event_ids.is_empty() {
@@ -730,10 +753,8 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
     }
 
     let mut tags = Vec::new();
-    for event_id in &valid_event_ids {
-        if let Ok(eid) = EventId::from_hex(event_id) {
-            tags.push(nostr_sdk::Tag::event(eid));
-        }
+    for eid in &valid_event_ids {
+        tags.push(nostr_sdk::Tag::event(*eid));
     }
     tags.push(nostr_sdk::Tag::custom(
         nostr_sdk::TagKind::custom("k"),

@@ -8,7 +8,7 @@ use crate::stores::shop_store::{
     fetch_products, fetch_products_paginated, get_cart_count,
     ShopFilterState, filter_products, sort_products, ProductSortBy,
 };
-use crate::stores::nostr_client::{fetch_contacts, get_user_pubkey};
+use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey};
 use crate::components::shop::{ProductCard, ProductCardSkeleton, CategorySelector};
 use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 
@@ -342,7 +342,7 @@ pub fn ShopHome() -> Element {
                                                 // Fetch contacts when enabling WoT filter
                                                 wot_loading.set(true);
                                                 spawn(async move {
-                                                    if let Ok(pubkey) = get_user_pubkey().await {
+                                                    if let Ok(pubkey) = get_cached_pubkey() {
                                                         match fetch_contacts(pubkey.to_hex()).await {
                                                             Ok(contacts) => {
                                                                 log::info!("WoT filter: loaded {} contacts", contacts.len());

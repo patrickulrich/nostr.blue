@@ -796,20 +796,21 @@ impl WalletTokensStore {
     /// Optimized: reuses single-pass balance_breakdown()
     pub fn total_balance(&self) -> u64 {
         let (avail, pend) = self.balance_breakdown();
-        avail.saturating_add(pend)
+        avail + pend
     }
 
     /// Get balance breakdown (available, pending) in single pass
     /// This is the primary balance computation - other methods delegate to this
     pub fn balance_breakdown(&self) -> (u64, u64) {
+        // Use normal addition - wallet balances can't realistically overflow u64
         self.data
             .iter()
             .flat_map(|token| &token.proofs)
             .fold((0u64, 0u64), |(avail, pend), proof| {
                 if proof.state.is_spendable() {
-                    (avail.saturating_add(proof.amount), pend)
+                    (avail + proof.amount, pend)
                 } else if proof.state.is_pending() {
-                    (avail, pend.saturating_add(proof.amount))
+                    (avail, pend + proof.amount)
                 } else {
                     (avail, pend)
                 }
@@ -980,6 +981,28 @@ pub struct InFlightMeltRequest {
     pub created_at: u64,
 }
 
+/// Operation types for in-flight send/swap requests
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationType {
+    /// Standard send operation
+    Send,
+    /// P2PK locked send operation
+    SendP2pk,
+    /// Token swap/consolidation operation
+    Swap,
+}
+
+impl std::fmt::Display for OperationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationType::Send => write!(f, "send"),
+            OperationType::SendP2pk => write!(f, "send_p2pk"),
+            OperationType::Swap => write!(f, "swap"),
+        }
+    }
+}
+
 /// Tracks in-flight send/swap operations for crash recovery and proof protection
 ///
 /// Similar to InFlightMeltRequest but for send/swap operations that don't have
@@ -998,8 +1021,8 @@ pub struct InFlightSendRequest {
     pub proof_secrets: Vec<String>,
     /// Amount being sent/swapped
     pub amount: u64,
-    /// Operation type: "send" or "swap"
-    pub operation_type: String,
+    /// Operation type (send, send_p2pk, or swap)
+    pub operation_type: OperationType,
     /// Timestamp when request was created (seconds since epoch)
     pub created_at: u64,
 }

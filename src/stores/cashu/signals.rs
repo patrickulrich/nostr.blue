@@ -252,14 +252,15 @@ where
     mutate_fn(&mut tokens_write)?;
 
     // Compute balance from mutated tokens (CDK pattern)
+    // Use normal addition - wallet balances can't realistically overflow u64
     let (available, pending) = tokens_write
         .iter()
         .flat_map(|t| &t.proofs)
         .fold((0u64, 0u64), |(avail, pend), proof| {
             if proof.state.is_spendable() {
-                (avail.saturating_add(proof.amount), pend)
+                (avail + proof.amount, pend)
             } else if proof.state.is_pending() {
-                (avail, pend.saturating_add(proof.amount))
+                (avail, pend + proof.amount)
             } else {
                 (avail, pend)
             }
@@ -268,7 +269,7 @@ where
     // Update single balance signal
     *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
         crate::stores::cashu_cdk_bridge::WalletBalances {
-            total: available.saturating_add(pending),
+            total: available + pending,
             available,
             pending,
         };
@@ -307,20 +308,21 @@ pub fn update_wallet_balances() {
     let data = store.data();
     let tokens = data.read();
 
+    // Use normal addition - wallet balances can't realistically overflow u64
     let (available, pending) = tokens
         .iter()
         .flat_map(|t| &t.proofs)
         .fold((0u64, 0u64), |(avail, pend), proof| {
             if proof.state.is_spendable() {
-                (avail.saturating_add(proof.amount), pend)
+                (avail + proof.amount, pend)
             } else if proof.state.is_pending() {
-                (avail, pend.saturating_add(proof.amount))
+                (avail, pend + proof.amount)
             } else {
                 (avail, pend)
             }
         });
 
-    let total = available.saturating_add(pending);
+    let total = available + pending;
 
     // Single signal for all balance data
     *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
@@ -549,6 +551,32 @@ pub const MAX_RECEIVE_BATCH_SIZE: usize = 100;
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+/// RAII guard for in-flight send/swap tracking cleanup
+/// Follows CDK pattern: decrement on all exit paths (success, error, panic)
+pub struct InFlightGuard {
+    tx_id: Option<String>,
+}
+
+impl InFlightGuard {
+    pub fn new(tx_id: String) -> Self {
+        Self { tx_id: Some(tx_id) }
+    }
+
+    /// Dismiss guard - call on success when manual cleanup is done
+    pub fn dismiss(&mut self) {
+        self.tx_id = None;
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Some(ref tx_id) = self.tx_id {
+            remove_in_flight_send_request(tx_id);
+            log::debug!("In-flight guard auto-cleaned tx_id: {}", tx_id);
+        }
+    }
+}
 
 /// Guard that releases the mint lock when dropped (RAII pattern)
 pub struct MintOperationGuard {

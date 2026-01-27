@@ -253,13 +253,10 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
         .await
         .map_err(|e| format!("Failed to fetch nutzap info: {}", e))?;
 
-    // Sort by created_at descending and take newest
-    let mut events_vec: Vec<_> = events.into_iter().collect();
-    events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    let event = events_vec
+    // Select newest event by timestamp (nostr-sdk pattern)
+    let event = events
         .into_iter()
-        .next()
+        .max_by_key(|e| e.created_at)
         .ok_or_else(|| format!("No nutzap info found for {}", pubkey))?;
 
     // Parse tags
@@ -329,7 +326,7 @@ pub async fn validate_nutzap_recipient(pubkey: &str) -> Result<NutzapMint, Strin
 /// Validate nutzap recipient using pre-fetched info (avoids duplicate network fetch)
 ///
 /// CDK pattern: Always filter by unit when checking proof availability
-fn validate_nutzap_recipient_with_info(info: &NutzapInfo) -> Result<NutzapMint, String> {
+pub fn validate_nutzap_recipient_with_info(info: &NutzapInfo) -> Result<NutzapMint, String> {
     // Get our mints
     let our_mints = super::get_mints();
 
@@ -575,27 +572,46 @@ impl Drop for SubscriptionGuard {
     }
 }
 
-/// Classify whether a redemption error is transient (retry-able) or permanent
+/// Error classification for retry logic
 ///
-/// CDK Error Classification Pattern:
-/// - Permanent errors (no retry): TokenAlreadySpent, InvalidProofs, KeysetNotFound
-/// - Transient errors (retry): Network, Timeout, Connection, Relay issues
+/// Categories (following nostr-sdk Error pattern):
+/// - NETWORK: Transient connectivity issues (retry)
+/// - VALIDATION: Permanent proof/token failures (don't retry)
+///
+/// CDK-specific error identifiers are normalized to lowercase.
+/// When CDK exposes structured error types, migrate to enum matching.
+///
+/// Network/connectivity errors - safe to retry
+const TRANSIENT_PATTERNS: &[&str] = &[
+    // Network layer
+    "network", "timeout", "connection", "unavailable", "temporary",
+    // Protocol layer
+    "relay", "http", "fetch", "websocket",
+];
+
+/// Validation/permanent errors - do NOT retry
+const PERMANENT_PATTERNS: &[&str] = &[
+    // CDK-specific (normalized lowercase)
+    "tokenalreadyspent", "invalidproofs", "keysetnotfound",
+    // Generic validation
+    "already spent", "invalid", "unknown", "keyset", "expired", "malformed",
+];
+
+/// Classify whether a redemption error is transient (retry-able) or permanent
 fn is_transient_error(err: &str) -> bool {
     let err_lower = err.to_lowercase();
-    // Transient: network/connection issues
-    if err_lower.contains("network") || err_lower.contains("timeout")
-        || err_lower.contains("connection") || err_lower.contains("relay")
-        || err_lower.contains("http") || err_lower.contains("fetch")
-        || err_lower.contains("unavailable") || err_lower.contains("temporary") {
-        return true;
-    }
-    // Permanent: proof/token validation failures
-    if err_lower.contains("already spent") || err_lower.contains("invalid")
-        || err_lower.contains("unknown") || err_lower.contains("keyset")
-        || err_lower.contains("expired") || err_lower.contains("malformed") {
+
+    // Check permanent patterns first (more specific, takes precedence)
+    if PERMANENT_PATTERNS.iter().any(|p| err_lower.contains(p)) {
         return false;
     }
-    // Default to transient (safer to retry)
+
+    // Check transient patterns
+    if TRANSIENT_PATTERNS.iter().any(|p| err_lower.contains(p)) {
+        return true;
+    }
+
+    // Default to transient (safer to retry unknown errors)
     true
 }
 
@@ -895,7 +911,7 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
 
     // CurrencyUnit::from_str never fails - unknown units become Custom(String)
     let currency_unit = cdk::nuts::CurrencyUnit::from_str(&pending.unit)
-        .expect("CurrencyUnit::from_str never fails");
+        .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(pending.unit.clone()));
 
     let token = Token::new(
         mint_url_parsed,

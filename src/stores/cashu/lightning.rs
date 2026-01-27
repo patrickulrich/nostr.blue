@@ -530,10 +530,15 @@ pub async fn melt_tokens(
     };
 
     // Create history event
-    let valid_created: Vec<String> = new_event_id.iter().cloned().collect();
+    // Filter out pending_* IDs - they're not valid hex event IDs
+    let valid_created: Vec<String> = new_event_id
+        .iter()
+        .filter(|id| !id.starts_with("pending_"))
+        .cloned()
+        .collect();
     let valid_destroyed: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| EventId::from_hex(id).is_ok())
+        .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
 
@@ -541,15 +546,18 @@ pub async fn melt_tokens(
     let total_amount = quote_info.amount.checked_add(fee_paid)
         .ok_or_else(|| "Overflow adding quote amount and fee".to_string())?;
 
-    create_history_event_with_type(
-        "out",
-        total_amount,
-        valid_created,
-        valid_destroyed,
-        Some("lightning_melt"),
-        Some(&quote_info.invoice),
-    )
-    .await?;
+    // Skip history event if both are empty (no valid event IDs to reference)
+    if !valid_created.is_empty() || !valid_destroyed.is_empty() {
+        create_history_event_with_type(
+            "out",
+            total_amount,
+            valid_created,
+            valid_destroyed,
+            Some("lightning_melt"),
+            Some(&quote_info.invoice),
+        )
+        .await?;
+    }
 
     // Clean up quote
     if let Err(e) = remove_melt_quote_from_db(&quote_id).await {

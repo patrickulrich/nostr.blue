@@ -64,11 +64,16 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             return;
         }
 
+        // Filter selected mints against current wallet mints to avoid stale entries
+        // Normalize URLs first to handle trailing slashes/scheme differences (CDK MintUrl pattern)
+        let current_wallet_mints = cashu::get_mints();
         let mints: Vec<cashu::NutzapMint> = selected_mints
             .read()
             .iter()
-            .map(|url| cashu::NutzapMint {
-                url: url.clone(),
+            .map(|url| cashu::normalize_mint_url(url))  // Normalize first
+            .filter(|normalized_url| current_wallet_mints.iter().any(|m| cashu::mint_matches(m, normalized_url)))
+            .map(|normalized_url| cashu::NutzapMint {
+                url: normalized_url,  // Store normalized URL
                 unit: "sat".to_string(),
             })
             .collect();
@@ -78,15 +83,22 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             return;
         }
 
-        let relays: Vec<String> = relay_input
+        // Validate relay URLs using RelayUrl::parse (nostr-sdk pattern)
+        // This performs multi-step validation: scheme check, URL structure, ws/wss only
+        let (relays, rejected): (Vec<String>, Vec<String>) = relay_input
             .read()
             .lines()
             .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && l.starts_with("wss://"))
-            .collect();
+            .filter(|l| !l.is_empty())
+            .partition(|l| nostr_sdk::RelayUrl::parse(l).is_ok());
+
+        // Log warning for rejected entries
+        if !rejected.is_empty() {
+            log::warn!("Rejected relay URLs (invalid scheme): {:?}", rejected);
+        }
 
         if relays.is_empty() {
-            error_message.set(Some("Please enter at least one relay URL".to_string()));
+            error_message.set(Some("Please enter at least one valid relay URL (wss:// or ws://)".to_string()));
             return;
         }
 
@@ -101,6 +113,13 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                 Ok(event_id) => {
                     // Update auto-redeem setting
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
+
+                    // Persist to localStorage (Dioxus pattern for persistence)
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        use gloo_storage::{LocalStorage, Storage};
+                        let _ = LocalStorage::set("nostr_nutzap_auto_redeem", auto_redeem_setting);
+                    }
 
                     success_message.set(Some(format!(
                         "Nutzap info published! Event: {}...",
@@ -211,6 +230,8 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                                         let mint_url_clone = mint_url.clone();
                                         rsx! {
                                             button {
+                                                // Use stable key from mint URL (Dioxus pattern)
+                                                key: "mint-{mint_url}",
                                                 class: if is_selected {
                                                     "w-full px-4 py-3 text-left rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 transition"
                                                 } else {
