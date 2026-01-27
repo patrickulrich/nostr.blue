@@ -622,7 +622,7 @@ async fn publish_swap_events(
         mint: mint_url.to_string(),
         unit: "sat".to_string(),
         proofs: extended_proofs,
-        del: valid_del_ids,
+        del: valid_del_ids.clone(),
     };
 
     let json_content = serde_json::to_string(&token_event_data)
@@ -662,7 +662,7 @@ async fn publish_swap_events(
                 ).await;
 
                 // Queue deletion events for retry too
-                queue_deletion_event_retry(event_ids_to_delete).await;
+                queue_deletion_event_retry(&valid_del_ids).await;
                 return Err("No relays accepted swap token event".to_string());
             }
 
@@ -674,7 +674,7 @@ async fn publish_swap_events(
             );
 
             // Publish deletion events for old tokens
-            publish_deletion_events(&client, event_ids_to_delete).await;
+            publish_deletion_events(&client, &valid_del_ids).await;
         }
         Err(e) => {
             log::warn!(
@@ -690,7 +690,7 @@ async fn publish_swap_events(
             ).await;
 
             // Also queue deletion events for retry if there are any
-            queue_deletion_event_retry(event_ids_to_delete).await;
+            queue_deletion_event_retry(&valid_del_ids).await;
             return Err(format!("Failed to publish swap token event: {}", e));
         }
     }
