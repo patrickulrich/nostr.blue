@@ -54,36 +54,7 @@ use super::types::{
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 
-// =============================================================================
-// RAII Guard for In-Flight Tracking
-// =============================================================================
-
-/// RAII guard for in-flight send/swap tracking cleanup
-/// Follows MintOperationGuard pattern from signals.rs
-struct InFlightGuard {
-    tx_id: Option<String>,
-}
-
-impl InFlightGuard {
-    fn new(tx_id: String) -> Self {
-        Self { tx_id: Some(tx_id) }
-    }
-
-    /// Dismiss the guard - prevents automatic cleanup on drop
-    /// Call this when you want to handle cleanup manually
-    fn dismiss(&mut self) {
-        self.tx_id = None;
-    }
-}
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        if let Some(ref tx_id) = self.tx_id {
-            super::signals::remove_in_flight_send_request(tx_id);
-            log::debug!("In-flight guard auto-cleaned tx_id: {}", tx_id);
-        }
-    }
-}
+use super::signals::InFlightGuard;
 
 // =============================================================================
 // Swap Options

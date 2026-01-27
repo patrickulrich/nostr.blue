@@ -35,9 +35,21 @@ pub async fn publish_repost_tracked(
 
     // Fetch the original event from database to get full event data
     // This is required for EventBuilder::repost() to serialize the event properly
-    let event = client.database().event_by_id(&target_event_id).await
-        .map_err(|e| format!("Failed to fetch event from database: {}", e))?
-        .ok_or_else(|| format!("Event not found: {}", event_id))?;
+    // Fallback to relay fetch if not in local DB (nostr-sdk pattern: always use timeout)
+    let event = match client.database().event_by_id(&target_event_id).await {
+        Ok(Some(ev)) => ev,
+        Ok(None) | Err(_) => {
+            // Fallback: fetch from relays
+            log::debug!("Event {} not in local DB, fetching from relays", event_id);
+            let filter = nostr::Filter::new().id(target_event_id);
+            let events = client
+                .fetch_events(filter, std::time::Duration::from_secs(5))
+                .await
+                .map_err(|e| format!("Failed to fetch event from relays: {}", e))?;
+            events.into_iter().next()
+                .ok_or_else(|| format!("Event not found locally or on relays: {}", event_id))?
+        }
+    };
 
     // Parse relay URL if provided
     let relay = relay_url.and_then(|url| RelayUrl::parse(&url).ok());

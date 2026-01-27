@@ -65,44 +65,7 @@ pub async fn publish_note_to_relays(
     }
 
     // Convert raw tags to nostr::Tag format preserving relay hints and markers
-    // (follows nostr-sdk parse_e_tag pattern from standard.rs)
-    use nostr::{EventId, PublicKey};
-    let nostr_tags: Vec<nostr::Tag> = tags.iter()
-        .filter_map(|tag| {
-            if tag.is_empty() {
-                return None;
-            }
-            match tag[0].as_str() {
-                "e" if tag.len() >= 2 => {
-                    EventId::from_hex(&tag[1]).ok().map(|id| {
-                        if tag.len() > 2 {
-                            // Preserve ALL trailing fields (nostr-sdk pattern)
-                            nostr::Tag::custom(nostr::TagKind::e(), tag[1..].to_vec())
-                        } else {
-                            nostr::Tag::event(id)
-                        }
-                    })
-                }
-                "p" if tag.len() >= 2 => {
-                    PublicKey::from_hex(&tag[1]).ok().map(|pk| {
-                        if tag.len() > 2 {
-                            // Preserve ALL trailing fields (nostr-sdk pattern)
-                            nostr::Tag::custom(nostr::TagKind::p(), tag[1..].to_vec())
-                        } else {
-                            nostr::Tag::public_key(pk)
-                        }
-                    })
-                }
-                "t" if tag.len() >= 2 => {
-                    Some(nostr::Tag::hashtag(&tag[1]))
-                }
-                _ => Some(nostr::Tag::custom(
-                    nostr::TagKind::Custom(std::borrow::Cow::Owned(tag[0].clone())),
-                    tag[1..].to_vec(),
-                ))
-            }
-        })
-        .collect();
+    let nostr_tags = super::types::convert_raw_tags(tags);
 
     let builder = nostr::EventBuilder::text_note(&content)
         .tags(nostr_tags);

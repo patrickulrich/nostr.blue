@@ -84,6 +84,10 @@ where
 {
     use futures::StreamExt;
 
+    if batch_size == 0 {
+        return Err("batch_size must be greater than 0".to_string());
+    }
+
     let client = get_client().ok_or("Client not initialized")?;
 
     // Wait for user relays if signed in (up to 2 seconds)
@@ -163,6 +167,10 @@ where
 {
     use futures::StreamExt;
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    if batch_size == 0 {
+        return Err("batch_size must be greater than 0".to_string());
+    }
 
     let client = get_client().ok_or("Client not initialized")?;
     ensure_relays_ready(&client).await;

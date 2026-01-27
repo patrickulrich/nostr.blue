@@ -173,8 +173,9 @@ pub enum UrgencyLevel {
 /// Stuck proof info for UI display
 #[derive(Debug, Clone, PartialEq)]
 pub struct StuckProofInfo {
-    /// Proof secret (unique identifier for stable UI keys)
-    pub secret: String,
+    /// Hashed identifier for stable UI keys (not the actual secret)
+    /// CDK pattern: proofs are identified by y-value, not raw secret
+    pub hashed_id: String,
     pub mint_url: String,
     pub amount: u64,
     pub state: ProofState,
@@ -182,6 +183,15 @@ pub struct StuckProofInfo {
     pub transaction_id: Option<u64>,
     pub urgency: UrgencyLevel,
     pub can_recover: bool,
+}
+
+/// Hash a proof secret for stable UI identification
+/// Uses truncated SHA-256 to avoid exposing raw secret in UI/logs
+fn hash_proof_id(secret: &str) -> String {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    format!("{:x}", hasher.finalize())[..16].to_string()
 }
 
 /// Health stats for UI display
@@ -624,7 +634,7 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
                 if duration > TRANSACTION_TIMEOUT_SECS {
                     // Stuck - show in modal
                     stuck_proofs.push(StuckProofInfo {
-                        secret: proof.secret.clone(),
+                        hashed_id: hash_proof_id(&proof.secret),
                         mint_url: token.mint.clone(),
                         amount: proof.amount,
                         state: proof.state,
