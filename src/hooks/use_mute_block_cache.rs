@@ -62,6 +62,17 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             return;
         }
 
+        // Handle transient state where authenticated but pubkey not yet available
+        // (occurs briefly during login before AUTH_STATE.pubkey is set)
+        // Pattern: main.rs:61-67 checks get_pubkey().is_none() before operations
+        if current_pubkey.is_none() {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            last_fetch_error_at.set(None);
+            last_pubkey.set(current_pubkey.clone());
+            return;
+        }
+
         // Detect account switch (both Some but different) and clear stale caches
         if let (Some(ref last), Some(ref current)) = (last_pubkey.peek().as_ref(), current_pubkey.as_ref()) {
             if last != current {

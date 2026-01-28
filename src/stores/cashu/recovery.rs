@@ -29,6 +29,40 @@ use super::mint_mgmt::get_mints;
 use super::signals::try_acquire_mint_lock;
 use super::utils::now_secs;
 
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Get unit for proofs from keyset cache, defaulting to "sat"
+///
+/// CDK pattern: unit is associated with keyset, not proofs directly.
+/// Looks up first proof's keyset ID in MINT_CACHE to get unit.
+fn get_unit_for_proofs(mint_url: &str, proofs: &[ProofData]) -> String {
+    use super::cache::MINT_CACHE;
+
+    // Get first proof's keyset ID (all proofs in a token typically share keyset)
+    let keyset_id = match proofs.first() {
+        Some(p) => &p.id,
+        None => return "sat".to_string(),
+    };
+
+    // Look up unit from cached keyset (pattern: keyset.rs:71-79)
+    let cache = MINT_CACHE.read();
+    if let Some(entry) = cache.get_mint(mint_url) {
+        if let Some(keyset) = entry.keysets.get(keyset_id) {
+            return keyset.unit.clone();
+        }
+    }
+
+    // Default to "sat" if not found (preserves current behavior)
+    // Pattern: CDK unwrap_or_default() for missing unit
+    log::debug!(
+        "Keyset {} not in cache for {}, defaulting to sat",
+        keyset_id, mint_url
+    );
+    "sat".to_string()
+}
+
 /// Refresh wallet data by re-fetching tokens and history from Nostr
 pub async fn refresh_wallet() -> Result<(), String> {
     if !is_wallet_initialized() {
@@ -709,8 +743,8 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
 
         // Create and publish token event for orphaned proofs
         // nostr-sdk will save locally before attempting relay publish
-        // CDK pattern: unit passed explicitly (currently "sat" - future: look up from mint's keyset info)
-        match super::events::publish_orphaned_proofs_event(&mint_url, &proof_data, "sat").await {
+        let unit = get_unit_for_proofs(&mint_url, &proof_data);
+        match super::events::publish_orphaned_proofs_event(&mint_url, &proof_data, &unit).await {
             Ok(event_id) => {
                 log::info!("Published orphaned proofs to Nostr: {}", event_id);
 
@@ -1270,8 +1304,8 @@ async fn recover_melt_change_deduplicated(
     // Publish orphaned proofs event (uses existing event publishing logic)
     // Note: publish_orphaned_proofs_event now internally adds tokens to WALLET_TOKENS
     // using the saga pattern (persist before publish), so we don't need to add them here
-    // CDK pattern: unit passed explicitly (currently "sat" - future: look up from mint's keyset info)
-    match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data, "sat").await {
+    let unit = get_unit_for_proofs(&request.mint_url, &proof_data);
+    match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data, &unit).await {
         Ok(event_id) => {
             log::info!("Published recovered change proofs to Nostr: {}", event_id);
 
@@ -1426,8 +1460,8 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
         .map(|p| cdk_proof_to_proof_data(p))
         .collect();
 
-    // CDK pattern: unit passed explicitly (currently "sat" - future: look up from mint's keyset info)
-    match super::events::publish_orphaned_proofs_event(mint_url, &proof_data, "sat").await {
+    let unit = get_unit_for_proofs(mint_url, &proof_data);
+    match super::events::publish_orphaned_proofs_event(mint_url, &proof_data, &unit).await {
         Ok(event_id) => {
             log::info!(
                 "Published {} recovered proofs ({} sats) to Nostr: {}",
@@ -1437,13 +1471,16 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
             // Token insertion handled by publish_orphaned_proofs_event
             // Only register in event map for fast lookup
             super::proofs::register_proofs_in_event_map(&event_id, &proof_data);
+
+            Ok(recovered_amount)
         }
         Err(e) => {
-            log::warn!("Failed to publish recovered proofs: {}", e);
+            // Propagate error so callers can handle/retry
+            // Pattern: matches recover_melt_change_deduplicated at line 1284-1288
+            log::warn!("Failed to publish recovered proofs: {}. Proofs safe in CDK, will retry on next sync.", e);
+            Err(format!("Nostr publish failed: {}", e))
         }
     }
-
-    Ok(recovered_amount)
 }
 
 /// Recover operations for a specific mint using CDK's active quote discovery
