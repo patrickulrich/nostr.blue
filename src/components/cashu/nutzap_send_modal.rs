@@ -37,8 +37,16 @@ pub fn NutzapSendModal(
 
     // Fetch recipient nutzap info when recipient changes
     // Use use_reactive! to track non-signal prop and re-run when recipient_pubkey changes
+    // Also depend on CLIENT_INITIALIZED to avoid fetching before client is ready
     let recipient_pubkey_for_effect = recipient_pubkey.clone();
-    use_effect(use_reactive!(|(recipient_pubkey_for_effect,)| {
+    let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+    use_effect(use_reactive!(|(recipient_pubkey_for_effect, client_initialized)| {
+        // Early return if client not ready
+        if !client_initialized {
+            log::debug!("Waiting for client initialization before fetching nutzap info");
+            return;
+        }
+
         let recipient = recipient_pubkey_for_effect.clone();
 
         // Increment version for this request (Dioxus effect dedup pattern)

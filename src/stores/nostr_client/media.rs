@@ -80,6 +80,13 @@ fn validate_voice_params(duration: f64, waveform: &[u8]) -> Result<(u64, Vec<u8>
         return Err("Duration must be non-negative".to_string());
     }
 
+    // Overflow check: ensure duration can safely cast to u64
+    // MAX_SAFE_DURATION is slightly below u64::MAX to account for rounding
+    const MAX_SAFE_DURATION: f64 = (u64::MAX as f64) - 0.5;
+    if duration > MAX_SAFE_DURATION {
+        return Err("Duration too large".to_string());
+    }
+
     let duration_u64 = duration.round() as u64;
     let capped_waveform = if waveform.len() > MAX_WAVEFORM_LEN {
         log::warn!(

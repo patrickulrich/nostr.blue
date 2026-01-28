@@ -11,7 +11,7 @@ use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
 use crate::stores::relay;
-use super::signals::{NOSTR_CLIENT, HAS_SIGNER, get_contacts_cache, CachedContacts};
+use super::signals::{NOSTR_CLIENT, HAS_SIGNER};
 use crate::stores::relay::USER_RELAYS_APPLIED;
 
 // =============================================================================

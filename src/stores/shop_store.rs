@@ -92,6 +92,10 @@ pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal:
 pub static PROCESSED_ORDER_EVENTS: GlobalSignal<LruCache<String, ()>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PROCESSED_EVENTS_CACHE_SIZE).unwrap()));
 
+/// Flag to track if orders have been loaded from DB for this session
+/// Prevents skipping reload when BUYER_ORDERS/SELLER_ORDERS happen to be empty
+static ORDERS_LOADED_FROM_DB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 // ============================================================================
 // Global Signals - Merchant
 // ============================================================================
@@ -776,16 +780,27 @@ pub fn get_shop_stats() -> ShopStats {
 /// Ensure orders are loaded from DB (call when auth becomes available)
 /// CDK pattern: idempotent, returns Ok(()) if already loaded or no DB
 pub async fn ensure_orders_loaded() -> Result<()> {
+    use std::sync::atomic::Ordering;
+
     let db = match SHOP_DB.read().as_ref() {
         Some(db) => db.clone(),
         None => return Ok(()),  // No DB yet, nothing to do
     };
 
-    // Only reload if orders are empty (might have loaded already)
-    if BUYER_ORDERS.read().is_empty() && SELLER_ORDERS.read().is_empty() {
+    // Use atomic flag instead of checking list emptiness
+    // This prevents skipping seller orders when buyer orders happen to be empty
+    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst) {
         restore_orders_from_db(&db).await?;
+        ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
     }
     Ok(())
+}
+
+/// Reset orders loaded flag (call on logout)
+pub fn reset_orders_loaded_flag() {
+    use std::sync::atomic::Ordering;
+    ORDERS_LOADED_FROM_DB.store(false, Ordering::SeqCst);
+    log::debug!("Orders loaded flag reset");
 }
 
 /// Initialize the shop store and restore persisted orders from IndexedDB
@@ -1843,12 +1858,12 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
 
-                        // Dioxus pattern: Guard clause with explicit skip
+                        // Dioxus pattern: Guard clause - return Err so caller doesn't mark event as processed
                         let merchant_pubkey = match nostr_client::get_cached_pubkey() {
                             Ok(pk) => pk.to_hex(),
                             Err(_) => {
-                                log::warn!("Skipping order message - not authenticated");
-                                return Ok(());  // Skip processing, don't use empty pubkey
+                                log::warn!("Deferring order message - not authenticated");
+                                return Err("Not authenticated - order message will be reprocessed".to_string());
                             }
                         };
 

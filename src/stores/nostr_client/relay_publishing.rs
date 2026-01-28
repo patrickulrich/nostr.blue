@@ -15,14 +15,16 @@ use super::types::PublishResult;
 // Relay URL Parsing Helper
 // =============================================================================
 
-/// Parse relay URLs with validation logging
+/// Parse relay URLs with validation logging and deduplication
 ///
-/// Returns validated URLs and logs warnings for any invalid URLs.
+/// Returns validated, deduplicated URLs and logs warnings for any invalid URLs.
 /// Returns an error if no valid URLs remain after filtering.
 ///
 /// # Errors
 /// Returns `Err` if all provided URLs are invalid.
 fn parse_relay_urls(relay_urls: &[String]) -> Result<Vec<nostr::RelayUrl>, String> {
+    use std::collections::HashSet;
+
     let (valid_urls, invalid_urls): (Vec<_>, Vec<_>) = relay_urls
         .iter()
         .map(|r| (r.clone(), nostr::RelayUrl::parse(r)))
@@ -33,9 +35,12 @@ fn parse_relay_urls(relay_urls: &[String]) -> Result<Vec<nostr::RelayUrl>, Strin
         log::warn!("Invalid relay URL skipped: {}", url);
     }
 
+    // Deduplicate relay URLs to avoid double-publishing
+    let mut seen = HashSet::new();
     let urls: Vec<nostr::RelayUrl> = valid_urls
         .into_iter()
         .filter_map(|(_, r)| r.ok())
+        .filter(|url| seen.insert(url.to_string()))  // Only keep first occurrence
         .collect();
 
     if urls.is_empty() {
@@ -116,8 +121,9 @@ pub async fn publish_reaction_to_relays(
 
     let target_event_id = nostr::EventId::from_hex(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let target_pubkey = PublicKey::from_hex(&event_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    // Use PublicKey::parse() which handles hex, bech32 (npub), and NIP-21 URIs (nostr-sdk pattern)
+    let target_pubkey = PublicKey::parse(&event_pubkey)
+        .map_err(|e| format!("Invalid pubkey (expected hex or npub): {}", e))?;
 
     // Create reaction target
     let target = ReactionTarget {

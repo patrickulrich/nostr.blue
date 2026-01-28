@@ -127,6 +127,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     // Cached mute/block lists for N+1 optimization
     let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
     let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    // Track previous pubkey to detect account switches (Dioxus pattern)
+    let mut last_pubkey: Signal<Option<String>> = use_signal(|| None);
 
     // Fetch mute/block lists once when authenticated (N+1 optimization)
     // Single fetch for both muted posts and blocked users
@@ -140,8 +142,19 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
         if !is_authenticated {
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
+            last_pubkey.set(None);
             return;
         }
+
+        // Detect account switch (both Some but different) and clear stale caches
+        if let (Some(ref last), Some(ref current)) = (last_pubkey.peek().as_ref(), current_pubkey.as_ref()) {
+            if last != current {
+                log::debug!("Account switch detected in note view, clearing mute/block cache");
+                cached_muted_posts.set(None);
+                cached_blocked_users.set(None);
+            }
+        }
+        last_pubkey.set(current_pubkey.clone());
 
         if !client_initialized {
             return;

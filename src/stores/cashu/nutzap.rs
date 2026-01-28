@@ -631,6 +631,15 @@ fn is_transient_error(err: &str) -> bool {
 ///
 /// Subscribes to kind:9321 events tagged with our pubkey and accepted mints.
 pub async fn start_nutzap_subscription() -> Result<(), String> {
+    // 1. Validate first (before setting flag) - fail fast without side effects
+    let _my_info = MY_NUTZAP_INFO
+        .read()
+        .clone()
+        .ok_or("Nutzap info not published - enable receiving first")?;
+
+    let my_pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+
+    // 2. Set flag AFTER validation, immediately before spawn
     // Hold write lock during check-and-set to prevent race condition
     {
         let mut active = NUTZAP_SUBSCRIPTION_ACTIVE.write();
@@ -640,13 +649,6 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
         }
         *active = true;
     } // Drop lock before spawn
-
-    let _my_info = MY_NUTZAP_INFO
-        .read()
-        .clone()
-        .ok_or("Nutzap info not published - enable receiving first")?;
-
-    let my_pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let my_pubkey =
         PublicKey::parse(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 

@@ -489,6 +489,21 @@ pub fn Settings() -> Element {
                                     let enabled = evt.checked();
                                     spawn(async move {
                                         settings_store::update_cashu_wallet_auto_load(enabled).await;
+                                        // When disabling Cashu, reset payment preference if it was "cashu_first"
+                                        // to prevent invalid preference state
+                                        if !enabled {
+                                            let current_pref = settings_store::SETTINGS.read().payment_method_preference.clone();
+                                            if current_pref == "cashu_first" {
+                                                // Reset to safe default - check if NWC is connected
+                                                let new_pref = if nwc_store::is_connected() {
+                                                    "nwc_first"
+                                                } else {
+                                                    "always_ask"
+                                                };
+                                                settings_store::update_payment_method_preference(new_pref.to_string()).await;
+                                                log::info!("Reset payment preference from cashu_first to {}", new_pref);
+                                            }
+                                        }
                                     });
                                 }
                             }

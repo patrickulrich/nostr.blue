@@ -184,7 +184,9 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
                             uppercase: false,
                         }))
                     } else {
-                        Some(nostr::Tag::event(event_id))
+                        // Unknown marker (e.g., "mention") - preserve full tag using Tag::custom
+                        // This follows nostr-sdk pattern where Tag::custom preserves raw data
+                        Some(nostr::Tag::custom(nostr::TagKind::e(), tag_vec[1..].to_vec()))
                     }
                 }
                 "e" if tag_vec.len() >= 2 => {

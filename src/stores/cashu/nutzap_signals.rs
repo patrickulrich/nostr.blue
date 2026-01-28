@@ -105,15 +105,22 @@ pub fn update_pending_nutzap_status(event_id: &str, status: super::nutzap::Nutza
     }
 }
 
-/// Get count of pending nutzaps
+/// Get count of pending nutzaps (only those with Pending status)
 #[allow(dead_code)]
 pub fn pending_nutzap_count() -> usize {
-    PENDING_NUTZAPS.read().len()
+    PENDING_NUTZAPS.read()
+        .iter()
+        .filter(|n| matches!(n.status, super::nutzap::NutzapStatus::Pending))
+        .count()
 }
 
-/// Get total value of pending nutzaps
+/// Get total value of pending nutzaps (only those with Pending status)
 #[allow(dead_code)]
 pub fn pending_nutzap_value() -> u64 {
     // Use sum() for clarity - nutzap amounts can't realistically overflow u64
-    PENDING_NUTZAPS.read().iter().map(|n| n.amount).sum()
+    PENDING_NUTZAPS.read()
+        .iter()
+        .filter(|n| matches!(n.status, super::nutzap::NutzapStatus::Pending))
+        .map(|n| n.amount)
+        .sum()
 }

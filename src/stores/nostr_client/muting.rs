@@ -53,6 +53,10 @@ async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::Event
         // For mutations: bypass DB cache, fetch directly from relays
         // This prevents publishing stale state that could overwrite changes from other devices
         let client = get_client().ok_or("Client not initialized")?;
+
+        // Ensure at least one relay is ready before fetching
+        super::fetching::ensure_relays_ready(&client).await;
+
         match client.fetch_events(filter, Duration::from_secs(10)).await {
             Ok(events) => Ok(select_newest(events.into_iter().collect())),
             Err(e) => {

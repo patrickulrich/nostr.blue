@@ -15,6 +15,9 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut success_message = use_signal(|| Option::<String>::None);
 
+    // Re-entrancy guard for "Redeem All" button (Dioxus Signal pattern)
+    let mut is_redeeming_all = use_signal(|| false);
+
     // Manual refresh
     let mut is_refreshing = use_signal(|| false);
 
@@ -65,6 +68,11 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
 
     // Redeem all pending nutzaps sequentially to avoid overwhelming the mint
     let on_redeem_all = move |_| {
+        // Re-entrancy guard: prevent multiple concurrent "Redeem All" operations
+        if *is_redeeming_all.peek() {
+            return;
+        }
+
         // Read from signal to get current state
         let pending: Vec<String> = cashu::PENDING_NUTZAPS
             .read()
@@ -79,6 +87,9 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
 
         error_message.set(None);
         success_message.set(None);
+
+        // Set guard before marking IDs and spawning
+        is_redeeming_all.set(true);
 
         // Mark all pending IDs as redeeming upfront (optimistic UI update)
         for event_id in &pending {
@@ -123,6 +134,9 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                     error_count
                 )));
             }
+
+            // Reset guard on all paths (Dioxus pattern: clone signal before await)
+            is_redeeming_all.set(false);
         });
     };
 
@@ -358,9 +372,14 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                     }
                     if pending_count > 1 {
                         button {
-                            class: "flex-1 px-4 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition",
+                            class: if *is_redeeming_all.read() {
+                                "flex-1 px-4 py-3 bg-orange-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed"
+                            } else {
+                                "flex-1 px-4 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition"
+                            },
+                            disabled: *is_redeeming_all.read(),
                             onclick: on_redeem_all,
-                            "Redeem All ({pending_count})"
+                            if *is_redeeming_all.read() { "Redeeming All..." } else { "Redeem All ({pending_count})" }
                         }
                     }
                 }

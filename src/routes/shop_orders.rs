@@ -21,11 +21,17 @@ pub fn ShopOrders() -> Element {
         let is_authenticated = crate::stores::auth_store::is_authenticated();
 
         // Skip if not authenticated - orders page requires login
+        // Clear ALL state on logout to prevent stale data
         if !is_authenticated {
             orders.set(Vec::new());
+            selected_order.set(None);
+            error.set(None);
             loading.set(false);
             return;
         }
+
+        // Capture auth state before async operations
+        let auth_snapshot = crate::stores::auth_store::get_pubkey();
 
         spawn(async move {
             loading.set(true);
@@ -41,12 +47,26 @@ pub fn ShopOrders() -> Element {
                 log::warn!("Failed to fetch order updates: {}", e);
             }
 
+            // Guard: re-check auth before writing state (prevent stale writes after logout)
+            if crate::stores::auth_store::get_pubkey() != auth_snapshot {
+                log::debug!("Auth changed during order fetch, discarding results");
+                loading.set(false);
+                return;
+            }
+
             // Then fetch all orders
             match fetch_my_orders().await {
-                Ok(o) => orders.set(o),
+                Ok(o) => {
+                    // Final auth guard before state mutation
+                    if crate::stores::auth_store::get_pubkey() == auth_snapshot {
+                        orders.set(o);
+                    }
+                }
                 Err(e) => {
                     log::error!("Failed to fetch my orders: {}", e);
-                    error.set(Some(e));
+                    if crate::stores::auth_store::get_pubkey() == auth_snapshot {
+                        error.set(Some(e));
+                    }
                 }
             }
             loading.set(false);

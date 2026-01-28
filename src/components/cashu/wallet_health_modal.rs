@@ -114,6 +114,7 @@ fn urgency_color_class(urgency: UrgencyLevel) -> &'static str {
 }
 
 /// Calculate the remaining seconds until a group becomes eligible for recovery
+/// Returns the EARLIEST (minimum) time when any proof in the group can be recovered
 fn remaining_until_recovery(proofs: &[StuckProofInfo]) -> Option<u64> {
     proofs
         .iter()
@@ -125,7 +126,7 @@ fn remaining_until_recovery(proofs: &[StuckProofInfo]) -> Option<u64> {
             };
             timeout.checked_sub(p.stuck_duration_secs)
         })
-        .max()
+        .min()  // Use min() to get earliest recovery time, not max()
 }
 
 // =============================================================================

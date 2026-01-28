@@ -1,25 +1,43 @@
 //! Shared search relay connection caching
 //!
 //! Used by both content_search and profile_search to avoid duplicate connections.
+//! Cache is keyed by pubkey to handle account switches properly.
 
+use std::collections::HashMap;
 use nostr_sdk::prelude::*;
 
 use crate::stores::relay;
 
-/// Cached search relays after connection (avoids reconnecting on every search)
-static SEARCH_RELAYS_CONNECTED: std::sync::OnceLock<tokio::sync::RwLock<Vec<String>>> =
+/// Cached search relays by pubkey (keyed to handle account switches)
+/// Key is pubkey hex string, value is connected relay URLs
+static SEARCH_RELAYS_CACHE: std::sync::OnceLock<tokio::sync::RwLock<HashMap<String, Vec<String>>>> =
     std::sync::OnceLock::new();
+
+/// Invalidate the search relay cache (call on logout/relay-list updates)
+pub async fn invalidate_search_relay_cache() {
+    let lock = SEARCH_RELAYS_CACHE.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()));
+    let mut cache = lock.write().await;
+    cache.clear();
+    log::debug!("Search relay cache invalidated");
+}
 
 /// Get connected search relay URLs, ensuring they're in the pool first.
 /// Returns empty vec if no search relays could be connected (will fallback to all relays).
+/// Cache is keyed by current user's pubkey to handle account switches.
 pub async fn get_connected_search_relays(client: &Client) -> Vec<String> {
-    let lock = SEARCH_RELAYS_CONNECTED.get_or_init(|| tokio::sync::RwLock::new(Vec::new()));
+    let lock = SEARCH_RELAYS_CACHE.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()));
 
-    // Check if already connected
+    // Get current pubkey for cache key (use "anonymous" if not authenticated)
+    let cache_key = crate::stores::auth_store::get_pubkey()
+        .unwrap_or_else(|| "anonymous".to_string());
+
+    // Check if already connected for this user
     {
         let cached = lock.read().await;
-        if !cached.is_empty() {
-            return cached.clone();
+        if let Some(relays) = cached.get(&cache_key) {
+            if !relays.is_empty() {
+                return relays.clone();
+            }
         }
     }
 
@@ -29,7 +47,7 @@ pub async fn get_connected_search_relays(client: &Client) -> Vec<String> {
     // Cache if successful
     if !connected.is_empty() {
         let mut cached = lock.write().await;
-        *cached = connected.clone();
+        cached.insert(cache_key, connected.clone());
     }
 
     connected

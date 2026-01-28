@@ -365,11 +365,18 @@ pub async fn execute_mpp_melt(
                         .cloned()
                         .unwrap_or_default();
 
+                    // Filter out pending_* IDs from del list - only valid NIP-60 hex event IDs
+                    // (Same pattern as line 455-457)
+                    let filtered_del: Vec<String> = event_ids_for_mint
+                        .into_iter()
+                        .filter(|id| nostr_sdk::EventId::from_hex(id).is_ok())
+                        .collect();
+
                     let token_event_data = ExtendedTokenEvent {
                         mint: mint_url.clone(),
                         unit: "sat".to_string(),
                         proofs: extended_proofs,
-                        del: event_ids_for_mint,
+                        del: filtered_del,
                     };
 
                     let json_content = serde_json::to_string(&token_event_data)

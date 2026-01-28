@@ -142,7 +142,7 @@ where
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
 
-    let mut total_count = 0;
+    let mut accepted_count = 0;  // Renamed from total_count - only counts accepted events
     let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
 
@@ -156,7 +156,7 @@ where
         }
 
         batch.push(event);
-        total_count += 1;
+        accepted_count += 1;
 
         // Deliver batch when we reach batch_size
         if batch.len() >= batch_size {
@@ -172,11 +172,11 @@ where
     }
 
     if filtered_count > 0 {
-        log::info!("Stream completed: {} events ({} filtered out from non-matching authors)", total_count, filtered_count);
+        log::info!("Stream completed: {} accepted events ({} filtered out from non-matching authors)", accepted_count, filtered_count);
     } else {
-        log::info!("Stream completed: received {} events in batches", total_count);
+        log::info!("Stream completed: received {} events in batches", accepted_count);
     }
-    Ok(total_count)
+    Ok(accepted_count)
 }
 
 /// Stream events from connected relays only (bypasses gossip discovery)
@@ -233,7 +233,7 @@ where
         .await
         .map_err(|e| format!("Failed to create stream: {}", e))?;
 
-    let mut total_count = 0;
+    let mut accepted_count = 0;  // Renamed from total_count - only counts accepted events
     let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
 
@@ -247,7 +247,7 @@ where
         }
 
         batch.push(event);
-        total_count += 1;
+        accepted_count += 1;
 
         if batch.len() >= batch_size {
             let items = std::mem::take(&mut batch);
@@ -261,11 +261,11 @@ where
     }
 
     if filtered_count > 0 {
-        log::info!("Fast stream completed: {} events ({} filtered out from non-followed authors)", total_count, filtered_count);
+        log::info!("Fast stream completed: {} accepted events ({} filtered out from non-followed authors)", accepted_count, filtered_count);
     } else {
-        log::info!("Fast stream completed: {} events from connected relays", total_count);
+        log::info!("Fast stream completed: {} events from connected relays", accepted_count);
     }
-    Ok(total_count)
+    Ok(accepted_count)
 }
 
 // =============================================================================
@@ -276,12 +276,14 @@ where
 ///
 /// This is a convenience wrapper that collects all streamed events
 /// into a vector with deduplication and sorting.
+/// Uses HashSet for O(1) deduplication during collection (nostr-sdk pattern).
 #[allow(dead_code)]
 pub async fn stream_events_collected(
     filter: Filter,
     timeout: std::time::Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     use futures::StreamExt;
+    use std::collections::HashSet;
 
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -289,15 +291,16 @@ pub async fn stream_events_collected(
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
 
+    // O(1) deduplication during collection using HashSet (nostr-sdk pattern)
+    let mut seen_ids: HashSet<nostr::EventId> = HashSet::new();
     let mut events = Vec::new();
 
     while let Some(event) = stream.next().await {
-        events.push(event);
+        // O(1) dedup during collection - skip duplicates from multiple relays
+        if seen_ids.insert(event.id) {
+            events.push(event);
+        }
     }
-
-    // Deduplicate by event ID (events may come from multiple relays)
-    events.sort_by(|a, b| a.id.cmp(&b.id));
-    events.dedup_by(|a, b| a.id == b.id);
 
     // Sort by created_at descending (newest first)
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));

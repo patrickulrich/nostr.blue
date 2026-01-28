@@ -49,12 +49,15 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
     let p2pk_pubkey = cashu::get_nutzap_p2pk_pubkey().ok();
 
     // Toggle mint selection
+    // Normalize URLs for consistent comparison (handles trailing slashes, scheme differences)
     let mut toggle_mint = move |mint_url: String| {
+        let normalized = cashu::normalize_mint_url(&mint_url);
         let mut mints = selected_mints.write();
-        if mints.contains(&mint_url) {
-            mints.retain(|m| m != &mint_url);
+        // Use mint_matches helper for comparison when removing
+        if mints.iter().any(|m| cashu::mint_matches(m, &normalized)) {
+            mints.retain(|m| !cashu::mint_matches(m, &normalized));
         } else {
-            mints.push(mint_url);
+            mints.push(normalized);
         }
     };
 

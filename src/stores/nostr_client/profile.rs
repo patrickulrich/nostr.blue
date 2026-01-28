@@ -59,6 +59,24 @@ pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String,
 }
 
 // =============================================================================
+// URL Validation Helper
+// =============================================================================
+
+/// Validate a picture/banner URL (http/https only, must have host)
+fn validate_picture_url(url: &str) -> std::result::Result<Url, String> {
+    let validated_url = Url::parse(url)
+        .map_err(|e| format!("Invalid URL: {}", e))?;
+    match validated_url.scheme() {
+        "http" | "https" => {}
+        scheme => return Err(format!("Invalid URL scheme '{}': only http/https allowed", scheme)),
+    }
+    if validated_url.host().is_none() {
+        return Err("Invalid URL: missing host".to_string());
+    }
+    Ok(validated_url)
+}
+
+// =============================================================================
 // Profile Picture/Banner Updates
 // =============================================================================
 
@@ -72,16 +90,8 @@ pub async fn update_profile_picture(url: String) -> std::result::Result<(), Stri
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
         .ok_or("Profile not loaded; fetch metadata first")?;
 
-    // Validate URL by parsing it and check scheme
-    let validated_url = Url::parse(&url)
-        .map_err(|e| format!("Invalid picture URL: {}", e))?;
-    match validated_url.scheme() {
-        "http" | "https" => {}
-        scheme => return Err(format!("Invalid URL scheme '{}': only http/https allowed", scheme)),
-    }
-    if validated_url.host().is_none() {
-        return Err("Invalid URL: missing host".to_string());
-    }
+    // Validate URL using extracted helper
+    validate_picture_url(&url)?;
 
     // Update picture field
     let updated_metadata = Metadata {
@@ -103,16 +113,8 @@ pub async fn update_profile_banner(url: String) -> std::result::Result<(), Strin
     let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
         .ok_or("Profile not loaded; fetch metadata first")?;
 
-    // Validate URL by parsing it and check scheme
-    let validated_url = Url::parse(&url)
-        .map_err(|e| format!("Invalid banner URL: {}", e))?;
-    match validated_url.scheme() {
-        "http" | "https" => {}
-        scheme => return Err(format!("Invalid URL scheme '{}': only http/https allowed", scheme)),
-    }
-    if validated_url.host().is_none() {
-        return Err("Invalid URL: missing host".to_string());
-    }
+    // Validate URL using extracted helper
+    validate_picture_url(&url)?;
 
     // Update banner field
     let updated_metadata = Metadata {

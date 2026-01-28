@@ -66,6 +66,13 @@ pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result
     // nostr-sdk pattern: Defensive normalization (may already be normalized by caller)
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_str)?;
 
+    // Debug assertion to detect unnecessary double-normalization in debug builds
+    debug_assert!(
+        pubkey_str == normalized_pubkey || pubkey_str.starts_with("npub"),
+        "Unexpected pubkey format: input '{}' normalized to '{}'",
+        pubkey_str, normalized_pubkey
+    );
+
     log::info!("Fetching contacts from relay for: {}", normalized_pubkey);
 
     // Parse pubkey (now guaranteed to be hex)

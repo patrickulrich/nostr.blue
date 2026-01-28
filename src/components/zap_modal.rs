@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::hooks::use_reactive;
 use dioxus::html::input_data::keyboard_types::Key;
 use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
@@ -80,10 +81,11 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut checking_nutzap = use_signal(|| false);
 
     // Check nutzap eligibility on modal open
+    // Use use_reactive! to properly track recipient_pubkey changes (Dioxus pattern)
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
-        use_effect(move || {
-            let pubkey = recipient_pubkey.clone();
+        use_effect(use_reactive!(|recipient_pubkey| {
+            let pubkey = recipient_pubkey.clone();  // Clone before await
             checking_nutzap.set(true);
             spawn(async move {
                 match cashu::validate_nutzap_recipient(&pubkey).await {
@@ -92,7 +94,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 }
                 checking_nutzap.set(false);
             });
-        });
+        }));
     }
 
     // Preset amounts in sats
