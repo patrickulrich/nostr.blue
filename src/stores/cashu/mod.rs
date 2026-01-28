@@ -84,6 +84,7 @@ pub use mpp::{
     mint_supports_mpp,
     MppQuoteInfo,
 };
+#[allow(unused_imports)]  // Public API: get_mint_spendable_balance may be used by external callers
 pub use mint_mgmt::{
     add_mint,
     remove_mint,

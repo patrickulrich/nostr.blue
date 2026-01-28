@@ -48,7 +48,18 @@ pub async fn fetch_events_aggregated(
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
+    fetch_events_aggregated_with_client(&client, filter, timeout).await
+}
 
+/// Internal: aggregated fetch using provided client (avoids re-reading NOSTR_CLIENT)
+///
+/// Dioxus pattern: Get client once via OnceLock/get_or_init, pass same instance
+/// through all async operations. No locks held across await points.
+async fn fetch_events_aggregated_with_client(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
     // Try database first (fast)
     match client.database().query(filter.clone()).await {
         Ok(db_events) => {
@@ -79,7 +90,7 @@ pub async fn fetch_events_aggregated(
     log::info!("Fetching from relays (database empty or failed)");
 
     // Wait for at least one relay to be ready (non-blocking connect() may not have finished)
-    ensure_relays_ready(&client).await;
+    relay::connection::ensure_relays_ready(client).await;
 
     client
         .fetch_events(filter, timeout)
@@ -102,8 +113,8 @@ pub async fn fetch_video_events(
     // Ensure video relay is in the pool
     ensure_video_relay_connected(&client).await;
 
-    // Use standard aggregated fetch (DB first, then relays including video relay)
-    fetch_events_aggregated(filter, timeout).await
+    // Pass same client through - no re-read of NOSTR_CLIENT (Dioxus pattern)
+    fetch_events_aggregated_with_client(&client, filter, timeout).await
 }
 
 // =============================================================================
@@ -282,10 +293,22 @@ pub async fn fetch_events_from_connected_relays(
     filter: Filter,
     timeout: std::time::Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
+}
+
+/// Internal: connected relays fetch using provided client (avoids re-reading NOSTR_CLIENT)
+///
+/// Dioxus pattern: Get client once, pass same instance through all async operations.
+/// No locks held across await points.
+async fn fetch_events_from_connected_relays_with_client(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: std::time::Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
 
-    let client = get_client().ok_or("Client not initialized")?;
-    ensure_relays_ready(&client).await;
+    relay::connection::ensure_relays_ready(client).await;
 
     let relays = client.relays().await;
     let connected_urls: Vec<nostr::RelayUrl> = relays
@@ -337,6 +360,6 @@ pub async fn fetch_video_events_from_connected_relays(
     // Ensure video relay is in the pool
     ensure_video_relay_connected(&client).await;
 
-    // Use fast fetch (bypasses gossip)
-    fetch_events_from_connected_relays(filter, timeout).await
+    // Pass same client through - no re-read of NOSTR_CLIENT (Dioxus pattern)
+    fetch_events_from_connected_relays_with_client(&client, filter, timeout).await
 }

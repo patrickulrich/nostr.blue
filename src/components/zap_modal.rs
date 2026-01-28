@@ -624,9 +624,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 }
                             } else if let Some(mint) = nutzap_mint.read().as_ref() {
                                 {
-                                    // Show per-mint spendable balance (normalize URL for consistent lookup)
+                                    // Show per-mint unit-aware spendable balance (normalize URL for consistent lookup)
+                                    // Use "sat" unit since nutzap payments use sats
                                     let normalized_url = cashu::normalize_mint_url(&mint.url);
-                                    let balance = cashu::get_mint_spendable_balance(&normalized_url);
+                                    let balance = cashu::get_mint_unit_spendable_balance(&normalized_url, "sat");
                                     rsx! {
                                         div {
                                             class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",

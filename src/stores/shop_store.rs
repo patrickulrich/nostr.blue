@@ -789,8 +789,10 @@ pub async fn ensure_orders_loaded() -> Result<()> {
 
     // Use atomic flag instead of checking list emptiness
     // This prevents skipping seller orders when buyer orders happen to be empty
-    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst) {
-        restore_orders_from_db(&db).await?;
+    // Only set flag if restore actually completed (not skipped due to missing auth)
+    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst)
+        && restore_orders_from_db(&db).await?
+    {
         ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
     }
     Ok(())
@@ -835,7 +837,8 @@ pub async fn init_shop_store() -> Result<()> {
 }
 
 /// Restore orders from IndexedDB into memory signals
-async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
+/// Returns true if orders were actually processed (or none exist), false if skipped due to missing auth
+async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
     log::info!("Restoring orders from IndexedDB...");
 
     let orders = db.get_all_orders().await
@@ -843,7 +846,7 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
 
     if orders.is_empty() {
         log::info!("No persisted orders found");
-        return Ok(());
+        return Ok(true);  // Empty is a valid "loaded" state
     }
 
     // Dioxus pattern: Explicit validation before state mutation
@@ -851,7 +854,7 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
         Ok(pk) => pk.to_hex(),
         Err(_) => {
             log::warn!("Cannot load orders - not authenticated");
-            return Ok(());  // Early return, don't proceed with empty pubkey
+            return Ok(false);  // Signal: skipped, try again later when auth is available
         }
     };
 
@@ -873,7 +876,7 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
     *BUYER_ORDERS.write() = buyer_orders;
     *SELLER_ORDERS.write() = seller_orders;
 
-    Ok(())
+    Ok(true)
 }
 
 /// Persist an order to IndexedDB

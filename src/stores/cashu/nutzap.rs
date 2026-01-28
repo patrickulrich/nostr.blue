@@ -514,10 +514,41 @@ pub async fn send_nutzap(
         .clone();
 
     // Publish to recipient's preferred relays
-    let output = client
-        .send_event_builder(builder)
-        .await
-        .map_err(|e| format!("Failed to publish nutzap: {}", e))?;
+    // Use match to handle network errors - queue for retry instead of failing
+    let output = match client.send_event_builder(builder.clone()).await {
+        Ok(out) => out,
+        Err(e) => {
+            // Network error - queue for retry (proofs already spent, local state updated)
+            log::warn!("Failed to publish nutzap, queuing for retry: {}", e);
+            super::events::queue_event_for_retry(
+                builder,
+                super::types::PendingEventType::NutzapEvent,
+                Some(pending_event_id.clone()),
+                Some(mint_url.to_string()),
+            )
+            .await;
+
+            // Create history event (tokens were spent)
+            if let Err(e) =
+                super::events::create_history_event("out", amount, vec![], event_ids_to_delete.clone())
+                    .await
+            {
+                log::error!("Failed to create history event: {}", e);
+            }
+
+            // Sync wallet state
+            if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
+                log::warn!("Failed to sync wallet state after nutzap: {}", e);
+            }
+
+            return Ok(NutzapSendResult {
+                event_id: pending_event_id,
+                amount,
+                fee: fee_u64,
+                is_pending_retry: true,
+            });
+        }
+    };
 
     // Check if at least one relay succeeded
     let (event_id, is_pending_retry) = if output.success.is_empty() {
@@ -638,8 +669,10 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
         .ok_or("Nutzap info not published - enable receiving first")?;
 
     let my_pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let my_pubkey =
+        PublicKey::parse(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // 2. Set flag AFTER validation, immediately before spawn
+    // 2. Set flag AFTER all validation, immediately before spawn
     // Hold write lock during check-and-set to prevent race condition
     {
         let mut active = NUTZAP_SUBSCRIPTION_ACTIVE.write();
@@ -649,8 +682,6 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
         }
         *active = true;
     } // Drop lock before spawn
-    let my_pubkey =
-        PublicKey::parse(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Build filter for nutzaps tagged to us
     // Note: We filter by pubkey only, then validate mint in process_nutzap_event

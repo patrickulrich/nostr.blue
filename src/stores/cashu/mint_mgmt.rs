@@ -885,8 +885,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
 
-    // Get all proofs for this mint
-    let (all_proofs, event_ids_to_delete) = {
+    // Get all proofs for this mint and extract/validate unit consistency
+    let (all_proofs, event_ids_to_delete, unit_str) = {
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
@@ -900,15 +900,29 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
         let mut all_proofs = Vec::new();
         let mut event_ids = Vec::new();
+        let mut detected_unit: Option<String> = None;
 
         for token in &mint_tokens {
+            // Validate unit consistency (CDK pattern: all proofs should share the same unit)
+            if let Some(ref existing) = detected_unit {
+                if &token.unit != existing {
+                    return Err(format!(
+                        "Mixed units in mint proofs: '{}' and '{}' - cannot consolidate",
+                        existing, token.unit
+                    ));
+                }
+            } else {
+                detected_unit = Some(token.unit.clone());
+            }
+
             event_ids.push(token.event_id.clone());
             for proof in &token.proofs {
                 all_proofs.push(proof_data_to_cdk_proof(proof)?);
             }
         }
 
-        (all_proofs, event_ids)
+        let unit = detected_unit.ok_or("No proofs found to determine unit")?;
+        (all_proofs, event_ids, unit)
     };
 
     let proofs_before = all_proofs.len();
@@ -1014,6 +1028,11 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     .ok_or("Localstore not initialized")?
                     .clone();
 
+                // Convert unit string to CurrencyUnit using CDK's FromStr (handles Custom fallback)
+                use std::str::FromStr;
+                let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
+                    .unwrap_or(cdk::nuts::CurrencyUnit::Sat);  // Defensive fallback
+
                 let proof_infos: Vec<cdk::types::ProofInfo> = proofs.iter()
                     .enumerate()
                     .map(|(i, p)| {
@@ -1021,7 +1040,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                             p.clone(),
                             mint_url_parsed.clone(),
                             cdk::nuts::State::Unspent,
-                            cdk::nuts::CurrencyUnit::Sat,
+                            currency_unit.clone(),  // Use extracted unit
                         ).map_err(|e| format!(
                             "ProofInfo conversion failed in batch {}, proof {}: {}",
                             batch_idx + 1, i, e

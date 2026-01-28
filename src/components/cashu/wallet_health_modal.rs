@@ -227,10 +227,28 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
             // run_full_recovery() already snapshots data before async operations
             let result = proof_recovery::run_full_recovery().await;
 
+            // Build recovery message covering all outcomes (nostr.blue proof_recovery pattern)
             let msg = if result.recovered_count > 0 {
                 format!(
                     "Recovered {} proofs ({} sats)",
                     result.recovered_count, result.recovered_value
+                )
+            } else if result.spent_count > 0 && result.errors.is_empty() {
+                // Proofs were confirmed spent by mint - this is useful information
+                format!(
+                    "Recovered 0 proofs (spent {} proofs / {} sats)",
+                    result.spent_count, result.spent_value
+                )
+            } else if result.spent_count > 0 && !result.errors.is_empty() {
+                // Mixed: some spent confirmations plus errors
+                let display = if result.errors.len() <= 3 {
+                    result.errors.join(", ")
+                } else {
+                    format!("{} + {} more", result.errors[..3].join(", "), result.errors.len() - 3)
+                };
+                format!(
+                    "{} spent, recovery completed with errors: {}",
+                    result.spent_count, display
                 )
             } else if !result.errors.is_empty() {
                 // Truncate error list to prevent UI overflow (show first 3 + count)
