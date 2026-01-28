@@ -202,10 +202,27 @@ pub async fn remove_person_from_list(list_event: &Event, person_pubkey: &str) ->
     Ok(())
 }
 
+/// Result of getting list members with decryption status
+pub struct ListMembersResult {
+    pub members: Vec<PublicKey>,
+    /// Whether private member decryption succeeded (false if decryption failed)
+    pub private_decryption_succeeded: bool,
+}
+
 /// Get all members of a list (public + decrypted private)
 ///
 /// This is the main function used when loading a feed from a people list.
 pub async fn get_all_list_members(list_event: &Event) -> Result<Vec<PublicKey>, String> {
+    let result = get_all_list_members_with_status(list_event).await?;
+    Ok(result.members)
+}
+
+/// Get all members with indication of whether private decryption succeeded
+///
+/// Use this when you need to know if the member count is accurate or partial.
+/// If `private_decryption_succeeded` is false, the returned members are only
+/// the public ones (private members could not be decrypted).
+pub async fn get_all_list_members_with_status(list_event: &Event) -> Result<ListMembersResult, String> {
     let mut members = Vec::new();
 
     // Extract public members from tags
@@ -221,11 +238,11 @@ pub async fn get_all_list_members(list_event: &Event) -> Result<Vec<PublicKey>, 
 
     // Extract private members (decrypt content)
     // For read-only operations, log warning but continue with public members only
-    let private_tags = match decrypt_private_tags(list_event).await {
-        Ok(tags) => tags,
+    let (private_tags, decryption_succeeded) = match decrypt_private_tags(list_event).await {
+        Ok(tags) => (tags, true),
         Err(e) => {
             log::warn!("Failed to decrypt private members, showing public only: {}", e);
-            Vec::new()
+            (Vec::new(), false)
         }
     };
     for tag in private_tags {
@@ -241,7 +258,10 @@ pub async fn get_all_list_members(list_event: &Event) -> Result<Vec<PublicKey>, 
         }
     }
 
-    Ok(members)
+    Ok(ListMembersResult {
+        members,
+        private_decryption_succeeded: decryption_succeeded,
+    })
 }
 
 /// Create a new people list with optional initial members

@@ -3,7 +3,7 @@ use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client};
-use crate::utils::list_encryption::get_all_list_members;
+use crate::utils::list_encryption::get_all_list_members_with_status;
 use crate::utils::list_kinds::{get_item_count, LIST_KINDS, NAMED_PEOPLE};
 
 /// User list data structure
@@ -162,12 +162,16 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         for list in &mut lists {
             if list.kind == NAMED_PEOPLE {
                 if list.has_private_content {
-                    match get_all_list_members(&list.event).await {
-                        Ok(members) => {
-                            list.total_member_count = Some(members.len());
+                    match get_all_list_members_with_status(&list.event).await {
+                        Ok(result) => {
+                            // Only set count if decryption succeeded
+                            // Otherwise leave as None → UI shows "N+" fallback
+                            if result.private_decryption_succeeded {
+                                list.total_member_count = Some(result.members.len());
+                            }
                         }
                         Err(e) => {
-                            log::warn!("Failed to decrypt members for list '{}': {}", list.name, e);
+                            log::warn!("Failed to get members for list '{}': {}", list.name, e);
                             // Keep as None - will show public count with "+" indicator
                         }
                     }

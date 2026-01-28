@@ -1010,6 +1010,10 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
 
+    // Ensure at least one relay is connected before fetching
+    // This is critical - CLIENT_INITIALIZED may be true but relays not yet connected
+    nostr_client::ensure_relays_ready(&client).await;
+
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
