@@ -1080,6 +1080,9 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         }
     }
 
+    // Track emergency event ID for later replacement (CDK saga pattern)
+    let mut emergency_event_id: Option<String> = None;
+
     // Emergency recovery if any persistence failed (nostr-sdk Output pattern)
     // Update WALLET_TOKENS so funds are visible in UI even if localstore persistence failed
     if !persistence_failures.is_empty() {
@@ -1092,10 +1095,11 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             .map(cdk_proof_to_proof_data)
             .collect();
 
-        let emergency_event_id = format!("recovery_{}", uuid::Uuid::new_v4());
+        let temp_emergency_id = format!("recovery_{}", uuid::Uuid::new_v4());
+        emergency_event_id = Some(temp_emergency_id.clone());
 
         let emergency_token = TokenData {
-            event_id: emergency_event_id.clone(),
+            event_id: temp_emergency_id.clone(),
             mint: mint_url.clone(),
             unit: unit_str.clone(),
             proofs: emergency_proof_data.clone(),
@@ -1108,7 +1112,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         ) {
             log::error!("Emergency WALLET_TOKENS update failed: {}", e);
         } else {
-            super::proofs::register_proofs_in_event_map(&emergency_event_id, &emergency_proof_data);
+            super::proofs::register_proofs_in_event_map(&temp_emergency_id, &emergency_proof_data);
             super::signals::update_wallet_balances();
             log::info!("Emergency recovery: {} proofs now visible in UI", new_proofs.len());
         }
@@ -1192,7 +1196,15 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     }
 
     let proofs_after = new_proofs.len();
-    log::info!("Consolidated to {} proofs (all batches persisted)", proofs_after);
+    if persistence_failures.is_empty() {
+        log::info!("Consolidated to {} proofs (all batches persisted)", proofs_after);
+    } else {
+        log::info!(
+            "Consolidated to {} proofs ({} batch failures; emergency recovery performed)",
+            proofs_after,
+            persistence_failures.len()
+        );
+    }
 
     // Note: Proofs already persisted per-batch above (CDK saga pattern)
 
@@ -1322,11 +1334,37 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         return Err(format!("Non-retryable publish error: {}", last_error));
     };
 
-    // CRITICAL: Update local state IMMEDIATELY (even with pending_id)
-    // This ensures UI reflects the consolidation operation.
-    // atomic_token_replace: adds new BEFORE deleting old (crash-safe)
-    // Skip if emergency recovery already ran (it already updated WALLET_TOKENS)
-    if persistence_failures.is_empty() {
+    // CDK saga pattern: Replace emergency token with real event_id after publish
+    if let Some(ref emergency_id) = emergency_event_id {
+        // Create replacement token with real published event_id
+        let replacement_token = TokenData {
+            event_id: new_event_id.clone(),
+            mint: mint_url.clone(),
+            unit: unit_str.clone(),
+            proofs: proof_data.clone(),
+            created_at: now_secs(),
+        };
+
+        // Atomic replacement: add new BEFORE delete old (CDK pattern)
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![replacement_token],
+            std::slice::from_ref(emergency_id),
+        ) {
+            log::error!("Failed to replace emergency token with real event_id: {}", e);
+            // Continue - emergency token still has correct proofs, just wrong event_id
+        } else {
+            // Update proofs map to point to real event_id (CDK state sync)
+            super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);
+            log::info!(
+                "Replaced emergency token {} with published event {}",
+                &emergency_id[..16.min(emergency_id.len())],
+                &new_event_id[..16.min(new_event_id.len())]
+            );
+        }
+    } else {
+        // CRITICAL: Update local state IMMEDIATELY (even with pending_id)
+        // This ensures UI reflects the consolidation operation.
+        // atomic_token_replace: adds new BEFORE deleting old (crash-safe)
         let new_token = TokenData {
             event_id: new_event_id.clone(),
             mint: mint_url.clone(),
