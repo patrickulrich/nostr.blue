@@ -80,23 +80,34 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut nutzap_mint = use_signal(|| None::<cashu::NutzapMint>);
     let mut checking_nutzap = use_signal(|| false);
 
+    // Version counter to prevent stale async results from overwriting state
+    // Pattern: use_mute_block_cache.rs uses wrapping counters for invalidation detection
+    let mut nutzap_request_version = use_signal(|| 0u32);
+
     // Check nutzap eligibility on modal open
     // Use use_reactive! to properly track recipient_pubkey changes (Dioxus pattern)
-    // nostr-sdk + Dioxus pattern: Snapshot capture before async, compare with peek() before write
+    // Pattern from use_mute_block_cache.rs: version token + peek() validation
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
         use_effect(use_reactive!(|recipient_pubkey| {
-            // nostr-sdk pattern: Capture snapshot BEFORE any async work
+            // Increment version using wrapping_add for overflow safety (signals.rs pattern)
+            let current_version = nutzap_request_version.peek().wrapping_add(1);
+            nutzap_request_version.set(current_version);
+
             let pubkey_snapshot = recipient_pubkey.clone();
             checking_nutzap.set(true);
             nutzap_mint.set(None); // Clear previous result immediately
+
             spawn(async move {
                 let result = cashu::validate_nutzap_recipient(&pubkey_snapshot).await;
 
-                // Dioxus pattern: Use peek() to check current state without subscribing
-                // nostr-sdk pattern: Compare snapshot to detect stale result
-                // Note: We don't have direct access to current recipient_pubkey here,
-                // but the effect will re-run if it changes, so we just write the result
+                // Guard: only write if this is still the current request
+                // Pattern from use_mute_block_cache.rs: compare token with peek() after await
+                if *nutzap_request_version.peek() != current_version {
+                    log::debug!("Discarding stale nutzap eligibility result");
+                    return;
+                }
+
                 match result {
                     Ok(mint) => nutzap_mint.set(Some(mint)),
                     Err(_) => nutzap_mint.set(None),

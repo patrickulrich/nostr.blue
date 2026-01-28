@@ -406,6 +406,12 @@ pub fn Home(list: String) -> Element {
                                             Some(600), // 10 minute idle timeout
                                         ).await {
                                             Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
                                                 interaction_stream_handle.set(Some(handle));
                                             }
                                             Err(e) => {
@@ -520,6 +526,12 @@ pub fn Home(list: String) -> Element {
                                             Some(600), // 10 minute idle timeout
                                         ).await {
                                             Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
                                                 interaction_stream_handle.set(Some(handle));
                                             }
                                             Err(e) => {
@@ -623,6 +635,12 @@ pub fn Home(list: String) -> Element {
                                             Some(600), // 10 minute idle timeout
                                         ).await {
                                             Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
                                                 interaction_stream_handle.set(Some(handle));
                                             }
                                             Err(e) => {
@@ -731,6 +749,12 @@ pub fn Home(list: String) -> Element {
                                             Some(600), // 10 minute idle timeout
                                         ).await {
                                             Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
                                                 interaction_stream_handle.set(Some(handle));
                                             }
                                             Err(e) => {
