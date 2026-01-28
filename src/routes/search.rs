@@ -6,6 +6,7 @@ use crate::services::content_search::{
     ContentSearchResult,
 };
 use crate::components::{NoteCard, NoteCardSkeleton, PhotoCard, VideoCard};
+use crate::stores::nostr_client;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
@@ -60,8 +61,14 @@ pub fn Search(q: String) -> Element {
         query.set(q);
     }));
 
-    // Fetch contacts on mount
+    // Fetch contacts on mount (after client initializes)
     use_effect(move || {
+        // Reading at start creates subscription - effect re-runs when this changes
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;  // Early return - effect will re-run when signal changes
+        }
+
         spawn(async move {
             let contacts = get_contact_pubkeys().await;
             contact_pubkeys.set(contacts);
@@ -70,6 +77,12 @@ pub fn Search(q: String) -> Element {
 
     // Search when query or tab changes
     use_effect(move || {
+        // Guard: wait for client before searching
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+
         let q = query.read().clone();
         let tab = *active_tab.read();
         let contacts = contact_pubkeys.read().clone();

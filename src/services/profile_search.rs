@@ -6,10 +6,32 @@ use crate::stores::nostr_client::NOSTR_CLIENT;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::relay;
 
-/// Get search relay URLs, returns empty vec if none configured (fallback to all relays)
-fn get_search_relay_urls() -> Vec<String> {
-    // Use peek() for non-component context - safe in async/service code
-    relay::SEARCH_RELAYS.peek().clone()
+/// Cached search relays after connection (avoids reconnecting on every search)
+static SEARCH_RELAYS_CONNECTED: std::sync::OnceLock<tokio::sync::RwLock<Vec<String>>> = std::sync::OnceLock::new();
+
+/// Get connected search relay URLs, ensuring they're in the pool first.
+/// Returns empty vec if no search relays could be connected (will fallback to all relays).
+async fn get_connected_search_relays(client: &Client) -> Vec<String> {
+    let lock = SEARCH_RELAYS_CONNECTED.get_or_init(|| tokio::sync::RwLock::new(Vec::new()));
+
+    // Check if already connected
+    {
+        let cached = lock.read().await;
+        if !cached.is_empty() {
+            return cached.clone();
+        }
+    }
+
+    // Connect search relays and cache the result
+    let connected = relay::ensure_search_relays_connected(client).await;
+
+    // Cache if successful
+    if !connected.is_empty() {
+        let mut cached = lock.write().await;
+        *cached = connected.clone();
+    }
+
+    connected
 }
 
 /// Result type for profile search
@@ -204,7 +226,8 @@ pub async fn search_profiles(
             .search(query)
             .limit(20);
 
-        let search_urls = get_search_relay_urls();
+        // Ensure search relays are in pool and connected before fetching
+        let search_urls = get_connected_search_relays(&client).await;
         let fetch_result = if search_urls.is_empty() {
             // Fallback to all connected relays
             client.fetch_events(filter, Duration::from_secs(3)).await

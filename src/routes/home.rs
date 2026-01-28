@@ -156,9 +156,9 @@ pub fn Home(list: String) -> Element {
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
 
-        // KEY: Only show loading skeleton if no data exists
-        // This keeps existing posts visible during refresh
-        if !has_data {
+        // Clear feed when switching types; keep visible during same-feed refresh
+        // This ensures old feed data doesn't show while loading a different feed
+        if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
         }
         oldest_timestamp.set(None);
@@ -1066,7 +1066,12 @@ pub fn Home(list: String) -> Element {
                                             {
                                                 let list_for_select = list.clone();
                                                 let list_for_check = list.clone();
-                                                let item_count = get_item_count(&list.tags);
+                                                // Use total_member_count if available, otherwise fallback to public count
+                                                let display_count = match list.total_member_count {
+                                                    Some(count) => count.to_string(),
+                                                    None if list.has_private_content => format!("{}+", get_item_count(&list.tags)),
+                                                    None => get_item_count(&list.tags).to_string(),
+                                                };
                                                 rsx! {
                                                     button {
                                                         key: "{list.id}",
@@ -1089,7 +1094,7 @@ pub fn Home(list: String) -> Element {
                                                             }
                                                             div {
                                                                 class: "text-xs text-muted-foreground",
-                                                                "{item_count} members"
+                                                                "{display_count} members"
                                                             }
                                                         }
                                                         if matches!(feed_type.read().clone(), FeedType::PeopleList(ref l) if l.id == list_for_check.id) {
@@ -2432,7 +2437,7 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
     })?;
 
     if members.is_empty() {
-        log::info!("People list '{}' has no members", list.name);
+        log::warn!("People list '{}' has no members - check if private decryption failed", list.name);
         return Ok(Vec::new());
     }
 
@@ -2449,11 +2454,11 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    // Fetch events using gossip/outbox routing for automatic relay selection based on authors
-    // This routes queries to each list member's preferred write relays for better discovery
-    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
+    // Use fast fetch (bypasses gossip) for list feeds - same as Following feed
+    // This queries all connected relays directly, avoiding 30+ second NIP-65 timeouts
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            log::info!("Loaded {} events from people list '{}' via outbox", events.len(), list.name);
+            log::info!("Loaded {} events from people list '{}'", events.len(), list.name);
 
             // Process events into FeedItems
             let mut feed_items: Vec<FeedItem> = Vec::new();

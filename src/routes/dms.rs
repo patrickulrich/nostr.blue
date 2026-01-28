@@ -57,10 +57,8 @@ pub fn DMs() -> Element {
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
 
-    // Load DMs on mount
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
+    // Load DMs on mount and when client initializes
+    use_effect(use_reactive(&*nostr_client::CLIENT_INITIALIZED.read(), move |client_initialized| {
         if !client_initialized {
             log::debug!("Waiting for client initialization before loading DMs...");
             return;
@@ -74,7 +72,6 @@ pub fn DMs() -> Element {
         error.set(None);
 
         spawn(async move {
-            // Load DMs
             match dms::init_dms().await {
                 Ok(_) => {
                     log::info!("DMs loaded successfully");
@@ -85,12 +82,10 @@ pub fn DMs() -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     // Auto-refresh polling for conversation list (30 seconds)
-    use_effect(move || {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
+    use_effect(use_reactive(&*nostr_client::CLIENT_INITIALIZED.read(), move |client_initialized| {
         if !client_initialized || !auth_store::is_authenticated() {
             return;
         }
@@ -106,7 +101,7 @@ pub fn DMs() -> Element {
                 }
             }
         });
-    });
+    }));
 
     // Manual refresh function
     let refresh_dms = move |_| {
