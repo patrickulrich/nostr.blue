@@ -134,13 +134,12 @@ pub async fn fetch_events_from_relays(
     // Wait for at least one relay to be ready
     ensure_relays_ready(&client).await;
 
-    // Log relay status for debugging
+    // Log relay status for debugging (count only - URLs may contain credentials)
     let relays = client.relays().await;
-    let connected: Vec<_> = relays.iter()
+    let connected_count = relays.iter()
         .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
-        .map(|(url, _)| url.to_string())
-        .collect();
-    log::info!("fetch_events_from_relays: {} relays connected: {:?}", connected.len(), connected);
+        .count();
+    log::info!("fetch_events_from_relays: {} relays connected", connected_count);
 
     let result = client
         .fetch_events(filter.clone(), timeout)

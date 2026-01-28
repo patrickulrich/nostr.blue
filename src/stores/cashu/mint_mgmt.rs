@@ -1110,7 +1110,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.clone(),
-        unit: "sat".to_string(),
+        unit: unit_str.clone(),
         proofs: extended_proofs,
         del: event_ids_to_delete.clone(),
     };
@@ -1218,7 +1218,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         let new_token = TokenData {
             event_id: new_event_id.clone(),
             mint: mint_url.clone(),
-            unit: "sat".to_string(),
+            unit: unit_str.clone(),
             proofs: proof_data,
             created_at: now_secs(),
         };
