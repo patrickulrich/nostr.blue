@@ -3,13 +3,13 @@
 //! Displays a feed of notes recommended by a Data Vending Machine (DVM).
 //! Users can select which DVM provider to use via a gear icon.
 
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 
+use crate::hooks::use_mute_block_cache;
 use crate::stores::{nostr_client, dvm_store};
 use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
 use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
@@ -26,9 +26,8 @@ pub fn DVM() -> Element {
     let mut interactions_loaded = use_signal(|| false);
     let mut fetch_in_progress = use_signal(|| false);
 
-    // Cached mute/block lists for N+1 optimization
-    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
-    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    // Cached mute/block lists using centralized hook (N+1 optimization)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
@@ -93,59 +92,6 @@ pub fn DVM() -> Element {
                 }
             }
             fetch_in_progress.set(false);
-        });
-    });
-
-    // Fetch mute/block lists once when authenticated (N+1 optimization)
-    // Single fetch for both muted posts and blocked users
-    use_effect(move || {
-        // Subscribe to refresh_trigger to allow manual refresh (Dioxus pattern)
-        let _ = refresh_trigger.read();
-        let is_authenticated = crate::stores::auth_store::is_authenticated();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        // Reading AUTH_STATE auto-subscribes to pubkey changes (Dioxus pattern)
-        let current_pubkey = crate::stores::auth_store::AUTH_STATE.read().pubkey.clone();
-
-        // Clear caches on logout to prevent stale data
-        if !is_authenticated {
-            cached_muted_posts.set(None);
-            cached_blocked_users.set(None);
-            return;
-        }
-
-        if !client_initialized {
-            return;
-        }
-
-        // Pubkey change detection: the effect auto-reruns when current_pubkey changes
-        // due to reading AUTH_STATE above (Dioxus signal subscription).
-        // On rerun, we fetch fresh data; the pubkey guard in spawn() prevents
-        // race conditions where stale data could be written after account switch.
-
-        // Only fetch if not already loaded
-        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
-            return;
-        }
-
-        // Capture pubkey before spawn to guard against account switch during fetch
-        let auth_pubkey_snapshot = current_pubkey.clone();
-        spawn(async move {
-            // Single fetch for both - avoids double fetch_mute_list() call
-            // Only set caches on success; leave as None on error so we can retry
-            match nostr_client::get_mute_list_data().await {
-                Ok(data) => {
-                    // Guard: only write if same user still logged in
-                    let current_pubkey = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
-                    if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
-                        cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
-                        cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to fetch mute/block data: {}", e);
-                    // Leave as None to enable retry on next effect run
-                }
-            }
         });
     });
 

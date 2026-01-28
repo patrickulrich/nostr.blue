@@ -7,6 +7,7 @@ use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
 use super::fetching::{get_client, ensure_relays_ready, fetch_events_aggregated_outbox};
+use super::platform_sleep_ms;
 use super::signals::HAS_SIGNER;
 use crate::stores::relay::USER_RELAYS_APPLIED;
 
@@ -38,6 +39,25 @@ where
     use futures::StreamExt;
 
     let client = get_client().ok_or("Client not initialized")?;
+
+    // Wait for user relays if signed in (up to 2 seconds)
+    // This ensures gossip routing uses the user's configured relays
+    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
+        log::debug!("Streaming callback: Waiting for user relay lists...");
+        let start = instant::Instant::now();
+
+        // Use shared platform sleep helper (Dioxus pattern: no duplicated cfg blocks)
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+            platform_sleep_ms(50).await;
+        }
+
+        if *USER_RELAYS_APPLIED.peek() {
+            log::debug!("Streaming callback: User relays applied after {}ms", start.elapsed().as_millis());
+        } else {
+            log::warn!("Streaming callback: User relays not applied after timeout");
+        }
+    }
+
     ensure_relays_ready(&client).await;
 
     let mut stream = client.stream_events(filter, timeout)
@@ -97,18 +117,9 @@ where
         log::debug!("Streaming: Waiting for user relay lists to be applied...");
         let start = instant::Instant::now();
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
-                gloo_timers::future::TimeoutFuture::new(50).await;
-            }
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
+        // Use shared platform sleep helper (Dioxus pattern: no duplicated cfg blocks)
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+            platform_sleep_ms(50).await;
         }
 
         if *USER_RELAYS_APPLIED.peek() {

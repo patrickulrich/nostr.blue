@@ -908,6 +908,9 @@ fn update_local_state_after_send(
 
     let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
 
+    // Rebuild the full proof-event map to ensure consistency after atomic replace
+    super::proofs::rebuild_proof_event_map();
+
     if let Some((event_id, proof_data)) = proofs_to_register {
         register_proofs_in_event_map(&event_id, &proof_data);
     }

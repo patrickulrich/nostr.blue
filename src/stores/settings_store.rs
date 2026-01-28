@@ -69,16 +69,12 @@ pub static SETTINGS_ERROR: GlobalSignal<Option<String>> = Signal::global(|| None
 
 /// Load cached settings from localStorage (synchronous)
 fn load_cached_settings() -> Option<AppSettings> {
-    gloo_storage::LocalStorage::get::<String>(SETTINGS_LOCAL_STORAGE_KEY)
-        .ok()
-        .and_then(|json| serde_json::from_str(&json).ok())
+    gloo_storage::LocalStorage::get::<AppSettings>(SETTINGS_LOCAL_STORAGE_KEY).ok()
 }
 
 /// Save settings to localStorage cache
 fn cache_settings(settings: &AppSettings) {
-    if let Ok(json) = serde_json::to_string(settings) {
-        let _ = gloo_storage::LocalStorage::set(SETTINGS_LOCAL_STORAGE_KEY, json);
-    }
+    let _ = gloo_storage::LocalStorage::set(SETTINGS_LOCAL_STORAGE_KEY, settings);
 }
 
 /// Initialize settings from localStorage cache (synchronous, for instant UI)
@@ -306,12 +302,10 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
         w.clone() // Clone for async save
     }; // Lock released here
 
-    // Cache locally first (sync, never fails user-visible)
-    // This ensures setting persists even if Nostr save fails
-    cache_settings(&settings);
-
-    // Async persist to Nostr (may fail if unauthenticated)
+    // Async persist to Nostr first
     if let Err(e) = save_settings(&settings).await {
         log::warn!("Failed to persist Cashu wallet auto-load setting to Nostr: {}", e);
+        // Defensive: cache locally on Nostr failure
+        cache_settings(&settings);
     }
 }

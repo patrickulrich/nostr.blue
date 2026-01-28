@@ -362,21 +362,25 @@ pub async fn report_post(
     // Parse event ID and pubkey
     // Use parse() to support both hex and bech32 (note1...) formats
     use nostr::{EventId, PublicKey, Tag};
+    use nostr::nips::nip56::Report;
+    use std::str::FromStr;
+
     let target_event_id = EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
     // Use parse() to support both hex and bech32 formats (nostr-sdk pattern)
     let target_pubkey = PublicKey::parse(&author_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
+    // Convert string to Report enum (NIP-56 compliance)
+    let report = Report::from_str(&report_type).unwrap_or(Report::Other);
+
     // Build report event (kind 1984)
-    // NIP-56: Required 'p' tag for user, 'e' tag for event with report type
-    // Format: ["e", <event-id>, <report-type>] (no empty relay field)
+    // NIP-56 compliant tags using nostr-sdk API:
+    // - ["p", "<pubkey>", "<report>"] for user report
+    // - ["e", "<event>", "<report>"] for event report
     let tags = vec![
-        Tag::public_key(target_pubkey),
-        Tag::custom(
-            nostr::TagKind::e(),
-            vec![target_event_id.to_hex(), report_type],
-        ),
+        Tag::public_key_report(target_pubkey, report.clone()),
+        Tag::event_report(target_event_id, report),
     ];
 
     let content = details.unwrap_or_default();

@@ -258,7 +258,7 @@ pub async fn execute_swap_with_nip60(
     }
 
     // Full validation: compare proof secrets to ensure exact match
-    let input_secrets: std::collections::HashSet<_> = input_proofs
+    let input_secrets_set: std::collections::HashSet<_> = input_proofs
         .iter()
         .map(|p| &p.secret)
         .collect();
@@ -267,7 +267,7 @@ pub async fn execute_swap_with_nip60(
         .map(|p| &p.secret)
         .collect();
 
-    if input_secrets != wallet_secrets {
+    if input_secrets_set != wallet_secrets {
         return Err(
             "Proof set mismatch: input proofs don't match wallet's spendable proofs. \
              Ensure you're passing the complete set from get_proofs_for_mint().".to_string()
@@ -635,15 +635,13 @@ async fn publish_swap_events(
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-    // Pre-compute event ID from unsigned event
-    let mut unsigned = builder.clone().build(pubkey);
-    let event_id_hex = unsigned.id().to_hex();
-
-    // Sign the event
-    let signed_event = unsigned
+    // Build and sign the event, then get ID from signed event directly
+    let signed_event = builder
+        .build(pubkey)
         .sign(&signer)
         .await
         .map_err(|e| format!("Failed to sign token event: {}", e))?;
+    let event_id_hex = signed_event.id.to_hex();
 
     // Try to publish
     match client.send_event(&signed_event).await {

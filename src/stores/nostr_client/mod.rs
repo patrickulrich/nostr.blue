@@ -170,6 +170,18 @@ pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 pub use crate::stores::relay::display::RelayDisplayInfo;
 
 // =============================================================================
+// Platform Helpers
+// =============================================================================
+
+/// Cross-platform async sleep helper (Dioxus pattern: compile-time cfg)
+pub(crate) async fn platform_sleep_ms(ms: u64) {
+    #[cfg(target_arch = "wasm32")]
+    gloo_timers::future::TimeoutFuture::new(ms as u32).await;
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+}
+
+// =============================================================================
 // Initialization
 // =============================================================================
 
@@ -308,14 +320,13 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     const TIMEOUT_MS: u64 = 3000;
     const POLL_INTERVAL_MS: u64 = 100;
 
-    #[cfg(target_arch = "wasm32")]
+    // Single implementation using platform_sleep_ms instead of duplicated cfg blocks
     {
-        use gloo_timers::future::TimeoutFuture;
         let start = instant::Instant::now();
 
         loop {
             // Yield to allow background connection task to progress
-            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+            platform_sleep_ms(POLL_INTERVAL_MS).await;
 
             let relays_now = client.relays().await;
             let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
@@ -330,35 +341,6 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
             if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
                 log::warn!("Relay connection timeout after {}ms, proceeding anyway", TIMEOUT_MS);
-                // Signal false so downstream watchers know init completed without relay
-                // They can retry via ensure_relays_ready when a relay connects later
-                *RELAY_CONNECTED.write() = false;
-                break;
-            }
-        }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_millis(TIMEOUT_MS);
-
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-
-            let relays_now = client.relays().await;
-            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
-
-            if connected {
-                log::info!("First relay connected after {:?}", start.elapsed());
-                if !*RELAY_CONNECTED.peek() {
-                    *RELAY_CONNECTED.write() = true;
-                }
-                break;
-            }
-
-            if start.elapsed() > timeout {
-                log::warn!("Relay connection timeout after {:?}, proceeding anyway", timeout);
                 // Signal false so downstream watchers know init completed without relay
                 // They can retry via ensure_relays_ready when a relay connects later
                 *RELAY_CONNECTED.write() = false;
