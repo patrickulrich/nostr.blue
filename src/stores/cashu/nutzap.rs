@@ -433,6 +433,15 @@ pub async fn send_nutzap(
         .map_err(|e| format!("Failed to calculate fee: {}", e))?;
     let fee_u64 = u64::from(fee);
 
+    // CDK pattern: capture input proof secrets to identify change proofs after swap
+    let pre_swap_secrets: std::collections::HashSet<String> = wallet
+        .get_unspent_proofs()
+        .await
+        .map_err(|e| format!("Failed to get pre-swap proofs: {}", e))?
+        .iter()
+        .map(|p| p.secret.to_string())
+        .collect();
+
     // Execute swap with P2PK conditions - this returns P2PK-locked proofs
     let send_proofs = wallet
         .swap(
@@ -446,11 +455,14 @@ pub async fn send_nutzap(
         .map_err(|e| format!("Swap failed: {}", e))?
         .ok_or("Swap returned no proofs")?;
 
-    // Get change proofs
-    let keep_proofs = wallet
+    // CDK pattern: filter to only NEW proofs (not in pre-swap set)
+    let keep_proofs: Vec<_> = wallet
         .get_unspent_proofs()
         .await
-        .map_err(|e| format!("Failed to get change proofs: {}", e))?;
+        .map_err(|e| format!("Failed to get change proofs: {}", e))?
+        .into_iter()
+        .filter(|p| !pre_swap_secrets.contains(&p.secret.to_string()))
+        .collect();
 
     // CRITICAL: Update local state IMMEDIATELY after successful swap
     // Proofs are already spent at the mint - WALLET_TOKENS must reflect this
@@ -989,24 +1001,22 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
     // Publish token event with ONLY new proofs
     let new_event_id = publish_redeemed_token_event(mint_url, &pending.unit, &new_proofs).await?;
 
-    // Update local state
-    {
-        let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens = data.write();
+    // CDK pattern: persist first (atomic), then update in-memory only on success
+    let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
+    let token = TokenData {
+        event_id: new_event_id.clone(),
+        mint: mint_url.to_string(),
+        unit: pending.unit.clone(),
+        proofs: proof_data.clone(),
+        created_at: chrono::Utc::now().timestamp() as u64,
+    };
 
-        tokens.push(TokenData {
-            event_id: new_event_id.clone(),
-            mint: mint_url.to_string(),
-            unit: pending.unit.clone(),
-            proofs: proof_data.clone(),
-            created_at: chrono::Utc::now().timestamp() as u64,
-        });
+    // Atomic token replace: add new token, delete none (nutzap redeem only adds)
+    super::signals::atomic_token_replace(vec![token], &[])?;
 
-        super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);
-        super::signals::update_wallet_balances();
-    }
+    // Only after successful atomic replace, update derived state
+    super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);
+    super::signals::update_wallet_balances();
 
     // Create history event with "redeemed" tag referencing the nutzap event
     if let Err(e) = super::events::create_history_event_full(

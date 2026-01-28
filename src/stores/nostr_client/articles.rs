@@ -170,7 +170,7 @@ pub async fn publish_article_tracked(
     }
 
     // Build the event (Kind 30023 - LongFormTextNote)
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(30023), content)
+    let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content)
         .tags(tags);
 
     // Publish

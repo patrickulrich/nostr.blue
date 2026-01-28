@@ -5,7 +5,7 @@
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
-use super::fetching::get_client;
+use super::fetching::{fetch_events_from_relays, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 
@@ -34,17 +34,16 @@ pub async fn publish_repost_tracked(
 
     // Fetch the original event from database to get full event data
     // This is required for EventBuilder::repost() to serialize the event properly
-    // Fallback to relay fetch if not in local DB (nostr-sdk pattern: always use timeout)
+    // Fallback to relay fetch if not in local DB (uses fetch_events_from_relays for relay readiness)
     let event = match client.database().event_by_id(&target_event_id).await {
         Ok(Some(ev)) => ev,
         Ok(None) | Err(_) => {
-            // Fallback: fetch from relays
+            // Fallback: fetch from relays using helper that handles relay readiness
             log::debug!("Event {} not in local DB, fetching from relays", event_id);
             let filter = nostr::Filter::new().id(target_event_id);
-            let events = client
-                .fetch_events(filter, std::time::Duration::from_secs(5))
+            let events = fetch_events_from_relays(filter, std::time::Duration::from_secs(5))
                 .await
-                .map_err(|e| format!("Failed to fetch event from relays: {}", e))?;
+                .map_err(|e| format!("Failed to fetch event {} from relays: {}", event_id, e))?;
             events.into_iter().next()
                 .ok_or_else(|| format!("Event not found locally or on relays: {}", event_id))?
         }

@@ -243,9 +243,9 @@ pub async fn sync_wallet_state() -> Result<(), String> {
 ///
 /// This is a lightweight, synchronous, no-network operation suitable for frequent calls.
 #[allow(dead_code)]
-pub fn sync_balance_only() -> Result<u64, String> {
+pub fn sync_balance_only() -> u64 {
     super::cashu::signals::update_wallet_balances();
-    Ok(WALLET_BALANCES.read().available)
+    WALLET_BALANCES.read().available
 }
 
 /// Clear the MultiMintWallet and all related UI signals (for logout)

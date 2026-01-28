@@ -421,13 +421,26 @@ pub async fn receive_tokens_with_options(
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
+
+    // Get signer and pubkey for pre-signing
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    // Pre-sign the event so we have the real event ID even on duplicate errors
+    let signed_event = builder
+        .build(pubkey)
+        .sign(&signer)
+        .await
+        .map_err(|e| format!("Failed to sign token event: {}", e))?;
+    let pre_signed_event_id = signed_event.id.to_hex();
 
     // Attempt publish with immediate retries before falling back to queue
     let mut event_id: Option<String> = None;
@@ -453,10 +466,10 @@ pub async fn receive_tokens_with_options(
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
 
-        match client.send_event_builder(builder.clone()).await {
+        match client.send_event(&signed_event).await {
             Ok(output) => {
                 if !output.success.is_empty() {
-                    event_id = Some(output.id().to_hex());
+                    event_id = Some(pre_signed_event_id.clone());
                     log::info!(
                         "Published token event to {}/{} relays",
                         output.success.len(),
@@ -479,7 +492,8 @@ pub async fn receive_tokens_with_options(
                 }
                 // "duplicate" means event already published - this is success, not error
                 if err_str.contains("duplicate") || err_str.contains("already exists") {
-                    log::info!("Event already exists on relay, treating as success");
+                    log::info!("Event already exists on relay, using pre-signed ID");
+                    event_id = Some(pre_signed_event_id.clone()); // Use real ID
                     retryable = false; // Don't queue for retry - event is already there
                     break;
                 }
@@ -497,8 +511,10 @@ pub async fn receive_tokens_with_options(
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
 
                 // Queue for background retry - proofs are safe in CDK, just need Nostr backup
+                // Re-create builder for retry queue since we used signed_event for publish attempts
+                let retry_builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
                 super::events::queue_token_event_for_retry(
-                    builder,
+                    retry_builder,
                     pending_id.clone(),
                     mint_url.clone(),
                 )
