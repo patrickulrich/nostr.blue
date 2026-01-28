@@ -169,17 +169,24 @@ pub fn Home(list: String) -> Element {
             return;
         }
 
-        // Capture pubkey before spawn to guard against account switch during fetch
+        // Capture pubkey and invalidate token before spawn to guard against staleness
         let auth_pubkey_snapshot = current_pubkey.clone();
+        let invalidate_token_snapshot = current_token;
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             match nostr_client::get_mute_list_data().await {
                 Ok(data) => {
-                    // Guard: only write if same user still logged in
+                    // Guard: only write if same user still logged in AND no new invalidation
                     let current_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
-                    if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                    let current_invalidate = *nostr_client::MUTE_BLOCK_INVALIDATE.peek();
+                    if current_pubkey == auth_pubkey_snapshot
+                        && auth_pubkey_snapshot.is_some()
+                        && current_invalidate == invalidate_token_snapshot
+                    {
                         cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
                         cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                    } else {
+                        log::debug!("Discarding stale mute list fetch (pubkey or token changed)");
                     }
                 }
                 Err(e) => {

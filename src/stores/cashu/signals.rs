@@ -241,6 +241,8 @@ pub async fn persist_single_in_flight_request(request: &super::types::InFlightMe
 /// Holds WALLET_TOKENS lock during entire operation and updates
 /// WALLET_BALANCES before releasing, preventing race conditions.
 /// Following CDK pattern: balance is always computed from proof state.
+///
+/// Safety: Mutates a copy first; only replaces on success (no partial mutation on error).
 pub fn atomic_token_update<F>(mutate_fn: F) -> Result<u64, String>
 where
     F: FnOnce(&mut Vec<super::types::TokenData>) -> Result<(), String>,
@@ -249,7 +251,10 @@ where
     let mut data = store.data();
     let mut tokens_write = data.write();
 
-    mutate_fn(&mut tokens_write)?;
+    // Clone first, mutate copy, only replace on success (prevents partial mutation)
+    let mut working_copy = tokens_write.clone();
+    mutate_fn(&mut working_copy)?;
+    *tokens_write = working_copy;
 
     // Compute balance from mutated tokens (CDK pattern)
     // Use normal addition - wallet balances can't realistically overflow u64

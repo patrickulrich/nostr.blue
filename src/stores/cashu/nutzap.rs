@@ -935,15 +935,18 @@ fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), St
         // Normalize our pubkey for comparison (defensive - should already be lowercase)
         let our_p2pk_lower = our_p2pk.to_lowercase();
 
-        // Validate pubkey format: 33-byte compressed = 66 hex chars, starts with 02 or 03
+        // Validate pubkey format: 33-byte compressed = 66 hex chars
+        // NIP-61 requires "02" prefix for client-generated P2PK keys
+        // Note: CDK accepts both "02" and "03" for general P2PK, but NIP-61 specifies
+        // "Clients MUST prefix the public key they P2PK-lock with '02'"
         if locked_pubkey.len() != 66 {
             return Err(format!("Invalid pubkey length: {} (expected 66)", locked_pubkey.len()));
         }
         if !locked_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err("Invalid pubkey hex".to_string());
         }
-        if !locked_pubkey.starts_with("02") && !locked_pubkey.starts_with("03") {
-            return Err(format!("Invalid pubkey prefix: {} (expected 02 or 03)", &locked_pubkey[0..2]));
+        if !locked_pubkey.starts_with("02") {
+            return Err(format!("Invalid pubkey prefix: {} (NIP-61 requires '02' prefix for client-generated keys)", &locked_pubkey[0..2]));
         }
 
         // Verify it matches our P2PK pubkey (case-insensitive via lowercase normalization)
@@ -1162,6 +1165,9 @@ fn get_event_ids_for_mint(mint_url: &str, unit: &str) -> Vec<String> {
 }
 
 /// Update local state after sending a nutzap
+///
+/// Uses the safer CDK pattern: local state first with pending_id, then publish.
+/// This ensures proofs are never lost if publish fails (can be recovered on restart).
 async fn update_local_state_after_nutzap_send(
     mint_url: &str,
     unit: &str,
@@ -1174,22 +1180,33 @@ async fn update_local_state_after_nutzap_send(
         return Ok(());
     }
 
-    // Publish new token event with change proofs (include del field for consumed events)
-    let new_event_id = publish_change_token_event(mint_url, unit, keep_proofs, event_ids_to_delete).await?;
+    // 1. Generate pending_event_id FIRST (CDK saga pattern)
+    let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
 
-    // Update local state
+    // 2. Create TokenData with pending_event_id
     let keep_proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
     let token = TokenData {
-        event_id: new_event_id.clone(),
+        event_id: pending_event_id.clone(),
         mint: mint_url.to_string(),
         unit: unit.to_string(),
         proofs: keep_proof_data.clone(),
         created_at: chrono::Utc::now().timestamp() as u64,
     };
 
+    // 3. Update local state FIRST (crash-safe: proofs tracked even if publish fails)
     super::signals::atomic_token_replace(vec![token], event_ids_to_delete)?;
-    super::proofs::register_proofs_in_event_map(&new_event_id, &keep_proof_data);
+    super::proofs::register_proofs_in_event_map(&pending_event_id, &keep_proof_data);
+
+    // 4. NOW attempt publish (safe to fail - state already updated)
+    let real_event_id = publish_change_token_event(mint_url, unit, keep_proofs, event_ids_to_delete).await?;
+
+    // 5. Update event_id if different from pending
+    if real_event_id != pending_event_id {
+        super::events::update_token_event_id(&pending_event_id, &real_event_id);
+        // Re-register proofs under the real event_id
+        super::proofs::register_proofs_in_event_map(&real_event_id, &keep_proof_data);
+    }
 
     Ok(())
 }

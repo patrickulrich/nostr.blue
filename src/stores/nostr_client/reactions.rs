@@ -119,6 +119,11 @@ pub async fn publish_reaction_tracked(
         }
     }
 
+    // nostr-sdk pattern: Total failure when no relays succeeded
+    if result.success_count() == 0 {
+        return Err("Reaction failed: no relays accepted the event".to_string());
+    }
+
     Ok(result)
 }
 

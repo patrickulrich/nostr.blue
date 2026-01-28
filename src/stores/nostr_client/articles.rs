@@ -149,8 +149,8 @@ pub async fn publish_article_tracked(
         ));
     }
 
-    // Add published_at timestamp (WASM-compatible)
-    let timestamp = ((js_sys::Date::now() / 1000.0) as u64).to_string();
+    // Add published_at timestamp (cross-platform using nostr_sdk)
+    let timestamp = nostr_sdk::Timestamp::now().as_secs().to_string();
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("published_at".into()),

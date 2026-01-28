@@ -92,10 +92,19 @@ pub fn DVM() -> Element {
 
         fetch_in_progress.set(true);
 
+        // Capture refresh_trigger before spawn to detect stale state
+        let trigger_snapshot = *refresh_trigger.peek();
+
         spawn(async move {
             let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
             match fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await {
                 Ok(counts) => {
+                    // Guard: skip state update if refresh occurred during fetch
+                    if *refresh_trigger.peek() != trigger_snapshot {
+                        log::debug!("Discarding stale DVM interaction counts");
+                        return;
+                    }
+
                     interaction_counts.set(counts);
                     interactions_loaded.set(true);
 
@@ -106,6 +115,11 @@ pub fn DVM() -> Element {
                         interaction_counts,
                         Some(600), // 10 minute idle timeout
                     ).await {
+                        // Guard: skip state update if refresh occurred during stream setup
+                        if *refresh_trigger.peek() != trigger_snapshot {
+                            log::debug!("Discarding stale DVM stream handle");
+                            return;
+                        }
                         interaction_stream_handle.set(Some(handle));
                     }
                 }

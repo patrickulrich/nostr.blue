@@ -133,13 +133,19 @@ pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
 fn normalize_event_id(event_id: &str) -> Result<String, String> {
     use nostr::nips::nip19::Nip19;
 
-    // Try EventId::parse first (handles hex, note1, nostr:note1)
+    // Try SDK's from_nostr_uri first - handles nostr: prefix automatically (NIP-21)
+    if let Ok(id) = nostr::EventId::from_nostr_uri(event_id) {
+        return Ok(id.to_hex());
+    }
+
+    // Try EventId::parse (handles hex, note1)
     if let Ok(id) = nostr::EventId::parse(event_id) {
         return Ok(id.to_hex());
     }
 
-    // Try NIP-19 nevent decoding (nostr-sdk pattern: Nip19::Event contains event_id)
-    if let Ok(Nip19::Event(nip19_event)) = Nip19::from_bech32(event_id) {
+    // Final fallback: strip nostr: prefix manually for Nip19::from_bech32 (nevent1)
+    let stripped = event_id.strip_prefix("nostr:").unwrap_or(event_id);
+    if let Ok(Nip19::Event(nip19_event)) = Nip19::from_bech32(stripped) {
         return Ok(nip19_event.event_id.to_hex());
     }
 

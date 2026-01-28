@@ -11,7 +11,7 @@ use super::internal::{
     cleanup_spent_proofs_internal, create_ephemeral_wallet, is_insufficient_funds_error_string,
     is_token_spent_error_string, nostr_pubkey_to_cdk_pubkey, validate_proofs_with_mint,
 };
-use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
+use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{try_acquire_mint_lock, WALLET_STATE, WALLET_TOKENS};
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, InFlightSendRequest, ProofData, TokenData,
@@ -927,10 +927,10 @@ fn update_local_state_after_send(
     event_ids_to_delete: &[String],
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
-    let (tokens_to_add, proofs_to_register) = if let Some(ref event_id) = new_event_id {
+    let tokens_to_add = if let Some(ref event_id) = new_event_id {
         // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
         if keep_proofs.is_empty() {
-            (vec![], None)
+            vec![]
         } else {
             let keep_proof_data: Vec<ProofData> =
                 keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
@@ -938,23 +938,20 @@ fn update_local_state_after_send(
                 event_id: event_id.clone(),
                 mint: mint_url.to_string(),
                 unit: "sat".to_string(),
-                proofs: keep_proof_data.clone(),
+                proofs: keep_proof_data,
                 created_at: chrono::Utc::now().timestamp() as u64,
             };
-            (vec![token], Some((event_id.clone(), keep_proof_data)))
+            vec![token]
         }
     } else {
-        (vec![], None)
+        vec![]
     };
 
     let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
 
     // Rebuild the full proof-event map to ensure consistency after atomic replace
+    // This already registers all proofs including the new ones, so no separate call needed
     super::proofs::rebuild_proof_event_map();
-
-    if let Some((event_id, proof_data)) = proofs_to_register {
-        register_proofs_in_event_map(&event_id, &proof_data);
-    }
 
     log::info!("Local state updated. Balance after send: {} sats", new_balance);
     Ok(())

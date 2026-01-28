@@ -143,18 +143,30 @@ pub fn NutzapSendModal(
                 .await
                 {
                     Ok(result) => {
-                        success_message.set(Some(format!(
-                            "Sent {} sats (fee: {} sats)",
-                            result.amount, result.fee
-                        )));
-                        is_sending.set(false);
-                        // Clear inputs
-                        amount.set(String::new());
-                        comment.set(String::new());
+                        if result.is_pending_retry {
+                            // Tokens sent but event publish failed - show pending message
+                            success_message.set(Some(format!(
+                                "Sent {} sats (fee: {} sats) - publishing pending",
+                                result.amount, result.fee
+                            )));
+                            is_sending.set(false);
+                            // Don't clear inputs or call success handler for pending retry
+                            // User may want to retry or troubleshoot
+                        } else {
+                            // Full success - clear inputs and notify
+                            success_message.set(Some(format!(
+                                "Sent {} sats (fee: {} sats)",
+                                result.amount, result.fee
+                            )));
+                            is_sending.set(false);
+                            // Clear inputs
+                            amount.set(String::new());
+                            comment.set(String::new());
 
-                        // Call success handler if provided
-                        if let Some(handler) = &on_success {
-                            handler.call(result.event_id);
+                            // Call success handler if provided
+                            if let Some(handler) = &on_success {
+                                handler.call(result.event_id);
+                            }
                         }
                     }
                     Err(e) => {

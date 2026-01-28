@@ -17,10 +17,24 @@ use super::types::{PublishResult, detect_mime_type};
 /// Returns (root_event_id, root_pubkey, root_relay_url)
 /// Note: Kind is not available from standard e-tags, so caller should use parent's kind as fallback
 fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<PublicKey>, Option<RelayUrl>) {
-    // Try modern NIP-10/NIP-22 marker-based tag
+    // Try modern NIP-10/NIP-22 marker-based tag (marker == Root)
     if let Some(result) = event.tags.iter().find_map(|tag| {
         if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
             if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
+                return Some((Some(event_id.to_hex()), *public_key, relay_url.clone()));
+            }
+        }
+        None
+    }) {
+        return result;
+    }
+
+    // Fallback: Standardized "e" tag with marker == None (markerless)
+    // NIP-10: If no markers are used, first e-tag is root, last is reply
+    if let Some(result) = event.tags.iter().find_map(|tag| {
+        if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
+            if marker.is_none() {
+                // First markerless e-tag is treated as root
                 return Some((Some(event_id.to_hex()), *public_key, relay_url.clone()));
             }
         }

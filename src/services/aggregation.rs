@@ -1188,15 +1188,26 @@ pub async fn stream_interaction_counts(
 
     // FAST: Subscribe only to already-connected relays (bypasses gossip/NIP-65 discovery)
     // This is critical for fast interaction streaming - gossip discovery can add 5-10+ seconds delay
-    let relays = client.relays().await;
-    let connected_urls: Vec<nostr_sdk::RelayUrl> = relays
-        .iter()
-        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
-        .filter_map(|(url, _)| nostr_sdk::RelayUrl::parse(url.as_str()).ok())
-        .collect();
+    // Retry loop: relays may still be connecting on app startup (WASM-compatible sleep)
+    let mut attempts = 0;
+    const MAX_ATTEMPTS: u32 = 5;
+    let connected_urls = loop {
+        let relays = client.relays().await;
+        let urls: Vec<nostr_sdk::RelayUrl> = relays
+            .iter()
+            .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+            .filter_map(|(url, _)| nostr_sdk::RelayUrl::parse(url.as_str()).ok())
+            .collect();
+        if !urls.is_empty() || attempts >= MAX_ATTEMPTS {
+            break urls;
+        }
+        attempts += 1;
+        log::debug!("Waiting for relay connections (attempt {}/{})", attempts, MAX_ATTEMPTS);
+        gloo_timers::future::TimeoutFuture::new(500).await;
+    };
 
     if connected_urls.is_empty() {
-        return Err("No connected relays for interaction streaming".to_string());
+        return Err("No connected relays for interaction streaming after retries".to_string());
     }
 
     log::info!(

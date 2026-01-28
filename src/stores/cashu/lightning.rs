@@ -547,8 +547,9 @@ pub async fn melt_tokens(
         .ok_or_else(|| "Overflow adding quote amount and fee".to_string())?;
 
     // Skip history event if both are empty (no valid event IDs to reference)
+    // History event failures should not abort the melt flow - the payment already succeeded
     if !valid_created.is_empty() || !valid_destroyed.is_empty() {
-        create_history_event_with_type(
+        if let Err(e) = create_history_event_with_type(
             "out",
             total_amount,
             valid_created,
@@ -556,7 +557,10 @@ pub async fn melt_tokens(
             Some("lightning_melt"),
             Some(&quote_info.invoice),
         )
-        .await?;
+        .await
+        {
+            log::error!("Failed to create melt history event: {}", e);
+        }
     }
 
     // Clean up quote

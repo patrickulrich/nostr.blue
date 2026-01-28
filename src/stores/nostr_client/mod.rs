@@ -266,7 +266,8 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
                     match pool.add_relay(url, opts).await {
                         Ok(_) => {
                             log::debug!("Added relay with opts: {}", url_str);
-                            RelayInfo::new(url_str, RelayStatus::Connected)
+                            // Mark as Connecting, not Connected (actual connection is async)
+                            RelayInfo::new(url_str, RelayStatus::Connecting)
                         }
                         Err(e) => {
                             log::error!("Failed to add relay {}: {}", url_str, e);

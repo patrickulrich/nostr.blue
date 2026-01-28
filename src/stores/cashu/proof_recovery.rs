@@ -563,13 +563,6 @@ pub fn get_recovery_stats() -> (usize, u64, usize, u64) {
 
 /// Recalculate and update wallet balance
 pub(crate) fn recalculate_balance() {
-    let store = WALLET_TOKENS();
-    let data = store.data();
-    let tokens = data.read();
-
-    drop(tokens);
-
-    // Update balance from proof state
     super::signals::update_wallet_balances();
 }
 

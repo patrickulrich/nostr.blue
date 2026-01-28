@@ -920,6 +920,38 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
     for token in pending_tokens {
         let old_event_id = token.event_id.clone();
 
+        // Check if there's already a non-pending token with matching proof secrets
+        // This prevents republishing if another process already created the real event
+        let proof_secrets: std::collections::HashSet<&str> = token.proofs
+            .iter()
+            .map(|p| p.secret.as_str())
+            .collect();
+
+        let existing_real_event = {
+            let store = WALLET_TOKENS.read();
+            let data = store.data();
+            let tokens = data.read();
+            tokens.iter()
+                .filter(|t| !t.event_id.starts_with("pending_"))
+                .find(|t| {
+                    let t_secrets: std::collections::HashSet<&str> = t.proofs
+                        .iter()
+                        .map(|p| p.secret.as_str())
+                        .collect();
+                    // Check if all pending proofs exist in a non-pending token
+                    !proof_secrets.is_empty() && proof_secrets == t_secrets
+                })
+                .map(|t| t.event_id.clone())
+        };
+
+        if let Some(real_event_id) = existing_real_event {
+            // Found existing real event - just update the pending reference
+            log::info!("Found existing real event {} for pending token {}", real_event_id, old_event_id);
+            update_token_event_id(&old_event_id, &real_event_id);
+            reconciled += 1;
+            continue;
+        }
+
         // Build and publish token event
         let extended_proofs: Vec<ExtendedCashuProof> = token.proofs.iter()
             .map(|p| ExtendedCashuProof::from(p.clone()))
@@ -1075,6 +1107,9 @@ pub async fn publish_orphaned_proofs_event(
     }) {
         log::warn!("Failed to pre-persist orphaned proofs token: {}", e);
         // Continue anyway - better to try publish than fail entirely
+    } else {
+        // Register proofs in event map for fast lookup
+        super::proofs::register_proofs_in_event_map(&pending_id, proofs);
     }
 
     // 3. Attempt publish

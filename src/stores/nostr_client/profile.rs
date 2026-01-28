@@ -89,11 +89,10 @@ fn validate_picture_url(url: &str) -> std::result::Result<Url, String> {
 // Profile Picture/Banner Updates
 // =============================================================================
 
-/// Update just the profile picture
+/// Update a single profile field while preserving custom fields
 ///
-/// Uses raw_metadata_json from cached Profile to preserve custom fields during update.
-#[allow(dead_code)]
-pub async fn update_profile_picture(url: String) -> std::result::Result<(), String> {
+/// Uses raw_metadata_json from cached Profile to preserve unknown fields during update.
+async fn update_profile_field(field: &str, url: String) -> std::result::Result<(), String> {
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
@@ -109,19 +108,20 @@ pub async fn update_profile_picture(url: String) -> std::result::Result<(), Stri
 
     // Build updated metadata, preserving unknown fields via raw JSON merge
     let updated_metadata = if let Some(json) = cached_profile.raw_metadata_json {
-        // Merge picture into existing raw JSON to preserve custom fields
+        // Merge field into existing raw JSON to preserve custom fields
         let mut value: serde_json::Value = serde_json::from_str(&json)
             .map_err(|e| format!("Invalid metadata JSON: {}", e))?;
-        value["picture"] = serde_json::Value::String(url);
+        value[field] = serde_json::Value::String(url);
         serde_json::from_value(value)
             .map_err(|e| format!("Failed to parse updated metadata: {}", e))?
     } else {
         // Fallback: use current get_profile behavior (may lose custom fields)
         let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
             .ok_or("Profile not loaded")?;
-        Metadata {
-            picture: Some(url),
-            ..current_metadata
+        match field {
+            "picture" => Metadata { picture: Some(url), ..current_metadata },
+            "banner" => Metadata { banner: Some(url), ..current_metadata },
+            _ => return Err(format!("Unknown profile field: {}", field)),
         }
     };
 
@@ -129,42 +129,18 @@ pub async fn update_profile_picture(url: String) -> std::result::Result<(), Stri
     Ok(())
 }
 
+/// Update just the profile picture
+///
+/// Uses raw_metadata_json from cached Profile to preserve custom fields during update.
+#[allow(dead_code)]
+pub async fn update_profile_picture(url: String) -> std::result::Result<(), String> {
+    update_profile_field("picture", url).await
+}
+
 /// Update just the profile banner
 ///
 /// Uses raw_metadata_json from cached Profile to preserve custom fields during update.
 #[allow(dead_code)]
 pub async fn update_profile_banner(url: String) -> std::result::Result<(), String> {
-    let pubkey_str = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
-
-    // Get cached profile with raw JSON for merging
-    let cached_profile = crate::stores::profiles::PROFILE_CACHE
-        .read()
-        .peek(&pubkey_str)
-        .cloned()
-        .ok_or("Profile not loaded; fetch metadata first")?;
-
-    // Validate URL using extracted helper
-    validate_picture_url(&url)?;
-
-    // Build updated metadata, preserving unknown fields via raw JSON merge
-    let updated_metadata = if let Some(json) = cached_profile.raw_metadata_json {
-        // Merge banner into existing raw JSON to preserve custom fields
-        let mut value: serde_json::Value = serde_json::from_str(&json)
-            .map_err(|e| format!("Invalid metadata JSON: {}", e))?;
-        value["banner"] = serde_json::Value::String(url);
-        serde_json::from_value(value)
-            .map_err(|e| format!("Failed to parse updated metadata: {}", e))?
-    } else {
-        // Fallback: use current get_profile behavior (may lose custom fields)
-        let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
-            .ok_or("Profile not loaded")?;
-        Metadata {
-            banner: Some(url),
-            ..current_metadata
-        }
-    };
-
-    publish_metadata(updated_metadata).await?;
-    Ok(())
+    update_profile_field("banner", url).await
 }

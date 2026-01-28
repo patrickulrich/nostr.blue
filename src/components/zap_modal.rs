@@ -90,8 +90,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
         use_effect(use_reactive!(|recipient_pubkey| {
-            // Increment version using wrapping_add for overflow safety (signals.rs pattern)
-            let current_version = nutzap_request_version.peek().wrapping_add(1);
+            // Increment version using saturating_add for overflow safety (Dioxus pattern)
+            let current_version = nutzap_request_version.peek().saturating_add(1);
             nutzap_request_version.set(current_version);
 
             let pubkey_snapshot = recipient_pubkey.clone();

@@ -156,12 +156,13 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         .filter_map(UserList::from_event)
         .collect();
 
-    // Populate total_member_count for people lists with private content
-    // Only attempt if signer is available (needed for NIP-44 decryption)
-    if *nostr_client::HAS_SIGNER.peek() {
-        for list in &mut lists {
-            if list.kind == NAMED_PEOPLE {
-                if list.has_private_content {
+    // Populate total_member_count for people lists
+    // Public count can always be computed; private content requires signer for NIP-44 decryption
+    for list in &mut lists {
+        if list.kind == NAMED_PEOPLE {
+            if list.has_private_content {
+                // Only attempt decryption if signer is available
+                if *nostr_client::HAS_SIGNER.peek() {
                     match get_all_list_members_with_status(&list.event).await {
                         Ok(result) => {
                             // Only set count if decryption succeeded
@@ -175,10 +176,11 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
                             // Keep as None - will show public count with "+" indicator
                         }
                     }
-                } else {
-                    // No private content - public count is the total
-                    list.total_member_count = Some(get_item_count(&list.tags));
                 }
+                // If no signer, leave as None - UI shows public count with "+" indicator
+            } else {
+                // No private content - public count is the total (always computable)
+                list.total_member_count = Some(get_item_count(&list.tags));
             }
         }
     }

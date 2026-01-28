@@ -129,10 +129,11 @@ pub fn Videos() -> Element {
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
 
-        // Clear feed when switching types; keep visible during same-feed refresh
+        // Always set loading (shows spinner during refresh)
+        loading_feed.set(true);
+        // Clear feed only when switching types; keep visible during same-feed refresh
         // (Dioxus pattern: clear data before async to prevent stale UI)
-        if !has_data || feed_type_changed {
-            loading_feed.set(true);
+        if feed_type_changed {
             feed_events.set(Vec::new());
         }
         error.set(None);

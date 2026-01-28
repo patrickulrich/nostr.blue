@@ -13,7 +13,12 @@ use crate::stores::cashu::proof_recovery;
 #[component]
 pub fn WalletHealthIndicator(on_open_modal: EventHandler<()>) -> Element {
     // use_memo tracks signal dependencies and recomputes when they change
-    let stats = use_memo(proof_recovery::get_wallet_health_stats);
+    // Reading WALLET_BALANCES inside memo auto-tracks it as dependency (Dioxus pattern)
+    let stats = use_memo(move || {
+        // Touch WALLET_BALANCES to establish reactive dependency
+        let _ = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read();
+        proof_recovery::get_wallet_health_stats()
+    });
 
     // DIOXUS PATTERN: Clone the value from memo using read()
     let health = stats.read().clone();
