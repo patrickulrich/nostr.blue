@@ -1141,16 +1141,28 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     let currency_unit = cdk::nuts::CurrencyUnit::from_str(&retry_unit_str)
                         .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone()));
 
-                    let proof_infos: Vec<cdk::types::ProofInfo> = retry_proofs.iter()
-                        .filter_map(|p| {
-                            cdk::types::ProofInfo::new(
-                                p.clone(),
-                                retry_mint_url.clone(),
-                                cdk::nuts::State::Unspent,
-                                currency_unit.clone(),
-                            ).ok()
-                        })
-                        .collect();
+                    let mut proof_infos: Vec<cdk::types::ProofInfo> = Vec::with_capacity(retry_proofs.len());
+                    for p in &retry_proofs {
+                        match cdk::types::ProofInfo::new(
+                            p.clone(),
+                            retry_mint_url.clone(),
+                            cdk::nuts::State::Unspent,
+                            currency_unit.clone(),
+                        ) {
+                            Ok(info) => proof_infos.push(info),
+                            Err(e) => {
+                                log::error!(
+                                    "Background retry {}: ProofInfo conversion failed: {} \
+                                     (mint: {}, unit: {}, proof_amount: {})",
+                                    attempt + 1,
+                                    e,
+                                    retry_mint_url,
+                                    retry_unit_str,
+                                    p.amount
+                                );
+                            }
+                        }
+                    }
 
                     if let Err(e) = retry_localstore.update_proofs(proof_infos, vec![]).await {
                         log::warn!("Background retry {} failed: {}", attempt + 1, e);
