@@ -29,14 +29,15 @@ fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<Publ
     }
 
     // Fallback: Legacy uppercase E/P positional convention
+    // Use as_slice() instead of clone().to_vec() to avoid unnecessary allocations
     let uppercase_e_tags: Vec<_> = event.tags.iter()
         .filter_map(|tag| {
-            let tag_vec = tag.clone().to_vec();
-            if tag_vec.len() >= 2 && tag_vec[0] == "E" {
-                let relay = tag_vec.get(2)
+            let tag_slice = tag.as_slice();
+            if tag_slice.len() >= 2 && tag_slice[0] == "E" {
+                let relay = tag_slice.get(2)
                     .filter(|r| !r.is_empty())
                     .and_then(|r| RelayUrl::parse(r).ok());
-                Some((tag_vec[1].clone(), relay))
+                Some((tag_slice[1].to_string(), relay))
             } else {
                 None
             }
@@ -45,7 +46,7 @@ fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<Publ
 
     if let Some((root_id, relay)) = uppercase_e_tags.first() {
         let root_pubkey = event.tags.iter().find_map(|tag| {
-            let v = tag.clone().to_vec();
+            let v = tag.as_slice();
             if v.len() >= 2 && v[0] == "P" {
                 PublicKey::from_hex(&v[1]).ok()
             } else {

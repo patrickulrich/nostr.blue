@@ -568,7 +568,11 @@ fn update_local_state_after_swap(
     // Note: atomic_token_replace already updates wallet balances internally
     let new_balance = super::signals::atomic_token_replace(vec![new_token], event_ids_to_delete)?;
 
-    // Register proofs in event map
+    // CDK pattern: Rebuild map to ensure deleted proofs are removed
+    // (matches send.rs which does this after atomic_token_replace for consistency)
+    super::proofs::rebuild_proof_event_map();
+
+    // Register new proofs in event map
     register_proofs_in_event_map(new_event_id, &proof_data);
 
     log::info!(

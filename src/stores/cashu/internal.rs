@@ -110,6 +110,10 @@ pub(crate) async fn get_or_create_wallet(mint_url: &str) -> Result<Arc<Wallet>, 
 ///
 /// Duplicate Check: Proofs that already exist in CDK database are skipped
 /// to prevent balance corruption from duplicate entries.
+///
+/// TODO(multi-unit): Currently hardcodes CurrencyUnit::Sat. To support multi-unit
+/// tokens (CDK pattern), add a `unit: CurrencyUnit` parameter and derive unit from
+/// proof keysets or pass explicitly from callers.
 pub(crate) async fn create_ephemeral_wallet(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>,

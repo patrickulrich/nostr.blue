@@ -10,8 +10,7 @@ use crate::stores::community_store::{
 use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
-use crate::services::aggregation::{fetch_interaction_counts_batch, InteractionCounts, stream_interaction_counts};
-use crate::stores::subscription_manager;
+use crate::services::aggregation::{fetch_interaction_counts_batch, InteractionCounts, stream_interaction_counts, InteractionStreamHandle};
 use crate::components::{
     CommunityPostCard, CommunityPostCardSkeleton, CommunityPostComposerInline,
     UserRoleBadge, JoinButton, ClientInitializing,
@@ -44,8 +43,8 @@ pub fn CommunityPage(a_tag: String) -> Element {
     // Interaction counts for posts
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
 
-    // Track interaction stream subscription for cleanup
-    let mut interaction_stream_id = use_signal(|| None::<nostr_sdk::SubscriptionId>);
+    // Track interaction stream handle for cleanup (Dioxus pattern: store full handle for task cancellation)
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
 
     // Pagination state
     let mut oldest_timestamp = use_signal(|| None::<u64>);
@@ -128,16 +127,14 @@ pub fn CommunityPage(a_tag: String) -> Element {
             let community_clone = comm.clone();
             loading_posts.set(true);
 
-            // Cleanup interaction stream subscription on refresh
-            if let Some(stream_id) = interaction_stream_id.peek().clone() {
+            // Cleanup interaction stream handle on refresh (Dioxus pattern: cancel task BEFORE starting new)
+            if let Some(handle) = interaction_stream_handle.peek().clone() {
                 spawn(async move {
-                    if let Some(client) = nostr_client::get_client() {
-                        log::info!("Cleaning up interaction stream subscription due to refresh");
-                        subscription_manager::unsubscribe(&client, &stream_id).await;
-                    }
+                    log::info!("Cleaning up interaction stream due to refresh");
+                    handle.unsubscribe().await;
                 });
             }
-            interaction_stream_id.set(None);
+            interaction_stream_handle.set(None);
 
             spawn(async move {
                 match fetch_community_posts(&community_clone, 50, false, None).await {
@@ -181,12 +178,13 @@ pub fn CommunityPage(a_tag: String) -> Element {
                                         interaction_counts.set(counts);
 
                                         // Start streaming interactions after batch fetch completes
+                                        // Store full handle for proper task cancellation (Dioxus pattern)
                                         if let Ok(handle) = stream_interaction_counts(
                                             event_ids,
                                             interaction_counts,
                                             Some(600), // 10 minute idle timeout
                                         ).await {
-                                            interaction_stream_id.set(Some(handle.subscription_id));
+                                            interaction_stream_handle.set(Some(handle));
                                         }
                                     }
                                     Err(e) => {

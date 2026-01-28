@@ -153,10 +153,15 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
     )
     .await;
 
-    // SAFETY: Remove in-flight tracking regardless of success/failure
-    super::signals::remove_in_flight_send_request(&tx_id);
-
-    let (token_string, keep_proofs) = result?;
+    // CDK pattern: Handle error case first, remove in-flight on failure
+    let (token_string, keep_proofs) = match result {
+        Ok(r) => r,
+        Err(e) => {
+            // CDK pattern: Remove in-flight tracking on error (matches compensate_all)
+            super::signals::remove_in_flight_send_request(&tx_id);
+            return Err(e);
+        }
+    };
 
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish
@@ -168,6 +173,9 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         &event_ids_to_delete,
         &Some(pending_event_id.clone()),
     )?;
+
+    // CDK pattern: Remove in-flight tracking AFTER state update (matches melt_saga finalize)
+    super::signals::remove_in_flight_send_request(&tx_id);
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)
     // nostr-sdk saves to local database before relay transmission
@@ -320,10 +328,15 @@ pub async fn send_tokens_p2pk(
     )
     .await;
 
-    // SAFETY: Remove in-flight tracking regardless of success/failure
-    super::signals::remove_in_flight_send_request(&tx_id);
-
-    let (token_string, keep_proofs) = result?;
+    // CDK pattern: Handle error case first, remove in-flight on failure
+    let (token_string, keep_proofs) = match result {
+        Ok(r) => r,
+        Err(e) => {
+            // CDK pattern: Remove in-flight tracking on error (matches compensate_all)
+            super::signals::remove_in_flight_send_request(&tx_id);
+            return Err(e);
+        }
+    };
 
     // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
     // This uses a pending event ID that we'll update after Nostr publish
@@ -335,6 +348,9 @@ pub async fn send_tokens_p2pk(
         &event_ids_to_delete,
         &Some(pending_event_id.clone()),
     )?;
+
+    // CDK pattern: Remove in-flight tracking AFTER state update (matches melt_saga finalize)
+    super::signals::remove_in_flight_send_request(&tx_id);
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)
     // nostr-sdk saves to local database before relay transmission

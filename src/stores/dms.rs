@@ -92,6 +92,8 @@ pub async fn init_dms() -> Result<(), String> {
     // This is critical: nostr-sdk's fetch_events_from fails if ANY relay isn't in pool
     let dm_relays = relay::specialty::ensure_dm_relays_connected(&client).await;
     if dm_relays.is_empty() {
+        // Clear stale conversations before returning error to prevent showing old DMs
+        CONVERSATIONS.read().data().write().clear();
         return Err("No DM relays could be connected".to_string());
     }
     log::info!("Using {} connected DM relays: {:?}", dm_relays.len(), dm_relays);

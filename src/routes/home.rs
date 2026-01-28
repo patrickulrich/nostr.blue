@@ -118,6 +118,8 @@ pub fn Home(list: String) -> Element {
 
     // Add signal for pubkey tracking (Dioxus pattern from note.rs)
     let mut last_mute_pubkey: Signal<Option<String>> = use_signal(|| None);
+    // Track last seen invalidation token to detect mute/block changes (Dioxus pattern)
+    let mut last_invalidate_token: Signal<u32> = use_signal(|| 0);
 
     // Fetch mute/block lists once when authenticated (N+1 optimization)
     // Single fetch for both muted posts and blocked users
@@ -126,9 +128,19 @@ pub fn Home(list: String) -> Element {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let current_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
 
-        // Dioxus pattern: reading .read() auto-subscribes to changes
+        // Dioxus pattern: read to subscribe, then compare with peek()
         // Effect re-runs when MUTE_BLOCK_INVALIDATE is incremented
-        let _ = *nostr_client::MUTE_BLOCK_INVALIDATE.read();
+        let current_token = *nostr_client::MUTE_BLOCK_INVALIDATE.read();
+
+        // Check if invalidation occurred BEFORE the early return
+        // Use peek() to avoid creating extra dependency
+        if current_token != *last_invalidate_token.peek() {
+            log::debug!("Mute/block invalidation detected in home feed, clearing caches");
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            last_invalidate_token.set(current_token);
+            // Don't return - let fetch logic run below
+        }
 
         // Clear caches on logout to prevent stale data on re-login
         if !is_authenticated {

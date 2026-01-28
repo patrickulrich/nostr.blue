@@ -203,6 +203,11 @@ pub fn generate_custom_nip_naddr(
     use nostr::nips::nip01::Coordinate;
     use nostr::nips::nip19::Nip19Coordinate;
 
+    // Validate identifier is not empty or whitespace
+    if identifier.trim().is_empty() {
+        return Err("Identifier cannot be empty or whitespace".to_string());
+    }
+
     let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey)
         .identifier(identifier);
 

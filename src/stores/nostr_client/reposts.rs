@@ -27,9 +27,10 @@ pub async fn publish_repost_tracked(
 
     log::info!("Publishing repost of event: {}", event_id);
 
-    // Parse event ID
+    // nostr-sdk pattern: EventId::parse() handles all formats
+    // (hex, note1..., nostr:note1..., nevent1...)
     use nostr::{EventId, RelayUrl};
-    let target_event_id = EventId::from_hex(&event_id)
+    let target_event_id = EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch the original event from database to get full event data
@@ -49,8 +50,12 @@ pub async fn publish_repost_tracked(
         }
     };
 
-    // Parse relay URL if provided
-    let relay = relay_url.and_then(|url| RelayUrl::parse(&url).ok());
+    // nostr-sdk pattern: Propagate relay URL errors explicitly (no silent .ok())
+    let relay = match relay_url {
+        Some(url) => Some(RelayUrl::parse(&url)
+            .map_err(|e| format!("Invalid relay URL '{}': {}", url, e))?),
+        None => None,
+    };
 
     // Use EventBuilder::repost() for proper NIP-18 compliance
     // This automatically:

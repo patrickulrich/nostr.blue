@@ -1058,12 +1058,21 @@ pub fn increment_cached_counts(
     is_current_user: bool,
     zap_amount: Option<u64>,
 ) -> Option<InteractionCounts> {
+    // Use same TTL as elsewhere (5 minutes)
+    const CACHE_TTL: Duration = Duration::from_secs(300);
+
     let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
         log::warn!("Counts cache mutex was poisoned, recovering");
         poisoned.into_inner()
     });
 
     if let Some(cached) = cache.cache.get_mut(event_id) {
+        // Check if entry is expired before updating (prevents reviving expired entries)
+        if cached.cached_at.elapsed() > CACHE_TTL {
+            cache.cache.pop(event_id);
+            return None;
+        }
+
         // Refresh the timestamp since we're updating
         cached.cached_at = Instant::now();
 

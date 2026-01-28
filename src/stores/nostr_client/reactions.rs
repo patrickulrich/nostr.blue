@@ -81,12 +81,20 @@ pub async fn publish_reaction_tracked(
     let mut builder = nostr::EventBuilder::reaction(target, content);
 
     // Add emoji tag for custom emojis (NIP-30)
+    // Validate http/https scheme only (security concern)
     if let Some((shortcode, url_str)) = emoji_tag {
         if let Ok(parsed_url) = Url::parse(&url_str) {
-            builder = builder.tag(Tag::from_standardized_without_cell(
-                TagStandard::Emoji { shortcode, url: parsed_url }
-            ));
-            log::info!("Added custom emoji tag to reaction");
+            match parsed_url.scheme() {
+                "http" | "https" => {
+                    builder = builder.tag(Tag::from_standardized_without_cell(
+                        TagStandard::Emoji { shortcode, url: parsed_url }
+                    ));
+                    log::info!("Added custom emoji tag to reaction");
+                }
+                scheme => {
+                    log::warn!("Rejected emoji URL with invalid scheme '{}': {}", scheme, url_str);
+                }
+            }
         } else {
             log::warn!("Failed to parse custom emoji URL: {}", url_str);
         }

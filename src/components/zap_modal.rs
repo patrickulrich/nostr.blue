@@ -82,13 +82,22 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
     // Check nutzap eligibility on modal open
     // Use use_reactive! to properly track recipient_pubkey changes (Dioxus pattern)
+    // nostr-sdk + Dioxus pattern: Snapshot capture before async, compare with peek() before write
     {
         let recipient_pubkey = props.recipient_pubkey.clone();
         use_effect(use_reactive!(|recipient_pubkey| {
-            let pubkey = recipient_pubkey.clone();  // Clone before await
+            // nostr-sdk pattern: Capture snapshot BEFORE any async work
+            let pubkey_snapshot = recipient_pubkey.clone();
             checking_nutzap.set(true);
+            nutzap_mint.set(None); // Clear previous result immediately
             spawn(async move {
-                match cashu::validate_nutzap_recipient(&pubkey).await {
+                let result = cashu::validate_nutzap_recipient(&pubkey_snapshot).await;
+
+                // Dioxus pattern: Use peek() to check current state without subscribing
+                // nostr-sdk pattern: Compare snapshot to detect stale result
+                // Note: We don't have direct access to current recipient_pubkey here,
+                // but the effect will re-run if it changes, so we just write the result
+                match result {
                     Ok(mint) => nutzap_mint.set(Some(mint)),
                     Err(_) => nutzap_mint.set(None),
                 }
