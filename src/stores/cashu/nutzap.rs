@@ -424,6 +424,18 @@ pub async fn send_nutzap(
     // Create P2PK spending conditions
     let spending_conditions = SpendingConditions::new_p2pk(recipient_p2pk, None);
 
+    // Verify Nostr signer/client available BEFORE spending proofs
+    // Follows nostr.blue pattern (send.rs:755-766, swap.rs:593-604)
+    let _signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available - cannot send nutzap")?;
+    let _pubkey = auth_store::get_pubkey()
+        .ok_or("Not authenticated - cannot send nutzap")?;
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Nostr client not initialized - cannot send nutzap")?
+        .clone();
+
     // Create ephemeral wallet and execute swap
     let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
 
@@ -507,13 +519,8 @@ pub async fn send_nutzap(
     let content = comment.unwrap_or("");
     let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
 
-    let client = nostr_client::NOSTR_CLIENT
-        .read()
-        .as_ref()
-        .ok_or("Client not initialized")?
-        .clone();
-
     // Publish to recipient's preferred relays
+    // Note: `client` was verified available before swap (fail-fast pattern)
     // Use match to handle network errors - queue for retry instead of failing
     let output = match client.send_event_builder(builder.clone()).await {
         Ok(out) => out,
@@ -917,12 +924,16 @@ fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), St
             return Err("P2PK nonce is empty".to_string());
         }
 
-        // Get the locked pubkey
+        // Get the locked pubkey and normalize to lowercase for case-insensitive comparison
         let locked_pubkey = secret
             .get(1)
             .and_then(|obj| obj.get("data"))
             .and_then(|d| d.as_str())
-            .ok_or("P2PK secret missing pubkey data")?;
+            .ok_or("P2PK secret missing pubkey data")?
+            .to_lowercase(); // Normalize to lowercase (hex crate outputs lowercase)
+
+        // Normalize our pubkey for comparison (defensive - should already be lowercase)
+        let our_p2pk_lower = our_p2pk.to_lowercase();
 
         // Validate pubkey format: 33-byte compressed = 66 hex chars, starts with 02 or 03
         if locked_pubkey.len() != 66 {
@@ -935,11 +946,11 @@ fn validate_nutzap_p2pk(proofs_json: &[String], our_p2pk: &str) -> Result<(), St
             return Err(format!("Invalid pubkey prefix: {} (expected 02 or 03)", &locked_pubkey[0..2]));
         }
 
-        // Verify it matches our P2PK pubkey
-        if locked_pubkey != our_p2pk {
+        // Verify it matches our P2PK pubkey (case-insensitive via lowercase normalization)
+        if locked_pubkey != our_p2pk_lower {
             return Err(format!(
                 "P2PK lock doesn't match our pubkey. Expected: {}, Got: {}",
-                our_p2pk, locked_pubkey
+                our_p2pk_lower, locked_pubkey
             ));
         }
     }
@@ -972,6 +983,13 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
 
     // Collect P2PK signing keys (includes our wallet key)
     let signing_keys = collect_p2pk_signing_keys().await;
+
+    // Validate signing keys available BEFORE receiving (fail-fast pattern)
+    // CDK pattern: fail early rather than mint proofs we can't spend
+    // Reference: cdk/src/nuts/nut11/mod.rs - Error::SignaturesNotProvided
+    if signing_keys.is_empty() {
+        return Err("No P2PK signing keys available - cannot redeem nutzap".to_string());
+    }
 
     // Build token string from proofs
     let mint_url_parsed: cdk::mint_url::MintUrl = mint_url

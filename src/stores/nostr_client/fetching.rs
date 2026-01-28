@@ -171,7 +171,17 @@ pub async fn fetch_events_aggregated_outbox(
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
+    fetch_events_aggregated_outbox_with_client(&client, filter, timeout).await
+}
 
+/// Internal: Fetch events using gossip with provided client (avoids re-reading NOSTR_CLIENT)
+///
+/// Dioxus pattern: Get client once, pass same instance through all async operations.
+async fn fetch_events_aggregated_outbox_with_client(
+    client: &std::sync::Arc<Client>,
+    filter: Filter,
+    timeout: Duration,
+) -> std::result::Result<Vec<nostr::Event>, String> {
     // Wait for user relays if signed in (up to 2 seconds)
     // This ensures gossip routing uses the user's configured relays
     if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
@@ -200,7 +210,7 @@ pub async fn fetch_events_aggregated_outbox(
     }
 
     // Wait for at least one relay to be ready (non-blocking connect() may not have finished)
-    ensure_relays_ready(&client).await;
+    ensure_relays_ready(client).await;
 
     // Capture authors for client-side filtering (defense-in-depth)
     let filter_authors = filter.authors.clone();
@@ -319,7 +329,7 @@ async fn fetch_events_from_connected_relays_with_client(
 
     if connected_urls.is_empty() {
         log::warn!("No connected relays, falling back to gossip fetch");
-        return fetch_events_aggregated_outbox(filter.clone(), timeout).await;
+        return fetch_events_aggregated_outbox_with_client(client, filter.clone(), timeout).await;
     }
 
     log::info!("Fast fetching from {} connected relays (bypassing gossip)", connected_urls.len());

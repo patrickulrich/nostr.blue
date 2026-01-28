@@ -822,8 +822,20 @@ pub async fn init_shop_store() -> Result<()> {
             log::info!("Shop IndexedDB initialized");
 
             // Restore orders from IndexedDB
-            if let Err(e) = restore_orders_from_db(&db_arc).await {
-                log::warn!("Failed to restore orders from IndexedDB: {}", e);
+            match restore_orders_from_db(&db_arc).await {
+                Ok(true) => {
+                    // Restore succeeded - set flag to prevent double-restore
+                    use std::sync::atomic::Ordering;
+                    ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
+                    log::info!("Orders restored from IndexedDB, flag set");
+                }
+                Ok(false) => {
+                    // Skipped (e.g., missing auth) - flag remains false for retry later
+                    log::debug!("Order restore skipped (no auth), will retry on auth");
+                }
+                Err(e) => {
+                    log::warn!("Failed to restore orders from IndexedDB: {}", e);
+                }
             }
         }
         Err(e) => {
@@ -1635,8 +1647,7 @@ pub struct CollectionFormData {
 /// Fetch current user's collections
 pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
     let pubkey = nostr_client::get_cached_pubkey()
-        .map_err(|e| format!("Not authenticated: {}", e))?
-        .to_hex();
+        .map_err(|e| format!("Not authenticated: {}", e))?;
 
     *LOADING_MY_COLLECTIONS.write() = true;
 
@@ -1645,7 +1656,7 @@ pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
 
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_COLLECTION))
-        .author(PublicKey::parse(&pubkey).map_err(|e| e.to_string())?)
+        .author(pubkey) // Use PublicKey directly - no round-trip
         .limit(100);
 
     let events = client

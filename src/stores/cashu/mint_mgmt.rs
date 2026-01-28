@@ -1012,6 +1012,17 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     }
                 }
 
+                // If any prior batches succeeded, sync wallet state before returning
+                // Follows CDK's "explicit state queries on failure" pattern
+                // and nostr.blue's non-critical sync pattern (send.rs:224, swap.rs:518)
+                if batch_idx > 0 {
+                    log::warn!("Partial swap succeeded ({} batches); syncing wallet state", batch_idx);
+                    if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+                        log::warn!("Failed to sync after partial swap: {}", sync_err);
+                    }
+                    super::signals::update_wallet_balances();
+                }
+
                 // InFlightGuard will auto-cleanup on return (CDK pattern)
                 return Err(format!("Swap failed on batch {}/{}: {}", batch_idx + 1, total_batches, e));
             }
