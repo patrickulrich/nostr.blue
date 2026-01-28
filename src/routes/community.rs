@@ -10,7 +10,8 @@ use crate::stores::community_store::{
 use crate::stores::auth_store;
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
-use crate::services::aggregation::{fetch_interaction_counts_batch, InteractionCounts};
+use crate::services::aggregation::{fetch_interaction_counts_batch, InteractionCounts, stream_interaction_counts};
+use crate::stores::subscription_manager;
 use crate::components::{
     CommunityPostCard, CommunityPostCardSkeleton, CommunityPostComposerInline,
     UserRoleBadge, JoinButton, ClientInitializing,
@@ -42,6 +43,9 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
     // Interaction counts for posts
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
+
+    // Track interaction stream subscription for cleanup
+    let mut interaction_stream_id = use_signal(|| None::<nostr_sdk::SubscriptionId>);
 
     // Pagination state
     let mut oldest_timestamp = use_signal(|| None::<u64>);
@@ -124,6 +128,17 @@ pub fn CommunityPage(a_tag: String) -> Element {
             let community_clone = comm.clone();
             loading_posts.set(true);
 
+            // Cleanup interaction stream subscription on refresh
+            if let Some(stream_id) = interaction_stream_id.peek().clone() {
+                spawn(async move {
+                    if let Some(client) = nostr_client::get_client() {
+                        log::info!("Cleaning up interaction stream subscription due to refresh");
+                        subscription_manager::unsubscribe(&client, &stream_id).await;
+                    }
+                });
+            }
+            interaction_stream_id.set(None);
+
             spawn(async move {
                 match fetch_community_posts(&community_clone, 50, false, None).await {
                     Ok(community_posts) => {
@@ -153,7 +168,7 @@ pub fn CommunityPage(a_tag: String) -> Element {
                             });
                         }
 
-                        // Fetch interaction counts
+                        // Fetch interaction counts, then start streaming
                         let event_ids: Vec<nostr_sdk::EventId> = community_posts
                             .iter()
                             .filter_map(|p| nostr_sdk::EventId::from_hex(&p.id).ok())
@@ -161,9 +176,18 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
                         if !event_ids.is_empty() {
                             spawn(async move {
-                                match fetch_interaction_counts_batch(event_ids, std::time::Duration::from_secs(5)).await {
+                                match fetch_interaction_counts_batch(event_ids.clone(), std::time::Duration::from_secs(5)).await {
                                     Ok(counts) => {
                                         interaction_counts.set(counts);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        if let Ok(handle) = stream_interaction_counts(
+                                            event_ids,
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            interaction_stream_id.set(Some(handle.subscription_id));
+                                        }
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to fetch interaction counts: {}", e);

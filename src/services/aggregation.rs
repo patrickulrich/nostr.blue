@@ -16,13 +16,13 @@
 //! - Automatic eviction of stale/excess entries
 //! - Reduces redundant database queries for recently-viewed events
 
-use dioxus::prelude::ReadableExt;
+use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use lru::LruCache;
-use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagStandard};
+use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagStandard, SubscriptionId, RelayPoolNotification};
 use nostr_relay_pool::{SyncOptions, SyncDirection};
 use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 use instant::{Duration, Instant};
@@ -1006,6 +1006,280 @@ pub async fn fetch_trending_interactions(
     }
 
     Ok(counts_map)
+}
+
+// ============================================================================
+// Real-Time Interaction Streaming (Phase 4)
+// ============================================================================
+
+/// Subscription handle for cleanup
+#[derive(Clone, Debug)]
+pub struct InteractionStreamHandle {
+    pub subscription_id: SubscriptionId,
+}
+
+/// Increment cached counts from streaming update
+///
+/// Updates the L2 cache with a new interaction event.
+/// Returns the updated counts if the event is in cache, None otherwise.
+///
+/// # Arguments
+/// * `event_id` - The event ID being interacted with (hex string)
+/// * `kind` - The interaction kind (TextNote, Reaction, Repost, ZapReceipt)
+/// * `content` - The event content (used for reactions to detect "-" unlikes)
+/// * `is_current_user` - Whether this interaction is from the current user
+/// * `zap_amount` - Optional zap amount in satoshis
+pub fn increment_cached_counts(
+    event_id: &str,
+    kind: Kind,
+    content: Option<&str>,
+    is_current_user: bool,
+    zap_amount: Option<u64>,
+) -> Option<InteractionCounts> {
+    let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
+        log::warn!("Counts cache mutex was poisoned, recovering");
+        poisoned.into_inner()
+    });
+
+    if let Some(cached) = cache.cache.get_mut(event_id) {
+        // Refresh the timestamp since we're updating
+        cached.cached_at = Instant::now();
+
+        match kind {
+            Kind::TextNote => cached.counts.replies += 1,
+            Kind::Reaction => {
+                let content = content.unwrap_or("+");
+                if content != "-" {
+                    cached.counts.likes += 1;
+                }
+                if is_current_user {
+                    if content == "-" {
+                        cached.counts.user_liked = Some(false);
+                        cached.counts.user_reaction = None;
+                        cached.counts.user_reaction_url = None;
+                    } else {
+                        cached.counts.user_liked = Some(true);
+                        cached.counts.user_reaction = Some(content.to_string());
+                        // Note: emoji_url is not available in increment context
+                        // This is only used for live updates, full data comes from fetch
+                    }
+                }
+            }
+            Kind::Repost => cached.counts.reposts += 1,
+            Kind::ZapReceipt => {
+                cached.counts.zaps += 1;
+                if let Some(amount) = zap_amount {
+                    cached.counts.zap_amount_sats += amount;
+                }
+            }
+            _ => {}
+        }
+
+        Some(cached.counts.clone())
+    } else {
+        None
+    }
+}
+
+/// Extract the event ID being interacted with from an interaction event
+///
+/// Only returns an event ID if it's in the set of tracked IDs.
+fn extract_referenced_event_for_streaming(
+    event: &Event,
+    tracked_ids: &HashSet<String>,
+) -> Option<String> {
+    for tag in event.tags.iter() {
+        if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+            let id_hex = event_id.to_hex();
+            if tracked_ids.contains(&id_hex) {
+                return Some(id_hex);
+            }
+        }
+    }
+    None
+}
+
+/// Start streaming interactions for a set of events
+///
+/// Opens a subscription for interaction events (replies, reactions, reposts, zaps)
+/// that reference the given event IDs. Uses the handle_notifications() pattern
+/// from nostr-sdk for event processing.
+///
+/// # Arguments
+/// * `event_ids` - Vector of event IDs to track interactions for
+/// * `interaction_counts` - Signal to update with new counts (Dioxus reactive state)
+/// * `idle_timeout_secs` - Optional timeout in seconds for the subscription (default: 600)
+///
+/// # Returns
+/// * `Ok(InteractionStreamHandle)` - Handle containing subscription ID for cleanup
+/// * `Err(String)` - Error message if subscription fails
+///
+/// # Deduplication
+/// - nostr-sdk automatically deduplicates events (RelayPoolNotification::Event only fires once per event)
+/// - Uses `since: Timestamp::now()` to only receive new events
+/// - Only updates existing cache entries (no-op if event not in cache)
+pub async fn stream_interaction_counts(
+    event_ids: Vec<EventId>,
+    interaction_counts: Signal<HashMap<String, InteractionCounts>>,
+    idle_timeout_secs: Option<u64>,
+) -> Result<InteractionStreamHandle, String> {
+    use nostr_relay_pool::{SubscribeAutoCloseOptions, RelayStatus as PoolRelayStatus};
+    use nostr_relay_pool::relay::ReqExitPolicy;
+
+    if event_ids.is_empty() {
+        return Err("No event IDs to stream".to_string());
+    }
+
+    let client = get_client().ok_or("Client not initialized")?;
+
+    // Build set of tracked event IDs for efficient lookup
+    let tracked_ids: HashSet<String> = event_ids.iter().map(|id| id.to_hex()).collect();
+
+    // Create filter for interaction events
+    // kinds: TextNote (replies), Reaction (likes), Repost, ZapReceipt
+    // #e filter: events referencing our tracked IDs
+    // since: now (only new events)
+    let filter = Filter::new()
+        .kinds(vec![
+            Kind::TextNote,   // kind 1 - replies
+            Kind::Reaction,   // kind 7 - likes
+            Kind::Repost,     // kind 6 - reposts
+            Kind::ZapReceipt, // kind 9735 - zaps
+        ])
+        .events(event_ids)
+        .since(Timestamp::now());
+
+    // FAST: Subscribe only to already-connected relays (bypasses gossip/NIP-65 discovery)
+    // This is critical for fast interaction streaming - gossip discovery can add 5-10+ seconds delay
+    let relays = client.relays().await;
+    let connected_urls: Vec<nostr_sdk::RelayUrl> = relays
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+        .filter_map(|(url, _)| nostr_sdk::RelayUrl::parse(url.as_str()).ok())
+        .collect();
+
+    if connected_urls.is_empty() {
+        return Err("No connected relays for interaction streaming".to_string());
+    }
+
+    log::info!(
+        "Fast interaction streaming: subscribing to {} connected relays (bypassing gossip)",
+        connected_urls.len()
+    );
+
+    // Subscribe with auto-close options for idle timeout
+    let timeout = std::time::Duration::from_secs(idle_timeout_secs.unwrap_or(600));
+    let auto_close = SubscribeAutoCloseOptions::default()
+        .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
+
+    // Use subscribe_to() to target only connected relays (fast path)
+    let subscription_id = client
+        .subscribe_to(connected_urls, filter, Some(auto_close))
+        .await
+        .map(|output| output.val)
+        .map_err(|e| format!("Failed to subscribe: {}", e))?;
+
+    log::info!(
+        "Started interaction stream subscription {:?} for {} events",
+        subscription_id,
+        tracked_ids.len()
+    );
+
+    // Parse current user's pubkey for reaction tracking
+    let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+        .read()
+        .as_ref()
+        .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
+
+    // Clone subscription_id for the notification handler
+    let sub_id = subscription_id.clone();
+
+    // Spawn the notification handler task
+    // This runs in the background and updates the signal when events arrive
+    dioxus::prelude::spawn(async move {
+        // Get a fresh client reference for the notification handler
+        let client = match get_client() {
+            Some(c) => c,
+            None => {
+                log::error!("Client not available for interaction stream handler");
+                return;
+            }
+        };
+
+        // Handle notifications using nostr-sdk's canonical pattern
+        if let Err(e) = client
+            .handle_notifications(|notification| {
+                // Clone values needed in the async block
+                let tracked_ids = tracked_ids.clone();
+                let sub_id = sub_id.clone();
+                let mut interaction_counts = interaction_counts;
+
+                async move {
+                    if let RelayPoolNotification::Event {
+                        subscription_id: event_sub_id,
+                        event,
+                        ..
+                    } = notification
+                    {
+                        // Only process events from our subscription
+                        if event_sub_id != sub_id {
+                            return Ok(false); // Continue listening
+                        }
+
+                        // Find which tracked event this interaction references
+                        let referenced_id = match extract_referenced_event_for_streaming(&event, &tracked_ids) {
+                            Some(id) => id,
+                            None => return Ok(false), // Not for a tracked event
+                        };
+
+                        // Check if this is from the current user
+                        let is_current_user = current_user_pk
+                            .map(|pk| event.pubkey == pk)
+                            .unwrap_or(false);
+
+                        // Extract zap amount if this is a zap receipt
+                        let zap_amount = if event.kind == Kind::ZapReceipt {
+                            extract_zap_amount(&event)
+                        } else {
+                            None
+                        };
+
+                        // Get reaction content
+                        let content = if event.kind == Kind::Reaction {
+                            Some(event.content.trim())
+                        } else {
+                            None
+                        };
+
+                        // Increment cached counts
+                        if let Some(updated_counts) = increment_cached_counts(
+                            &referenced_id,
+                            event.kind,
+                            content,
+                            is_current_user,
+                            zap_amount,
+                        ) {
+                            // Update the signal with new counts
+                            // Dioxus pattern: write after async work
+                            interaction_counts.write().insert(referenced_id.clone(), updated_counts);
+                            log::debug!(
+                                "Streamed interaction update for {}: kind={}",
+                                &referenced_id[..8.min(referenced_id.len())],
+                                event.kind.as_u16()
+                            );
+                        }
+                    }
+
+                    Ok(false) // Continue listening
+                }
+            })
+            .await
+        {
+            log::debug!("Interaction stream handler ended: {}", e);
+        }
+    });
+
+    Ok(InteractionStreamHandle { subscription_id })
 }
 
 #[cfg(test)]

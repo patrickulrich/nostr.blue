@@ -7,7 +7,7 @@ use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
 use crate::utils::{DataState, FeedItem, extract_reposted_event, get_item_count};
 use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::get_all_list_members;
-use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
+use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts, stream_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -68,6 +68,9 @@ pub fn Home(list: String) -> Element {
 
     // Track active subscription IDs for cleanup
     let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
+
+    // Track interaction stream subscription for cleanup
+    let mut interaction_stream_id = use_signal(|| None::<nostr_sdk::SubscriptionId>);
 
     // Request ID for preventing stale results when feed type changes rapidly
     let mut request_id = use_signal(|| 0u32);
@@ -220,6 +223,17 @@ pub fn Home(list: String) -> Element {
         }
         subscription_ids.write().clear();
 
+        // Cleanup interaction stream subscription
+        if let Some(stream_id) = interaction_stream_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    log::info!("Cleaning up interaction stream subscription due to refresh");
+                    subscription_manager::unsubscribe(&client, &stream_id).await;
+                }
+            });
+        }
+        interaction_stream_id.set(None);
+
         // Clear pending posts buffer on refresh
         pending_posts.set(Vec::new());
 
@@ -326,7 +340,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let req_id = request_id;
@@ -334,15 +348,24 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        if let Ok(handle) = stream_interaction_counts(
+                                            event_ids,
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            interaction_stream_id.set(Some(handle.subscription_id));
+                                        }
                                     }
                                 });
                             }
@@ -420,7 +443,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let req_id = request_id;
@@ -428,15 +451,24 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        if let Ok(handle) = stream_interaction_counts(
+                                            event_ids,
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            interaction_stream_id.set(Some(handle.subscription_id));
+                                        }
                                     }
                                 });
                             }
@@ -502,7 +534,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let is_first_load = !*interactions_loaded.peek();
@@ -511,15 +543,24 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        if let Ok(handle) = stream_interaction_counts(
+                                            event_ids,
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            interaction_stream_id.set(Some(handle.subscription_id));
+                                        }
                                     }
                                 });
                             }
@@ -591,7 +632,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let req_id = request_id;
@@ -599,15 +640,24 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        if let Ok(handle) = stream_interaction_counts(
+                                            event_ids,
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            interaction_stream_id.set(Some(handle.subscription_id));
+                                        }
                                     }
                                 });
                             }
@@ -650,6 +700,17 @@ pub fn Home(list: String) -> Element {
         }
         subscription_ids.write().clear();
         realtime_started.set(false);
+
+        // Cleanup interaction stream subscription
+        if let Some(stream_id) = interaction_stream_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    log::info!("Cleaning up interaction stream subscription due to feed type change");
+                    subscription_manager::unsubscribe(&client, &stream_id).await;
+                }
+            });
+        }
+        interaction_stream_id.set(None);
     });
 
     // Real-time subscription for live feed updates (starts AFTER initial load)
