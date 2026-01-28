@@ -1039,10 +1039,10 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     .ok_or("Localstore not initialized")?
                     .clone();
 
-                // Convert unit string to CurrencyUnit using CDK's FromStr (handles Custom fallback)
+                // Convert unit string to CurrencyUnit, preserving unknown units as Custom
                 use std::str::FromStr;
                 let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
-                    .unwrap_or(cdk::nuts::CurrencyUnit::Sat);  // Defensive fallback
+                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone()));
 
                 let proof_infos: Vec<cdk::types::ProofInfo> = proofs.iter()
                     .enumerate()
