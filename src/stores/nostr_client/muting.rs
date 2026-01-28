@@ -17,7 +17,13 @@ use super::types::{MuteListTags, extract_mute_list_tags, rebuild_mute_list_tags}
 
 /// Fetch the mute list (kind 10000) from relays
 /// NIP-51: https://github.com/nostr-protocol/nips/blob/master/51.md
-async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> {
+///
+/// # Arguments
+/// * `fresh` - If true, bypasses DB cache and fetches directly from relays.
+///   Use `fresh=true` for mutations (mute/unmute/block/unblock) to avoid
+///   publishing stale state that could overwrite changes from other devices.
+///   Use `fresh=false` for read-only operations where cache is acceptable.
+async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::Event>, String> {
     let current_pubkey = crate::stores::auth_store::get_pubkey()
         .ok_or("Not logged in")?;
 
@@ -33,18 +39,35 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
         .author(pubkey)
         .kind(nostr::Kind::from(10000));
 
-    // Fetch from database/relays
-    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        // NIP-01 tie-breaking: higher created_at wins, then lower event ID wins
-        Ok(events) => Ok(events.into_iter().max_by(|a, b| {
+    // NIP-01 tie-breaking: higher created_at wins, then lower event ID wins
+    let select_newest = |events: Vec<nostr::Event>| {
+        events.into_iter().max_by(|a, b| {
             match a.created_at.cmp(&b.created_at) {
                 std::cmp::Ordering::Equal => b.id.cmp(&a.id), // Lower ID = Greater
                 other => other,
             }
-        })),
-        Err(e) => {
-            log::error!("Failed to fetch mute list: {}", e);
-            Err(format!("Failed to fetch mute list: {}", e))
+        })
+    };
+
+    if fresh {
+        // For mutations: bypass DB cache, fetch directly from relays
+        // This prevents publishing stale state that could overwrite changes from other devices
+        let client = get_client().ok_or("Client not initialized")?;
+        match client.fetch_events(filter, Duration::from_secs(10)).await {
+            Ok(events) => Ok(select_newest(events.into_iter().collect())),
+            Err(e) => {
+                log::error!("Failed to fetch fresh mute list: {}", e);
+                Err(format!("Failed to fetch fresh mute list: {}", e))
+            }
+        }
+    } else {
+        // For reads: use DB-first with background sync (existing behavior)
+        match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+            Ok(events) => Ok(select_newest(events)),
+            Err(e) => {
+                log::error!("Failed to fetch mute list: {}", e);
+                Err(format!("Failed to fetch mute list: {}", e))
+            }
         }
     }
 }
@@ -55,7 +78,7 @@ async fn fetch_mute_list() -> std::result::Result<Option<nostr::Event>, String> 
 
 /// Get all muted event IDs
 pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
-    match fetch_mute_list().await? {
+    match fetch_mute_list(false).await? {
         Some(event) => {
             // Use SDK's event_ids() method to extract e-tags
             let muted_posts: Vec<String> = event.tags.event_ids()
@@ -84,7 +107,7 @@ pub struct MuteListData {
 /// This avoids the double fetch_mute_list() call that happens when
 /// get_muted_posts() and get_blocked_users() are called separately.
 pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
-    match fetch_mute_list().await {
+    match fetch_mute_list(false).await {
         Ok(Some(event)) => {
             let muted_posts: HashSet<String> = event.tags.event_ids()
                 .map(|id| id.to_hex())
@@ -137,8 +160,9 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     let target_event_id = nostr::EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
-    // Fetch current mute list and extract tags
-    let mute_event = fetch_mute_list().await?;
+    // Fetch current mute list fresh from relays (not cached) to avoid overwriting
+    // changes made by other devices
+    let mute_event = fetch_mute_list(true).await?;
     let (mut tags, existing_content) = match mute_event {
         Some(event) => {
             let content = event.content.clone();
@@ -178,8 +202,9 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     let target_event_id = nostr::EventId::parse(&event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
-    // Fetch current mute list and extract tags
-    let mute_event = match fetch_mute_list().await? {
+    // Fetch current mute list fresh from relays (not cached) to avoid overwriting
+    // changes made by other devices
+    let mute_event = match fetch_mute_list(true).await? {
         Some(event) => event,
         None => {
             log::debug!("No mute list found, nothing to unmute");
@@ -212,7 +237,7 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
 
 /// Get all blocked user pubkeys
 pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
-    match fetch_mute_list().await? {
+    match fetch_mute_list(false).await? {
         Some(event) => {
             // Use SDK's public_keys() method to extract p-tags
             let blocked_users: Vec<String> = event.tags.public_keys()
@@ -252,8 +277,9 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     let target_pubkey = nostr::PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Fetch current mute list and extract tags
-    let mute_event = fetch_mute_list().await?;
+    // Fetch current mute list fresh from relays (not cached) to avoid overwriting
+    // changes made by other devices
+    let mute_event = fetch_mute_list(true).await?;
     let (mut tags, existing_content) = match mute_event {
         Some(event) => {
             let content = event.content.clone();
@@ -293,8 +319,9 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     let target_pubkey = nostr::PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    // Fetch current mute list and extract tags
-    let mute_event = match fetch_mute_list().await? {
+    // Fetch current mute list fresh from relays (not cached) to avoid overwriting
+    // changes made by other devices
+    let mute_event = match fetch_mute_list(true).await? {
         Some(event) => event,
         None => {
             log::debug!("No mute list found, nothing to unblock");
