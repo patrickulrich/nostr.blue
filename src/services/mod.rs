@@ -16,5 +16,6 @@ pub mod git_worker;
 pub mod btc_price;
 pub mod geocoding;
 pub mod scheduler;  // Background task scheduler
+pub mod search_relays;  // Shared search relay connection caching
 #[cfg(target_arch = "wasm32")]
 pub mod bible_api;  // HelloAO Bible API (WASM-only due to gloo_net/web_sys)

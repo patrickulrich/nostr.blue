@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, Timestamp};
+
 use crate::stores::nostr_client;
 use crate::components::{NoteCard, ClientInitializing};
-use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Filter, Kind, Timestamp};
-use std::time::Duration;
+use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 
 #[component]
 pub fn Hashtag(tag: String) -> Element {
@@ -14,6 +16,9 @@ pub fn Hashtag(tag: String) -> Element {
     let mut refresh_trigger = use_signal(|| 0);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+
+    // Cached mute/block lists for N+1 optimization (uses centralized hook)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     let tag_clone = tag.clone();
     let tag_for_load = tag.clone();
@@ -202,7 +207,9 @@ pub fn Hashtag(tag: String) -> Element {
                         NoteCard {
                             key: "{event.id}",
                             event: event.clone(),
-                            collapsible: true
+                            collapsible: true,
+                            cached_muted_posts: cached_muted_posts.read().clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone()
                         }
                     }
                 }

@@ -11,7 +11,7 @@ use super::internal::{create_ephemeral_wallet, get_or_create_wallet};
 use super::utils::normalize_mint_url;
 use super::mint_mgmt::get_mint_balance;
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
-use super::signals::{try_acquire_mint_lock, TRANSFER_PROGRESS, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{try_acquire_mint_lock, TRANSFER_PROGRESS, WALLET_TOKENS};
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, TransferProgress, TransferResult,
     WalletTokensStoreStoreExt,
@@ -343,7 +343,15 @@ pub async fn transfer_between_mints(
             }
             Err(e) => {
                 log::warn!("Failed to publish source token event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                // Generate pending ID for retry tracking
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(source_mint.clone()),
+                ).await;
+                source_new_event_id = Some(pending_id);
             }
         }
     } else {
@@ -360,14 +368,13 @@ pub async fn transfer_between_mints(
             let builder = nostr_sdk::EventBuilder::delete(deletion_request);
             if let Err(e) = client.send_event_builder(builder.clone()).await {
                 log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent).await;
+                queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
             }
         }
     }
 
     // Publish target mint token event (new proofs)
-    let mut target_new_event_id: Option<String> = None;
-    {
+    let target_new_event_id: String = {
         let proof_data: Vec<ProofData> = target_proofs
             .iter()
             .map(cdk_proof_to_proof_data)
@@ -397,15 +404,24 @@ pub async fn transfer_between_mints(
 
         match client.send_event_builder(builder.clone()).await {
             Ok(event_output) => {
-                target_new_event_id = Some(event_output.id().to_hex());
-                log::info!("Published target token event: {:?}", target_new_event_id);
+                let event_id = event_output.id().to_hex();
+                log::info!("Published target token event: {}", event_id);
+                event_id
             }
             Err(e) => {
                 log::warn!("Failed to publish target token event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                // Generate pending ID for retry tracking
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(target_mint.clone()),
+                ).await;
+                pending_id
             }
         }
-    }
+    };
 
     // Update local state
     {
@@ -443,8 +459,7 @@ pub async fn transfer_between_mints(
             .map(cdk_proof_to_proof_data)
             .collect();
 
-        let target_event_id = target_new_event_id
-            .unwrap_or_else(|| format!("local-{}-tgt-{:08x}", chrono::Utc::now().timestamp_millis(), rand::random::<u32>()));
+        let target_event_id = target_new_event_id.clone();
         tokens.push(TokenData {
             event_id: target_event_id.clone(),
             mint: target_mint.clone(),
@@ -457,18 +472,8 @@ pub async fn transfer_between_mints(
         register_proofs_in_event_map(&target_event_id, &target_proof_data);
     }
 
-    // Update balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     // Calculate result
     let amount_sent = amount + fee_paid;

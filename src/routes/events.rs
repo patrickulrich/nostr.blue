@@ -589,7 +589,7 @@ pub fn Events() -> Element {
                 ClientInitializing {}
             } else if *loading.read() {
                 div {
-                    class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4",
+                    class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4",
                     for _ in 0..6 {
                         EventCardSkeleton {}
                     }
@@ -669,7 +669,7 @@ pub fn Events() -> Element {
                     ViewMode::Grid => {
                         rsx! {
                             div {
-                                class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4",
+                                class: "p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4",
                                 for event in filtered_events.read().iter() {
                                     EventCard {
                                         key: "{event.coordinate()}",

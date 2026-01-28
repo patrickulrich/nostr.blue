@@ -46,6 +46,8 @@ pub mod pagination;
 pub mod dust;
 pub mod enriched_history;
 pub mod ws;
+pub mod nutzap_signals;
+pub mod nutzap;
 
 // Re-export commonly used types
 pub use types::*;
@@ -82,11 +84,14 @@ pub use mpp::{
     mint_supports_mpp,
     MppQuoteInfo,
 };
+#[allow(unused_imports)]  // Public API: get_mint_spendable_balance may be used by external callers
 pub use mint_mgmt::{
     add_mint,
     remove_mint,
     get_mints,
     get_mint_balance,
+    get_mint_spendable_balance,
+    get_mint_unit_spendable_balance,
     get_mint_info,
     get_mint_proof_count,
     get_total_proof_count,
@@ -248,6 +253,25 @@ pub use auth_cache::{
     cache_tokens, get_cached_token, has_cached_tokens,
     cached_token_count, needs_token_replenishment,
     cleanup_auth_cache, clear_mint_tokens, get_auth_cache_stats,
+};
+// NIP-61 Nutzap support
+// Note: Some exports are for public API / future use (e.g., sending nutzaps from profiles/posts)
+#[allow(unused_imports)]
+pub use nutzap::{
+    NutzapInfo, NutzapMint, PendingNutzap, NutzapStatus,
+    NutzapSendResult, NutzapRedeemResult,
+    get_nutzap_p2pk_pubkey, publish_nutzap_info, fetch_nutzap_info,
+    send_nutzap, validate_nutzap_recipient, validate_nutzap_recipient_with_info,
+    start_nutzap_subscription, process_nutzap_event,
+    redeem_nutzap, fetch_pending_nutzaps,
+};
+#[allow(unused_imports)]
+pub use nutzap_signals::{
+    MY_NUTZAP_INFO, NUTZAP_INFO_CACHE, PENDING_NUTZAPS,
+    NUTZAP_AUTO_REDEEM, NUTZAP_SUBSCRIPTION_ACTIVE, NUTZAP_ENABLED,
+    clear_nutzap_state, cache_nutzap_info, get_cached_nutzap_info,
+    add_pending_nutzap, remove_pending_nutzap, update_pending_nutzap_status,
+    pending_nutzap_count, pending_nutzap_value,
 };
 
 // Internal helpers (shared by submodules, not exported)

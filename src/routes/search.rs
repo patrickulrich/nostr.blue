@@ -6,6 +6,8 @@ use crate::services::content_search::{
     ContentSearchResult,
 };
 use crate::components::{NoteCard, NoteCardSkeleton, PhotoCard, VideoCard};
+use crate::hooks::use_mute_block_cache;
+use crate::stores::nostr_client;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
@@ -55,13 +57,22 @@ pub fn Search(q: String) -> Element {
     let mut sort_order = use_signal(|| SortOrder::FollowingFirst);
     let mut show_sort_dropdown = use_signal(|| false);
 
+    // Cached mute/block lists for N+1 optimization (uses centralized hook)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
+
     // Update query signal when prop changes (e.g., new search from search bar)
     use_effect(use_reactive!(|q| {
         query.set(q);
     }));
 
-    // Fetch contacts on mount
+    // Fetch contacts on mount (after client initializes)
     use_effect(move || {
+        // Reading at start creates subscription - effect re-runs when this changes
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;  // Early return - effect will re-run when signal changes
+        }
+
         spawn(async move {
             let contacts = get_contact_pubkeys().await;
             contact_pubkeys.set(contacts);
@@ -70,6 +81,12 @@ pub fn Search(q: String) -> Element {
 
     // Search when query or tab changes
     use_effect(move || {
+        // Guard: wait for client before searching
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+
         let q = query.read().clone();
         let tab = *active_tab.read();
         let contacts = contact_pubkeys.read().clone();
@@ -372,7 +389,9 @@ pub fn Search(q: String) -> Element {
                                         SearchTab::TextNotes | SearchTab::Articles => rsx! {
                                             NoteCard {
                                                 event: event_clone,
-                                                collapsible: true
+                                                collapsible: true,
+                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                cached_blocked_users: cached_blocked_users.read().clone()
                                             }
                                         },
                                         SearchTab::Photos => rsx! {
