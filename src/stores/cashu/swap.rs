@@ -359,10 +359,6 @@ pub async fn execute_swap_with_nip60(
         )
         .await;
 
-    // Dismiss guard and handle cleanup manually now that swap completed
-    in_flight_guard.dismiss();
-    super::signals::remove_in_flight_send_request(&tx_id);
-
     let swap_result = swap_result.map_err(|e| format!("Swap failed: {}", e))?;
 
     // 5. Handle Option<Proofs> return type
@@ -473,6 +469,10 @@ pub async fn execute_swap_with_nip60(
         &event_ids_to_delete,
         &pending_event_id,
     )?;
+
+    // NOW safe to clear in-flight tracking - local state is persisted
+    in_flight_guard.dismiss();
+    super::signals::remove_in_flight_send_request(&tx_id);
 
     // 7. Attempt Nostr publish (safe to fail - local state already updated)
     // nostr-sdk saves to local database before relay transmission
@@ -611,10 +611,19 @@ async fn publish_swap_events(
         .collect();
 
     // Build ExtendedTokenEvent with del tags for consumed events
-    // Filter out pending_* IDs - they're not valid hex event IDs for relay transmission
+    // Filter out pending_* IDs and validate hex format for relay transmission
     let valid_del_ids: Vec<String> = event_ids_to_delete
         .iter()
-        .filter(|id| !id.starts_with("pending_"))
+        .filter(|id| {
+            if id.starts_with("pending_") {
+                return false;
+            }
+            if EventId::from_hex(id).is_err() {
+                log::warn!("Skipping invalid hex event ID in del list: {}", id);
+                return false;
+            }
+            true
+        })
         .cloned()
         .collect();
 

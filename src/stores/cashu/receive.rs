@@ -459,8 +459,10 @@ pub async fn receive_tokens_with_options(
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                // Non-WASM: use async sleep to avoid blocking the runtime
-                let actual_delay = delay_ms.saturating_sub(100) + 100; // Fixed jitter
+                use rand::Rng;
+                // Mirror WASM jitter: base delay + random offset [0, 200)
+                let jitter = rand::thread_rng().gen_range(0..200);
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
                 tokio::time::sleep(std::time::Duration::from_millis(actual_delay as u64)).await;
             }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
