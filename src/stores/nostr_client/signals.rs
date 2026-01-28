@@ -56,3 +56,19 @@ pub fn invalidate_contacts_cache() {
     *cache = None;
     log::debug!("Contacts cache invalidated");
 }
+
+// =============================================================================
+// Mute/Block Cache Invalidation
+// =============================================================================
+
+/// Trigger for mute/block cache invalidation (Dioxus GlobalSignal pattern)
+/// Incremented after each mute/block mutation to trigger effect re-runs
+pub static MUTE_BLOCK_INVALIDATE: GlobalSignal<u32> = Signal::global(|| 0);
+
+/// Invalidate mute/block caches across all components
+/// Call after mute_post, unmute_post, block_user, unblock_user succeed
+pub fn invalidate_mute_block_cache() {
+    // Dioxus pattern: write() triggers subscribers, wrapping_add handles overflow
+    *MUTE_BLOCK_INVALIDATE.write() = MUTE_BLOCK_INVALIDATE.peek().wrapping_add(1);
+    log::debug!("Mute/block cache invalidated");
+}

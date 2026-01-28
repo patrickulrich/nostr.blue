@@ -35,6 +35,10 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
         // Effect re-runs when AUTH_STATE.pubkey changes (account switch)
         let current_pubkey = crate::stores::auth_store::AUTH_STATE.read().pubkey.clone();
 
+        // Dioxus pattern: reading .read() subscribes to changes
+        // Effect re-runs when mute/block mutation occurs
+        let _ = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.read();
+
         // Clear caches on logout to prevent stale data
         if !is_authenticated {
             cached_muted_posts.set(None);
@@ -60,6 +64,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
         }
 
         // Skip fetch if caches already populated for this session
+        // (cache cleared by invalidation or pubkey change triggers refetch)
         if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
             return;
         }
@@ -86,7 +91,14 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                         last_fetch_error_at.set(None); // Reset on success
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    // nostr-sdk pattern: structured logging with truncated IDs
+                    let snapshot_short = auth_pubkey_snapshot.as_ref()
+                        .map(|s| &s[..8.min(s.len())]);
+                    log::error!(
+                        "Failed to fetch mute list: {} (snapshot={:?})",
+                        e, snapshot_short
+                    );
                     last_fetch_error_at.set(Some(now_secs())); // Set error timestamp
                 }
             }

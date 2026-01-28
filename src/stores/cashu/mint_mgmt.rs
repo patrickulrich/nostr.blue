@@ -1330,7 +1330,45 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         // Use pending_id as event_id - continues to update local state below
         pending_id
     } else {
-        // Non-retryable error - return error, don't queue
+        // Non-retryable error - CDK saga pattern: persist state before returning error
+        // This ensures swapped proofs are visible even when publish permanently fails
+        log::error!("Non-retryable publish error: {}", last_error);
+
+        // CDK pattern: local-only ID marks token as unconfirmed (like State::Pending)
+        let local_only_id = format!("local_{}", uuid::Uuid::new_v4());
+
+        // Persist swapped proofs to WALLET_TOKENS so UI shows them
+        let local_token = TokenData {
+            event_id: local_only_id.clone(),
+            mint: mint_url.clone(),
+            unit: unit_str.clone(),
+            proofs: proof_data.clone(),
+            created_at: now_secs(),
+        };
+
+        // CDK atomic pattern: add new BEFORE delete old (crash-safe)
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![local_token],
+            &event_ids_to_delete,
+        ) {
+            log::error!("Failed to persist local-only token: {}", e);
+            // Proofs still exist in CDK database - recoverable via sync_wallet_state()
+        } else {
+            // Register proofs for lookup
+            super::proofs::register_proofs_in_event_map(&local_only_id, &proof_data);
+            log::info!(
+                "Persisted {} proofs as local-only token {} (publish_error={})",
+                proof_data.len(),
+                &local_only_id[..16.min(local_only_id.len())],
+                &last_error[..50.min(last_error.len())]
+            );
+        }
+
+        // Update balances to reflect the swapped proofs
+        super::signals::update_wallet_balances();
+
+        // Return error - do NOT queue for retry (non-retryable) or publish deletion
+        // Note: Deletion event not published since token event was never published
         return Err(format!("Non-retryable publish error: {}", last_error));
     };
 

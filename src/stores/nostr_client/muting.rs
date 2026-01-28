@@ -198,6 +198,7 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
+    super::signals::invalidate_mute_block_cache();
     log::info!("Post muted successfully");
     Ok(())
 }
@@ -241,6 +242,7 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
+    super::signals::invalidate_mute_block_cache();
     log::info!("Post unmuted successfully");
     Ok(())
 }
@@ -315,6 +317,7 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
+    super::signals::invalidate_mute_block_cache();
     log::info!("User blocked successfully");
     Ok(())
 }
@@ -358,6 +361,7 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
+    super::signals::invalidate_mute_block_cache();
     log::info!("User unblocked successfully");
     Ok(())
 }

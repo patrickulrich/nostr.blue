@@ -1016,6 +1016,28 @@ pub async fn fetch_trending_interactions(
 #[derive(Clone, Debug)]
 pub struct InteractionStreamHandle {
     pub subscription_id: SubscriptionId,
+    /// Task handle for cancellation (Dioxus pattern)
+    task: Option<dioxus::dioxus_core::Task>,
+}
+
+impl InteractionStreamHandle {
+    /// Cancel the background notification handler and unsubscribe
+    /// nostr-sdk pattern: graceful shutdown via signal, then cleanup
+    pub async fn unsubscribe(mut self) {
+        // Dioxus pattern: cancel() stops the spawned task
+        if let Some(task) = self.task.take() {
+            task.cancel();
+            log::debug!(
+                "Cancelled interaction stream task for {:?}",
+                self.subscription_id
+            );
+        }
+
+        // Unsubscribe from relay (cleanup)
+        if let Some(client) = crate::stores::nostr_client::get_client() {
+            crate::stores::subscription_manager::unsubscribe(&client, &self.subscription_id).await;
+        }
+    }
 }
 
 /// Increment cached counts from streaming update
@@ -1196,7 +1218,7 @@ pub async fn stream_interaction_counts(
 
     // Spawn the notification handler task
     // This runs in the background and updates the signal when events arrive
-    dioxus::prelude::spawn(async move {
+    let task = dioxus::prelude::spawn(async move {
         // Get a fresh client reference for the notification handler
         let client = match get_client() {
             Some(c) => c,
@@ -1279,7 +1301,10 @@ pub async fn stream_interaction_counts(
         }
     });
 
-    Ok(InteractionStreamHandle { subscription_id })
+    Ok(InteractionStreamHandle {
+        subscription_id,
+        task: Some(task),
+    })
 }
 
 #[cfg(test)]

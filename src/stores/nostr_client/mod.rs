@@ -95,7 +95,7 @@ pub use types::PublishResult;
 // Signals (most important for consumers)
 pub use signals::{
     NOSTR_CLIENT, CLIENT_INITIALIZED, HAS_SIGNER, CURRENT_SIGNER,
-    invalidate_contacts_cache,
+    invalidate_contacts_cache, MUTE_BLOCK_INVALIDATE, invalidate_mute_block_cache,
 };
 
 // Fetching
