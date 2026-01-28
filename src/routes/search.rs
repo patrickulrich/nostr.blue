@@ -7,6 +7,7 @@ use crate::services::content_search::{
 };
 use crate::components::{NoteCard, NoteCardSkeleton, PhotoCard, VideoCard};
 use crate::hooks::use_mute_block_cache;
+use crate::stores::nostr_client;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SearchTab {
