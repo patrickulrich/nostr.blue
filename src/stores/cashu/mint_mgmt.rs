@@ -885,6 +885,12 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
 
+    // Preflight: Verify localstore available before any swaps (nostr-sdk ensure_operational pattern)
+    let localstore = SHARED_LOCALSTORE.read()
+        .as_ref()
+        .ok_or("Localstore not initialized - cannot safely persist proofs")?
+        .clone();
+
     // Get all proofs for this mint and extract/validate unit consistency
     let (all_proofs, event_ids_to_delete, unit_str) = {
         let store = WALLET_TOKENS.read();
@@ -977,6 +983,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     // Batch proofs to avoid exceeding mint limits (CDK pattern)
     let total_batches = all_proofs.chunks(BATCH_PROOF_SIZE).count();
     let mut new_proofs: Vec<cdk::nuts::Proof> = Vec::new();
+    let mut persistence_failures: Vec<(usize, String)> = Vec::new();
     for (batch_idx, proof_batch) in all_proofs.chunks(BATCH_PROOF_SIZE).enumerate() {
         let batch_amount: u64 = proof_batch.iter()
             .map(|p| u64::from(p.amount))
@@ -1034,11 +1041,6 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             {
                 use cdk_common::database::WalletDatabase;
 
-                let localstore = SHARED_LOCALSTORE.read()
-                    .as_ref()
-                    .ok_or("Localstore not initialized")?
-                    .clone();
-
                 // Convert unit string to CurrencyUnit, preserving unknown units as Custom
                 use std::str::FromStr;
                 let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
@@ -1060,13 +1062,110 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     .collect::<Result<Vec<_>, String>>()?;
 
                 if !proof_infos.is_empty() {
-                    localstore.update_proofs(proof_infos, vec![]).await
-                        .map_err(|e| format!("Failed to persist batch {} proofs: {}", batch_idx + 1, e))?;
-                    log::info!("Batch {}/{} persisted {} proofs", batch_idx + 1, total_batches, proofs.len());
+                    // Track failures without early return - proofs are safe in CDK wallet after swap
+                    if let Err(e) = localstore.update_proofs(proof_infos, vec![]).await {
+                        log::error!(
+                            "CRITICAL: Batch {}/{} persistence failed AFTER successful swap: {}",
+                            batch_idx + 1, total_batches, e
+                        );
+                        persistence_failures.push((batch_idx + 1, e.to_string()));
+                        // Continue - proofs are safe in CDK wallet
+                    } else {
+                        log::info!("Batch {}/{} persisted {} proofs", batch_idx + 1, total_batches, proofs.len());
+                    }
                 }
             }
 
             new_proofs.extend(proofs);
+        }
+    }
+
+    // Emergency recovery if any persistence failed (nostr-sdk Output pattern)
+    // Update WALLET_TOKENS so funds are visible in UI even if localstore persistence failed
+    if !persistence_failures.is_empty() {
+        log::warn!(
+            "Consolidation had {} persistence failures. Updating in-memory state.",
+            persistence_failures.len()
+        );
+
+        let emergency_proof_data: Vec<ProofData> = new_proofs.iter()
+            .map(cdk_proof_to_proof_data)
+            .collect();
+
+        let emergency_event_id = format!("recovery_{}", uuid::Uuid::new_v4());
+
+        let emergency_token = TokenData {
+            event_id: emergency_event_id.clone(),
+            mint: mint_url.clone(),
+            unit: unit_str.clone(),
+            proofs: emergency_proof_data.clone(),
+            created_at: now_secs(),
+        };
+
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![emergency_token],
+            &event_ids_to_delete,
+        ) {
+            log::error!("Emergency WALLET_TOKENS update failed: {}", e);
+        } else {
+            super::proofs::register_proofs_in_event_map(&emergency_event_id, &emergency_proof_data);
+            super::signals::update_wallet_balances();
+            log::info!("Emergency recovery: {} proofs now visible in UI", new_proofs.len());
+        }
+
+        // Schedule background retry for failed persistence (nostr-sdk adaptive retry pattern)
+        #[cfg(target_arch = "wasm32")]
+        {
+            use cdk_common::database::WalletDatabase;
+            use std::str::FromStr;
+            let retry_proofs = new_proofs.clone();
+            let retry_mint_url = mint_url_parsed.clone();
+            let retry_unit_str = unit_str.clone();
+
+            dioxus::prelude::spawn(async move {
+                // Exponential backoff: 1s, 2s, 4s (with jitter)
+                for (attempt, base_delay_ms) in [1000u32, 2000, 4000].iter().enumerate() {
+                    let jitter = (js_sys::Math::random() * 200.0) as u32;
+                    let delay = base_delay_ms.saturating_sub(100) + jitter;
+                    gloo_timers::future::TimeoutFuture::new(delay).await;
+
+                    let retry_localstore = match SHARED_LOCALSTORE.read().as_ref() {
+                        Some(store) => store.clone(),
+                        None => {
+                            log::warn!("Background retry {}: localstore unavailable", attempt + 1);
+                            continue;
+                        }
+                    };
+
+                    // Convert unit string to CurrencyUnit (same logic as main path)
+                    let currency_unit = cdk::nuts::CurrencyUnit::from_str(&retry_unit_str)
+                        .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone()));
+
+                    let proof_infos: Vec<cdk::types::ProofInfo> = retry_proofs.iter()
+                        .filter_map(|p| {
+                            cdk::types::ProofInfo::new(
+                                p.clone(),
+                                retry_mint_url.clone(),
+                                cdk::nuts::State::Unspent,
+                                currency_unit.clone(),
+                            ).ok()
+                        })
+                        .collect();
+
+                    if let Err(e) = retry_localstore.update_proofs(proof_infos, vec![]).await {
+                        log::warn!("Background retry {} failed: {}", attempt + 1, e);
+                    } else {
+                        log::info!("Background retry {}: persistence succeeded", attempt + 1);
+                        return;
+                    }
+                }
+
+                log::error!(
+                    "All background persistence retries failed. \
+                     Proofs are in WALLET_TOKENS but not fully persisted. \
+                     Run sync_wallet_state() to reconcile."
+                );
+            });
         }
     }
 
@@ -1214,7 +1313,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     // CRITICAL: Update local state IMMEDIATELY (even with pending_id)
     // This ensures UI reflects the consolidation operation.
     // atomic_token_replace: adds new BEFORE deleting old (crash-safe)
-    {
+    // Skip if emergency recovery already ran (it already updated WALLET_TOKENS)
+    if persistence_failures.is_empty() {
         let new_token = TokenData {
             event_id: new_event_id.clone(),
             mint: mint_url.clone(),
