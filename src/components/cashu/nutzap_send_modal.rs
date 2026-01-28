@@ -288,7 +288,7 @@ pub fn NutzapSendModal(
                                 r#type: "text",
                                 placeholder: "Thanks for the great content!",
                                 maxlength: "256",
-                                value: comment.read().clone(),
+                                value: "{comment}",
                                 oninput: move |evt| comment.set(evt.value()),
                                 disabled: compatible_mint.read().is_none()
                             }

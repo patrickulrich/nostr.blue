@@ -229,6 +229,25 @@ pub fn get_mint_spendable_balance(mint_url: &str) -> u64 {
         .fold(0u64, |acc, amt| acc.saturating_add(amt))
 }
 
+/// Get spendable balance for a specific mint AND unit (CDK pattern)
+/// Filters by both mint URL and unit for multi-unit mint support
+/// Issue #1: Unit-aware balance check for nutzaps
+pub fn get_mint_unit_spendable_balance(mint_url: &str, unit: &str) -> u64 {
+    use super::types::ProofState;
+
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    // CDK pattern: always pair mint_url + unit, filter by State::Unspent
+    tokens.iter()
+        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit)
+        .flat_map(|t| t.proofs.iter())
+        .filter(|p| p.state == ProofState::Unspent)
+        .map(|p| p.amount)
+        .fold(0u64, |acc, amt| acc.saturating_add(amt))
+}
+
 /// Get proof count for a specific mint
 pub fn get_mint_proof_count(mint_url: &str) -> usize {
     let store = WALLET_TOKENS.read();

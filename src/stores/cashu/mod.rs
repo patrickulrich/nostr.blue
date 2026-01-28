@@ -90,6 +90,7 @@ pub use mint_mgmt::{
     get_mints,
     get_mint_balance,
     get_mint_spendable_balance,
+    get_mint_unit_spendable_balance,
     get_mint_info,
     get_mint_proof_count,
     get_total_proof_count,

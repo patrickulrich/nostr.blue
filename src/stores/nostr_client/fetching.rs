@@ -60,6 +60,8 @@ pub async fn fetch_events_aggregated(
                 let client_clone = client.clone();
                 let filter_clone = filter.clone();
                 dioxus::prelude::spawn(async move {
+                    // Ensure relays are ready before background sync (Issue #10)
+                    relay::connection::ensure_relays_ready(&client_clone).await;
                     if let Err(e) = client_clone.fetch_events(filter_clone, timeout).await {
                         log::warn!("Background relay sync failed: {}", e);
                     }

@@ -233,10 +233,13 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                     result.recovered_count, result.recovered_value
                 )
             } else if !result.errors.is_empty() {
-                format!(
-                    "Recovery completed with errors: {}",
+                // Truncate error list to prevent UI overflow (show first 3 + count)
+                let display = if result.errors.len() <= 3 {
                     result.errors.join(", ")
-                )
+                } else {
+                    format!("{} + {} more", result.errors[..3].join(", "), result.errors.len() - 3)
+                };
+                format!("Recovery completed with errors: {}", display)
             } else {
                 "No proofs eligible for recovery yet".to_string()
             };

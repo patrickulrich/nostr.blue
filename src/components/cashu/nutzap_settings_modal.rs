@@ -239,7 +239,11 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                             } else {
                                 for mint_url in all_mints.iter() {
                                     {
-                                        let is_selected = selected_mints.read().contains(mint_url);
+                                        // Issue #8: Use normalized comparison for consistent mint matching
+                                        let is_selected = {
+                                            let normalized = cashu::normalize_mint_url(mint_url);
+                                            selected_mints.read().iter().any(|m| cashu::mint_matches(m, &normalized))
+                                        };
                                         let mint_url_clone = mint_url.clone();
                                         rsx! {
                                             button {

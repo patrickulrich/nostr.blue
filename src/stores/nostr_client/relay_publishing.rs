@@ -119,8 +119,16 @@ pub async fn publish_reaction_to_relays(
 
     use nostr::nips::nip25::ReactionTarget;
 
-    let target_event_id = nostr::EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    // nostr-sdk pattern: try Nip19 first for nevent1, then parse() for hex/note1
+    let target_event_id = {
+        use nostr::nips::nip19::Nip19;
+        match Nip19::from_bech32(&event_id) {
+            Ok(Nip19::EventId(id)) => id,           // note1...
+            Ok(Nip19::Event(e)) => e.event_id,       // nevent1...
+            _ => nostr::EventId::parse(&event_id)    // hex, nostr:note1
+                .map_err(|e| format!("Invalid event ID: {}", e))?,
+        }
+    };
     // Use PublicKey::parse() which handles hex, bech32 (npub), and NIP-21 URIs (nostr-sdk pattern)
     let target_pubkey = PublicKey::parse(&event_pubkey)
         .map_err(|e| format!("Invalid pubkey (expected hex or npub): {}", e))?;

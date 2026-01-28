@@ -284,9 +284,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                     if let Some(mint) = nutzap_mint.read().as_ref() {
                         // Normalize mint URL for consistent balance lookups
                         let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
-                        // CDK pattern: use spendable balance (only Unspent proofs) to exclude
-                        // pending/reserved/spent proofs that cannot be used for payment
-                        let balance = cashu::get_mint_spendable_balance(&normalized_mint_url);
+                        // CDK pattern: use unit-aware spendable balance (Issue #1)
+                        // Filter by mint_url + unit to support multi-unit mints
+                        let balance = cashu::get_mint_unit_spendable_balance(&normalized_mint_url, &mint.unit);
                         if balance >= amount {
                             log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                             // Get event_id as hex string for nutzap

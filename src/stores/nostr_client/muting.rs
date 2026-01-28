@@ -129,11 +129,21 @@ pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
     }
 }
 
-/// Normalize event ID to hex format (handles hex, bech32 note1..., and NIP-21 URIs)
+/// Normalize event ID to hex format (handles hex, note1, nevent1, and NIP-21 URIs)
 fn normalize_event_id(event_id: &str) -> Result<String, String> {
-    nostr::EventId::parse(event_id)
-        .map(|id| id.to_hex())
-        .map_err(|e| format!("Invalid event ID: {}", e))
+    use nostr::nips::nip19::Nip19;
+
+    // Try EventId::parse first (handles hex, note1, nostr:note1)
+    if let Ok(id) = nostr::EventId::parse(event_id) {
+        return Ok(id.to_hex());
+    }
+
+    // Try NIP-19 nevent decoding (nostr-sdk pattern: Nip19::Event contains event_id)
+    if let Ok(Nip19::Event(nip19_event)) = Nip19::from_bech32(event_id) {
+        return Ok(nip19_event.event_id.to_hex());
+    }
+
+    Err(format!("Invalid event ID: {}", event_id))
 }
 
 /// Check if a post is muted using cached data (synchronous, O(1))

@@ -90,13 +90,15 @@ pub(crate) fn extract_mute_list_tags(event: &nostr::Event) -> MuteListTags {
     for tag in event.tags.iter() {
         if tag.kind() == nostr::TagKind::e() {
             if let Some(id) = tag.content() {
-                if let Ok(eid) = nostr::EventId::from_hex(id) {
+                // nostr-sdk pattern: parse() handles hex, note1/npub, and nostr: URIs
+                if let Ok(eid) = nostr::EventId::parse(id) {
                     tags.event_ids.push(eid);
                 }
             }
         } else if tag.kind() == nostr::TagKind::p() {
             if let Some(pk) = tag.content() {
-                if let Ok(pubkey) = nostr::PublicKey::from_hex(pk) {
+                // nostr-sdk pattern: parse() handles hex, npub, and nostr: URIs
+                if let Ok(pubkey) = nostr::PublicKey::parse(pk) {
                     tags.pubkeys.push(pubkey);
                 }
             }

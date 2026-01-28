@@ -40,6 +40,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
             last_pubkey.set(None);
+            last_fetch_error_at.set(None);  // Clear error cooldown on logout
             return;
         }
 
