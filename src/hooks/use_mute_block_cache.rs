@@ -90,16 +90,23 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             }
         }
 
-        // Capture pubkey before spawn to guard against account switch during fetch
+        // Capture pubkey and invalidation token before spawn to guard against
+        // account switch or cache invalidation during fetch (wrapping_add token pattern)
         let auth_pubkey_snapshot = current_pubkey.clone();
+        let invalidate_token_snapshot = current_token;
 
         spawn(async move {
             // Single fetch for both - avoids double fetch_mute_list() call
             match crate::stores::nostr_client::get_mute_list_data().await {
                 Ok(data) => {
-                    // Guard: only write if same user still logged in (prevents stale data)
+                    // Guard: only write if same user still logged in AND no invalidation occurred
+                    // Uses peek() for validation - no subscription created
                     let current = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
-                    if current == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                    let current_invalidate = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
+                    if current == auth_pubkey_snapshot
+                        && current_invalidate == invalidate_token_snapshot
+                        && auth_pubkey_snapshot.is_some()
+                    {
                         cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
                         cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
                         last_fetch_error_at.set(None); // Reset on success
@@ -113,7 +120,12 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                         "Failed to fetch mute list: {} (snapshot={:?})",
                         e, snapshot_short
                     );
-                    last_fetch_error_at.set(Some(now_secs())); // Set error timestamp
+                    // Only set error if context still valid (same user, no invalidation)
+                    let current = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
+                    let current_invalidate = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
+                    if current == auth_pubkey_snapshot && current_invalidate == invalidate_token_snapshot {
+                        last_fetch_error_at.set(Some(now_secs())); // Set error timestamp
+                    }
                 }
             }
         });

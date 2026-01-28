@@ -180,6 +180,9 @@ pub async fn queue_event_for_retry(
 ///
 /// The `pending_token_id` links this pending event to a token in WALLET_TOKENS,
 /// allowing us to update the token's event_id when background publish succeeds.
+///
+/// This is a convenience wrapper around `queue_signed_event_for_retry` that handles
+/// signing the builder first. Eliminates duplicate queue+persist logic.
 pub async fn queue_token_event_for_retry(
     builder: nostr_sdk::EventBuilder,
     pending_token_id: String,
@@ -194,34 +197,13 @@ pub async fn queue_token_event_for_retry(
         }
     };
 
-    let event_json = match serde_json::to_string(&event) {
-        Ok(j) => j,
-        Err(e) => {
-            log::error!("Failed to serialize event: {}", e);
-            return;
-        }
-    };
-
-    let pending_event = PendingNostrEvent {
-        id: uuid::Uuid::new_v4().to_string(),
-        builder_json: event_json,
-        event_type: PendingEventType::TokenEvent,
-        created_at: chrono::Utc::now().timestamp() as u64,
-        retry_count: 0,
-        last_retry_at: None,
-        pending_token_id: Some(pending_token_id.clone()),
-        mint_url: Some(mint_url.clone()),
-    };
-
-    // Add to in-memory queue
-    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
-
-    // Persist to IndexedDB
-    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
-        if let Err(e) = localstore.add_pending_event(&pending_event).await {
-            log::warn!("Failed to persist pending event: {}", e);
-        }
-    }
+    // Reuse existing function - single path for queue+persist (CDK adaptive backoff pattern)
+    queue_signed_event_for_retry(
+        event,
+        PendingEventType::TokenEvent,
+        Some(pending_token_id.clone()),
+        Some(mint_url),
+    ).await;
 
     log::info!("Queued token event for retry, pending_id={}", pending_token_id);
 }
@@ -1015,9 +997,15 @@ pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
 /// 3. Attempt publish
 /// 4. On success: update pending_id to real event_id
 /// 5. On failure: proofs remain accessible via pending_id for retry
+///
+/// # Arguments
+/// * `mint_url` - The mint URL for these proofs
+/// * `proofs` - The proof data to publish
+/// * `unit` - The unit for these proofs (CDK pattern: unit passed explicitly, not deduced from proofs)
 pub async fn publish_orphaned_proofs_event(
     mint_url: &str,
     proofs: &[ProofData],
+    unit: &str,
 ) -> Result<String, String> {
     use nostr_sdk::signer::NostrSigner;
     use super::types::ExtendedCashuProof;
@@ -1050,7 +1038,7 @@ pub async fn publish_orphaned_proofs_event(
 
     let token_event_data = super::types::ExtendedTokenEvent {
         mint: mint_url.to_string(),
-        unit: "sat".to_string(),
+        unit: unit.to_string(),
         proofs: extended_proofs,
         del: vec![], // No deletions for orphan recovery
     };
@@ -1077,7 +1065,7 @@ pub async fn publish_orphaned_proofs_event(
     let token_data = TokenData {
         event_id: pending_id.clone(),
         mint: mint_url.to_string(),
-        unit: "sat".to_string(),
+        unit: unit.to_string(),
         proofs: proofs.to_vec(),
         created_at: chrono::Utc::now().timestamp() as u64,
     };
@@ -1181,9 +1169,13 @@ pub fn start_pending_events_processor() {
                 log::error!("Error processing pending events: {}", e);
             }
 
+            // Re-read count AFTER sleep and processing for maintenance decision
+            // (original pending_count is stale after 30-60s sleep)
+            let fresh_pending_count = PENDING_NOSTR_EVENTS.read().len();
+
             // Every 6th iteration when idle (roughly every 6 min), run maintenance tasks
             recovery_counter += 1;
-            if recovery_counter >= 6 && pending_count == 0 {
+            if recovery_counter >= 6 && fresh_pending_count == 0 {
                 recovery_counter = 0;
 
                 // Clean expired pending secrets (proofs pending at mint for >1 hour)

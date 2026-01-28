@@ -709,7 +709,8 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
 
         // Create and publish token event for orphaned proofs
         // nostr-sdk will save locally before attempting relay publish
-        match super::events::publish_orphaned_proofs_event(&mint_url, &proof_data).await {
+        // CDK pattern: unit passed explicitly (currently "sat" - future: look up from mint's keyset info)
+        match super::events::publish_orphaned_proofs_event(&mint_url, &proof_data, "sat").await {
             Ok(event_id) => {
                 log::info!("Published orphaned proofs to Nostr: {}", event_id);
 
@@ -1269,7 +1270,8 @@ async fn recover_melt_change_deduplicated(
     // Publish orphaned proofs event (uses existing event publishing logic)
     // Note: publish_orphaned_proofs_event now internally adds tokens to WALLET_TOKENS
     // using the saga pattern (persist before publish), so we don't need to add them here
-    match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data).await {
+    // CDK pattern: unit passed explicitly (currently "sat" - future: look up from mint's keyset info)
+    match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data, "sat").await {
         Ok(event_id) => {
             log::info!("Published recovered change proofs to Nostr: {}", event_id);
 
@@ -1424,7 +1426,8 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
         .map(|p| cdk_proof_to_proof_data(p))
         .collect();
 
-    match super::events::publish_orphaned_proofs_event(mint_url, &proof_data).await {
+    // CDK pattern: unit passed explicitly (currently "sat" - future: look up from mint's keyset info)
+    match super::events::publish_orphaned_proofs_event(mint_url, &proof_data, "sat").await {
         Ok(event_id) => {
             log::info!(
                 "Published {} recovered proofs ({} sats) to Nostr: {}",

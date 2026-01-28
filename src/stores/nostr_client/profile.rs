@@ -90,22 +90,39 @@ fn validate_picture_url(url: &str) -> std::result::Result<Url, String> {
 // =============================================================================
 
 /// Update just the profile picture
+///
+/// Uses raw_metadata_json from cached Profile to preserve custom fields during update.
 #[allow(dead_code)]
 pub async fn update_profile_picture(url: String) -> std::result::Result<(), String> {
-    // Fetch current metadata - require existing profile to avoid clobbering data
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
-    let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
+    // Get cached profile with raw JSON for merging
+    let cached_profile = crate::stores::profiles::PROFILE_CACHE
+        .read()
+        .peek(&pubkey_str)
+        .cloned()
         .ok_or("Profile not loaded; fetch metadata first")?;
 
     // Validate URL using extracted helper
     validate_picture_url(&url)?;
 
-    // Update picture field
-    let updated_metadata = Metadata {
-        picture: Some(url),
-        ..current_metadata
+    // Build updated metadata, preserving unknown fields via raw JSON merge
+    let updated_metadata = if let Some(json) = cached_profile.raw_metadata_json {
+        // Merge picture into existing raw JSON to preserve custom fields
+        let mut value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| format!("Invalid metadata JSON: {}", e))?;
+        value["picture"] = serde_json::Value::String(url);
+        serde_json::from_value(value)
+            .map_err(|e| format!("Failed to parse updated metadata: {}", e))?
+    } else {
+        // Fallback: use current get_profile behavior (may lose custom fields)
+        let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
+            .ok_or("Profile not loaded")?;
+        Metadata {
+            picture: Some(url),
+            ..current_metadata
+        }
     };
 
     publish_metadata(updated_metadata).await?;
@@ -113,22 +130,39 @@ pub async fn update_profile_picture(url: String) -> std::result::Result<(), Stri
 }
 
 /// Update just the profile banner
+///
+/// Uses raw_metadata_json from cached Profile to preserve custom fields during update.
 #[allow(dead_code)]
 pub async fn update_profile_banner(url: String) -> std::result::Result<(), String> {
-    // Fetch current metadata - require existing profile to avoid clobbering data
     let pubkey_str = crate::stores::auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
 
-    let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
+    // Get cached profile with raw JSON for merging
+    let cached_profile = crate::stores::profiles::PROFILE_CACHE
+        .read()
+        .peek(&pubkey_str)
+        .cloned()
         .ok_or("Profile not loaded; fetch metadata first")?;
 
     // Validate URL using extracted helper
     validate_picture_url(&url)?;
 
-    // Update banner field
-    let updated_metadata = Metadata {
-        banner: Some(url),
-        ..current_metadata
+    // Build updated metadata, preserving unknown fields via raw JSON merge
+    let updated_metadata = if let Some(json) = cached_profile.raw_metadata_json {
+        // Merge banner into existing raw JSON to preserve custom fields
+        let mut value: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| format!("Invalid metadata JSON: {}", e))?;
+        value["banner"] = serde_json::Value::String(url);
+        serde_json::from_value(value)
+            .map_err(|e| format!("Failed to parse updated metadata: {}", e))?
+    } else {
+        // Fallback: use current get_profile behavior (may lose custom fields)
+        let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
+            .ok_or("Profile not loaded")?;
+        Metadata {
+            banner: Some(url),
+            ..current_metadata
+        }
     };
 
     publish_metadata(updated_metadata).await?;

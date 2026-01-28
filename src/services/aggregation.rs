@@ -1058,17 +1058,17 @@ pub fn increment_cached_counts(
     is_current_user: bool,
     zap_amount: Option<u64>,
 ) -> Option<InteractionCounts> {
-    // Use same TTL as elsewhere (5 minutes)
-    const CACHE_TTL: Duration = Duration::from_secs(300);
-
     let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
         log::warn!("Counts cache mutex was poisoned, recovering");
         poisoned.into_inner()
     });
 
+    // Read TTL before mutable borrow (single source of truth, matches is_valid() pattern)
+    let cache_ttl = cache.ttl;
+
     if let Some(cached) = cache.cache.get_mut(event_id) {
         // Check if entry is expired before updating (prevents reviving expired entries)
-        if cached.cached_at.elapsed() > CACHE_TTL {
+        if cached.cached_at.elapsed() > cache_ttl {
             cache.cache.pop(event_id);
             return None;
         }
@@ -1139,7 +1139,7 @@ fn extract_referenced_event_for_streaming(
 /// # Arguments
 /// * `event_ids` - Vector of event IDs to track interactions for
 /// * `interaction_counts` - Signal to update with new counts (Dioxus reactive state)
-/// * `idle_timeout_secs` - Optional timeout in seconds for the subscription (default: 600)
+/// * `post_eose_timeout_secs` - Optional timeout in seconds after EOSE before closing subscription (default: 600)
 ///
 /// # Returns
 /// * `Ok(InteractionStreamHandle)` - Handle containing subscription ID for cleanup
@@ -1158,7 +1158,7 @@ fn extract_referenced_event_for_streaming(
 pub async fn stream_interaction_counts(
     event_ids: Vec<EventId>,
     interaction_counts: Signal<HashMap<String, InteractionCounts>>,
-    idle_timeout_secs: Option<u64>,
+    post_eose_timeout_secs: Option<u64>,
 ) -> Result<InteractionStreamHandle, String> {
     use nostr_relay_pool::{SubscribeAutoCloseOptions, RelayStatus as PoolRelayStatus};
     use nostr_relay_pool::relay::ReqExitPolicy;
@@ -1204,9 +1204,9 @@ pub async fn stream_interaction_counts(
         connected_urls.len()
     );
 
-    // Subscribe with auto-close options for idle timeout
+    // Subscribe with auto-close options for post-EOSE timeout
     // Use instant::Duration for WASM compatibility (already imported at line 28)
-    let timeout = Duration::from_secs(idle_timeout_secs.unwrap_or(600));
+    let timeout = Duration::from_secs(post_eose_timeout_secs.unwrap_or(600));
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
 
