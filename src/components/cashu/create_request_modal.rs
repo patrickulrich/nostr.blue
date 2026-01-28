@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::PaymentRequestProgress;
+use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 
 #[component]
 pub fn CashuCreateRequestModal(
@@ -17,7 +18,7 @@ pub fn CashuCreateRequestModal(
     let mut copy_error = use_signal(|| Option::<String>::None);
 
     let progress = cashu::PAYMENT_REQUEST_PROGRESS.read();
-    let balance = *cashu::WALLET_BALANCE.read();
+    let balance = WALLET_BALANCES.read().available;
 
     // Handle creating a new request
     let handle_create = move |_| {

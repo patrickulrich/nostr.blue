@@ -399,13 +399,7 @@ impl WalletStatus {
     }
 }
 
-/// Wallet balance breakdown
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct WalletBalances {
-    pub total: u64,
-    pub available: u64,
-    pub pending: u64,
-}
+// Note: WalletBalances is defined in cashu_cdk_bridge.rs (single source of truth)
 
 // =============================================================================
 // Transaction Types
@@ -784,6 +778,46 @@ pub struct WalletTokensStore {
     pub data: Vec<TokenData>,
 }
 
+impl WalletTokensStore {
+    /// Compute available (spendable) balance from unspent proofs
+    /// Following CDK pattern: balance is derived, never stored
+    /// Optimized: reuses single-pass balance_breakdown()
+    pub fn available_balance(&self) -> u64 {
+        self.balance_breakdown().0
+    }
+
+    /// Compute pending balance (proofs in transient states)
+    /// Optimized: reuses single-pass balance_breakdown()
+    pub fn pending_balance(&self) -> u64 {
+        self.balance_breakdown().1
+    }
+
+    /// Compute total balance (available + pending)
+    /// Optimized: reuses single-pass balance_breakdown()
+    pub fn total_balance(&self) -> u64 {
+        let (avail, pend) = self.balance_breakdown();
+        avail + pend
+    }
+
+    /// Get balance breakdown (available, pending) in single pass
+    /// This is the primary balance computation - other methods delegate to this
+    pub fn balance_breakdown(&self) -> (u64, u64) {
+        // Use normal addition - wallet balances can't realistically overflow u64
+        self.data
+            .iter()
+            .flat_map(|token| &token.proofs)
+            .fold((0u64, 0u64), |(avail, pend), proof| {
+                if proof.state.is_spendable() {
+                    (avail + proof.amount, pend)
+                } else if proof.state.is_pending() {
+                    (avail, pend + proof.amount)
+                } else {
+                    (avail, pend)
+                }
+            })
+    }
+}
+
 /// Store for wallet history with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
 pub struct WalletHistoryStore {
@@ -807,13 +841,15 @@ pub struct PendingMeltQuotesStore {
 // =============================================================================
 
 /// Event type for pending Nostr event publication
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::enum_variant_names)]
 pub enum PendingEventType {
     TokenEvent,
     DeletionEvent,
     HistoryEvent,
     QuoteEvent,
+    /// NIP-61 nutzap events (kind 9321)
+    NutzapEvent,
 }
 
 /// Pending Nostr event awaiting publication
@@ -827,6 +863,15 @@ pub struct PendingNostrEvent {
     /// Timestamp of last retry attempt (for proper backoff calculation)
     #[serde(default)]
     pub last_retry_at: Option<u64>,
+
+    /// For TokenEvents: links pending event to token in WALLET_TOKENS
+    /// Used to update event_id when background publish succeeds
+    #[serde(default)]
+    pub pending_token_id: Option<String>,
+
+    /// Mint URL for recovery context if token lookup fails
+    #[serde(default)]
+    pub mint_url: Option<String>,
 }
 
 // =============================================================================
@@ -863,4 +908,121 @@ impl RecoveryResult {
             message: Some(format!("Recovered {} sats", amount)),
         }
     }
+}
+
+/// Result type for melt recovery operations (CDK 0.14.2+)
+#[derive(Clone, Debug, Default)]
+pub struct MeltRecoveryResult {
+    /// Number of melt quotes checked
+    pub quotes_checked: usize,
+    /// Number of quotes that were paid
+    pub quotes_paid: usize,
+    /// Amount of change recovered (sats)
+    pub change_recovered: u64,
+    /// Errors encountered during recovery
+    pub errors: Vec<String>,
+}
+
+/// Result of orphan proof sync operation (CDK → NIP-60)
+///
+/// Tracks proofs found in CDK's IndexedDB that were not in WALLET_TOKENS,
+/// verified with mint via NUT-07, and published to Nostr.
+#[derive(Clone, Debug, Default)]
+pub struct OrphanSyncResult {
+    /// Number of orphaned proofs recovered and published to NIP-60
+    pub proofs_recovered: usize,
+    /// Total sats recovered from orphaned proofs
+    pub sats_recovered: u64,
+    /// Errors encountered during sync
+    pub errors: Vec<String>,
+}
+
+// =============================================================================
+// In-Flight Melt Request Types (Crash Recovery)
+// =============================================================================
+
+/// Maximum time a proof can be Reserved before checking mint state (10 minutes)
+pub const RESERVED_PROOF_TIMEOUT_SECS: u64 = 600;
+
+/// Maximum time a proof can be PendingSpent before checking mint state (30 minutes)
+pub const PENDING_SPENT_TIMEOUT_SECS: u64 = 1800;
+
+/// Maximum time for in-flight melt before checking quote status (5 minutes)
+pub const IN_FLIGHT_MELT_TIMEOUT_SECS: u64 = 300;
+
+/// Maximum number of counter healing attempts
+pub const MAX_COUNTER_HEAL_ATTEMPTS: u32 = 3;
+
+/// Counter increments for each healing attempt
+pub const COUNTER_HEAL_INCREMENTS: [u32; 3] = [10, 50, 100];
+
+/// In-flight melt request for crash recovery
+///
+/// Persisted BEFORE the melt network call to ensure we can recover
+/// change proofs if the app crashes during the operation.
+///
+/// SAFETY: This data enables NUT-07 verification and change recovery
+/// without relying on wallet state that may be lost in a crash.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InFlightMeltRequest {
+    /// Unique transaction ID for this melt operation
+    pub transaction_id: String,
+    /// Mint URL where the melt is being performed
+    pub mint_url: String,
+    /// Melt quote ID from the mint
+    pub quote_id: String,
+    /// Proofs being used for this melt (serialized for recovery)
+    pub proofs_used: Vec<ProofData>,
+    /// Amount being melted (excluding fees)
+    pub amount: u64,
+    /// Fee reserve for this melt
+    pub fee_reserve: u64,
+    /// Timestamp when request was created (seconds since epoch)
+    pub created_at: u64,
+}
+
+/// Operation types for in-flight send/swap requests
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationType {
+    /// Standard send operation
+    Send,
+    /// P2PK locked send operation
+    SendP2pk,
+    /// Token swap/consolidation operation
+    Swap,
+}
+
+impl std::fmt::Display for OperationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationType::Send => write!(f, "send"),
+            OperationType::SendP2pk => write!(f, "send_p2pk"),
+            OperationType::Swap => write!(f, "swap"),
+        }
+    }
+}
+
+/// Tracks in-flight send/swap operations for crash recovery and proof protection
+///
+/// Similar to InFlightMeltRequest but for send/swap operations that don't have
+/// their own tracking. This ensures proof_recovery doesn't reclaim proofs that
+/// are actively being used in send/swap operations.
+///
+/// SAFETY: Without this tracking, recover_reserved_proofs() could incorrectly
+/// reclaim proofs from active send/swap operations, causing fund loss.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InFlightSendRequest {
+    /// Unique transaction ID ("send_{uuid}" or "swap_{uuid}")
+    pub transaction_id: String,
+    /// Mint URL where the operation is being performed
+    pub mint_url: String,
+    /// Secrets of proofs being used (for filtering in recovery)
+    pub proof_secrets: Vec<String>,
+    /// Amount being sent/swapped
+    pub amount: u64,
+    /// Operation type (send, send_p2pk, or swap)
+    pub operation_type: OperationType,
+    /// Timestamp when request was created (seconds since epoch)
+    pub created_at: u64,
 }

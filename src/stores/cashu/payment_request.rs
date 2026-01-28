@@ -28,7 +28,7 @@ use super::internal::create_ephemeral_wallet;
 use super::mint_mgmt::{get_mint_balance, get_mints};
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
 use super::signals::{
-    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS, WALLET_BALANCE,
+    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS,
     WALLET_TOKENS,
 };
 use super::types::{
@@ -446,15 +446,35 @@ pub async fn pay_payment_request(
 
         let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-        match client.send_event_builder(builder.clone()).await {
+        new_event_id = Some(match client.send_event_builder(builder.clone()).await {
             Ok(event_output) => {
-                new_event_id = Some(event_output.id().to_hex());
+                // Check if at least one relay accepted (nostr-sdk Output<T> pattern)
+                if event_output.success.is_empty() {
+                    log::warn!("No relays accepted token event, queuing for retry");
+                    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                    queue_event_for_retry(
+                        builder,
+                        PendingEventType::TokenEvent,
+                        Some(pending_id.clone()),
+                        Some(mint_url.clone()),
+                    ).await;
+                    pending_id
+                } else {
+                    event_output.id().to_hex()
+                }
             }
             Err(e) => {
                 log::warn!("Failed to publish token event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.clone()),
+                ).await;
+                pending_id
             }
-        }
+        });
     } else {
         // No remaining proofs - publish deletion
         if !event_ids_to_delete.is_empty() {
@@ -467,9 +487,17 @@ pub async fn pay_payment_request(
             }
 
             let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-            if let Err(e) = client.send_event_builder(builder.clone()).await {
-                log::warn!("Failed to publish deletion event: {}", e);
-                queue_event_for_retry(builder, PendingEventType::DeletionEvent).await;
+            match client.send_event_builder(builder.clone()).await {
+                Ok(output) => {
+                    if output.success.is_empty() {
+                        log::warn!("No relays accepted deletion event, queuing for retry");
+                        queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to publish deletion event: {}", e);
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                }
             }
         }
     }
@@ -503,18 +531,8 @@ pub async fn pay_payment_request(
         }
     }
 
-    // Update balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Payment request paid: {} sats", amount);
 
@@ -763,11 +781,33 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
     let new_event_id = match client.send_event_builder(builder.clone()).await {
-        Ok(event_output) => Some(event_output.id().to_hex()),
+        Ok(event_output) => {
+            // Check if at least one relay accepted (nostr-sdk Output<T> pattern)
+            if event_output.success.is_empty() {
+                log::warn!("No relays accepted token event, queuing for retry");
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+                queue_event_for_retry(
+                    builder,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.to_string()),
+                ).await;
+                pending_id
+            } else {
+                event_output.id().to_hex()
+            }
+        }
         Err(e) => {
             log::warn!("Failed to publish token event: {}", e);
-            queue_event_for_retry(builder, PendingEventType::TokenEvent).await;
-            None
+            // Generate pending ID for retry tracking
+            let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+            queue_event_for_retry(
+                builder,
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.to_string()),
+            ).await;
+            pending_id
         }
     };
 
@@ -777,8 +817,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         let mut data = store.data();
         let mut tokens = data.write();
 
-        let event_id =
-            new_event_id.unwrap_or_else(|| format!("local-{}", chrono::Utc::now().timestamp()));
+        let event_id = new_event_id;
         tokens.push(TokenData {
             event_id: event_id.clone(),
             mint: mint_url.to_string(),
@@ -791,18 +830,8 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         register_proofs_in_event_map(&event_id, &proof_data);
     }
 
-    // Update balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Received {} sats from payment request", amount);
 

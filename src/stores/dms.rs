@@ -88,10 +88,15 @@ pub async fn init_dms() -> Result<(), String> {
 
     log::info!("Loading DMs for {}", pubkey_str);
 
-    // Get user's DM relays (kind 10050) for privacy-preserving queries
-    // This prevents leaking DM activity to all relays
-    let dm_relays = relay::nip65::get_dm_relays();
-    log::info!("Using {} DM relays for privacy: {:?}", dm_relays.len(), dm_relays);
+    // Ensure DM relays are in pool and connected before fetching
+    // This is critical: nostr-sdk's fetch_events_from fails if ANY relay isn't in pool
+    let dm_relays = relay::specialty::ensure_dm_relays_connected(&client).await;
+    if dm_relays.is_empty() {
+        // Clear stale conversations before returning error to prevent showing old DMs
+        CONVERSATIONS.read().data().write().clear();
+        return Err("No DM relays could be connected".to_string());
+    }
+    log::info!("Using {} connected DM relays: {:?}", dm_relays.len(), dm_relays);
 
     // Create filters for all DM types
     let received_nip04 = Filter::new()

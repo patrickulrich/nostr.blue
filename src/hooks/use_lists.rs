@@ -3,7 +3,8 @@ use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client};
-use crate::utils::list_kinds::LIST_KINDS;
+use crate::utils::list_encryption::get_all_list_members_with_status;
+use crate::utils::list_kinds::{get_item_count, LIST_KINDS, NAMED_PEOPLE};
 
 /// User list data structure
 #[derive(Clone, Debug, PartialEq)]
@@ -19,6 +20,8 @@ pub struct UserList {
     pub event: Event,
     /// Indicates if the list has encrypted private content (NIP-44)
     pub has_private_content: bool,
+    /// Cached total member count including private members (populated after decryption)
+    pub total_member_count: Option<usize>,
 }
 
 impl UserList {
@@ -66,6 +69,7 @@ impl UserList {
             created_at: event.created_at.as_secs(),
             author: event.pubkey.to_string(),
             has_private_content,
+            total_member_count: None,  // Will be populated after decryption
             event,
         })
     }
@@ -151,6 +155,33 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     let mut lists: Vec<UserList> = events.into_iter()
         .filter_map(UserList::from_event)
         .collect();
+
+    // Populate total_member_count for people lists with private content
+    // Only attempt if signer is available (needed for NIP-44 decryption)
+    if *nostr_client::HAS_SIGNER.peek() {
+        for list in &mut lists {
+            if list.kind == NAMED_PEOPLE {
+                if list.has_private_content {
+                    match get_all_list_members_with_status(&list.event).await {
+                        Ok(result) => {
+                            // Only set count if decryption succeeded
+                            // Otherwise leave as None → UI shows "N+" fallback
+                            if result.private_decryption_succeeded {
+                                list.total_member_count = Some(result.members.len());
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to get members for list '{}': {}", list.name, e);
+                            // Keep as None - will show public count with "+" indicator
+                        }
+                    }
+                } else {
+                    // No private content - public count is the total
+                    list.total_member_count = Some(get_item_count(&list.tags));
+                }
+            }
+        }
+    }
 
     // Sort by creation time (newest first)
     lists.sort_by(|a, b| b.created_at.cmp(&a.created_at));

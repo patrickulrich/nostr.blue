@@ -178,7 +178,7 @@ pub fn PollCreatorModal(
 
             // Modal content
             div {
-                class: "bg-background border border-border rounded-lg shadow-xl w-full max-w-lg m-4 mt-20",
+                class: "bg-background border border-border rounded-lg shadow-xl w-full max-w-lg m-4 mt-8 sm:mt-20",
                 onclick: move |e| e.stop_propagation(),
 
                 // Header

@@ -277,7 +277,7 @@ pub fn RecipesHome() -> Element {
                     div {
                         div { class: "h-6 w-36 bg-muted rounded animate-pulse mb-4" }
                         div {
-                            class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4",
+                            class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                             for _ in 0..12 {
                                 DiscoverRecipeCardSkeleton {}
                             }
@@ -303,7 +303,7 @@ pub fn RecipesHome() -> Element {
                                 "Search Results ({results.len()})"
                             }
                             div {
-                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4",
+                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for recipe in results.iter() {
                                     DiscoverRecipeCard {
                                         key: "{recipe.naddr}",
@@ -435,7 +435,7 @@ pub fn RecipesHome() -> Element {
 
                         if *discover_loading.read() {
                             div {
-                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4",
+                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for _ in 0..12 {
                                     DiscoverRecipeCardSkeleton {}
                                 }
@@ -448,7 +448,7 @@ pub fn RecipesHome() -> Element {
                             }
                         } else {
                             div {
-                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4",
+                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4",
 
                                 for recipe in discover_recipes.read().iter() {
                                     DiscoverRecipeCard {

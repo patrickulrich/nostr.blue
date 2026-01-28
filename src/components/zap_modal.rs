@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
+use dioxus::hooks::use_reactive;
 use dioxus::html::input_data::keyboard_types::Key;
 use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
-use crate::stores::{signer, nwc_store, settings_store};
+use crate::stores::{signer, nwc_store, settings_store, cashu};
 use qrcode::QrCode;
 use qrcode::render::svg;
 use wasm_bindgen::prelude::*;
@@ -74,6 +75,47 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     let mut qr_code_svg = use_signal(|| None::<String>);
     let webln_available = is_webln_available();
     let toast = consume_toast();
+
+    // Nutzap eligibility check
+    let mut nutzap_mint = use_signal(|| None::<cashu::NutzapMint>);
+    let mut checking_nutzap = use_signal(|| false);
+
+    // Version counter to prevent stale async results from overwriting state
+    // Pattern: use_mute_block_cache.rs uses wrapping counters for invalidation detection
+    let mut nutzap_request_version = use_signal(|| 0u32);
+
+    // Check nutzap eligibility on modal open
+    // Use use_reactive! to properly track recipient_pubkey changes (Dioxus pattern)
+    // Pattern from use_mute_block_cache.rs: version token + peek() validation
+    {
+        let recipient_pubkey = props.recipient_pubkey.clone();
+        use_effect(use_reactive!(|recipient_pubkey| {
+            // Increment version using wrapping_add for overflow safety (signals.rs pattern)
+            let current_version = nutzap_request_version.peek().wrapping_add(1);
+            nutzap_request_version.set(current_version);
+
+            let pubkey_snapshot = recipient_pubkey.clone();
+            checking_nutzap.set(true);
+            nutzap_mint.set(None); // Clear previous result immediately
+
+            spawn(async move {
+                let result = cashu::validate_nutzap_recipient(&pubkey_snapshot).await;
+
+                // Guard: only write if this is still the current request
+                // Pattern from use_mute_block_cache.rs: compare token with peek() after await
+                if *nutzap_request_version.peek() != current_version {
+                    log::debug!("Discarding stale nutzap eligibility result");
+                    return;
+                }
+
+                match result {
+                    Ok(mint) => nutzap_mint.set(Some(mint)),
+                    Err(_) => nutzap_mint.set(None),
+                }
+                checking_nutzap.set(false);
+            });
+        }));
+    }
 
     // Preset amounts in sats
     let preset_amounts = vec![21, 100, 500, 1000, 5000, 10000];
@@ -160,7 +202,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             };
 
             // Create zap request builder
-            let msg_opt = if message.is_empty() { None } else { Some(message) };
+            // Clone message for later use in nutzap fallback
+            let msg_opt = if message.is_empty() { None } else { Some(message.clone()) };
             let builder = lnurl::create_zap_request_unsigned(
                 recipient_pubkey,
                 relays,
@@ -238,6 +281,97 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
             // Try payment based on preference
             match payment_preference.as_str() {
+                "cashu_first" => {
+                    // Wait for nutzap eligibility check to complete using select pattern
+                    // (nostr-sdk async pattern: use select! for racing, not busy-wait)
+                    use futures::future::{select, Either};
+
+                    let timeout = gloo_timers::future::TimeoutFuture::new(5000);
+                    let check_done = async {
+                        while *checking_nutzap.peek() { // Use peek() to avoid subscription
+                            gloo_timers::future::TimeoutFuture::new(50).await;
+                        }
+                    };
+
+                    match select(Box::pin(timeout), Box::pin(check_done)).await {
+                        Either::Left(_) => {
+                            log::warn!("Nutzap eligibility check timed out, proceeding with Lightning");
+                        }
+                        Either::Right(_) => {} // Check completed
+                    }
+
+                    // Check if nutzap is possible using per-mint spendable balance
+                    if let Some(mint) = nutzap_mint.read().as_ref() {
+                        // Dioxus pattern: Early validation check before main logic
+                        if mint.unit != "sat" {
+                            log::info!("Mint {} uses unit '{}', not sats - skipping nutzap", mint.url, mint.unit);
+                            // Fall through to Lightning
+                        } else {
+                            // Normalize mint URL for consistent balance lookups
+                            let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
+                            // CDK pattern: use unit-aware spendable balance (Issue #1)
+                            // Filter by mint_url + unit to support multi-unit mints
+                            let balance = cashu::get_mint_unit_spendable_balance(&normalized_mint_url, &mint.unit);
+                            if balance >= amount {
+                                log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
+                                // Get event_id as hex string for nutzap
+                                let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
+                                // Use already-captured message (avoid redundant signal read)
+                                let nutzap_comment_opt = if message.is_empty() { None } else { Some(message.clone()) };
+                                match cashu::send_nutzap(
+                                    &recipient_pubkey_str,
+                                    amount,
+                                    nutzap_event_id.as_deref(),
+                                    None, // target_kind
+                                    nutzap_comment_opt.as_deref(),
+                                ).await {
+                                    Ok(result) => {
+                                        log::info!("Nutzap successful: {} sats (fee: {} sats)", result.amount, result.fee);
+                                        loading.set(false);
+                                        toast_api.success(
+                                            "Nutzap sent!".to_string(),
+                                            ToastOptions::new()
+                                                .description(format!("Sent {} sats via ecash (fee: {} sats)", result.amount, result.fee))
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                        props.on_close.call(());
+                                        return;
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Nutzap failed, falling back to Lightning: {}", e);
+                                        // Continue to Lightning fallback
+                                    }
+                                }
+                            } else {
+                                log::info!("Insufficient Cashu balance ({} < {}), using Lightning", balance, amount);
+                            }
+                        }
+                    } else {
+                        log::info!("Recipient doesn't support nutzaps, using Lightning");
+                    }
+                    // Fall through to Lightning (try NWC if available)
+                    if nwc_available {
+                        match nwc_store::pay_invoice(inv_clone.clone()).await {
+                            Ok(_) => {
+                                loading.set(false);
+                                toast_api.success(
+                                    "Zap sent!".to_string(),
+                                    ToastOptions::new()
+                                        .description("Zap successfully sent via Nostr Wallet Connect")
+                                        .duration(Duration::from_secs(2))
+                                        .permanent(false),
+                                );
+                                props.on_close.call(());
+                                return;
+                            }
+                            Err(e) => {
+                                log::warn!("NWC payment failed: {}", e);
+                                // Continue to WebLN/manual fallback
+                            }
+                        }
+                    }
+                }
                 "nwc_first" if nwc_available => {
                     // Try NWC first
                     log::info!("Attempting payment with NWC");
@@ -507,6 +641,52 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                             }
                         }
                     } else {
+                        // Nutzap availability indicator
+                        if settings_store::SETTINGS.read().payment_method_preference == "cashu_first" {
+                            if *checking_nutzap.read() {
+                                div {
+                                    class: "bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4",
+                                    p { class: "text-sm text-blue-700 dark:text-blue-300", "Checking nutzap availability..." }
+                                }
+                            } else if let Some(mint) = nutzap_mint.read().as_ref() {
+                                {
+                                    let normalized_url = cashu::normalize_mint_url(&mint.url);
+                                    // Dioxus pattern: if/else conditional rendering (weather_app.rs lines 149-175)
+                                    if mint.unit != "sat" {
+                                        rsx! {
+                                            div {
+                                                class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
+                                                p {
+                                                    class: "text-sm text-amber-700 dark:text-amber-300",
+                                                    "Mint uses '{mint.unit}' unit, not sats. Will use Lightning."
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Show per-mint unit-aware spendable balance (normalize URL for consistent lookup)
+                                        let balance = cashu::get_mint_unit_spendable_balance(&normalized_url, &mint.unit);
+                                        rsx! {
+                                            div {
+                                                class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
+                                                p {
+                                                    class: "text-sm text-green-700 dark:text-green-300",
+                                                    "✓ Nutzap available via {normalized_url} ({balance} sats at mint)"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div {
+                                    class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
+                                    p {
+                                        class: "text-sm text-amber-700 dark:text-amber-300",
+                                        "Recipient doesn't support nutzaps. Will use Lightning."
+                                    }
+                                }
+                            }
+                        }
+
                         // Amount selection
                         div {
                             class: "space-y-2",

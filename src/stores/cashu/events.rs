@@ -13,7 +13,7 @@ use nostr::nips::nip60::{SpendingHistory, TransactionDirection};
 use std::time::Duration;
 
 use super::signals::{
-    PENDING_NOSTR_EVENTS, WALLET_TOKENS, WALLET_BALANCE, SHARED_LOCALSTORE, SYNC_STATE,
+    PENDING_NOSTR_EVENTS, WALLET_TOKENS, SHARED_LOCALSTORE, SYNC_STATE,
 };
 use super::types::{TokenData, ProofData, ProofState, TokenEventData, WalletTokensStoreStoreExt, PendingEventType, PendingNostrEvent, SyncState};
 use super::proofs::rebuild_proof_event_map;
@@ -44,6 +44,8 @@ pub async fn queue_nostr_event(
         created_at,
         retry_count: 0,
         last_retry_at: None,
+        pending_token_id: None,
+        mint_url: None,
     };
 
     // Save to in-memory queue
@@ -62,6 +64,7 @@ pub async fn queue_nostr_event(
             PendingEventType::DeletionEvent => "deletion",
             PendingEventType::HistoryEvent => "history",
             PendingEventType::QuoteEvent => "quote",
+            PendingEventType::NutzapEvent => "nutzap",
         },
         event_id);
 
@@ -85,80 +88,124 @@ pub async fn remove_pending_event(event_id: &str) -> Result<(), String> {
 }
 
 /// Queue an already-signed Event for retry when publication fails
-pub async fn queue_signed_event_for_retry(event: nostr_sdk::Event, event_type: PendingEventType) {
-    match serde_json::to_string(&event) {
-        Ok(event_json) => {
-            match queue_nostr_event(event_json, event_type).await {
-                Ok(queue_id) => {
-                    log::info!("Queued signed event {} for retry: {}", event.id.to_hex(), queue_id);
-                }
-                Err(queue_err) => {
-                    log::error!("Failed to queue event for retry: {}", queue_err);
-                }
-            }
+///
+/// Optional `pending_token_id` and `mint_url` link this pending event to a token
+/// in WALLET_TOKENS, allowing the token's event_id to be updated when background
+/// publish succeeds.
+pub async fn queue_signed_event_for_retry(
+    event: nostr_sdk::Event,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+) {
+    let event_id = event.id.to_hex();
+    let event_json = match serde_json::to_string(&event) {
+        Ok(j) => j,
+        Err(e) => {
+            log::error!("Failed to serialize event for queueing: {}", e);
+            return;
         }
-        Err(json_err) => {
-            log::error!("Failed to serialize event for queueing: {}", json_err);
+    };
+
+    let pending_event = PendingNostrEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        builder_json: event_json,
+        event_type: event_type.clone(),
+        created_at: chrono::Utc::now().timestamp() as u64,
+        retry_count: 0,
+        last_retry_at: None,
+        pending_token_id,
+        mint_url,
+    };
+
+    // Add to in-memory queue
+    PENDING_NOSTR_EVENTS.write().push(pending_event.clone());
+
+    // Persist to IndexedDB
+    if let Some(ref localstore) = *SHARED_LOCALSTORE.read() {
+        if let Err(e) = localstore.add_pending_event(&pending_event).await {
+            log::warn!("Failed to persist pending event: {}", e);
+        }
+    }
+
+    log::info!("Queued signed event {} for retry: {}", event_id, pending_event.id);
+}
+
+/// Sign an EventBuilder using the current signer
+/// Returns Ok(Event) or Err(error_message)
+pub async fn sign_event_builder(builder: nostr_sdk::EventBuilder) -> Result<nostr_sdk::Event, String> {
+    let signer = crate::stores::signer::get_signer()
+        .ok_or_else(|| "No signer available".to_string())?;
+
+    match signer {
+        crate::stores::signer::SignerType::Keys(keys) => {
+            builder.sign_with_keys(&keys)
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
+        #[cfg(target_family = "wasm")]
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
+            builder.sign(&*browser_signer).await
+                .map_err(|e| format!("Failed to sign event: {}", e))
+        }
+        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
+            builder.sign(&*remote_signer).await
+                .map_err(|e| format!("Failed to sign event: {}", e))
         }
     }
 }
 
 /// Queue an EventBuilder for retry when initial publication fails
-pub async fn queue_event_for_retry(builder: nostr_sdk::EventBuilder, event_type: PendingEventType) {
-    let signer = match crate::stores::signer::get_signer() {
-        Some(s) => s,
-        None => {
-            log::error!("Cannot queue failed event: no signer available");
+///
+/// Optional `pending_token_id` and `mint_url` link this pending event to a token
+/// in WALLET_TOKENS, allowing the token's event_id to be updated when background
+/// publish succeeds.
+pub async fn queue_event_for_retry(
+    builder: nostr_sdk::EventBuilder,
+    event_type: PendingEventType,
+    pending_token_id: Option<String>,
+    mint_url: Option<String>,
+) {
+    let event = match sign_event_builder(builder).await {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("Failed to sign event for queueing: {}", e);
             return;
         }
     };
 
-    let event_type_clone = event_type.clone();
-    let sign_and_queue = |event: nostr_sdk::Event| async move {
-        match serde_json::to_string(&event) {
-            Ok(event_json) => {
-                match queue_nostr_event(event_json, event_type_clone).await {
-                    Ok(queue_id) => {
-                        log::info!("Queued failed event for retry: {}", queue_id);
-                    }
-                    Err(queue_err) => {
-                        log::error!("Failed to queue event for retry: {}", queue_err);
-                    }
-                }
-            }
-            Err(json_err) => {
-                log::error!("Failed to serialize event for queueing: {}", json_err);
-            }
+    queue_signed_event_for_retry(event, event_type, pending_token_id, mint_url).await;
+}
+
+/// Queue a token event for retry with tracking info
+///
+/// The `pending_token_id` links this pending event to a token in WALLET_TOKENS,
+/// allowing us to update the token's event_id when background publish succeeds.
+///
+/// This is a convenience wrapper around `queue_signed_event_for_retry` that handles
+/// signing the builder first. Eliminates duplicate queue+persist logic.
+pub async fn queue_token_event_for_retry(
+    builder: nostr_sdk::EventBuilder,
+    pending_token_id: String,
+    mint_url: String,
+) {
+    // Use shared signing helper
+    let event = match sign_event_builder(builder).await {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("Cannot queue token event: {}", e);
+            return;
         }
     };
 
-    match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            match builder.sign_with_keys(&keys) {
-                Ok(event) => sign_and_queue(event).await,
-                Err(sign_err) => {
-                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                }
-            }
-        }
-        #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            match builder.sign(&*browser_signer).await {
-                Ok(event) => sign_and_queue(event).await,
-                Err(sign_err) => {
-                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                }
-            }
-        }
-        crate::stores::signer::SignerType::NostrConnect(remote_signer) => {
-            match builder.sign(&*remote_signer).await {
-                Ok(event) => sign_and_queue(event).await,
-                Err(sign_err) => {
-                    log::error!("Failed to sign event for queueing: {}", sign_err);
-                }
-            }
-        }
-    }
+    // Reuse existing function - single path for queue+persist (CDK adaptive backoff pattern)
+    queue_signed_event_for_retry(
+        event,
+        PendingEventType::TokenEvent,
+        Some(pending_token_id.clone()),
+        Some(mint_url),
+    ).await;
+
+    log::info!("Queued token event for retry, pending_id={}", pending_token_id);
 }
 
 /// Get count of pending events waiting to be published
@@ -486,7 +533,7 @@ pub async fn fetch_tokens() -> Result<(), String> {
                 *WALLET_TOKENS.read().data().write() = tokens;
             }
 
-            *WALLET_BALANCE.write() = total_balance;
+            super::signals::update_wallet_balances();
 
             // Update sync state with new timestamp
             let new_sync_ts = Timestamp::now().as_secs();
@@ -651,8 +698,8 @@ pub async fn create_history_event_full(
 // Pending Events Processing
 // =============================================================================
 
-/// Publish a single pending event
-async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> {
+/// Publish a single pending event and return the Nostr event ID
+async fn publish_pending_event(event: &PendingNostrEvent) -> Result<String, String> {
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Nostr client not initialized")?
         .clone();
@@ -660,10 +707,21 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<(), String> 
     let evt: nostr_sdk::Event = serde_json::from_str(&event.builder_json)
         .map_err(|e| format!("Failed to deserialize event: {}", e))?;
 
-    client.send_event(&evt).await
+    // Get the event_id before publishing (deterministic from signature)
+    let event_id = evt.id.to_hex();
+
+    let output = client.send_event(&evt).await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
 
-    Ok(())
+    // Check for at least one successful relay
+    if output.success.is_empty() {
+        return Err(format!("All {} relays failed", output.failed.len()));
+    }
+
+    log::debug!("Published to {}/{} relays", output.success.len(),
+        output.success.len() + output.failed.len());
+
+    Ok(event_id)
 }
 
 /// Process pending events with adaptive backoff retry logic
@@ -710,8 +768,54 @@ pub async fn process_pending_events() -> Result<usize, String> {
         }
 
         match publish_pending_event(&event).await {
-            Ok(_) => {
-                log::info!("Published pending event: {}", event.id);
+            Ok(nostr_event_id) => {
+                log::info!("Published pending event: {} -> nostr:{}", event.id, nostr_event_id);
+
+                // Handle TokenEvent: update token's event_id in WALLET_TOKENS
+                if event.event_type == PendingEventType::TokenEvent {
+                    if let Some(ref pending_id) = event.pending_token_id {
+                        update_token_event_id(pending_id, &nostr_event_id);
+                    } else if let Some(ref mint_url) = event.mint_url {
+                        // Fallback: try to find token by mint_url when pending_token_id is missing
+                        // CDK pattern: avoid ambiguous matching - only update if exactly one candidate
+                        log::warn!("TokenEvent missing pending_token_id, attempting proof-based fallback for {}", mint_url);
+                        let normalized_mint = super::utils::normalize_mint_url(mint_url);
+
+                        // Collect candidates and check for ambiguity
+                        let matched_token = {
+                            let store = WALLET_TOKENS.read();
+                            let data = store.data();
+                            let tokens = data.read();
+
+                            // Collect candidates at this mint with pending event_ids
+                            let candidates: Vec<_> = tokens.iter()
+                                .filter(|t| t.event_id.starts_with("pending_")
+                                    && super::utils::mint_matches(&t.mint, &normalized_mint))
+                                .collect();
+
+                            if candidates.len() == 1 {
+                                // Unambiguous: only one pending token at this mint
+                                Some(candidates[0].event_id.clone())
+                            } else if candidates.len() > 1 {
+                                // Ambiguous: log warning, skip update to avoid wrong token
+                                log::warn!(
+                                    "Multiple pending tokens ({}) at mint {}, cannot disambiguate without proof matching",
+                                    candidates.len(),
+                                    mint_url
+                                );
+                                None
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(old_id) = matched_token {
+                            log::info!("Found pending token by mint fallback: {} -> {}", old_id, nostr_event_id);
+                            update_token_event_id(&old_id, &nostr_event_id);
+                        }
+                    }
+                }
+
                 let _ = remove_pending_event(&event.id).await;
                 processed_count += 1;
             }
@@ -745,6 +849,278 @@ pub async fn process_pending_events() -> Result<usize, String> {
     Ok(processed_count)
 }
 
+/// Update a token's event_id after successful background publish
+///
+/// Called when a pending TokenEvent is successfully published to Nostr.
+/// Updates the token in WALLET_TOKENS from the pending_id to the real Nostr event_id.
+pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
+    {
+        let store = WALLET_TOKENS.read();
+        let mut data_signal = store.data();
+        let mut data = data_signal.write();
+
+        if let Some(token) = data.iter_mut().find(|t| t.event_id == pending_id) {
+            log::info!("Updating token event_id: {} -> {}", pending_id, real_event_id);
+            token.event_id = real_event_id.to_string();
+        } else {
+            log::warn!("Could not find token with pending_id {} to update", pending_id);
+            return;
+        }
+        // Drop write guard before calling rebuild (prevents deadlock)
+    }
+
+    // Rebuild proof event map to stay in sync (matches fetch_tokens pattern at line 594)
+    rebuild_proof_event_map();
+}
+
+/// Reconcile tokens with pending event IDs
+///
+/// Finds tokens in WALLET_TOKENS that have `pending_*` event IDs and attempts
+/// to publish them to Nostr. This handles cases where background retry failed
+/// permanently but proofs are valid in CDK.
+///
+/// CDK Pattern: Similar to CDK's `check_all_pending_proofs()` which reconciles
+/// pending proof states. We apply the same pattern for NIP-60 event IDs.
+///
+/// Called periodically by the background processor.
+pub async fn reconcile_pending_event_ids() -> Result<usize, String> {
+    use nostr_sdk::signer::NostrSigner;
+    use super::types::ExtendedCashuProof;
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+
+    // Find tokens with pending_* event IDs
+    let pending_tokens: Vec<TokenData> = {
+        let store = WALLET_TOKENS.read();
+        let data = store.data();
+        let tokens = data.read();
+        tokens.iter()
+            .filter(|t| t.event_id.starts_with("pending_"))
+            .cloned()
+            .collect()
+    };
+
+    if pending_tokens.is_empty() {
+        return Ok(0);
+    }
+
+    log::info!("Found {} tokens with pending event IDs to reconcile", pending_tokens.len());
+
+    let mut reconciled = 0;
+
+    for token in pending_tokens {
+        let old_event_id = token.event_id.clone();
+
+        // Build and publish token event
+        let extended_proofs: Vec<ExtendedCashuProof> = token.proofs.iter()
+            .map(|p| ExtendedCashuProof::from(p.clone()))
+            .collect();
+
+        let token_event_data = super::types::ExtendedTokenEvent {
+            mint: token.mint.clone(),
+            unit: token.unit.clone(),
+            proofs: extended_proofs,
+            del: vec![],
+        };
+
+        let json_content = match serde_json::to_string(&token_event_data) {
+            Ok(j) => j,
+            Err(e) => {
+                log::warn!("Failed to serialize token {}: {}", old_event_id, e);
+                continue;
+            }
+        };
+
+        let encrypted = match signer.nip44_encrypt(&pubkey, &json_content).await {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("Failed to encrypt token {}: {}", old_event_id, e);
+                continue;
+            }
+        };
+
+        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+        match client.send_event_builder(builder).await {
+            Ok(output) => {
+                // Check if at least one relay succeeded (nostr-sdk auto-saves locally before relay)
+                if !output.success.is_empty() {
+                    let real_event_id = output.id().to_hex();
+                    log::info!(
+                        "Reconciled pending token: {} -> {} (to {} relays)",
+                        old_event_id, real_event_id, output.success.len()
+                    );
+
+                    // Update in WALLET_TOKENS
+                    update_token_event_id(&old_event_id, &real_event_id);
+                    reconciled += 1;
+                } else {
+                    // No relays accepted - keep pending ID for future retry
+                    log::warn!(
+                        "No relays accepted reconciliation event for {}, will retry later",
+                        old_event_id
+                    );
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to publish reconciliation event for {}: {}", old_event_id, e);
+                // Will retry on next reconciliation pass
+            }
+        }
+    }
+
+    if reconciled > 0 {
+        log::info!("Reconciled {} pending event IDs", reconciled);
+    }
+
+    Ok(reconciled)
+}
+
+/// Publish a token event for orphaned proofs discovered in CDK
+///
+/// This follows the same pattern as publish_send_events but without deletion events.
+/// Used by `sync_orphaned_cdk_proofs_to_nostr()` to publish proofs that exist in CDK
+/// but are not in WALLET_TOKENS (e.g., from crashed send/melt operations).
+///
+/// CRASH SAFETY (CDK Saga Pattern): Persists state BEFORE external operations.
+/// 1. Generate pending_id BEFORE any network operation
+/// 2. Insert TokenData into WALLET_TOKENS first
+/// 3. Attempt publish
+/// 4. On success: update pending_id to real event_id
+/// 5. On failure: proofs remain accessible via pending_id for retry
+///
+/// # Arguments
+/// * `mint_url` - The mint URL for these proofs
+/// * `proofs` - The proof data to publish
+/// * `unit` - The unit for these proofs (CDK pattern: unit passed explicitly, not deduced from proofs)
+pub async fn publish_orphaned_proofs_event(
+    mint_url: &str,
+    proofs: &[ProofData],
+    unit: &str,
+) -> Result<String, String> {
+    use nostr_sdk::signer::NostrSigner;
+    use super::types::ExtendedCashuProof;
+
+    if proofs.is_empty() {
+        return Err("No proofs to publish".to_string());
+    }
+
+    let signer = crate::stores::signer::get_signer()
+        .ok_or("No signer available")?
+        .as_nostr_signer();
+
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
+
+    // 1. Generate pending_id BEFORE any network operation (CDK Saga Pattern)
+    let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+
+    // Convert to extended proofs format
+    let extended_proofs: Vec<ExtendedCashuProof> = proofs
+        .iter()
+        .map(|p| ExtendedCashuProof::from(p.clone()))
+        .collect();
+
+    let token_event_data = super::types::ExtendedTokenEvent {
+        mint: mint_url.to_string(),
+        unit: unit.to_string(),
+        proofs: extended_proofs,
+        del: vec![], // No deletions for orphan recovery
+    };
+
+    let json_content = serde_json::to_string(&token_event_data)
+        .map_err(|e| format!("Failed to serialize: {}", e))?;
+
+    let encrypted = signer
+        .nip44_encrypt(&pubkey, &json_content)
+        .await
+        .map_err(|e| format!("Failed to encrypt: {}", e))?;
+
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+
+    // Sign the event
+    let unsigned = builder.clone().build(pubkey);
+    let signed_event = unsigned
+        .sign(&signer)
+        .await
+        .map_err(|e| format!("Failed to sign: {}", e))?;
+
+    // 2. Insert into WALLET_TOKENS right before publish (saga setup - persist before network)
+    // This ensures we don't leave dangling entries if serialize/encrypt/sign fails
+    let token_data = TokenData {
+        event_id: pending_id.clone(),
+        mint: mint_url.to_string(),
+        unit: unit.to_string(),
+        proofs: proofs.to_vec(),
+        created_at: chrono::Utc::now().timestamp() as u64,
+    };
+    if let Err(e) = super::signals::atomic_token_update(|tokens| {
+        tokens.push(token_data);
+        Ok(())
+    }) {
+        log::warn!("Failed to pre-persist orphaned proofs token: {}", e);
+        // Continue anyway - better to try publish than fail entirely
+    }
+
+    // 3. Attempt publish
+    match client.send_event(&signed_event).await {
+        Ok(output) => {
+            // Check if at least one relay succeeded
+            if !output.success.is_empty() {
+                let real_event_id = output.id().to_hex();
+                // 4. On success: update pending_id to real event_id
+                update_token_event_id(&pending_id, &real_event_id);
+                log::info!(
+                    "Published orphaned proofs token event: {} (to {} relays)",
+                    real_event_id, output.success.len()
+                );
+                Ok(real_event_id)
+            } else {
+                // No relays accepted - token already persisted with pending_id
+                log::warn!(
+                    "No relays accepted orphaned proofs event, queuing for retry: {}",
+                    pending_id
+                );
+                queue_signed_event_for_retry(
+                    signed_event,
+                    PendingEventType::TokenEvent,
+                    Some(pending_id.clone()),
+                    Some(mint_url.to_string()),
+                ).await;
+                // Return the pending_id since proofs are now tracked under it
+                Ok(pending_id)
+            }
+        }
+        Err(e) => {
+            // 5. On failure: proofs remain accessible via pending_id for retry
+            log::warn!("Failed to publish orphaned proofs, queuing for retry: {}", e);
+            queue_signed_event_for_retry(
+                signed_event,
+                PendingEventType::TokenEvent,
+                Some(pending_id.clone()),
+                Some(mint_url.to_string()),
+            ).await;
+            // Return the pending_id since proofs are now tracked under it
+            Ok(pending_id)
+        }
+    }
+}
+
 /// Guard to prevent multiple processor spawns
 #[cfg(target_arch = "wasm32")]
 static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -753,6 +1129,10 @@ static PROCESSOR_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 ///
 /// Uses AtomicBool guard to ensure only one processor runs at a time.
 /// Calling this function multiple times is safe - subsequent calls are no-ops.
+///
+/// Uses adaptive interval: 30s when there are pending events, 60s when idle.
+/// Maintenance tasks (recovery, cleanup) run every 6th idle iteration (~6 min cadence).
+/// Also runs periodic proof recovery and pending secrets cleanup.
 #[cfg(target_arch = "wasm32")]
 pub fn start_pending_events_processor() {
     use dioxus::prelude::spawn;
@@ -770,16 +1150,83 @@ pub fn start_pending_events_processor() {
     }
 
     spawn(async {
-        loop {
-            TimeoutFuture::new(5 * 60 * 1000).await;
+        // Counter for periodic recovery (every 6th iteration when idle = ~6 min)
+        let mut recovery_counter = 0u32;
 
+        loop {
+            // Adaptive interval: 30s when pending events exist, 60s otherwise
+            let pending_count = PENDING_NOSTR_EVENTS.read().len();
+            let interval_ms = if pending_count > 0 {
+                30_000  // 30 seconds when there's work
+            } else {
+                60_000  // 60 seconds when idle (faster pickup of newly queued events)
+            };
+
+            TimeoutFuture::new(interval_ms).await;
+
+            // Process pending Nostr events
             if let Err(e) = process_pending_events().await {
                 log::error!("Error processing pending events: {}", e);
+            }
+
+            // Re-read count AFTER sleep and processing for maintenance decision
+            // (original pending_count is stale after 30-60s sleep)
+            let fresh_pending_count = PENDING_NOSTR_EVENTS.read().len();
+
+            // Every 6th iteration when idle (roughly every 6 min), run maintenance tasks
+            recovery_counter += 1;
+            if recovery_counter >= 6 && fresh_pending_count == 0 {
+                recovery_counter = 0;
+
+                // Clean expired pending secrets (proofs pending at mint for >1 hour)
+                super::signals::cleanup_expired_pending_secrets().await;
+
+                // Reconcile any stuck pending event IDs (tokens with pending_* that never got real IDs)
+                match reconcile_pending_event_ids().await {
+                    Ok(count) if count > 0 => {
+                        log::info!("Reconciled {} pending event IDs", count);
+                    }
+                    Err(e) => {
+                        log::debug!("Pending event ID reconciliation error: {}", e);
+                    }
+                    _ => {}
+                }
+
+                // Run proof recovery in a separate task to avoid blocking the event loop
+                // Uses futures::select! for WASM-compatible timeout
+                spawn(async {
+                    use futures::FutureExt;
+
+                    let recovery_future = super::proof_recovery::run_full_recovery().fuse();
+                    let timeout_future = TimeoutFuture::new(180_000).fuse(); // 3 min timeout
+
+                    futures::pin_mut!(recovery_future, timeout_future);
+
+                    futures::select! {
+                        result = recovery_future => {
+                            if result.recovered_count > 0 || result.spent_count > 0 {
+                                log::info!(
+                                    "Periodic recovery: {} recovered, {} spent",
+                                    result.recovered_count,
+                                    result.spent_count
+                                );
+                            }
+                            if !result.errors.is_empty() {
+                                for err in result.errors {
+                                    log::debug!("Periodic recovery error: {}", err);
+                                }
+                            }
+                        }
+                        _ = timeout_future => {
+                            log::warn!("Periodic recovery timed out after 3 minutes");
+                        }
+                    }
+                });
             }
         }
     });
 
-    log::info!("Started pending events background processor (5 minute interval)");
+    log::info!("Started pending events background processor (adaptive interval + periodic recovery)");
 }
 
 /// No-op on non-WASM targets (gloo_timers is WASM-only)

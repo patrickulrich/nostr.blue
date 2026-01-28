@@ -150,3 +150,62 @@ pub async fn ensure_video_relay(client: &Client) -> bool {
 pub async fn ensure_gif_relay(client: &Client) -> bool {
     ensure_connected(client, urls::GIF).await
 }
+
+/// Ensure DM inbox relays are connected (session-persistent).
+/// Adds user's DM relays (kind 10050) or defaults to the pool and connects them.
+/// Returns the list of relay URLs that successfully connected.
+pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
+    let dm_relays = super::nip65::get_dm_relays();
+    let mut connected = Vec::new();
+
+    for relay_url in &dm_relays {
+        if ensure_connected(client, relay_url).await {
+            connected.push(relay_url.clone());
+        } else {
+            log::warn!("Could not connect to DM relay: {}", relay_url);
+        }
+    }
+
+    if connected.is_empty() {
+        log::error!("No DM relays could be connected!");
+    } else {
+        log::info!("DM relays connected: {}/{} - {:?}", connected.len(), dm_relays.len(), connected);
+    }
+
+    connected
+}
+
+/// Ensure search relays are connected (session-persistent).
+/// Adds user's search relays (kind 10007) or defaults to the pool and connects them.
+/// Returns the list of relay URLs that successfully connected.
+pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
+    use dioxus::prelude::ReadableExt;
+
+    // Get search relays from signal, fall back to defaults if empty
+    let search_relays = {
+        let relays = super::nip65::SEARCH_RELAYS.peek().clone();
+        if relays.is_empty() {
+            super::nip65::default_search_relays()
+        } else {
+            relays
+        }
+    };
+
+    let mut connected = Vec::new();
+
+    for relay_url in &search_relays {
+        if ensure_connected(client, relay_url).await {
+            connected.push(relay_url.clone());
+        } else {
+            log::warn!("Could not connect to search relay: {}", relay_url);
+        }
+    }
+
+    if connected.is_empty() {
+        log::error!("No search relays could be connected!");
+    } else {
+        log::info!("Search relays connected: {}/{} - {:?}", connected.len(), search_relays.len(), connected);
+    }
+
+    connected
+}

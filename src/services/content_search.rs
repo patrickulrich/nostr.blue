@@ -3,13 +3,7 @@ use dioxus::prelude::ReadableExt;
 use std::time::Duration;
 
 use crate::stores::nostr_client::{NOSTR_CLIENT, ensure_relays_ready};
-use crate::stores::relay;
-
-/// Get search relay URLs, returns empty vec if none configured (fallback to all relays)
-fn get_search_relay_urls() -> Vec<String> {
-    // Use peek() for non-component context - safe in async/service code
-    relay::SEARCH_RELAYS.peek().clone()
-}
+use super::search_relays::get_connected_search_relays;
 
 /// Result type for content search
 #[derive(Clone, Debug)]
@@ -57,7 +51,8 @@ pub async fn search_text_notes(
         .search(query)
         .limit(limit);
 
-    let search_urls = get_search_relay_urls();
+    // Ensure search relays are in pool and connected before fetching
+    let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         // Fallback to all connected relays
         client.fetch_events(filter, Duration::from_secs(5)).await
@@ -124,7 +119,8 @@ pub async fn search_articles(
         .search(query)
         .limit(limit);
 
-    let search_urls = get_search_relay_urls();
+    // Ensure search relays are in pool and connected before fetching
+    let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         // Fallback to all connected relays
         client.fetch_events(filter, Duration::from_secs(5)).await
@@ -191,7 +187,8 @@ pub async fn search_photos(
         .search(query)
         .limit(limit);
 
-    let search_urls = get_search_relay_urls();
+    // Ensure search relays are in pool and connected before fetching
+    let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         // Fallback to all connected relays
         client.fetch_events(filter, Duration::from_secs(5)).await
@@ -258,7 +255,8 @@ pub async fn search_videos(
         .search(query)
         .limit(limit);
 
-    let search_urls = get_search_relay_urls();
+    // Ensure search relays are in pool and connected before fetching
+    let search_urls = get_connected_search_relays(&client).await;
     let fetch_result = if search_urls.is_empty() {
         // Fallback to all connected relays
         client.fetch_events(filter, Duration::from_secs(5)).await

@@ -43,7 +43,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event_id_counts = event_id.clone();
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
-    let author_pubkey_repost = author_pubkey_str.clone();
 
     // Author profile metadata - uses shared hook for database-first, network-fallback pattern
     let author_metadata = use_author_metadata(author_pubkey_str.clone());
@@ -601,12 +600,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     }
 
                                     let event_id_clone = event_id_repost.clone();
-                                    let author_pubkey_clone = author_pubkey_repost.clone();
 
                                     is_reposting.set(true);
 
                                     spawn(async move {
-                                        match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                                        match publish_repost(event_id_clone, None).await {
                                             Ok(repost_id) => {
                                                 log::info!("Reposted event, repost ID: {}", repost_id);
                                                 is_reposted.set(true);

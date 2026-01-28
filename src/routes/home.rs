@@ -7,10 +7,11 @@ use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
 use crate::utils::{DataState, FeedItem, extract_reposted_event, get_item_count};
 use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::get_all_list_members;
-use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, sync_interaction_counts};
+use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle, fetch_interaction_counts_batch, sync_interaction_counts, stream_interaction_counts};
 use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
-use std::collections::HashMap;
 
 #[derive(Clone, PartialEq, Debug)]
 enum FeedType {
@@ -52,6 +53,10 @@ pub fn Home(list: String) -> Element {
     // Subsequent refreshes: use negentropy sync for incremental updates
     let mut interactions_loaded = use_signal(|| false);
 
+    // Cached mute/block lists for N+1 optimization (fetch once, pass to all NoteCards)
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+
     // Buffer for real-time events (Twitter/X pattern: "Show N new posts")
     let mut pending_posts = use_signal(Vec::<FeedItem>::new);
 
@@ -63,6 +68,9 @@ pub fn Home(list: String) -> Element {
 
     // Track active subscription IDs for cleanup
     let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
+
+    // Track interaction stream handle for cleanup (Dioxus pattern: store full handle for cancellation)
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
 
     // Request ID for preventing stale results when feed type changes rapidly
     let mut request_id = use_signal(|| 0u32);
@@ -106,6 +114,87 @@ pub fn Home(list: String) -> Element {
                 log::warn!("Deep link: List with identifier '{}' not found", list_param);
             }
         }
+    });
+
+    // Add signal for pubkey tracking (Dioxus pattern from note.rs)
+    let mut last_mute_pubkey: Signal<Option<String>> = use_signal(|| None);
+    // Track last seen invalidation token to detect mute/block changes (Dioxus pattern)
+    let mut last_invalidate_token: Signal<u32> = use_signal(|| 0);
+
+    // Fetch mute/block lists once when authenticated (N+1 optimization)
+    // Single fetch for both muted posts and blocked users
+    use_effect(move || {
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let current_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
+
+        // Dioxus pattern: read to subscribe, then compare with peek()
+        // Effect re-runs when MUTE_BLOCK_INVALIDATE is incremented
+        let current_token = *nostr_client::MUTE_BLOCK_INVALIDATE.read();
+
+        // Check if invalidation occurred BEFORE the early return
+        // Use peek() to avoid creating extra dependency
+        if current_token != *last_invalidate_token.peek() {
+            log::debug!("Mute/block invalidation detected in home feed, clearing caches");
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            last_invalidate_token.set(current_token);
+            // Don't return - let fetch logic run below
+        }
+
+        // Clear caches on logout to prevent stale data on re-login
+        if !is_authenticated {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            last_mute_pubkey.set(None);
+            return;
+        }
+
+        // note.rs pattern: detect account switch and clear stale caches
+        if let (Some(ref last), Some(ref current)) = (last_mute_pubkey.peek().as_ref(), current_pubkey.as_ref()) {
+            if last != current {
+                log::debug!("Account switch detected in home feed, clearing mute/block cache");
+                cached_muted_posts.set(None);
+                cached_blocked_users.set(None);
+            }
+        }
+        last_mute_pubkey.set(current_pubkey.clone());
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded (cache cleared by invalidation or pubkey change)
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        // Capture pubkey before spawn to guard against account switch during fetch
+        let auth_pubkey_snapshot = current_pubkey.clone();
+        spawn(async move {
+            // Single fetch for both - avoids double fetch_mute_list() call
+            match nostr_client::get_mute_list_data().await {
+                Ok(data) => {
+                    // Guard: only write if same user still logged in
+                    let current_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
+                    if current_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                        cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                        cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                    }
+                }
+                Err(e) => {
+                    // nostr-sdk pattern: structured logging with truncated IDs
+                    let snapshot_short = auth_pubkey_snapshot.as_ref()
+                        .map(|s| &s[..8.min(s.len())]);
+                    let current_short = auth_store::AUTH_STATE.peek().pubkey.as_ref()
+                        .map(|s| s[..8.min(s.len())].to_string());
+                    log::error!(
+                        "Failed to fetch mute list: {} (snapshot={:?}, current={:?})",
+                        e, snapshot_short, current_short
+                    );
+                }
+            }
+        });
     });
 
     // Load feed on mount and when refresh is triggered or feed type changes
@@ -156,9 +245,9 @@ pub fn Home(list: String) -> Element {
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
 
-        // KEY: Only show loading skeleton if no data exists
-        // This keeps existing posts visible during refresh
-        if !has_data {
+        // Clear feed when switching types; keep visible during same-feed refresh
+        // This ensures old feed data doesn't show while loading a different feed
+        if !has_data || feed_type_changed {
             feed_state.set(DataState::Loading);
         }
         oldest_timestamp.set(None);
@@ -176,6 +265,15 @@ pub fn Home(list: String) -> Element {
             });
         }
         subscription_ids.write().clear();
+
+        // Cleanup interaction stream handle with cancellation
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
+            spawn(async move {
+                log::info!("Cleaning up interaction stream due to refresh");
+                handle.unsubscribe().await;
+            });
+        }
+        interaction_stream_handle.set(None);
 
         // Clear pending posts buffer on refresh
         pending_posts.set(Vec::new());
@@ -283,7 +381,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let req_id = request_id;
@@ -291,15 +389,41 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        match stream_interaction_counts(
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
+                                                interaction_stream_handle.set(Some(handle));
+                                            }
+                                            Err(e) => {
+                                                // nostr-sdk pattern: structured logging with context
+                                                log::error!(
+                                                    "Failed to start interaction stream: {} (event_count={}, cached_count={})",
+                                                    e,
+                                                    event_ids.len(),
+                                                    interaction_counts.peek().len()
+                                                );
+                                            }
+                                        }
                                     }
                                 });
                             }
@@ -377,7 +501,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let req_id = request_id;
@@ -385,15 +509,41 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        match stream_interaction_counts(
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
+                                                interaction_stream_handle.set(Some(handle));
+                                            }
+                                            Err(e) => {
+                                                // nostr-sdk pattern: structured logging with context
+                                                log::error!(
+                                                    "Failed to start interaction stream: {} (event_count={}, cached_count={})",
+                                                    e,
+                                                    event_ids.len(),
+                                                    interaction_counts.peek().len()
+                                                );
+                                            }
+                                        }
                                     }
                                 });
                             }
@@ -459,7 +609,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let is_first_load = !*interactions_loaded.peek();
@@ -468,15 +618,41 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        match stream_interaction_counts(
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
+                                                interaction_stream_handle.set(Some(handle));
+                                            }
+                                            Err(e) => {
+                                                // nostr-sdk pattern: structured logging with context
+                                                log::error!(
+                                                    "Failed to start interaction stream: {} (event_count={}, cached_count={})",
+                                                    e,
+                                                    event_ids.len(),
+                                                    interaction_counts.peek().len()
+                                                );
+                                            }
+                                        }
                                     }
                                 });
                             }
@@ -548,7 +724,7 @@ pub fn Home(list: String) -> Element {
                                 });
                             }
 
-                            // Batch fetch interaction counts for all events
+                            // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
                                 let req_id = request_id;
@@ -556,15 +732,41 @@ pub fn Home(list: String) -> Element {
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
-                                        sync_interaction_counts(event_ids, Duration::from_secs(5)).await
+                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
                                     };
                                     // Re-check staleness after await
                                     if *req_id.peek() != curr_id { return; }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
+
+                                        // Start streaming interactions after batch fetch completes
+                                        match stream_interaction_counts(
+                                            event_ids.clone(),
+                                            interaction_counts,
+                                            Some(600), // 10 minute idle timeout
+                                        ).await {
+                                            Ok(handle) => {
+                                                // Re-check staleness AFTER await - if stale, cleanup and discard
+                                                if *req_id.peek() != curr_id {
+                                                    log::debug!("Discarding stale interaction stream handle");
+                                                    handle.unsubscribe().await;
+                                                    return;
+                                                }
+                                                interaction_stream_handle.set(Some(handle));
+                                            }
+                                            Err(e) => {
+                                                // nostr-sdk pattern: structured logging with context
+                                                log::error!(
+                                                    "Failed to start interaction stream: {} (event_count={}, cached_count={})",
+                                                    e,
+                                                    event_ids.len(),
+                                                    interaction_counts.peek().len()
+                                                );
+                                            }
+                                        }
                                     }
                                 });
                             }
@@ -607,6 +809,15 @@ pub fn Home(list: String) -> Element {
         }
         subscription_ids.write().clear();
         realtime_started.set(false);
+
+        // Cleanup interaction stream handle with cancellation
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
+            spawn(async move {
+                log::info!("Cleaning up interaction stream due to feed type change");
+                handle.unsubscribe().await;
+            });
+        }
+        interaction_stream_handle.set(None);
     });
 
     // Real-time subscription for live feed updates (starts AFTER initial load)
@@ -1066,7 +1277,12 @@ pub fn Home(list: String) -> Element {
                                             {
                                                 let list_for_select = list.clone();
                                                 let list_for_check = list.clone();
-                                                let item_count = get_item_count(&list.tags);
+                                                // Use total_member_count if available, otherwise fallback to public count
+                                                let display_count = match list.total_member_count {
+                                                    Some(count) => count.to_string(),
+                                                    None if list.has_private_content => format!("{}+", get_item_count(&list.tags)),
+                                                    None => get_item_count(&list.tags).to_string(),
+                                                };
                                                 rsx! {
                                                     button {
                                                         key: "{list.id}",
@@ -1089,7 +1305,7 @@ pub fn Home(list: String) -> Element {
                                                             }
                                                             div {
                                                                 class: "text-xs text-muted-foreground",
-                                                                "{item_count} members"
+                                                                "{display_count} members"
                                                             }
                                                         }
                                                         if matches!(feed_type.read().clone(), FeedType::PeopleList(ref l) if l.id == list_for_check.id) {
@@ -1250,7 +1466,9 @@ pub fn Home(list: String) -> Element {
                                             event: event.clone(),
                                             repost_info: repost_info,
                                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                                            collapsible: true
+                                            collapsible: true,
+                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                            cached_blocked_users: cached_blocked_users.read().clone()
                                         }
                                     }
                                 }
@@ -2432,7 +2650,7 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
     })?;
 
     if members.is_empty() {
-        log::info!("People list '{}' has no members", list.name);
+        log::warn!("People list '{}' has no members - check if private decryption failed", list.name);
         return Ok(Vec::new());
     }
 
@@ -2449,11 +2667,11 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    // Fetch events using gossip/outbox routing for automatic relay selection based on authors
-    // This routes queries to each list member's preferred write relays for better discovery
-    match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
+    // Use fast fetch (bypasses gossip) for list feeds - same as Following feed
+    // This queries all connected relays directly, avoiding 30+ second NIP-65 timeouts
+    match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            log::info!("Loaded {} events from people list '{}' via outbox", events.len(), list.name);
+            log::info!("Loaded {} events from people list '{}'", events.len(), list.name);
 
             // Process events into FeedItems
             let mut feed_items: Vec<FeedItem> = Vec::new();

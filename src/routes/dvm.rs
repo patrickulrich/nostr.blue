@@ -3,14 +3,17 @@
 //! Displays a feed of notes recommended by a Data Vending Machine (DVM).
 //! Users can select which DVM provider to use via a gear icon.
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+
+use crate::hooks::use_mute_block_cache;
 use crate::stores::{nostr_client, dvm_store};
 use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
 use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
-use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch};
-use nostr_sdk::PublicKey;
-use std::collections::HashMap;
-use std::time::Duration;
+use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, stream_interaction_counts, InteractionStreamHandle};
 
 /// Main DVM page component
 #[component]
@@ -22,6 +25,12 @@ pub fn DVM() -> Element {
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
     let mut fetch_in_progress = use_signal(|| false);
+
+    // Track interaction stream handle for cleanup (Dioxus pattern: store full handle for task cancellation)
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
+
+    // Cached mute/block lists using centralized hook (N+1 optimization)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
@@ -37,6 +46,15 @@ pub fn DVM() -> Element {
         if !client_initialized {
             return;
         }
+
+        // Cleanup interaction stream handle on refresh (Dioxus pattern: cancel task BEFORE starting new)
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
+            spawn(async move {
+                log::info!("Cleaning up interaction stream due to refresh");
+                handle.unsubscribe().await;
+            });
+        }
+        interaction_stream_handle.set(None);
 
         // Reset interaction counts on refresh
         interactions_loaded.set(false);
@@ -76,10 +94,20 @@ pub fn DVM() -> Element {
 
         spawn(async move {
             let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
-            match fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+            match fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await {
                 Ok(counts) => {
                     interaction_counts.set(counts);
                     interactions_loaded.set(true);
+
+                    // Start streaming interactions after batch fetch completes
+                    // Store full handle for proper task cancellation (Dioxus pattern)
+                    if let Ok(handle) = stream_interaction_counts(
+                        event_ids,
+                        interaction_counts,
+                        Some(600), // 10 minute idle timeout
+                    ).await {
+                        interaction_stream_handle.set(Some(handle));
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to fetch interaction counts: {}", e);
@@ -225,7 +253,9 @@ pub fn DVM() -> Element {
                             key: "{event.id.to_hex()}",
                             event: event.clone(),
                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
-                            collapsible: true
+                            collapsible: true,
+                            cached_muted_posts: cached_muted_posts.read().clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone()
                         }
                     }
                 }

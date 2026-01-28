@@ -1,10 +1,14 @@
+use std::collections::HashSet;
+use std::rc::Rc;
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
+
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::components::{NoteCard, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
-use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -59,6 +63,62 @@ pub fn Notifications() -> Element {
     let mut active_filter = use_signal(|| NotificationFilter::All);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+
+    // Cached mute/block lists for N+1 optimization
+    let mut cached_muted_posts: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_blocked_users: Signal<Option<Rc<HashSet<String>>>> = use_signal(|| None);
+    let mut cached_cache_owner: Signal<Option<String>> = use_signal(|| None);
+
+    // Fetch mute/block lists once when authenticated (N+1 optimization)
+    // Single fetch for both muted posts and blocked users
+    use_effect(move || {
+        let current_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+
+        // Clear caches on logout to prevent stale data
+        if current_pubkey.is_none() {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            cached_cache_owner.set(None);
+            return;
+        }
+
+        // Invalidate cache if account changed (pubkey-scoped cache pattern)
+        if cached_cache_owner.peek().as_ref() != current_pubkey.as_ref() {
+            cached_muted_posts.set(None);
+            cached_blocked_users.set(None);
+            cached_cache_owner.set(None);
+        }
+
+        if !client_initialized {
+            return;
+        }
+
+        // Only fetch if not already loaded
+        if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
+            return;
+        }
+
+        // Capture pubkey snapshot before spawn
+        let auth_pubkey_snapshot = current_pubkey.clone();
+        spawn(async move {
+            match nostr_client::get_mute_list_data().await {
+                Ok(data) => {
+                    // Guard: only write if same user still logged in
+                    let live_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
+                    if live_pubkey == auth_pubkey_snapshot && auth_pubkey_snapshot.is_some() {
+                        cached_muted_posts.set(Some(Rc::new(data.muted_posts)));
+                        cached_blocked_users.set(Some(Rc::new(data.blocked_users)));
+                        cached_cache_owner.set(auth_pubkey_snapshot);
+                    }
+                }
+                Err(e) => {
+                    // On error: caches stay None, effect will retry on next trigger
+                    log::warn!("Mute list fetch failed, will retry: {}", e);
+                }
+            }
+        });
+    });
 
     // Load initial notifications (limit: 100 for historical data)
     use_effect(move || {
@@ -322,7 +382,7 @@ pub fn Notifications() -> Element {
                         div {
                             class: "divide-y divide-border",
                             for notification in filtered_notifications.iter() {
-                                {render_notification(notification)}
+                                {render_notification(notification, cached_muted_posts.read().clone(), cached_blocked_users.read().clone())}
                             }
 
                             // Infinite scroll sentinel
@@ -351,7 +411,11 @@ pub fn Notifications() -> Element {
     }
 }
 
-fn render_notification(notification: &NotificationType) -> Element {
+fn render_notification(
+    notification: &NotificationType,
+    cached_muted_posts: Option<Rc<HashSet<String>>>,
+    cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     match notification {
         NotificationType::Mention(event) | NotificationType::Reply(event) => {
             rsx! {
@@ -370,7 +434,9 @@ fn render_notification(notification: &NotificationType) -> Element {
                     }
                     NoteCard {
                         event: event.clone(),
-                        collapsible: true
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             }
@@ -379,7 +445,9 @@ fn render_notification(notification: &NotificationType) -> Element {
             rsx! {
                 ReactionNotification {
                     key: "{event.id}",
-                    event: event.clone()
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone()
                 }
             }
         }
@@ -387,7 +455,9 @@ fn render_notification(notification: &NotificationType) -> Element {
             rsx! {
                 RepostNotification {
                     key: "{event.id}",
-                    event: event.clone()
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone()
                 }
             }
         }
@@ -395,7 +465,9 @@ fn render_notification(notification: &NotificationType) -> Element {
             rsx! {
                 ZapNotification {
                     key: "{event.id}",
-                    event: event.clone()
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone()
                 }
             }
         }
@@ -403,7 +475,11 @@ fn render_notification(notification: &NotificationType) -> Element {
 }
 
 #[component]
-fn ReactionNotification(event: NostrEvent) -> Element {
+fn ReactionNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reacted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
@@ -545,7 +621,9 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                     class: "ml-13 mt-2",
                     NoteCard {
                         event: post.clone(),
-                        collapsible: true
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             } else if *loading.read() {
@@ -559,7 +637,11 @@ fn ReactionNotification(event: NostrEvent) -> Element {
 }
 
 #[component]
-fn RepostNotification(event: NostrEvent) -> Element {
+fn RepostNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reposted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
@@ -666,7 +748,9 @@ fn RepostNotification(event: NostrEvent) -> Element {
                     class: "ml-13 mt-2",
                     NoteCard {
                         event: post.clone(),
-                        collapsible: true
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             } else if *loading.read() {
@@ -680,7 +764,11 @@ fn RepostNotification(event: NostrEvent) -> Element {
 }
 
 #[component]
-fn ZapNotification(event: NostrEvent) -> Element {
+fn ZapNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
@@ -797,7 +885,10 @@ fn ZapNotification(event: NostrEvent) -> Element {
                 div {
                     class: "ml-13 mt-2",
                     NoteCard {
-                        event: post.clone()
+                        event: post.clone(),
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             } else if *loading.read() {
@@ -918,6 +1009,10 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
 async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>, String> {
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
+
+    // Ensure at least one relay is connected before fetching
+    // This is critical - CLIENT_INITIALIZED may be true but relays not yet connected
+    nostr_client::ensure_relays_ready(&client).await;
 
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;
