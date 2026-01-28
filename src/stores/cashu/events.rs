@@ -795,20 +795,39 @@ pub async fn process_pending_events() -> Result<usize, String> {
                         update_token_event_id(pending_id, &nostr_event_id);
                     } else if let Some(ref mint_url) = event.mint_url {
                         // Fallback: try to find token by mint_url when pending_token_id is missing
-                        // This handles edge cases where the pending_token_id wasn't set
-                        log::warn!("TokenEvent missing pending_token_id, attempting mint_url fallback for {}", mint_url);
-                        // Find tokens with pending_ event IDs that match this mint
+                        // CDK pattern: avoid ambiguous matching - only update if exactly one candidate
+                        log::warn!("TokenEvent missing pending_token_id, attempting proof-based fallback for {}", mint_url);
                         let normalized_mint = super::utils::normalize_mint_url(mint_url);
-                        let store = WALLET_TOKENS.read();
-                        let data = store.data();
-                        let tokens = data.read();
-                        if let Some(token) = tokens.iter().find(|t| {
-                            t.event_id.starts_with("pending_") &&
-                            super::utils::mint_matches(&t.mint, &normalized_mint)
-                        }) {
-                            let old_id = token.event_id.clone();
-                            // Release locks before calling update_token_event_id (use let _ to suppress drop warning)
-                            let _ = (tokens, data, store);
+
+                        // Collect candidates and check for ambiguity
+                        let matched_token = {
+                            let store = WALLET_TOKENS.read();
+                            let data = store.data();
+                            let tokens = data.read();
+
+                            // Collect candidates at this mint with pending event_ids
+                            let candidates: Vec<_> = tokens.iter()
+                                .filter(|t| t.event_id.starts_with("pending_")
+                                    && super::utils::mint_matches(&t.mint, &normalized_mint))
+                                .collect();
+
+                            if candidates.len() == 1 {
+                                // Unambiguous: only one pending token at this mint
+                                Some(candidates[0].event_id.clone())
+                            } else if candidates.len() > 1 {
+                                // Ambiguous: log warning, skip update to avoid wrong token
+                                log::warn!(
+                                    "Multiple pending tokens ({}) at mint {}, cannot disambiguate without proof matching",
+                                    candidates.len(),
+                                    mint_url
+                                );
+                                None
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(old_id) = matched_token {
                             log::info!("Found pending token by mint fallback: {} -> {}", old_id, nostr_event_id);
                             update_token_event_id(&old_id, &nostr_event_id);
                         }

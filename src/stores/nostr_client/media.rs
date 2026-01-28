@@ -15,6 +15,7 @@ use super::types::{PublishResult, detect_mime_type};
 
 /// Extract root event information from a reply event (NIP-10/NIP-22)
 /// Returns (root_event_id, root_pubkey, root_relay_url)
+/// Note: Kind is not available from standard e-tags, so caller should use parent's kind as fallback
 fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<PublicKey>, Option<RelayUrl>) {
     // Try modern NIP-10/NIP-22 marker-based tag
     if let Some(result) = event.tags.iter().find_map(|tag| {
@@ -480,6 +481,7 @@ pub async fn publish_voice_message_reply_tracked(
 
     // Determine root and parent for NIP-22 structure
     // Extract root event ID, author pubkey, and relay URL using helper
+    // Note: Kind is not available from e-tags, so we use parent's kind as fallback
     let (root_event_id, root_pubkey, root_relay_url) = extract_root_from_event(&reply_to);
 
     let parent_id = reply_to.id.to_hex();
@@ -503,10 +505,11 @@ pub async fn publish_voice_message_reply_tracked(
             let event_id = EventId::parse(&root_id)
                 .map_err(|e| format!("Failed to parse root event ID: {}", e))?;
             // Include root author and relay URL for proper NIP-22/NIP-10 compliance
+            // Use parent's kind as fallback (kind not available from standard e-tags)
             use std::borrow::Cow;
             Some(CommentTarget::event(
                 event_id,
-                nostr::Kind::VoiceMessage,
+                reply_to.kind,  // Use parent's kind as best approximation for root
                 root_pubkey,  // Root author's public key
                 root_relay_url.as_ref().map(Cow::Borrowed)  // Relay hint/URL as Cow
             ))
@@ -549,6 +552,17 @@ pub async fn publish_voice_message_reply_tracked(
 
     // Add p tag for parent author
     tags.push(Tag::public_key(parent_pubkey));
+
+    // NIP-22: Add p tag for root author if different from parent and not already present
+    if let Some(root_pk) = root_pubkey {
+        if root_pk != parent_pubkey {
+            // Check if root_pk is already in parent's p tags
+            let already_tagged = reply_to.tags.public_keys().any(|pk| pk == &root_pk);
+            if !already_tagged {
+                tags.push(Tag::public_key(root_pk));
+            }
+        }
+    }
 
     // Add p tags for anyone else mentioned in the parent (using SDK's public_keys())
     for public_key in reply_to.tags.public_keys() {

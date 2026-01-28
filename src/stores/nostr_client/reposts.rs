@@ -112,7 +112,8 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
 
     log::info!("Deleting repost: {}", repost_event_id);
 
-    let event_id = nostr::EventId::from_hex(&repost_event_id)
+    // nostr-sdk pattern: EventId::parse() handles all formats (hex, note1, nevent1, etc.)
+    let event_id = nostr::EventId::parse(&repost_event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Create deletion event (kind 5) using NIP-9

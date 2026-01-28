@@ -11,7 +11,8 @@ use std::rc::Rc;
 const FETCH_ERROR_COOLDOWN_SECS: u64 = 30;
 
 fn now_secs() -> u64 {
-    chrono::Utc::now().timestamp() as u64
+    // Defensive conversion: negative timestamps (pre-1970) become 0
+    chrono::Utc::now().timestamp().try_into().unwrap_or(0)
 }
 
 /// Cache signal type for muted posts / blocked users

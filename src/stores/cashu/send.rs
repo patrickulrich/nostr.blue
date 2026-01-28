@@ -167,14 +167,20 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
     // This uses a pending event ID that we'll update after Nostr publish
     // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
-    update_local_state_after_send(
+
+    // CDK pattern: explicit cleanup on all paths (always remove in-flight, even on state update failure)
+    if let Err(e) = update_local_state_after_send(
         &mint_url,
         &keep_proofs,
         &event_ids_to_delete,
         &Some(pending_event_id.clone()),
-    )?;
+    ) {
+        // Always remove in-flight tracking, even on state update failure
+        super::signals::remove_in_flight_send_request(&tx_id);
+        return Err(e);
+    }
 
-    // CDK pattern: Remove in-flight tracking AFTER state update (matches melt_saga finalize)
+    // Success path: also remove in-flight tracking
     super::signals::remove_in_flight_send_request(&tx_id);
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)
@@ -342,14 +348,20 @@ pub async fn send_tokens_p2pk(
     // This uses a pending event ID that we'll update after Nostr publish
     // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
-    update_local_state_after_send(
+
+    // CDK pattern: explicit cleanup on all paths (always remove in-flight, even on state update failure)
+    if let Err(e) = update_local_state_after_send(
         &mint_url,
         &keep_proofs,
         &event_ids_to_delete,
         &Some(pending_event_id.clone()),
-    )?;
+    ) {
+        // Always remove in-flight tracking, even on state update failure
+        super::signals::remove_in_flight_send_request(&tx_id);
+        return Err(e);
+    }
 
-    // CDK pattern: Remove in-flight tracking AFTER state update (matches melt_saga finalize)
+    // Success path: also remove in-flight tracking
     super::signals::remove_in_flight_send_request(&tx_id);
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)

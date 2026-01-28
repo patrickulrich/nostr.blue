@@ -47,6 +47,15 @@ pub async fn publish_metadata_tracked(metadata: Metadata) -> std::result::Result
         }
     }
 
+    // nostr-sdk pattern: Total failure when no relays succeeded (pool/mod.rs)
+    // Partial success is OK (some relays worked), but zero success is an error
+    if result.success_count() == 0 {
+        return Err(format!(
+            "Failed to publish metadata: no relays accepted the event (attempted {})",
+            result.total_attempted()
+        ));
+    }
+
     Ok(result)
 }
 

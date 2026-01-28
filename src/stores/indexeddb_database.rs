@@ -185,19 +185,6 @@ mod native_stub {
         ) -> Result<Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>, database::Error> {
             Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
         }
-
-        pub async fn save_nutzap_auto_redeem(
-            &self,
-            _enabled: bool,
-        ) -> Result<(), database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
-        }
-
-        pub async fn load_nutzap_auto_redeem(
-            &self,
-        ) -> Result<Option<bool>, database::Error> {
-            Err(Self::make_error("IndexedDB is only available on wasm32 targets".to_string()))
-        }
     }
 
     #[async_trait::async_trait]
@@ -905,21 +892,6 @@ impl IndexedDbDatabase {
         &self,
     ) -> Result<Option<Vec<crate::stores::cashu::nutzap::PendingNutzap>>, database::Error> {
         self.get_value(STORE_PENDING_NUTZAPS, "current").await
-    }
-
-    /// Save nutzap auto-redeem setting
-    pub async fn save_nutzap_auto_redeem(
-        &self,
-        enabled: bool,
-    ) -> Result<(), database::Error> {
-        self.put_value(STORE_NUTZAP_SETTINGS, "auto_redeem", &enabled).await
-    }
-
-    /// Load nutzap auto-redeem setting
-    pub async fn load_nutzap_auto_redeem(
-        &self,
-    ) -> Result<Option<bool>, database::Error> {
-        self.get_value(STORE_NUTZAP_SETTINGS, "auto_redeem").await
     }
 }
 

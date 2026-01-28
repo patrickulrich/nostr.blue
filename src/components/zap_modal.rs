@@ -291,44 +291,50 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
                     // Check if nutzap is possible using per-mint spendable balance
                     if let Some(mint) = nutzap_mint.read().as_ref() {
-                        // Normalize mint URL for consistent balance lookups
-                        let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
-                        // CDK pattern: use unit-aware spendable balance (Issue #1)
-                        // Filter by mint_url + unit to support multi-unit mints
-                        let balance = cashu::get_mint_unit_spendable_balance(&normalized_mint_url, &mint.unit);
-                        if balance >= amount {
-                            log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
-                            // Get event_id as hex string for nutzap
-                            let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
-                            // Use already-captured message (avoid redundant signal read)
-                            let nutzap_comment_opt = if message.is_empty() { None } else { Some(message.clone()) };
-                            match cashu::send_nutzap(
-                                &recipient_pubkey_str,
-                                amount,
-                                nutzap_event_id.as_deref(),
-                                None, // target_kind
-                                nutzap_comment_opt.as_deref(),
-                            ).await {
-                                Ok(result) => {
-                                    log::info!("Nutzap successful: {} sats (fee: {} sats)", result.amount, result.fee);
-                                    loading.set(false);
-                                    toast_api.success(
-                                        "Nutzap sent!".to_string(),
-                                        ToastOptions::new()
-                                            .description(format!("Sent {} sats via ecash (fee: {} sats)", result.amount, result.fee))
-                                            .duration(Duration::from_secs(3))
-                                            .permanent(false),
-                                    );
-                                    props.on_close.call(());
-                                    return;
-                                }
-                                Err(e) => {
-                                    log::warn!("Nutzap failed, falling back to Lightning: {}", e);
-                                    // Continue to Lightning fallback
-                                }
-                            }
+                        // Dioxus pattern: Early validation check before main logic
+                        if mint.unit != "sat" {
+                            log::info!("Mint {} uses unit '{}', not sats - skipping nutzap", mint.url, mint.unit);
+                            // Fall through to Lightning
                         } else {
-                            log::info!("Insufficient Cashu balance ({} < {}), using Lightning", balance, amount);
+                            // Normalize mint URL for consistent balance lookups
+                            let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
+                            // CDK pattern: use unit-aware spendable balance (Issue #1)
+                            // Filter by mint_url + unit to support multi-unit mints
+                            let balance = cashu::get_mint_unit_spendable_balance(&normalized_mint_url, &mint.unit);
+                            if balance >= amount {
+                                log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
+                                // Get event_id as hex string for nutzap
+                                let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
+                                // Use already-captured message (avoid redundant signal read)
+                                let nutzap_comment_opt = if message.is_empty() { None } else { Some(message.clone()) };
+                                match cashu::send_nutzap(
+                                    &recipient_pubkey_str,
+                                    amount,
+                                    nutzap_event_id.as_deref(),
+                                    None, // target_kind
+                                    nutzap_comment_opt.as_deref(),
+                                ).await {
+                                    Ok(result) => {
+                                        log::info!("Nutzap successful: {} sats (fee: {} sats)", result.amount, result.fee);
+                                        loading.set(false);
+                                        toast_api.success(
+                                            "Nutzap sent!".to_string(),
+                                            ToastOptions::new()
+                                                .description(format!("Sent {} sats via ecash (fee: {} sats)", result.amount, result.fee))
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                        props.on_close.call(());
+                                        return;
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Nutzap failed, falling back to Lightning: {}", e);
+                                        // Continue to Lightning fallback
+                                    }
+                                }
+                            } else {
+                                log::info!("Insufficient Cashu balance ({} < {}), using Lightning", balance, amount);
+                            }
                         }
                     } else {
                         log::info!("Recipient doesn't support nutzaps, using Lightning");
@@ -633,16 +639,28 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 }
                             } else if let Some(mint) = nutzap_mint.read().as_ref() {
                                 {
-                                    // Show per-mint unit-aware spendable balance (normalize URL for consistent lookup)
-                                    // Use "sat" unit since nutzap payments use sats
                                     let normalized_url = cashu::normalize_mint_url(&mint.url);
-                                    let balance = cashu::get_mint_unit_spendable_balance(&normalized_url, "sat");
-                                    rsx! {
-                                        div {
-                                            class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
-                                            p {
-                                                class: "text-sm text-green-700 dark:text-green-300",
-                                                "✓ Nutzap available via {normalized_url} ({balance} sats at mint)"
+                                    // Dioxus pattern: if/else conditional rendering (weather_app.rs lines 149-175)
+                                    if mint.unit != "sat" {
+                                        rsx! {
+                                            div {
+                                                class: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4",
+                                                p {
+                                                    class: "text-sm text-amber-700 dark:text-amber-300",
+                                                    "Mint uses '{mint.unit}' unit, not sats. Will use Lightning."
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Show per-mint unit-aware spendable balance (normalize URL for consistent lookup)
+                                        let balance = cashu::get_mint_unit_spendable_balance(&normalized_url, &mint.unit);
+                                        rsx! {
+                                            div {
+                                                class: "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 mb-4",
+                                                p {
+                                                    class: "text-sm text-green-700 dark:text-green-300",
+                                                    "✓ Nutzap available via {normalized_url} ({balance} sats at mint)"
+                                                }
                                             }
                                         }
                                     }

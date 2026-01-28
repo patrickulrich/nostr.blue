@@ -1149,6 +1149,12 @@ fn extract_referenced_event_for_streaming(
 /// - nostr-sdk automatically deduplicates events (RelayPoolNotification::Event only fires once per event)
 /// - Uses `since: Timestamp::now()` to only receive new events
 /// - Only updates existing cache entries (no-op if event not in cache)
+///
+/// # Important: Event Gap Risk
+/// Because the filter uses `since: Timestamp::now()`, events that occur between the last fetch
+/// and when the subscription starts will be missed. Callers should start streaming before or
+/// concurrently with their first fetch to avoid gaps. The nostr-sdk deduplication ensures
+/// overlapping fetches don't cause double-counting.
 pub async fn stream_interaction_counts(
     event_ids: Vec<EventId>,
     interaction_counts: Signal<HashMap<String, InteractionCounts>>,
@@ -1199,7 +1205,8 @@ pub async fn stream_interaction_counts(
     );
 
     // Subscribe with auto-close options for idle timeout
-    let timeout = std::time::Duration::from_secs(idle_timeout_secs.unwrap_or(600));
+    // Use instant::Duration for WASM compatibility (already imported at line 28)
+    let timeout = Duration::from_secs(idle_timeout_secs.unwrap_or(600));
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
 
@@ -1222,8 +1229,10 @@ pub async fn stream_interaction_counts(
         .as_ref()
         .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
 
-    // Clone subscription_id for the notification handler
-    let sub_id = subscription_id.clone();
+    // Wrap in Arc for O(1) clone in hot-path notification handler
+    // (nostr-sdk pattern: SDK wraps Relay in Arc for similar reasons)
+    let tracked_ids = std::sync::Arc::new(tracked_ids);
+    let sub_id = std::sync::Arc::new(subscription_id.clone());
 
     // Spawn the notification handler task
     // This runs in the background and updates the signal when events arrive
@@ -1240,9 +1249,9 @@ pub async fn stream_interaction_counts(
         // Handle notifications using nostr-sdk's canonical pattern
         if let Err(e) = client
             .handle_notifications(|notification| {
-                // Clone values needed in the async block
-                let tracked_ids = tracked_ids.clone();
-                let sub_id = sub_id.clone();
+                // Clone Arc refs for O(1) copy in async block (not the underlying data)
+                let tracked_ids = std::sync::Arc::clone(&tracked_ids);
+                let sub_id = std::sync::Arc::clone(&sub_id);
                 let mut interaction_counts = interaction_counts;
 
                 async move {
@@ -1253,7 +1262,7 @@ pub async fn stream_interaction_counts(
                     } = notification
                     {
                         // Only process events from our subscription
-                        if event_sub_id != sub_id {
+                        if event_sub_id != *sub_id {
                             return Ok(false); // Continue listening
                         }
 
