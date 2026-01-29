@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::Client;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::stores::signer::SignerType;
 use super::contacts::EnrichedContact;
@@ -34,6 +35,19 @@ pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| 
 // Contacts Cache
 // =============================================================================
 
+// Dioxus pattern: Generation counter for cache freshness (freshness.rs:6-81)
+static CONTACTS_CACHE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Get the current cache generation (for staleness checks)
+pub(crate) fn get_cache_generation() -> u64 {
+    CONTACTS_CACHE_GENERATION.load(Ordering::SeqCst)
+}
+
+/// Increment cache generation and return the new value
+fn increment_cache_generation() -> u64 {
+    CONTACTS_CACHE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
 /// Cached contacts with 5-minute TTL for feed optimization
 /// Uses EnrichedContact to preserve relay hints and petnames (NIP-02)
 pub(crate) struct CachedContacts {
@@ -42,6 +56,10 @@ pub(crate) struct CachedContacts {
     pub cached_at: instant::Instant,
     /// nostr-sdk pattern: Track last refresh spawn to prevent spam
     pub last_refresh_spawned: Option<instant::Instant>,
+    /// Dioxus pattern: Track cache generation for staleness (freshness.rs)
+    /// Stored for debugging; staleness checks use get_cache_generation()
+    #[allow(dead_code)]
+    pub generation: u64,
 }
 
 static CONTACTS_CACHE: OnceLock<Mutex<Option<CachedContacts>>> = OnceLock::new();
@@ -53,10 +71,12 @@ pub(crate) fn get_contacts_cache() -> &'static Mutex<Option<CachedContacts>> {
 
 /// Invalidate the contacts cache (call after follow/unfollow)
 pub fn invalidate_contacts_cache() {
+    // Dioxus pattern: Increment generation BEFORE clearing (memory_cache.rs)
+    increment_cache_generation();
     // Use unwrap_or_else to recover from poisoned mutex instead of silently ignoring
     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     *cache = None;
-    log::debug!("Contacts cache invalidated");
+    log::debug!("Contacts cache invalidated (generation incremented)");
 }
 
 // =============================================================================

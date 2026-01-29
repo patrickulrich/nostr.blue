@@ -7,7 +7,7 @@ use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
 use super::fetching::{get_client, fetch_events_aggregated_outbox};
-use super::signals::{HAS_SIGNER, get_contacts_cache, CachedContacts, invalidate_contacts_cache};
+use super::signals::{HAS_SIGNER, get_contacts_cache, get_cache_generation, CachedContacts, invalidate_contacts_cache};
 use super::types::PublishResult;
 
 /// nostr-sdk pattern: Minimum interval between background refresh spawns (60 seconds)
@@ -64,10 +64,11 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
                     cached.last_refresh_spawned = Some(instant::Instant::now());
                     drop(cache); // Release lock before spawning
 
-                    // Background refresh (don't await) - use normalized key
+                    // Dioxus pattern: Capture generation when spawning (freshness.rs)
+                    let start_gen = get_cache_generation();
                     let pk = normalized_pubkey.clone();
                     dioxus::prelude::spawn(async move {
-                        let _ = fetch_enriched_contacts_from_relay(pk).await;
+                        let _ = fetch_enriched_contacts_from_relay_with_gen(pk, start_gen).await;
                     });
                 } else {
                     log::debug!("Skipping background refresh - cooldown not elapsed");
@@ -85,12 +86,23 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
 /// Internal: Fetch enriched contacts from relay with full NIP-02 data
 /// Parses p-tags per nostr-sdk pattern: ["p", pubkey, relay_hint?, petname?]
 async fn fetch_enriched_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<EnrichedContact>, String> {
+    fetch_enriched_contacts_from_relay_impl(pubkey_str, None).await
+}
+
+/// Internal: Fetch enriched contacts with generation check for background refresh
+/// Dioxus pattern: Check generation before write to prevent stale overwrites (memory_cache.rs:45-88)
+async fn fetch_enriched_contacts_from_relay_with_gen(pubkey_str: String, start_gen: u64) -> std::result::Result<Vec<EnrichedContact>, String> {
+    fetch_enriched_contacts_from_relay_impl(pubkey_str, Some(start_gen)).await
+}
+
+/// Internal implementation with optional generation check
+async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: Option<u64>) -> std::result::Result<Vec<EnrichedContact>, String> {
     // nostr-sdk pattern: Defensive normalization (may already be normalized by caller)
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_str)?;
 
-    // Debug assertion to detect unnecessary double-normalization in debug builds
+    // nostr-sdk pattern: Hex can be any case, normalization produces lowercase
     debug_assert!(
-        pubkey_str == normalized_pubkey || pubkey_str.starts_with("npub"),
+        pubkey_str.eq_ignore_ascii_case(&normalized_pubkey) || pubkey_str.starts_with("npub"),
         "Unexpected pubkey format: input '{}' normalized to '{}'",
         pubkey_str, normalized_pubkey
     );
@@ -152,7 +164,16 @@ async fn fetch_enriched_contacts_from_relay(pubkey_str: String) -> std::result::
 
                 log::info!("Found {} enriched contacts from relay", contacts.len());
 
-                // Update cache with normalized key
+                // Dioxus pattern: Check generation before write (memory_cache.rs:45-88)
+                let current_gen = get_cache_generation();
+                if let Some(gen) = start_gen {
+                    if gen != current_gen {
+                        log::debug!("Discarding stale background refresh (gen {} vs current {})", gen, current_gen);
+                        return Ok(contacts);  // Return results but don't cache
+                    }
+                }
+
+                // Safe to cache - generation matches (or no generation check requested)
                 {
                     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     *cache = Some(CachedContacts {
@@ -160,12 +181,23 @@ async fn fetch_enriched_contacts_from_relay(pubkey_str: String) -> std::result::
                         contacts: contacts.clone(),
                         cached_at: instant::Instant::now(),
                         last_refresh_spawned: None,
+                        generation: current_gen,
                     });
                 }
 
                 Ok(contacts)
             } else {
                 log::info!("No contact list found for {}", normalized_pubkey);
+
+                // Dioxus pattern: Check generation before write
+                let current_gen = get_cache_generation();
+                if let Some(gen) = start_gen {
+                    if gen != current_gen {
+                        log::debug!("Discarding stale background refresh (gen {} vs current {})", gen, current_gen);
+                        return Ok(Vec::new());
+                    }
+                }
+
                 // nostr-sdk cache pattern: Cache empty result to avoid repeated relay queries
                 {
                     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -174,6 +206,7 @@ async fn fetch_enriched_contacts_from_relay(pubkey_str: String) -> std::result::
                         contacts: Vec::new(),
                         cached_at: instant::Instant::now(),
                         last_refresh_spawned: None,
+                        generation: current_gen,
                     });
                 }
                 Ok(Vec::new())

@@ -259,7 +259,12 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
         .max_by_key(|e| e.created_at)
         .ok_or_else(|| format!("No nutzap info found for {}", pubkey))?;
 
-    // Parse tags
+    // nostr-sdk pattern: Two-stage verification (event/mod.rs:160-214)
+    // Verifies ID matches content hash, then verifies signature against pubkey
+    event.verify()
+        .map_err(|e| format!("Invalid signature on nutzap info event: {}", e))?;
+
+    // Parse tags (only after verification)
     let mut p2pk_pubkey = None;
     let mut mints = Vec::new();
     let mut relays = Vec::new();
@@ -1026,12 +1031,15 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
         ..Default::default()
     };
 
+    // CDK pattern: Use ? for critical paths (receive.rs:69)
     // Snapshot existing proof secrets BEFORE receive (nostr-sdk pattern: HashSet for dedup)
     let pre_receive_secrets: std::collections::HashSet<String> = wallet
         .get_unspent_proofs()
         .await
-        .map(|proofs| proofs.iter().map(|p| p.secret.to_string()).collect())
-        .unwrap_or_default();
+        .map_err(|e| format!("Failed to get pre-receive proofs: {}", e))?
+        .iter()
+        .map(|p| p.secret.to_string())
+        .collect();
 
     let amount_received = wallet
         .receive(&token.to_string(), receive_opts)
@@ -1128,7 +1136,15 @@ pub async fn redeem_nutzap(event_id: &str) -> Result<NutzapRedeemResult, String>
             Ok(result)
         }
         Err(e) => {
-            update_pending_nutzap_status(event_id, NutzapStatus::Failed(e.clone()));
+            // nostr-sdk pattern: Classify errors (relay/error.rs)
+            // CDK pattern: Transient errors allow retry (reclaim.rs)
+            if is_transient_error(&e) {
+                log::warn!("Transient error redeeming nutzap {}, reverting to Pending: {}", event_id, e);
+                update_pending_nutzap_status(event_id, NutzapStatus::Pending);
+            } else {
+                log::error!("Permanent error redeeming nutzap {}: {}", event_id, e);
+                update_pending_nutzap_status(event_id, NutzapStatus::Failed(e.clone()));
+            }
             Err(e)
         }
     }

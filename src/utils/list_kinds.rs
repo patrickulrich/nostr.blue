@@ -53,6 +53,15 @@ pub fn get_item_count(tags: &[nostr_sdk::Tag]) -> usize {
         .count()
 }
 
+/// Get the count of 'p' tags (people) in a list
+/// nostr-sdk pattern: filter_standardized(TagKind::p()) for people lists
+/// Used for NAMED_PEOPLE (kind 30000) to count only member pubkeys
+pub fn get_p_tag_count(tags: &[nostr_sdk::Tag]) -> usize {
+    tags.iter()
+        .filter(|tag| tag.kind() == nostr_sdk::TagKind::p())
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

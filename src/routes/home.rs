@@ -401,6 +401,13 @@ pub fn Home(list: String) -> Element {
                                 let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+
+                                    // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
+                                    if event_ids.is_empty() {
+                                        interactions_loaded.set(true);
+                                        return;
+                                    }
+
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
@@ -521,6 +528,13 @@ pub fn Home(list: String) -> Element {
                                 let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+
+                                    // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
+                                    if event_ids.is_empty() {
+                                        interactions_loaded.set(true);
+                                        return;
+                                    }
+
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
@@ -630,6 +644,13 @@ pub fn Home(list: String) -> Element {
                                 let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+
+                                    // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
+                                    if event_ids.is_empty() {
+                                        interactions_loaded.set(true);
+                                        return;
+                                    }
+
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {
@@ -744,6 +765,13 @@ pub fn Home(list: String) -> Element {
                                 let curr_id = current_id;
                                 spawn(async move {
                                     let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+
+                                    // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
+                                    if event_ids.is_empty() {
+                                        interactions_loaded.set(true);
+                                        return;
+                                    }
+
                                     let counts = if is_first_load {
                                         fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
                                     } else {

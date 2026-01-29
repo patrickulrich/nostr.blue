@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members_with_status;
-use crate::utils::list_kinds::{get_item_count, LIST_KINDS, NAMED_PEOPLE};
+use crate::utils::list_kinds::{get_p_tag_count, LIST_KINDS, NAMED_PEOPLE};
 
 /// User list data structure
 #[derive(Clone, Debug, PartialEq)]
@@ -160,8 +160,8 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     // Public lists - computed synchronously first (no await needed)
     for list in &mut lists {
         if list.kind == NAMED_PEOPLE && !list.has_private_content {
-            // No private content - public count is the total (always computable)
-            list.total_member_count = Some(get_item_count(&list.tags));
+            // nostr-sdk pattern: only count p tags for people lists (not e, t, a)
+            list.total_member_count = Some(get_p_tag_count(&list.tags));
         }
     }
 

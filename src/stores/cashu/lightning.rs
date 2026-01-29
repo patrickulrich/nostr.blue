@@ -829,35 +829,30 @@ fn update_local_state_after_melt(
     event_ids_to_delete: &[String],
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
-    let (tokens_to_add, proofs_to_register) = if let Some(ref event_id) = new_event_id {
-        // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
+    // Build tokens to add (skip when keep_proofs is empty to avoid zero-proof tokens)
+    let tokens_to_add = if let Some(ref event_id) = new_event_id {
         if keep_proofs.is_empty() {
-            (vec![], None)
+            vec![]
         } else {
             let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-            let token = TokenData {
+            vec![TokenData {
                 event_id: event_id.clone(),
                 mint: mint_url.to_string(),
                 unit: "sat".to_string(),
-                proofs: proof_data.clone(),
+                proofs: proof_data,
                 created_at: chrono::Utc::now().timestamp() as u64,
-            };
-            (vec![token], Some((event_id.clone(), proof_data)))
+            }]
         }
     } else {
-        (vec![], None)
+        vec![]
     };
 
     let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
 
-    // CDK pattern: Rebuild entire mapping atomically to ensure consistency
-    // This removes stale mappings from deleted tokens and adds new ones
+    // CDK pattern: Atomic rebuild ensures consistency (like update_proofs(add, remove))
+    // This removes stale mappings from deleted tokens and adds mappings for new tokens
+    // No separate register call needed - rebuild reads all WALLET_TOKENS atomically
     super::proofs::rebuild_proof_event_map();
-
-    // Register proofs for recovery tracking (mirrors send.rs pattern)
-    if let Some((event_id, proof_data)) = proofs_to_register {
-        register_proofs_in_event_map(&event_id, &proof_data);
-    }
 
     log::info!("Local state updated. New balance: {} sats", new_balance);
     Ok(())
