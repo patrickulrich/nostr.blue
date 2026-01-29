@@ -1104,7 +1104,8 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
     // Publish token event with ONLY new proofs
     let new_event_id = publish_redeemed_token_event(mint_url, &pending.unit, &new_proofs).await?;
 
-    // CDK pattern: persist first (atomic), then update in-memory only on success
+    // CDK pattern: CDK storage is persistent (already written by receive()), atomic_token_replace
+    // updates only in-memory WALLET_TOKENS signal - always call sync_wallet_state() to reconcile
     let proof_data: Vec<ProofData> = new_proofs.iter().map(cdk_proof_to_proof_data).collect();
     let token = TokenData {
         event_id: new_event_id.clone(),
@@ -1114,8 +1115,15 @@ async fn redeem_nutzap_inner(pending: &PendingNutzap, event_id: &str) -> Result<
         created_at: chrono::Utc::now().timestamp() as u64,
     };
 
-    // Atomic token replace: add new token, delete none (nutzap redeem only adds)
-    super::signals::atomic_token_replace(vec![token], &[])?;
+    // Note: in-memory only - CDK is authoritative, sync_wallet_state reconciles
+    if let Err(e) = super::signals::atomic_token_replace(vec![token], &[]) {
+        log::error!("Failed atomic token replace: {}", e);
+        // Always sync wallet state on error to reconcile in-memory with CDK
+        if let Err(sync_err) = cashu_cdk_bridge::sync_wallet_state().await {
+            log::warn!("Failed to sync wallet state after atomic_token_replace error: {}", sync_err);
+        }
+        return Err(format!("Failed to update wallet tokens: {}", e));
+    }
 
     // Only after successful atomic replace, update derived state
     super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);

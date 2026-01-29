@@ -715,6 +715,16 @@ async fn publish_pending_event(event: &PendingNostrEvent) -> Result<String, Stri
 
     // Check for at least one successful relay
     if output.success.is_empty() {
+        // nostr-sdk pattern: duplicates start with "duplicate:" prefix
+        let all_duplicates = output.failed.values().all(|err| {
+            err.to_lowercase().starts_with("duplicate:")
+        });
+
+        if all_duplicates && !output.failed.is_empty() {
+            log::debug!("Event {} already exists on all relays (duplicate)", event_id);
+            return Ok(event_id);
+        }
+
         return Err(format!("All {} relays failed", output.failed.len()));
     }
 
@@ -854,19 +864,20 @@ pub async fn process_pending_events() -> Result<usize, String> {
 /// Called when a pending TokenEvent is successfully published to Nostr.
 /// Updates the token in WALLET_TOKENS from the pending_id to the real Nostr event_id.
 pub(crate) fn update_token_event_id(pending_id: &str, real_event_id: &str) {
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data_signal = store.data();
-        let mut data = data_signal.write();
+    let pending_id_owned = pending_id.to_string();
+    let real_event_id_owned = real_event_id.to_string();
 
-        if let Some(token) = data.iter_mut().find(|t| t.event_id == pending_id) {
-            log::info!("Updating token event_id: {} -> {}", pending_id, real_event_id);
-            token.event_id = real_event_id.to_string();
+    if let Err(e) = super::signals::atomic_token_update(|tokens| {
+        if let Some(token) = tokens.iter_mut().find(|t| t.event_id == pending_id_owned) {
+            log::info!("Updating token event_id: {} -> {}", pending_id_owned, real_event_id_owned);
+            token.event_id = real_event_id_owned.clone();
+            Ok(())
         } else {
-            log::warn!("Could not find token with pending_id {} to update", pending_id);
-            return;
+            Err(format!("Token with pending_id {} not found", pending_id_owned))
         }
-        // Drop write guard before calling rebuild (prevents deadlock)
+    }) {
+        log::warn!("Failed to update token event_id: {}", e);
+        return;
     }
 
     // Rebuild proof event map to stay in sync (matches fetch_tokens pattern at line 594)

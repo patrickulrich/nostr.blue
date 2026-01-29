@@ -416,6 +416,11 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
             log::info!("Loaded {} general relays and {} DM relays for Settings display",
                 metadata.relays.len(), metadata.dm_relays.len());
             *USER_RELAY_METADATA.write() = Some(metadata);
+
+            // Invalidate search relay cache when NIP-65 relay lists are updated
+            crate::services::search_relays::invalidate_search_relay_cache().await;
+            log::debug!("Invalidated search relay cache after NIP-65 update");
+
             Ok(())
         }
         Err(e) => {

@@ -276,10 +276,18 @@ pub async fn search_custom_nips(
 
         return Ok(all_events.into_iter()
             .filter(|e| {
-                let content_matches = e.content.to_lowercase().contains(&query_lower);
+                // Cheap case-sensitive check first, only lowercase if needed
+                let content_matches = e.content.contains(query) || {
+                    e.content.chars().any(|c| c.is_uppercase()) &&
+                    e.content.to_lowercase().contains(&query_lower)
+                };
+
                 let title_matches = e.tags.iter().any(|tag| {
                     if let Some(nostr::TagStandard::Title(title)) = tag.as_standardized() {
-                        title.to_lowercase().contains(&query_lower)
+                        title.contains(query) || {
+                            title.chars().any(|c| c.is_uppercase()) &&
+                            title.to_lowercase().contains(&query_lower)
+                        }
                     } else {
                         false
                     }

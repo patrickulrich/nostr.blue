@@ -475,6 +475,18 @@ pub async fn receive_tokens_with_options(
                     );
                     break;
                 } else {
+                    // nostr-sdk pattern: duplicates start with "duplicate:" prefix
+                    let all_duplicates = output.failed.values().all(|err| {
+                        err.to_lowercase().starts_with("duplicate:")
+                    });
+
+                    if all_duplicates && !output.failed.is_empty() {
+                        log::debug!("Token event {} already exists on all relays (duplicate)", pre_signed_event_id);
+                        event_id = Some(pre_signed_event_id.clone());
+                        retryable = false;
+                        break;
+                    }
+
                     last_error = format!("All {} relays failed", output.failed.len());
                 }
             }

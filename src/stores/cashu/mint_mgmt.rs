@@ -1005,9 +1005,10 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                 // Mint is source of truth - proofs may have been consumed even if we got network error
                 log::warn!("Swap failed on batch {}/{}, syncing proof states with mint: {}", batch_idx + 1, total_batches, e);
 
-                // Check spent status with mint (NUT-07)
+                // CDK pattern: Check spent status and sync regardless of batch_idx
                 match wallet.check_proofs_spent(proof_batch.to_vec()).await {
                     Ok(states) => {
+                        let has_spent = states.iter().any(|s| s.state == cdk::nuts::State::Spent);
                         for (proof, state) in proof_batch.iter().zip(states.iter()) {
                             if state.state == cdk::nuts::State::Spent {
                                 // Log non-sensitive identifiers only (CDK pattern: never log secrets)
@@ -1018,6 +1019,13 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                                 );
                             }
                         }
+                        // CDK pattern: Sync on ANY spent proofs (not conditional on batch_idx)
+                        if has_spent {
+                            if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+                                log::warn!("Failed to sync after spent proofs: {}", sync_err);
+                            }
+                            super::signals::update_wallet_balances();
+                        }
                     }
                     Err(sync_err) => {
                         log::warn!("NUT-07 check failed: {}", sync_err);
@@ -1026,7 +1034,6 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
                 // If any prior batches succeeded, sync wallet state before returning
                 // Follows CDK's "explicit state queries on failure" pattern
-                // and nostr.blue's non-critical sync pattern (send.rs:224, swap.rs:518)
                 if batch_idx > 0 {
                     log::warn!("Partial swap succeeded ({} batches); syncing wallet state", batch_idx);
                     if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
@@ -1119,6 +1126,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         } else {
             super::proofs::register_proofs_in_event_map(&temp_emergency_id, &emergency_proof_data);
             super::signals::update_wallet_balances();
+            super::proofs::rebuild_proof_event_map();
             log::info!("Emergency recovery: {} proofs now visible in UI", new_proofs.len());
         }
 
@@ -1361,6 +1369,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         } else {
             // Register proofs for lookup
             super::proofs::register_proofs_in_event_map(&local_only_id, &proof_data);
+            super::proofs::rebuild_proof_event_map();
             log::info!(
                 "Persisted {} proofs as local-only token {} (publish_error={})",
                 proof_data.len(),

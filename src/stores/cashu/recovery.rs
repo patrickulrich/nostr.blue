@@ -1168,6 +1168,19 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     }
                 };
 
+                // Validate lengths match before zip (defensive best practice)
+                if proof_states.len() != valid_pairs.len() {
+                    log::warn!(
+                        "Proof state count mismatch: {} states for {} proofs, skipping categorization",
+                        proof_states.len(), valid_pairs.len()
+                    );
+                    result.errors.push(format!(
+                        "State count mismatch for {}: {} states vs {} proofs",
+                        request.mint_url, proof_states.len(), valid_pairs.len()
+                    ));
+                    continue;
+                }
+
                 // Step 3: Categorize proofs by mint state (now properly aligned)
                 let mut unspent_secrets = Vec::new();
                 let mut spent_secrets = Vec::new();
@@ -1419,12 +1432,10 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
         }
     };
 
-    // NOTE: quotes_checked/quotes_paid are batch operation markers (1 if recovery
-    // occurred, 0 otherwise). CDK's check_pending_melt_quotes() returns Result<(), Error>
-    // (void) and loops internally per-quote without returning per-quote statistics.
-    // We use recovered > 0 as a proxy to indicate the batch operation had results.
+    // NOTE: quotes_checked is always 1 - batch always performs checks regardless of outcome.
+    // quotes_paid reflects whether recovery actually found unrecorded proofs.
     Ok(MeltMintResult {
-        quotes_checked: if recovered > 0 { 1 } else { 0 },
+        quotes_checked: 1,
         quotes_paid: if recovered > 0 { 1 } else { 0 },
         change_recovered: recovered,
     })

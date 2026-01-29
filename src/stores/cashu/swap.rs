@@ -504,8 +504,8 @@ pub async fn execute_swap_with_nip60(
         .cloned()
         .collect();
 
-    // Skip history event if both are empty (no valid event IDs to reference)
-    if !valid_created.is_empty() || !valid_destroyed.is_empty() {
+    // Only create history event when we have a real created token event
+    if !valid_created.is_empty() {
         if let Err(e) =
             super::events::create_history_event("in", output_value, valid_created, valid_destroyed)
                 .await

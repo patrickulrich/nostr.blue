@@ -126,28 +126,37 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
         Ok(events) => {
             // Select latest event by timestamp (nostr-database pattern)
             if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
+                // nostr-sdk pattern: verify() checks ID first (cheap), then signature (expensive)
+                if let Err(e) = event.verify() {
+                    log::warn!("Contact list event failed verification: {}", e);
+                    return Err(format!("Invalid contact list event: {}", e));
+                }
+
                 // Parse full p-tags per NIP-02 format (nostr-sdk pattern)
                 // Format: ["p", pubkey, relay_hint?, petname?]
                 let contacts: Vec<EnrichedContact> = event.tags.iter()
                     .filter_map(|tag| {
-                        let parts: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
+                        let parts = tag.as_slice();  // Use slice directly
+
                         // nostr-sdk pattern: check tag type and minimum length
-                        if parts.first() != Some(&"p") || parts.len() < 2 {
+                        if parts.first().map(|s| s.as_str()) != Some("p") || parts.len() < 2 {
                             return None;
                         }
 
+                        let pubkey_str = parts[1].as_str();
+
                         // nostr-sdk pattern: try hex first (most common), then parse for npub
                         // Normalize to canonical lowercase hex for consistent comparisons
-                        let normalized_pubkey = match nostr::PublicKey::from_hex(parts[1])
-                            .or_else(|_| nostr::PublicKey::parse(parts[1])) {
+                        let normalized_pubkey = match nostr::PublicKey::from_hex(pubkey_str)
+                            .or_else(|_| nostr::PublicKey::parse(pubkey_str)) {
                             Ok(pk) => pk.to_hex(), // Canonical lowercase hex
                             Err(_) => {
-                                log::debug!("Skipping invalid pubkey in contact p-tag: {}", parts[1]);
+                                log::debug!("Skipping invalid pubkey in contact p-tag: {}", pubkey_str);
                                 return None;
                             }
                         };
 
-                        // nostr-sdk pattern: extract optional fields by position, check empty
+                        // Only allocate String when needed
                         Some(EnrichedContact {
                             pubkey: normalized_pubkey,
                             // Position 2: relay hint (nostr-sdk: tag_2)
@@ -387,10 +396,13 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
     invalidate_contacts_cache();
     let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey.clone()).await?;
 
-    // Find and remove by pubkey (preserves other contacts' metadata)
-    if let Some(pos) = contacts.iter().position(|c| c.pubkey == normalized_pubkey) {
-        contacts.remove(pos);
-        log::info!("Unfollowing user: {}", normalized_pubkey);
+    // Remove all entries matching the normalized pubkey (handles duplicates)
+    let original_len = contacts.len();
+    contacts.retain(|c| c.pubkey != normalized_pubkey);
+
+    if contacts.len() < original_len {
+        log::info!("Unfollowing user: {} (removed {} entries)",
+            normalized_pubkey, original_len - contacts.len());
 
         // Publish preserving remaining contacts' metadata
         publish_enriched_contacts(contacts).await?;

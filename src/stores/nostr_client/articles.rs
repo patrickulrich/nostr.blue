@@ -36,7 +36,7 @@ pub async fn fetch_articles(
     // Use aggregated fetch pattern (DB cache first, background relay sync)
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            let mut sorted: Vec<_> = events.into_iter().collect();
+            let mut sorted = events;  // Reuse owned Vec
             sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             // Enforce limit after sorting (API contract)
             sorted.truncate(limit);
