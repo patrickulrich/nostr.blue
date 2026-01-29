@@ -238,7 +238,7 @@ pub struct DleqData {
 
 /// Custom deserialization structure for proofs (allows missing fields)
 /// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProofData {
     #[serde(default)]
     pub id: String,
@@ -963,7 +963,7 @@ pub const COUNTER_HEAL_INCREMENTS: [u32; 3] = [10, 50, 100];
 ///
 /// SAFETY: This data enables NUT-07 verification and change recovery
 /// without relying on wallet state that may be lost in a crash.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InFlightMeltRequest {
     /// Unique transaction ID for this melt operation
     pub transaction_id: String,
@@ -1011,7 +1011,7 @@ impl std::fmt::Display for OperationType {
 ///
 /// SAFETY: Without this tracking, recover_reserved_proofs() could incorrectly
 /// reclaim proofs from active send/swap operations, causing fund loss.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InFlightSendRequest {
     /// Unique transaction ID ("send_{uuid}" or "swap_{uuid}")
     pub transaction_id: String,
@@ -1025,4 +1025,51 @@ pub struct InFlightSendRequest {
     pub operation_type: OperationType,
     /// Timestamp when request was created (seconds since epoch)
     pub created_at: u64,
+}
+
+// =============================================================================
+// Manual Debug Implementations (rust-nostr patterns for sensitive data)
+// =============================================================================
+
+/// Manual Debug for ProofData - omits sensitive cryptographic fields
+/// Following rust-nostr Keys pattern: only show non-sensitive fields
+impl std::fmt::Debug for ProofData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProofData")
+            .field("id", &self.id)
+            .field("amount", &self.amount)
+            // Omit: secret, c, witness, dleq (sensitive cryptographic data)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Manual Debug for InFlightMeltRequest - redacts proof data
+/// Following rust-nostr ConversationKey pattern: <sensitive> marker
+impl std::fmt::Debug for InFlightMeltRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InFlightMeltRequest")
+            .field("transaction_id", &self.transaction_id)
+            .field("mint_url", &self.mint_url)
+            .field("quote_id", &self.quote_id)
+            .field("proofs_used", &format!("<{} proofs, sensitive>", self.proofs_used.len()))
+            .field("amount", &self.amount)
+            .field("fee_reserve", &self.fee_reserve)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
+/// Manual Debug for InFlightSendRequest - redacts proof secrets
+/// Following rust-nostr ConversationKey pattern: <sensitive> marker
+impl std::fmt::Debug for InFlightSendRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InFlightSendRequest")
+            .field("transaction_id", &self.transaction_id)
+            .field("mint_url", &self.mint_url)
+            .field("proof_secrets", &format!("<{} secrets, sensitive>", self.proof_secrets.len()))
+            .field("amount", &self.amount)
+            .field("operation_type", &self.operation_type)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }

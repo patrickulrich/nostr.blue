@@ -6,7 +6,7 @@
 
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::{Client, EventBuilder, Filter, Kind, PublicKey, RelayUrl, Tag, TagKind};
+use nostr_sdk::{Client, EventBuilder, Filter, FromBech32, Kind, PublicKey, RelayUrl, SubscriptionId, Tag, TagKind};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,10 +31,11 @@ pub struct RelayConfig {
 }
 
 /// Complete relay metadata for a user (both kind 10002 and 10050)
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RelayListMetadata {
     pub relays: Vec<RelayConfig>,      // kind 10002 - general relays
     pub dm_relays: Vec<String>,        // kind 10050 - DM inbox relays
+    #[serde(default)]
     pub updated_at: u64,               // timestamp of last update
 }
 
@@ -692,4 +693,123 @@ pub async fn init_nip51_relay_lists(client: Arc<Client>) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Real-Time NIP-65 Relay List Subscription
+// ============================================================================
+
+/// Track the current real-time subscription ID for NIP-65 updates
+pub static RELAY_LIST_SUBSCRIPTION_ID: GlobalSignal<Option<SubscriptionId>> = Signal::global(|| None);
+
+/// Start real-time subscription for NIP-65 relay list updates
+/// Invalidates search relay cache when user's kind 10002 is updated
+pub async fn start_relay_list_subscription() {
+    // Skip if already subscribed
+    if RELAY_LIST_SUBSCRIPTION_ID.read().is_some() {
+        log::debug!("Relay list subscription already active");
+        return;
+    }
+
+    // Get client and pubkey
+    let client = match crate::stores::nostr_client::get_client() {
+        Some(c) => c,
+        None => {
+            log::warn!("Cannot start relay list subscription: no client");
+            return;
+        }
+    };
+
+    let my_pubkey_str = match crate::stores::auth_store::get_pubkey() {
+        Some(pk) => pk,
+        None => {
+            log::warn!("Cannot start relay list subscription: not authenticated");
+            return;
+        }
+    };
+
+    // Parse pubkey
+    let my_pubkey = match PublicKey::from_bech32(&my_pubkey_str)
+        .or_else(|_| PublicKey::from_hex(&my_pubkey_str)) {
+        Ok(pk) => pk,
+        Err(e) => {
+            log::error!("Invalid pubkey for relay list subscription: {}", e);
+            return;
+        }
+    };
+
+    // Subscribe to kind 10002 for current user
+    let filter = Filter::new()
+        .author(my_pubkey)
+        .kind(Kind::RelayList)
+        .limit(1);
+
+    let subscription_result = crate::stores::subscription_manager::subscribe_realtime(
+        &client,
+        filter,
+        Some(600), // 10 minute idle timeout (matches notifications)
+    ).await;
+
+    match subscription_result {
+        Ok(sub_id) => {
+            RELAY_LIST_SUBSCRIPTION_ID.write().replace(sub_id.clone());
+            log::info!("Started relay list subscription: {:?}", sub_id);
+
+            // Spawn listener task
+            spawn(async move {
+                let mut notifications = client.notifications();
+
+                while let Ok(notification) = notifications.recv().await {
+                    if let nostr_sdk::RelayPoolNotification::Event {
+                        subscription_id,
+                        event,
+                        ..
+                    } = notification
+                    {
+                        // Only process our subscription
+                        if subscription_id != sub_id {
+                            continue;
+                        }
+
+                        log::info!("Received NIP-65 relay list update (kind 10002)");
+
+                        // Parse and update relay metadata
+                        let relays = parse_relay_list_event(&event);
+                        if !relays.is_empty() {
+                            // Update USER_RELAY_METADATA with new relay list
+                            let mut metadata = USER_RELAY_METADATA.read().clone()
+                                .unwrap_or_default();
+                            metadata.relays = relays;
+                            metadata.updated_at = event.created_at.as_secs();
+                            *USER_RELAY_METADATA.write() = Some(metadata);
+
+                            // Invalidate search relay cache (main goal)
+                            crate::services::search_relays::invalidate_search_relay_cache().await;
+                            log::info!("Invalidated search relay cache after NIP-65 update");
+                        }
+                    }
+                }
+
+                // Clear subscription ID when loop ends
+                log::warn!("Relay list subscription ended - clearing for reconnect");
+                *RELAY_LIST_SUBSCRIPTION_ID.write() = None;
+            });
+        }
+        Err(e) => {
+            log::error!("Failed to start relay list subscription: {}", e);
+        }
+    }
+}
+
+/// Stop real-time relay list subscription
+pub async fn stop_relay_list_subscription() {
+    let sub_id = RELAY_LIST_SUBSCRIPTION_ID.read().clone();
+
+    if let Some(id) = sub_id {
+        if let Some(client) = crate::stores::nostr_client::get_client() {
+            log::info!("Stopping relay list subscription: {:?}", id);
+            crate::stores::subscription_manager::unsubscribe(&client, &id).await;
+        }
+        *RELAY_LIST_SUBSCRIPTION_ID.write() = None;
+    }
 }

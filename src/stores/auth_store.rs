@@ -454,6 +454,9 @@ async fn run_post_login_init() {
     // Start real-time notification subscription
     crate::stores::notifications::start_realtime_subscription().await;
 
+    // Start NIP-65 relay list subscription for cache invalidation
+    crate::stores::relay::start_relay_list_subscription().await;
+
     // Fetch custom emojis
     crate::stores::emoji_store::init_emoji_fetch();
 
@@ -569,6 +572,9 @@ pub async fn logout() {
 
     // Stop real-time notification subscription
     crate::stores::notifications::stop_realtime_subscription().await;
+
+    // Stop NIP-65 relay list subscription
+    crate::stores::relay::stop_relay_list_subscription().await;
 
     // Clear Cashu wallet state
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();

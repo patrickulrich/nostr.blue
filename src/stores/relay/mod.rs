@@ -135,6 +135,9 @@ pub use nip65::{
     save_local_relays,
     init_local_relays_from_cache,
     apply_local_relays_to_client,
+    // Real-time relay list subscription
+    start_relay_list_subscription,
+    stop_relay_list_subscription,
 };
 
 // Re-export display types and functions
