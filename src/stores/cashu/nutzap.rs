@@ -423,12 +423,11 @@ pub async fn send_nutzap(
         return Err("No tokens found for compatible mint".to_string());
     }
 
-    // Check balance (CDK pattern: use checked_add with explicit error for financial transactions)
+    // Query-level aggregation uses plain sum (overflow improbable for wallet balances)
     let total_available: u64 = all_proofs
         .iter()
         .map(|p| u64::from(p.amount))
-        .try_fold(0u64, |acc, amt| acc.checked_add(amt))
-        .ok_or("Balance overflow calculating available amount")?;
+        .sum();
 
     if total_available < amount {
         return Err(format!(
@@ -558,10 +557,23 @@ pub async fn send_nutzap(
     let content = comment.unwrap_or("");
     let builder = nostr_sdk::EventBuilder::new(Kind::from(9321), content).tags(tags.clone());
 
-    // Publish to recipient's preferred relays
+    // Parse recipient relays for NIP-61 delivery (relay_publishing.rs pattern)
+    let recipient_relay_urls: Vec<nostr::RelayUrl> = recipient_info.relays
+        .iter()
+        .filter_map(|r| nostr::RelayUrl::parse(r).ok())
+        .collect();
+
+    // Publish to recipient's preferred relays, fallback to default if none valid
     // Note: `client` was verified available before swap (fail-fast pattern)
     // Use match to handle network errors - queue for retry instead of failing
-    let output = match client.send_event_builder(builder.clone()).await {
+    let output = if recipient_relay_urls.is_empty() {
+        log::debug!("No valid recipient relays, using default relay routing");
+        client.send_event_builder(builder.clone()).await
+    } else {
+        log::debug!("Publishing nutzap to {} recipient relays", recipient_relay_urls.len());
+        client.send_event_builder_to(recipient_relay_urls, builder.clone()).await
+    };
+    let output = match output {
         Ok(out) => out,
         Err(e) => {
             // Network error - queue for retry (proofs already spent, local state updated)

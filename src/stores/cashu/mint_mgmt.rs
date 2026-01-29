@@ -1078,8 +1078,13 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     .collect::<Result<Vec<_>, String>>()?;
 
                 if !proof_infos.is_empty() {
+                    // Compute Y values for consumed input proofs (CDK pattern: delete spent inputs)
+                    let consumed_ys: Vec<cdk::nuts::PublicKey> = proof_batch.iter()
+                        .filter_map(|p| p.y().ok())
+                        .collect();
+
                     // Track failures without early return - proofs are safe in CDK wallet after swap
-                    if let Err(e) = localstore.update_proofs(proof_infos, vec![]).await {
+                    if let Err(e) = localstore.update_proofs(proof_infos, consumed_ys).await {
                         log::error!(
                             "CRITICAL: Batch {}/{} persistence failed AFTER successful swap: {}",
                             batch_idx + 1, total_batches, e

@@ -2327,9 +2327,13 @@ pub async fn run_wallet_health_check() -> Result<WalletHealthReport, String> {
     let (melt_quotes_checked, melt_completed, melt_expired) = check_all_melt_quotes().await?;
 
     // CDK 0.14.2+ batch melt quote recovery
-    let melt_recovery = check_pending_melt_quotes_batch()
-        .await
-        .unwrap_or_default();
+    let melt_recovery = match check_pending_melt_quotes_batch().await {
+        Ok(result) => result,
+        Err(e) => {
+            log::error!("Failed to check pending melt quotes batch: {}", e);
+            MeltRecoveryResult::default()
+        }
+    };
 
     // Sync wallet state
     let _ = cashu_cdk_bridge::sync_wallet_state().await;
