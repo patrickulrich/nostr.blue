@@ -4,14 +4,14 @@ use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoC
 use crate::utils::article_meta::{get_identifier, get_published_at};
 use crate::components::icons::{InfoIcon, MailIcon, ListIcon};
 use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::services::profile_stats;
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use nostr_sdk::nips::nip19::ToBech32;
-use std::time::Duration;
 use std::collections::HashMap;
+use std::time::Duration;
 use wasm_bindgen::JsCast;
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
@@ -145,6 +145,9 @@ pub fn Profile(pubkey: String) -> Element {
     // Pinned notes state
     let mut pinned_events = use_signal(Vec::<NostrEvent>::new);
     let mut pinned_loading = use_signal(|| true);
+
+    // Cached mute/block lists for N+1 optimization (uses centralized hook)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     // Clone pubkey for rsx! block usage
     let pubkey_for_button = pubkey.clone();
@@ -1223,7 +1226,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                     NoteCard {
                                                         key: "{event.id}",
                                                         event: event.clone(),
-                                                        collapsible: true
+                                                        collapsible: true,
+                                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                                        cached_blocked_users: cached_blocked_users.read().clone()
                                                     }
                                                 }
                                             }
@@ -1240,7 +1245,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                                 key: "{event.id}",
                                                                 event: original_event,
                                                                 repost_info: repost_info,
-                                                                collapsible: true
+                                                                collapsible: true,
+                                                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                                                cached_blocked_users: cached_blocked_users.read().clone()
                                                             }
                                                         }
                                                     }
@@ -1254,7 +1261,9 @@ pub fn Profile(pubkey: String) -> Element {
                                                     NoteCard {
                                                         key: "{event.id}",
                                                         event: event.clone(),
-                                                        collapsible: true
+                                                        collapsible: true,
+                                                        cached_muted_posts: cached_muted_posts.read().clone(),
+                                                        cached_blocked_users: cached_blocked_users.read().clone()
                                                     }
                                                 }
                                             }

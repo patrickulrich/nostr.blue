@@ -92,6 +92,10 @@ pub static SHOP_DB: GlobalSignal<Option<Arc<IndexedDbDatabase>>> = GlobalSignal:
 pub static PROCESSED_ORDER_EVENTS: GlobalSignal<LruCache<String, ()>> =
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(PROCESSED_EVENTS_CACHE_SIZE).unwrap()));
 
+/// Flag to track if orders have been loaded from DB for this session
+/// Prevents skipping reload when BUYER_ORDERS/SELLER_ORDERS happen to be empty
+static ORDERS_LOADED_FROM_DB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 // ============================================================================
 // Global Signals - Merchant
 // ============================================================================
@@ -773,6 +777,34 @@ pub fn get_shop_stats() -> ShopStats {
 // Shop Store Initialization & Order Persistence
 // =============================================================================
 
+/// Ensure orders are loaded from DB (call when auth becomes available)
+/// CDK pattern: idempotent, returns Ok(()) if already loaded or no DB
+pub async fn ensure_orders_loaded() -> Result<()> {
+    use std::sync::atomic::Ordering;
+
+    let db = match SHOP_DB.read().as_ref() {
+        Some(db) => db.clone(),
+        None => return Ok(()),  // No DB yet, nothing to do
+    };
+
+    // Use atomic flag instead of checking list emptiness
+    // This prevents skipping seller orders when buyer orders happen to be empty
+    // Only set flag if restore actually completed (not skipped due to missing auth)
+    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst)
+        && restore_orders_from_db(&db).await?
+    {
+        ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+/// Reset orders loaded flag (call on logout)
+pub fn reset_orders_loaded_flag() {
+    use std::sync::atomic::Ordering;
+    ORDERS_LOADED_FROM_DB.store(false, Ordering::SeqCst);
+    log::debug!("Orders loaded flag reset");
+}
+
 /// Initialize the shop store and restore persisted orders from IndexedDB
 pub async fn init_shop_store() -> Result<()> {
     if *SHOP_INITIALIZED.read() {
@@ -790,8 +822,20 @@ pub async fn init_shop_store() -> Result<()> {
             log::info!("Shop IndexedDB initialized");
 
             // Restore orders from IndexedDB
-            if let Err(e) = restore_orders_from_db(&db_arc).await {
-                log::warn!("Failed to restore orders from IndexedDB: {}", e);
+            match restore_orders_from_db(&db_arc).await {
+                Ok(true) => {
+                    // Restore succeeded - set flag to prevent double-restore
+                    use std::sync::atomic::Ordering;
+                    ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
+                    log::info!("Orders restored from IndexedDB, flag set");
+                }
+                Ok(false) => {
+                    // Skipped (e.g., missing auth) - flag remains false for retry later
+                    log::debug!("Order restore skipped (no auth), will retry on auth");
+                }
+                Err(e) => {
+                    log::warn!("Failed to restore orders from IndexedDB: {}", e);
+                }
             }
         }
         Err(e) => {
@@ -805,7 +849,8 @@ pub async fn init_shop_store() -> Result<()> {
 }
 
 /// Restore orders from IndexedDB into memory signals
-async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
+/// Returns true if orders were actually processed (or none exist), false if skipped due to missing auth
+async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
     log::info!("Restoring orders from IndexedDB...");
 
     let orders = db.get_all_orders().await
@@ -813,13 +858,17 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
 
     if orders.is_empty() {
         log::info!("No persisted orders found");
-        return Ok(());
+        return Ok(true);  // Empty is a valid "loaded" state
     }
 
-    // Get current user pubkey to separate buyer/seller orders
-    let user_pubkey = nostr_client::get_user_pubkey().await
-        .map(|pk| pk.to_hex())
-        .unwrap_or_default();
+    // Dioxus pattern: Explicit validation before state mutation
+    let user_pubkey = match nostr_client::get_cached_pubkey() {
+        Ok(pk) => pk.to_hex(),
+        Err(_) => {
+            log::warn!("Cannot load orders - not authenticated");
+            return Ok(false);  // Signal: skipped, try again later when auth is available
+        }
+    };
 
     let mut buyer_orders = Vec::new();
     let mut seller_orders = Vec::new();
@@ -839,7 +888,7 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<()> {
     *BUYER_ORDERS.write() = buyer_orders;
     *SELLER_ORDERS.write() = seller_orders;
 
-    Ok(())
+    Ok(true)
 }
 
 /// Persist an order to IndexedDB
@@ -1154,6 +1203,11 @@ pub async fn create_shop_order(
     payment_method: &str,
     payment_proof: &str,
 ) -> Result<String> {
+    // Auth check FIRST, before any side effects
+    let buyer_pubkey = nostr_client::get_cached_pubkey()
+        .map(|pk| pk.to_hex())
+        .map_err(|_| "Cannot checkout - not authenticated".to_string())?;
+
     if items.is_empty() {
         return Err("Cannot create order with no items".to_string());
     }
@@ -1258,11 +1312,7 @@ pub async fn create_shop_order(
     }
 
     // total_sats already calculated above
-
-    // Get user pubkey
-    let buyer_pubkey = nostr_client::get_user_pubkey().await
-        .map(|pk| pk.to_hex())
-        .unwrap_or_default();
+    // buyer_pubkey already validated at function entry
 
     let now = now_secs();
 
@@ -1596,10 +1646,8 @@ pub struct CollectionFormData {
 
 /// Fetch current user's collections
 pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
-    let pubkey = nostr_client::get_user_pubkey()
-        .await
-        .map_err(|e| format!("Not authenticated: {}", e))?
-        .to_hex();
+    let pubkey = nostr_client::get_cached_pubkey()
+        .map_err(|e| format!("Not authenticated: {}", e))?;
 
     *LOADING_MY_COLLECTIONS.write() = true;
 
@@ -1608,7 +1656,7 @@ pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
 
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_COLLECTION))
-        .author(PublicKey::parse(&pubkey).map_err(|e| e.to_string())?)
+        .author(pubkey) // Use PublicKey directly - no round-trip
         .limit(100);
 
     let events = client
@@ -1824,10 +1872,14 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
 
-                        // Get current user as merchant
-                        let merchant_pubkey = nostr_client::get_user_pubkey().await
-                            .map(|pk| pk.to_hex())
-                            .unwrap_or_default();
+                        // Dioxus pattern: Guard clause - return Err so caller doesn't mark event as processed
+                        let merchant_pubkey = match nostr_client::get_cached_pubkey() {
+                            Ok(pk) => pk.to_hex(),
+                            Err(_) => {
+                                log::warn!("Deferring order message - not authenticated");
+                                return Err("Not authenticated - order message will be reprocessed".to_string());
+                            }
+                        };
 
                         let order = ShopOrder {
                             order_id: order_id.clone(),

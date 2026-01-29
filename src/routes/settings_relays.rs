@@ -425,6 +425,9 @@ pub fn SettingsRelays() -> Element {
             *relay::SEARCH_RELAYS.write() = search;
             *relay::BLOCKED_RELAYS.write() = blocked;
 
+            // Invalidate search relay cache so next search uses the new relay list
+            crate::services::search_relays::invalidate_search_relay_cache().await;
+
             save_status.set(Some("Relay lists published successfully!".to_string()));
 
             // Clear message after 3 seconds

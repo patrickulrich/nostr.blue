@@ -259,7 +259,7 @@ fn BookCard(book: Book, translation: String) -> Element {
                 div {
                     class: "absolute top-full left-0 right-0 mt-1 p-2 bg-card border border-border rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto",
 
-                    div { class: "grid grid-cols-5 gap-1",
+                    div { class: "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1",
                         for ch in 1..=book.number_of_chapters {
                             {
                                 let book_id = book.id.clone();

@@ -11,7 +11,7 @@ use super::internal::{
     is_token_already_spent_error,
 };
 use super::proofs::{cdk_proof_to_proof_data, register_proofs_in_event_map};
-use super::signals::{try_acquire_mint_lock, WALLET_BALANCE, WALLET_TOKENS};
+use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt};
 use super::utils::{normalize_mint_url, sanitize_and_validate_token};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
@@ -251,12 +251,11 @@ pub async fn receive_tokens_with_options(
 
                     if let Some(keyset_info) = keysets.iter().find(|k| k.id == keyset_id) {
                         if !keyset_info.active {
-                            log::warn!(
-                                "Token uses inactive keyset {} - mint has rotated keys",
+                            log::info!(
+                                "Token uses inactive keyset {} - will be migrated to active keyset during receive",
                                 keyset_id
                             );
-                            // Don't reject outright - the receive will still work (swap to new keyset)
-                            // But log a warning so we can track this
+                            // CDK's receive() automatically migrates to active keyset via create_swap()
                         }
                     } else {
                         log::warn!("Keyset {} not found on mint {}", keyset_id, mint_url);
@@ -422,7 +421,7 @@ pub async fn receive_tokens_with_options(
         .await
         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
-    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -430,13 +429,116 @@ pub async fn receive_tokens_with_options(
         .ok_or("Client not initialized")?
         .clone();
 
-    let event_output = client
-        .send_event_builder(builder)
+    // Pre-sign the event so we have the real event ID even on duplicate errors
+    // Note: reuses `signer` from line 409-411 to avoid redundant get_signer() call
+    let signed_event = builder
+        .build(pubkey)
+        .sign(&signer)
         .await
-        .map_err(|e| format!("Failed to publish event: {}", e))?;
+        .map_err(|e| format!("Failed to sign token event: {}", e))?;
+    let pre_signed_event_id = signed_event.id.to_hex();
 
-    let event_id = event_output.id().to_hex();
-    log::info!("Published token event: {}", event_id);
+    // Attempt publish with immediate retries before falling back to queue
+    let mut event_id: Option<String> = None;
+    let mut last_error = String::new();
+    let mut retryable = true; // Track if error is retryable
+    let delays_ms = [500u32, 1000, 2000]; // Exponential backoff delays
+
+    for (attempt, delay_ms) in std::iter::once(0u32).chain(delays_ms.iter().copied()).enumerate() {
+        if attempt > 0 {
+            #[cfg(target_arch = "wasm32")]
+            {
+                // Add jitter to prevent synchronized retries
+                let jitter = (js_sys::Math::random() * 200.0) as u32;
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
+                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                use rand::Rng;
+                // Mirror WASM jitter: base delay + random offset [0, 200)
+                let jitter = rand::thread_rng().gen_range(0..200);
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
+                tokio::time::sleep(std::time::Duration::from_millis(actual_delay as u64)).await;
+            }
+            log::info!("Retrying token event publish (attempt {})", attempt + 1);
+        }
+
+        match client.send_event(&signed_event).await {
+            Ok(output) => {
+                if !output.success.is_empty() {
+                    event_id = Some(pre_signed_event_id.clone());
+                    log::info!(
+                        "Published token event to {}/{} relays",
+                        output.success.len(),
+                        output.success.len() + output.failed.len()
+                    );
+                    break;
+                } else {
+                    // nostr-sdk pattern: duplicates start with "duplicate:" prefix
+                    let all_duplicates = output.failed.values().all(|err| {
+                        err.to_lowercase().starts_with("duplicate:")
+                    });
+
+                    if all_duplicates && !output.failed.is_empty() {
+                        log::debug!("Token event {} already exists on all relays (duplicate)", pre_signed_event_id);
+                        event_id = Some(pre_signed_event_id.clone());
+                        retryable = false;
+                        break;
+                    }
+
+                    last_error = format!("All {} relays failed", output.failed.len());
+                }
+            }
+            Err(e) => {
+                last_error = e.to_string();
+                // Check for permanent errors that shouldn't be retried
+                // CDK pattern: classify errors - 4xx = permanent, 5xx = retryable
+                let err_str = last_error.to_lowercase();
+                if err_str.contains("banned") || err_str.contains("invalid") {
+                    log::error!("Permanent error, stopping retries: {}", last_error);
+                    retryable = false; // Mark as non-retryable
+                    break;
+                }
+                // "duplicate" means event already published - this is success, not error
+                if err_str.contains("duplicate") || err_str.contains("already exists") {
+                    log::info!("Event already exists on relay, using pre-signed ID");
+                    event_id = Some(pre_signed_event_id.clone()); // Use real ID
+                    retryable = false; // Don't queue for retry - event is already there
+                    break;
+                }
+            }
+        }
+    }
+
+    // If all immediate retries failed, queue for background retry (only if retryable)
+    let event_id = match event_id {
+        Some(id) => id,
+        None => {
+            if retryable {
+                log::error!("All publish attempts failed, queueing for retry: {}", last_error);
+                // Use UUID for collision-resistant pending IDs (Issue #13)
+                let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+
+                // Queue for background retry - proofs are safe in CDK, just need Nostr backup
+                // Re-create builder for retry queue since we used signed_event for publish attempts
+                let retry_builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
+                super::events::queue_token_event_for_retry(
+                    retry_builder,
+                    pending_id.clone(),
+                    mint_url.clone(),
+                )
+                .await;
+
+                pending_id
+            } else {
+                log::warn!("Permanent error - not queueing for retry: {}", last_error);
+                // Use UUID for collision-resistant local IDs
+                format!("local_{}", uuid::Uuid::new_v4())
+            }
+        }
+    };
+    log::info!("Token event ID: {}", event_id);
 
     // Update local state
     {
@@ -455,16 +557,9 @@ pub async fn receive_tokens_with_options(
         // Register proofs in event map for fast lookup
         register_proofs_in_event_map(&event_id, &proof_data);
 
-        // Recalculate balance
-        let new_balance: u64 = tokens
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .try_fold(0u64, |acc, amount| acc.checked_add(amount))
-            .ok_or_else(|| "Balance calculation overflow".to_string())?;
-
-        *WALLET_BALANCE.write() = new_balance;
-        log::info!("Balance after receive: {} sats", new_balance);
+        // Update balance from proof state
+        super::signals::update_wallet_balances();
+        log::info!("Updated balance after receive");
     }
 
     let amount = u64::from(amount_received);

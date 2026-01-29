@@ -158,7 +158,6 @@ pub fn PhotoCard(event: Event) -> Element {
     let event_id_comment_btn = event_id.clone();
     let event_id_link = event_id.clone();
     let event_id_repost = event_id.clone();
-    let author_pubkey_repost = author_pubkey.clone();
 
     // Clone images for use in closures
     let images_carousel = images.clone();
@@ -557,12 +556,11 @@ pub fn PhotoCard(event: Event) -> Element {
                         }
 
                         let event_id_clone = event_id_repost.clone();
-                        let author_pubkey_clone = author_pubkey_repost.clone();
 
                         is_reposting.set(true);
 
                         spawn(async move {
-                            match publish_repost(event_id_clone, author_pubkey_clone, None).await {
+                            match publish_repost(event_id_clone, None).await {
                                 Ok(repost_id) => {
                                     log::info!("Reposted photo, repost ID: {}", repost_id);
                                     is_reposted.set(true);

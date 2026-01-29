@@ -63,6 +63,9 @@ pub struct Profile {
     /// Birthday information (NIP-24)
     pub birthday: Option<Birthday>,
     pub fetched_at: DateTime<Utc>,
+    /// Raw metadata JSON for preserving unknown fields during updates
+    /// This prevents loss of custom metadata fields when updating profile picture/banner
+    pub raw_metadata_json: Option<String>,
 }
 
 impl Profile {
@@ -221,6 +224,7 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                     bot: None,
                     birthday: None,
                     fetched_at: Utc::now(),
+                    raw_metadata_json: None,
                 };
 
                 // Cache the empty profile to avoid re-fetching
@@ -246,6 +250,7 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                 bot: None,
                 birthday: None,
                 fetched_at: Utc::now(),
+                raw_metadata_json: None,
             };
 
             Ok(profile)
@@ -306,6 +311,8 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
         bot,
         birthday,
         fetched_at: Utc::now(),
+        // Preserve raw JSON for updates to avoid losing custom fields
+        raw_metadata_json: Some(content.clone()),
     })
 }
 

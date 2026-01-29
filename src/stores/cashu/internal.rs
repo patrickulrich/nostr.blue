@@ -22,7 +22,7 @@ use cdk_common::database::WalletDatabase;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS};
 use super::types::{ProofData, WalletTokensStoreStoreExt};
-use super::utils::mint_matches;
+use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge};
 
 // =============================================================================
@@ -107,6 +107,13 @@ pub(crate) async fn get_or_create_wallet(mint_url: &str) -> Result<Arc<Wallet>, 
 ///
 /// Uses the cached wallet system for performance. Proofs are injected into
 /// the shared IndexedDB store which all wallets share.
+///
+/// Duplicate Check: Proofs that already exist in CDK database are skipped
+/// to prevent balance corruption from duplicate entries.
+///
+/// TODO(multi-unit): Currently hardcodes CurrencyUnit::Sat. To support multi-unit
+/// tokens (CDK pattern), add a `unit: CurrencyUnit` parameter and derive unit from
+/// proof keysets or pass explicitly from callers.
 pub(crate) async fn create_ephemeral_wallet(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>,
@@ -131,18 +138,65 @@ pub(crate) async fn create_ephemeral_wallet(
             .parse()
             .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
-        let proof_infos: Vec<_> = proofs
-            .into_iter()
-            .map(|p| ProofInfo::new(p, mint_url_parsed.clone(), State::Unspent, CurrencyUnit::Sat))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to create proof info: {}", e))?;
-
-        // Inject proofs via shared localstore
+        // Get shared localstore for both checking and injecting
         let localstore = get_shared_localstore().await?;
-        localstore
-            .update_proofs(proof_infos, vec![])
+
+        // Check which proofs already exist in CDK database to prevent duplicates
+        let existing_proofs = localstore
+            .get_proofs(Some(mint_url_parsed.clone()), None, None, None)
             .await
-            .map_err(|e| format!("Failed to inject proofs: {}", e))?;
+            .map_err(|e| format!("Failed to query existing proofs: {}", e))?;
+
+        let existing_secrets: std::collections::HashSet<String> = existing_proofs
+            .iter()
+            .map(|p| p.proof.secret.to_string())
+            .collect();
+
+        // Capture input length before filtering for accurate skipped_count
+        let input_len = proofs.len();
+
+        // Filter to only inject proofs that don't already exist, and dedupe within the batch
+        let mut seen_secrets = std::collections::HashSet::new();
+        let new_proofs: Vec<_> = proofs
+            .into_iter()
+            .filter(|p| {
+                let secret = p.secret.to_string();
+                // Skip if already exists in CDK database
+                if existing_secrets.contains(&secret) {
+                    return false;
+                }
+                // Skip if we've already seen this secret in this batch (keeps first occurrence)
+                seen_secrets.insert(secret)
+            })
+            .collect();
+
+        if new_proofs.is_empty() {
+            log::debug!(
+                "All {} proofs already exist in CDK database, skipping injection",
+                input_len
+            );
+        } else {
+            let skipped_count = input_len.saturating_sub(new_proofs.len());
+            if skipped_count > 0 {
+                log::debug!(
+                    "Skipping {} duplicate proofs, injecting {} new proofs",
+                    skipped_count,
+                    new_proofs.len()
+                );
+            }
+
+            let proof_infos: Vec<_> = new_proofs
+                .into_iter()
+                .map(|p| ProofInfo::new(p, mint_url_parsed.clone(), State::Unspent, CurrencyUnit::Sat))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to create proof info: {}", e))?;
+
+            // Inject only new proofs via shared localstore
+            localstore
+                .update_proofs(proof_infos, vec![])
+                .await
+                .map_err(|e| format!("Failed to inject proofs: {}", e))?;
+        }
     }
 
     Ok(wallet)
@@ -547,46 +601,56 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                     super::events::queue_event_for_retry(
                         deletion_builder,
                         super::types::PendingEventType::DeletionEvent,
+                        None,
+                        None,
                     ).await;
                 }
             }
         }
     }
 
-    // Update local state
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data = store.data();
-        let mut tokens_write = data.write();
+    // Update local state with crash-safe atomic replacement
+    // Uses add-before-delete pattern: worst case on crash is duplicate tokens (recoverable),
+    // never lost tokens.
+    //
+    // SAFETY: Only perform atomic_token_replace when it's safe to do so:
+    // - If new_event_id.is_some(): We have a new token event, safe to replace
+    // - If available_proofs.is_empty(): No proofs left to track, safe to delete old events
+    // - Otherwise: Publish failed but proofs exist - create synthetic local pending ID
+    let available_proofs_is_empty = available_proofs.is_empty();
+    let tokens_to_add = if let Some(ref event_id) = new_event_id {
+        vec![super::types::TokenData {
+            event_id: event_id.clone(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
+    } else if !available_proofs.is_empty() {
+        // Fallback: create local pending event for unspent proofs when publish fails
+        // This ensures proofs remain accessible via pending_id for future recovery
+        let synthetic_id = format!("local_pending_{}", chrono::Utc::now().timestamp_millis());
+        log::warn!("Publish failed, using synthetic event_id: {}", synthetic_id);
+        vec![super::types::TokenData {
+            event_id: synthetic_id,
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
+    } else {
+        vec![]
+    };
 
-        // Remove old token events
-        tokens_write.retain(|t| !event_ids_to_delete.contains(&t.event_id));
-
-        // Add new token with remaining proofs
-        if let Some(ref event_id) = new_event_id {
-            use super::types::TokenData;
-
-            tokens_write.push(TokenData {
-                event_id: event_id.clone(),
-                mint: mint_url.to_string(),
-                unit: "sat".to_string(),
-                proofs: available_proofs,
-                created_at: chrono::Utc::now().timestamp() as u64,
-            });
+    // Always call atomic_token_replace - either we have new tokens or we're just deleting
+    if new_event_id.is_some() || available_proofs_is_empty || !tokens_to_add.is_empty() {
+        if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
+            log::error!("Failed atomic token replacement during cleanup: {}", e);
+        } else {
+            // Rebuild derived PROOF_EVENT_MAP from updated WALLET_TOKENS
+            // This ensures the map stays consistent with token state
+            super::proofs::rebuild_proof_event_map();
         }
-
-        // Update balance with overflow protection (following CDK try_sum pattern)
-        let new_balance: u64 = tokens_write
-            .iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .try_fold(0u64, |acc, amt| acc.checked_add(amt))
-            .unwrap_or_else(|| {
-                log::error!("Balance overflow detected during cleanup!");
-                u64::MAX
-            });
-
-        *super::signals::WALLET_BALANCE.write() = new_balance;
     }
 
     log::info!(
@@ -809,10 +873,27 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
 // Atomic Recovery Wrapper (CDK pattern: try_proof_operation_or_reclaim)
 // =============================================================================
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
-/// Global flag to prevent concurrent recovery operations
-static IN_ERROR_RECOVERY: AtomicBool = AtomicBool::new(false);
+/// Per-mint recovery state - combines lock flag and pending queue atomically
+/// CDK pattern: single lock per wallet, but we need per-mint for parallel recovery
+#[derive(Default)]
+struct MintRecoveryState {
+    /// True if recovery is currently running for this mint
+    in_recovery: bool,
+    /// Proofs queued while recovery was in progress
+    pending_proofs: Vec<cdk::nuts::Proof>,
+}
+
+/// Per-mint recovery coordination - mutex ensures atomic check-and-enqueue
+/// Key is normalized mint URL
+static MINT_RECOVERY_STATE: Lazy<Mutex<HashMap<String, MintRecoveryState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// CDK pattern: batch proof syncs to avoid overwhelming mint API
+const BATCH_PROOF_SIZE: usize = 100;
 
 /// Execute an operation with automatic proof state recovery on failure
 ///
@@ -821,6 +902,9 @@ static IN_ERROR_RECOVERY: AtomicBool = AtomicBool::new(false);
 /// might be spent at the mint but our local state doesn't reflect this.
 ///
 /// Based on CDK's `try_proof_operation_or_reclaim` pattern.
+///
+/// Uses per-mint locking to allow recovery for different mints to proceed in parallel
+/// while preventing concurrent recovery for the same mint.
 pub(crate) async fn try_operation_or_recover<F, R>(
     mint_url: &str,
     proofs: Vec<cdk::nuts::Proof>,
@@ -833,27 +917,73 @@ where
         Ok(result) => Ok(result),
         Err(err) => {
             log::error!(
-                "Operation failed with '{}', attempting to recover {} proofs",
+                "Operation failed with '{}', attempting to recover {} proofs for {}",
                 err,
-                proofs.len()
+                proofs.len(),
+                mint_url
             );
 
-            // Try to acquire recovery lock to prevent concurrent recovery
-            if IN_ERROR_RECOVERY
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                log::info!("Syncing proof states with mint after failure");
+            // Normalize mint URL for consistent keying (CDK pattern: MintUrl normalization)
+            let normalized_mint = normalize_mint_url(mint_url);
 
-                // Sync proof states with mint
-                if let Err(sync_err) = sync_proofs_with_mint_after_failure(mint_url, &proofs).await {
-                    log::warn!("Failed to sync proof states: {}", sync_err);
+            // Atomic check-and-set under single mutex (prevents TOCTOU race)
+            // Returns Some(proofs) if we should recover, None if proofs were queued
+            let proofs_to_recover = {
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let state = states.entry(normalized_mint.clone()).or_default();
+
+                if state.in_recovery {
+                    // Recovery already running - queue proofs atomically
+                    log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs.len());
+                    state.pending_proofs.extend(proofs);
+                    None
+                } else {
+                    // We become the recovery thread
+                    state.in_recovery = true;
+                    Some(proofs)
+                }
+            };
+
+            if let Some(proofs) = proofs_to_recover {
+                log::info!("Syncing proof states with mint {} after failure", mint_url);
+
+                // Sync initial proofs with mint (CDK pattern: batch in chunks of 100)
+                for chunk in proofs.chunks(BATCH_PROOF_SIZE) {
+                    if let Err(sync_err) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                        log::warn!("Failed to sync proof states for {}: {}", mint_url, sync_err);
+                    }
                 }
 
-                // Release recovery lock
-                IN_ERROR_RECOVERY.store(false, Ordering::SeqCst);
-            } else {
-                log::debug!("Recovery already in progress, skipping duplicate sync");
+                // Drain and process any queued proofs for this mint
+                // TOCTOU fix: Atomic check+clear in single lock (nostr-sdk pattern)
+                loop {
+                    let (queued_proofs, should_exit) = {
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let state = states.entry(normalized_mint.clone()).or_default();
+                        let proofs = std::mem::take(&mut state.pending_proofs);
+
+                        if proofs.is_empty() {
+                            // Atomically check empty AND clear in_recovery to prevent race
+                            state.in_recovery = false;
+                            states.remove(&normalized_mint); // Clean up
+                            (proofs, true)
+                        } else {
+                            (proofs, false)
+                        }
+                    };
+
+                    if should_exit {
+                        break;
+                    }
+
+                    log::info!("Processing {} queued proofs for {}", queued_proofs.len(), mint_url);
+                    // CDK pattern: batch in chunks of 100
+                    for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
+                        if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                            log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
+                        }
+                    }
+                }
             }
 
             Err(err)
@@ -931,6 +1061,7 @@ async fn sync_proofs_with_mint_after_failure(
 /// Execute a wallet swap operation with automatic recovery
 ///
 /// Convenience wrapper for swap/send operations that handles proof recovery.
+/// Uses per-mint locking to allow recovery for different mints to proceed in parallel.
 pub(crate) async fn try_swap_or_recover(
     _wallet: &Wallet,
     mint_url: &str,
@@ -943,15 +1074,68 @@ pub(crate) async fn try_swap_or_recover(
         Ok(result) => Ok(result),
         Err(err) => {
             let err_str = err.to_string();
-            log::error!("Swap failed: {}", err_str);
+            log::error!("Swap failed for {}: {}", mint_url, err_str);
 
-            // Sync proofs with mint
-            if IN_ERROR_RECOVERY
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-            {
-                let _ = sync_proofs_with_mint_after_failure(mint_url, &proofs_clone).await;
-                IN_ERROR_RECOVERY.store(false, Ordering::SeqCst);
+            // Normalize mint URL for consistent keying (CDK pattern: MintUrl normalization)
+            let normalized_mint = normalize_mint_url(mint_url);
+
+            // Atomic check-and-set under single mutex (prevents TOCTOU race)
+            // Returns Some(proofs) if we should recover, None if proofs were queued
+            let proofs_to_recover = {
+                let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                let state = states.entry(normalized_mint.clone()).or_default();
+
+                if state.in_recovery {
+                    // Recovery already running - queue proofs atomically
+                    log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs_clone.len());
+                    state.pending_proofs.extend(proofs_clone);
+                    None
+                } else {
+                    // We become the recovery thread
+                    state.in_recovery = true;
+                    Some(proofs_clone)
+                }
+            };
+
+            if let Some(proofs) = proofs_to_recover {
+                // Sync initial proofs with mint (CDK pattern: batch in chunks of 100)
+                for chunk in proofs.chunks(BATCH_PROOF_SIZE) {
+                    match sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                        Ok(_) => log::debug!("Recovery batch completed for mint {}", mint_url),
+                        Err(e) => log::error!("Recovery failed for mint {}: {}", mint_url, e),
+                    }
+                }
+
+                // Drain and process any queued proofs for this mint
+                // TOCTOU fix: Atomic check+clear in single lock (nostr-sdk pattern)
+                loop {
+                    let (queued_proofs, should_exit) = {
+                        let mut states = MINT_RECOVERY_STATE.lock().unwrap();
+                        let state = states.entry(normalized_mint.clone()).or_default();
+                        let proofs = std::mem::take(&mut state.pending_proofs);
+
+                        if proofs.is_empty() {
+                            // Atomically check empty AND clear in_recovery to prevent race
+                            state.in_recovery = false;
+                            states.remove(&normalized_mint); // Clean up
+                            (proofs, true)
+                        } else {
+                            (proofs, false)
+                        }
+                    };
+
+                    if should_exit {
+                        break;
+                    }
+
+                    log::info!("Processing {} queued proofs for {}", queued_proofs.len(), mint_url);
+                    // CDK pattern: batch in chunks of 100
+                    for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
+                        if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                            log::warn!("Failed to sync queued proofs for {}: {}", mint_url, e);
+                        }
+                    }
+                }
             }
 
             Err(err_str)

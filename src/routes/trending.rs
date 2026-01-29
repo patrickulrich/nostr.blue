@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::services::trending::{get_trending_notes, TrendingNote};
 use crate::components::{NoteCard, NoteCardSkeleton};
 use crate::stores::nostr_client;
+use crate::hooks::use_mute_block_cache;
 use nostr_sdk::{Event as NostrEvent, EventId, PublicKey, Timestamp, Kind, Tag};
 use nostr::secp256k1::schnorr::Signature;
 
@@ -13,6 +14,9 @@ pub fn Trending() -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
+
+    // Cached mute/block lists for N+1 optimization (uses centralized hook)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     // Load trending feed - wait for client initialization
     use_effect(move || {
@@ -119,7 +123,9 @@ pub fn Trending() -> Element {
                         NoteCard {
                             key: "{event.id}",
                             event: event.clone(),
-                            collapsible: true
+                            collapsible: true,
+                            cached_muted_posts: cached_muted_posts.read().clone(),
+                            cached_blocked_users: cached_blocked_users.read().clone()
                         }
                     }
                 }

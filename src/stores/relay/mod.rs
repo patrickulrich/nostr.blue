@@ -81,7 +81,9 @@ pub use specialty::{
     add_relays,
     add_relays_from_strings,
     ensure_connected,
+    ensure_dm_relays_connected,
     ensure_gif_relay,
+    ensure_search_relays_connected,
     ensure_video_relay,
     get_connected,
     remove_relays,
@@ -133,6 +135,9 @@ pub use nip65::{
     save_local_relays,
     init_local_relays_from_cache,
     apply_local_relays_to_client,
+    // Real-time relay list subscription
+    start_relay_list_subscription,
+    stop_relay_list_subscription,
 };
 
 // Re-export display types and functions

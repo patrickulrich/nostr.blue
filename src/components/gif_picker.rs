@@ -16,19 +16,8 @@ pub struct GifPickerProps {
 pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_picker = use_signal(|| false);
     let mut show_upload_modal = use_signal(|| false);
-    #[allow(unused_mut)] // Mutated only in WASM target
-    let mut position_right = use_signal(|| true); // Whether to show popup to the right of button
-    let button_id = use_signal(|| format!("gif-picker-{}", uuid::Uuid::new_v4()));
     let mut initialized = use_signal(|| false);
     let mut search_query = use_signal(String::new);
-    #[allow(unused_mut)] // Mutated only in WASM target
-    let mut picker_top = use_signal(|| 0.0);
-    #[allow(unused_mut)] // Mutated only in WASM target
-    let mut picker_left = use_signal(|| 0.0);
-    #[allow(unused_mut)] // Mutated only in WASM target
-    let mut picker_right = use_signal(|| 0.0);
-    #[allow(unused_mut)] // Mutated only in WASM target
-    let mut is_mobile = use_signal(|| false);
 
     // Read GIF state from global store
     let gif_results = GIF_RESULTS.read();
@@ -61,7 +50,6 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
 
             // GIF button
             button {
-                id: "{button_id}",
                 class: if props.icon_only {
                     "p-2 rounded-full hover:bg-accent transition text-sm font-bold"
                 } else {
@@ -80,71 +68,6 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             load_initial_gifs().await;
                         });
                     }
-
-                    // Calculate position when opening
-                    if !current {
-                        #[cfg(target_family = "wasm")]
-                        {
-                            let btn_id = button_id.read().clone();
-                            if let Some(window) = web_sys::window() {
-                                if let Some(document) = window.document() {
-                                    if let Some(element) = document.get_element_by_id(&btn_id) {
-                                        let rect = element.get_bounding_client_rect();
-                                        let viewport_width = window
-                                            .inner_width()
-                                            .ok()
-                                            .and_then(|w| w.as_f64())
-                                            .unwrap_or(1024.0);
-                                        let viewport_height = window
-                                            .inner_height()
-                                            .ok()
-                                            .and_then(|h| h.as_f64())
-                                            .unwrap_or(800.0);
-
-                                        // Mobile breakpoint (sm = 640px)
-                                        let is_mobile_view = viewport_width < 640.0;
-                                        is_mobile.set(is_mobile_view);
-
-                                        if is_mobile_view {
-                                            // On mobile: position at top with margins, CSS handles width
-                                            picker_top.set(16.0); // 1rem from top
-                                        } else {
-                                            // Desktop: compute picker_width based on viewport to match responsive CSS
-                                            // sm:w-[500px] at 640px, md:w-[700px] at 768px
-                                            let picker_width = if viewport_width < 768.0 {
-                                                500.0  // sm:w-[500px]
-                                            } else {
-                                                700.0  // md:w-[700px]
-                                            };
-                                            let picker_height = 600.0; // Approximate height
-                                            let margin = 8.0;
-
-                                            // Check if there's space on the right
-                                            let space_on_right = viewport_width - rect.right();
-                                            let has_space_right = space_on_right >= picker_width + margin;
-
-                                            // Calculate vertical position to center on button
-                                            let button_center_y = rect.top() + (rect.height() / 2.0);
-                                            let desired_top = button_center_y - (picker_height / 2.0);
-                                            // Clamp to viewport bounds
-                                            let final_top = desired_top.max(margin).min(viewport_height - picker_height - margin);
-                                            picker_top.set(final_top);
-
-                                            if has_space_right {
-                                                // Position to the right of button
-                                                picker_left.set(rect.right() + margin);
-                                                position_right.set(true);
-                                            } else {
-                                                // Position to the left of button
-                                                picker_right.set(viewport_width - rect.left() + margin);
-                                                position_right.set(false);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 },
                 if props.icon_only {
                     "GIF"
@@ -153,24 +76,28 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                 }
             }
 
-            // GIF picker popover
+            // GIF picker modal with backdrop
             if *show_picker.read() {
+                // Backdrop - clicking closes the picker
                 div {
-                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-[60]",
-                    class: "w-[calc(100vw-2rem)] sm:w-[500px] md:w-[700px]",
-                    style: if *is_mobile.read() {
-                        // Mobile: fixed position, CSS handles width via responsive classes
-                        "top: 1rem; left: 1rem; right: 1rem;".to_string()
-                    } else if *position_right.read() {
-                        format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read())
-                    } else {
-                        format!("top: {}px; right: {}px;", *picker_top.read(), *picker_right.read())
+                    class: "fixed inset-0 bg-black/50 z-[59]",
+                    onclick: move |_| {
+                        show_picker.set(false);
+                        show_upload_modal.set(false);
                     },
-                    onclick: move |e| e.stop_propagation(),
-
-                    // Header
+                }
+                // Modal container - centered with flexbox
+                div {
+                    class: "fixed inset-0 z-[60] flex items-start sm:items-center justify-center p-4 pointer-events-none",
+                    // Modal content - flexbox column to pin header/footer
                     div {
-                        class: "flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-t-xl",
+                        class: "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl pointer-events-auto flex flex-col",
+                        class: "w-full sm:w-[500px] md:w-[700px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] mt-4 sm:mt-0",
+                        onclick: move |e| e.stop_propagation(),
+
+                    // Header - shrink-0 keeps it pinned at top
+                    div {
+                        class: "shrink-0 flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-t-xl",
                         h3 {
                             class: "text-base font-bold text-gray-900 dark:text-gray-100",
                             "🎬 Select GIF"
@@ -185,9 +112,9 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                     }
 
-                    // Search input
+                    // Search input - shrink-0 keeps it pinned below header
                     div {
-                        class: "p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750",
+                        class: "shrink-0 p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750",
                         div {
                             class: "relative",
                             input {
@@ -207,9 +134,9 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                     }
 
-                    // Content area with scrolling
+                    // Content area with scrolling - flex-1 fills remaining space, min-h-0 allows shrinking
                     div {
-                        class: "overflow-y-auto max-h-[50vh] sm:max-h-[60vh] md:max-h-[500px]",
+                        class: "flex-1 min-h-0 overflow-y-auto",
 
                         // Recent GIFs section (if any and no active search)
                         if !recent_gifs.data().read().is_empty() && search_query.read().is_empty() {
@@ -298,7 +225,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                             // GIF grid
                             if !gif_results.data().read().is_empty() {
                                 div {
-                                    class: "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2",
+                                    class: "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2",
                                     for (idx, gif) in gif_results.data().read().iter().enumerate() {
                                         {
                                             let gif_url = gif.url.clone();
@@ -341,10 +268,10 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                         }
                     }
 
-                    // Footer with Load More and Upload buttons
+                    // Footer with Load More and Upload buttons - shrink-0 keeps it pinned at bottom
                     if !gif_results.data().read().is_empty() {
                         div {
-                            class: "p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-b-xl",
+                            class: "shrink-0 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 rounded-b-xl",
                             div {
                                 class: "flex gap-2",
                                 // Load More button
@@ -377,6 +304,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                 }
                             }
                         }
+                    }
                     }
                 }
 

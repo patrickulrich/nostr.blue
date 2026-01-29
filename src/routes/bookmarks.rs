@@ -1,8 +1,9 @@
 use dioxus::prelude::*;
+use nostr_sdk::Event as NostrEvent;
+
 use crate::stores::{auth_store, bookmarks, nostr_client};
 use crate::components::{NoteCard, ClientInitializing};
-use crate::hooks::use_infinite_scroll::use_infinite_scroll;
-use nostr_sdk::Event as NostrEvent;
+use crate::hooks::{use_infinite_scroll::use_infinite_scroll, use_mute_block_cache};
 
 #[component]
 pub fn Bookmarks() -> Element {
@@ -15,6 +16,9 @@ pub fn Bookmarks() -> Element {
     let mut has_more = use_signal(|| true);
     let mut loaded_count = use_signal(|| 0usize);
     const BATCH_SIZE: usize = 50;
+
+    // Cached mute/block lists for N+1 optimization (uses centralized hook)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     // Load initial batch of bookmarks on mount
     use_effect(move || {
@@ -207,7 +211,9 @@ pub fn Bookmarks() -> Element {
                             NoteCard {
                                 key: "{event.id}",
                                 event: event.clone(),
-                                collapsible: true
+                                collapsible: true,
+                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                cached_blocked_users: cached_blocked_users.read().clone()
                             }
                         }
 

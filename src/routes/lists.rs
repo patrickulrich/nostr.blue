@@ -348,7 +348,12 @@ fn ListCard(
     on_manage: EventHandler<UserList>,
 ) -> Element {
     let navigator = use_navigator();
-    let item_count = get_item_count(&list.tags);
+    // Use total_member_count if available, otherwise fallback to public count
+    let display_count = match list.total_member_count {
+        Some(count) => count.to_string(),
+        None if list.has_private_content => format!("{}+", get_item_count(&list.tags)),
+        None => get_item_count(&list.tags).to_string(),
+    };
     let list_clone = list.clone();
     let list_for_nav = list.clone();
     let list_for_manage = list.clone();
@@ -381,7 +386,7 @@ fn ListCard(
                 }
                 p {
                     class: "text-xs text-muted-foreground mt-1",
-                    "{get_list_type_name(list.kind)} • {item_count} items"
+                    "{get_list_type_name(list.kind)} • {display_count} items"
                 }
             }
 
