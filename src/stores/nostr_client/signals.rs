@@ -8,6 +8,7 @@ use nostr_sdk::Client;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::stores::signer::SignerType;
+use super::contacts::EnrichedContact;
 
 // =============================================================================
 // Core Client Signals
@@ -34,9 +35,10 @@ pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| 
 // =============================================================================
 
 /// Cached contacts with 5-minute TTL for feed optimization
+/// Uses EnrichedContact to preserve relay hints and petnames (NIP-02)
 pub(crate) struct CachedContacts {
     pub pubkey: String,
-    pub contacts: Vec<String>,
+    pub contacts: Vec<EnrichedContact>,
     pub cached_at: instant::Instant,
     /// nostr-sdk pattern: Track last refresh spawn to prevent spam
     pub last_refresh_spawned: Option<instant::Instant>,
