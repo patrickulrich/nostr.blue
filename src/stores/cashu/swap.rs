@@ -661,31 +661,46 @@ async fn publish_swap_events(
         Ok(output) => {
             // Check if at least one relay accepted (nostr-sdk Output<T> pattern)
             if output.success.is_empty() {
-                log::warn!(
-                    "No relays accepted swap token event (failed: {:?}), queuing for retry",
-                    output.failed.keys().collect::<Vec<_>>()
+                // nostr-sdk pattern: MachineReadablePrefix::Duplicate parses "duplicate:" prefix
+                // Some relays incorrectly return status: false for duplicates, check failed map
+                let all_duplicates = !output.failed.is_empty() && output.failed.values().all(|err| {
+                    err.to_lowercase().starts_with("duplicate:")
+                });
+
+                if all_duplicates {
+                    log::debug!(
+                        "Swap token event {} already exists on all relays (duplicate)",
+                        event_id_hex
+                    );
+                    // Treat as success - publish deletion events (event exists, safe to delete old)
+                    publish_deletion_events(&client, &valid_del_ids).await;
+                } else {
+                    log::warn!(
+                        "No relays accepted swap token event (failed: {:?}), queuing for retry",
+                        output.failed.keys().collect::<Vec<_>>()
+                    );
+                    queue_signed_event_for_retry(
+                        signed_event,
+                        PendingEventType::TokenEvent,
+                        Some(pending_event_id.to_string()),
+                        Some(mint_url.to_string()),
+                    ).await;
+
+                    // Do NOT queue deletion events here - token event not confirmed yet.
+                    // Deletions will be handled by publish_deletion_events after token retry succeeds.
+                    return Err("No relays accepted swap token event".to_string());
+                }
+            } else {
+                log::info!(
+                    "Published swap token event: {} (to {}/{} relays)",
+                    event_id_hex,
+                    output.success.len(),
+                    output.success.len() + output.failed.len()
                 );
-                queue_signed_event_for_retry(
-                    signed_event,
-                    PendingEventType::TokenEvent,
-                    Some(pending_event_id.to_string()),
-                    Some(mint_url.to_string()),
-                ).await;
 
-                // Do NOT queue deletion events here - token event not confirmed yet.
-                // Deletions will be handled by publish_deletion_events after token retry succeeds.
-                return Err("No relays accepted swap token event".to_string());
+                // Publish deletion events for old tokens
+                publish_deletion_events(&client, &valid_del_ids).await;
             }
-
-            log::info!(
-                "Published swap token event: {} (to {}/{} relays)",
-                event_id_hex,
-                output.success.len(),
-                output.success.len() + output.failed.len()
-            );
-
-            // Publish deletion events for old tokens
-            publish_deletion_events(&client, &valid_del_ids).await;
         }
         Err(e) => {
             log::warn!(

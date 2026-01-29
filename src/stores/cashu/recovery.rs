@@ -1458,13 +1458,36 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
         .await
         .map_err(|e| format!("Failed to get proofs: {}", e))?;
 
-    let known_proofs = get_all_proofs_for_mint(mint_url);
-    let known_secrets: std::collections::HashSet<String> =
-        known_proofs.iter().map(|p| p.secret.clone()).collect();
+    use cdk::dhke::hash_to_curve;
 
+    // Build HashSet of Y-values from known proofs (matches recover_melt_change_deduplicated)
+    let known_proofs = get_all_proofs_for_mint(mint_url);
+    let known_ys: std::collections::HashSet<String> = known_proofs
+        .iter()
+        .filter_map(|p| {
+            hash_to_curve(p.secret.as_bytes())
+                .ok()
+                .map(|y| y.to_string())
+        })
+        .collect();
+
+    // Filter using Y-value comparison (CDK pattern: p.y() calls hash_to_curve internally)
     let missing: Vec<_> = cdk_proofs
         .iter()
-        .filter(|p| !known_secrets.contains(&p.secret.to_string()))
+        .filter(|p| {
+            match p.y() {
+                Ok(y) => !known_ys.contains(&y.to_string()),
+                Err(e) => {
+                    // SAFETY: If we can't compute Y, treat as duplicate to prevent balance inflation
+                    // (matches recover_melt_change_deduplicated safety pattern)
+                    log::warn!(
+                        "Y_VALUE_COMPUTATION_FAILED: proof_amount={}, error='{}' - treating as duplicate",
+                        u64::from(p.amount), e
+                    );
+                    false
+                }
+            }
+        })
         .collect();
 
     if missing.is_empty() {
@@ -1526,14 +1549,22 @@ async fn recover_operations_for_mint(mint_url: &str) -> Result<u64, String> {
 
     for quote in active_quotes {
         if matches!(quote.state, MeltQuoteState::Paid) {
-            if let Ok(result) = recover_melt_quote_change(mint_url, &quote.id).await {
-                if result.recovered_amount > 0 {
-                    log::info!(
-                        "Recovered {} sats from melt quote {}",
-                        result.recovered_amount,
-                        quote.id
+            match recover_melt_quote_change(mint_url, &quote.id).await {
+                Ok(result) => {
+                    if result.recovered_amount > 0 {
+                        log::info!(
+                            "Recovered {} sats from melt quote {}",
+                            result.recovered_amount,
+                            quote.id
+                        );
+                        total_recovered += result.recovered_amount;
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to recover melt quote {}: {}",
+                        quote.id, e
                     );
-                    total_recovered += result.recovered_amount;
                 }
             }
         }

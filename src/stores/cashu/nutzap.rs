@@ -1240,8 +1240,14 @@ async fn update_local_state_after_nutzap_send(
     event_ids_to_delete: &[String],
 ) -> Result<(), String> {
     if keep_proofs.is_empty() {
-        // Just delete old events
-        super::signals::atomic_token_replace(vec![], event_ids_to_delete)?;
+        // Just delete old events - mirror redeem path error handling
+        if let Err(e) = super::signals::atomic_token_replace(vec![], event_ids_to_delete) {
+            log::error!("Failed atomic token replace (delete): {}", e);
+            if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+                log::warn!("Failed to sync wallet state after atomic_token_replace error: {}", sync_err);
+            }
+            return Err(format!("Failed to update wallet tokens: {}", e));
+        }
         return Ok(());
     }
 
@@ -1259,8 +1265,14 @@ async fn update_local_state_after_nutzap_send(
         created_at: chrono::Utc::now().timestamp() as u64,
     };
 
-    // 3. Update local state FIRST (crash-safe: proofs tracked even if publish fails)
-    super::signals::atomic_token_replace(vec![token], event_ids_to_delete)?;
+    // 3. Update local state FIRST - mirror redeem path error handling
+    if let Err(e) = super::signals::atomic_token_replace(vec![token], event_ids_to_delete) {
+        log::error!("Failed atomic token replace: {}", e);
+        if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+            log::warn!("Failed to sync wallet state after atomic_token_replace error: {}", sync_err);
+        }
+        return Err(format!("Failed to update wallet tokens: {}", e));
+    }
     super::proofs::register_proofs_in_event_map(&pending_event_id, &keep_proof_data);
 
     // 4. NOW attempt publish (safe to fail - state already updated)

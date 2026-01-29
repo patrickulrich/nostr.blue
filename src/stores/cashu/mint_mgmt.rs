@@ -29,6 +29,10 @@ use crate::stores::{auth_store, nostr_client};
 /// Maximum number of proofs to swap in a single batch (CDK pattern)
 /// Mints may reject requests with too many input proofs
 const BATCH_PROOF_SIZE: usize = 100;
+/// Exponential backoff delays for CDK persistence retry (milliseconds)
+const PERSISTENCE_RETRY_DELAYS_MS: [u32; 3] = [1000, 2000, 4000];
+/// Maximum jitter to add to retry delays (prevents synchronized retries)
+const PERSISTENCE_RETRY_JITTER_MS: u32 = 200;
 
 // =============================================================================
 // RAII Guard for In-Flight Tracking (CDK Transaction Guard Pattern)
@@ -1140,10 +1144,10 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             let retry_unit_str = unit_str.clone();
 
             dioxus::prelude::spawn(async move {
-                // Exponential backoff: 1s, 2s, 4s (with jitter)
-                for (attempt, base_delay_ms) in [1000u32, 2000, 4000].iter().enumerate() {
-                    let jitter = (js_sys::Math::random() * 200.0) as u32;
-                    let delay = base_delay_ms.saturating_sub(100) + jitter;
+                // Exponential backoff with jitter (nostr-sdk pattern)
+                for (attempt, base_delay_ms) in PERSISTENCE_RETRY_DELAYS_MS.iter().enumerate() {
+                    let jitter = (js_sys::Math::random() * PERSISTENCE_RETRY_JITTER_MS as f64) as u32;
+                    let delay = base_delay_ms.saturating_sub(PERSISTENCE_RETRY_JITTER_MS / 2) + jitter;
                     gloo_timers::future::TimeoutFuture::new(delay).await;
 
                     let retry_localstore = match SHARED_LOCALSTORE.read().as_ref() {
