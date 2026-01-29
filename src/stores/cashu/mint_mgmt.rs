@@ -1128,7 +1128,6 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         ) {
             log::error!("Emergency WALLET_TOKENS update failed: {}", e);
         } else {
-            super::proofs::register_proofs_in_event_map(&temp_emergency_id, &emergency_proof_data);
             super::signals::update_wallet_balances();
             super::proofs::rebuild_proof_event_map();
             log::info!("Emergency recovery: {} proofs now visible in UI", new_proofs.len());
@@ -1409,8 +1408,9 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
             log::error!("Failed to replace emergency token with real event_id: {}", e);
             // Continue - emergency token still has correct proofs, just wrong event_id
         } else {
-            // Update proofs map to point to real event_id (CDK state sync)
-            super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);
+            // Rebuild proof-to-event mapping to clean up stale emergency_id mapping
+            // (CDK pattern: rebuild atomically after atomic_token_replace)
+            super::proofs::rebuild_proof_event_map();
             log::info!(
                 "Replaced emergency token {} with published event {}",
                 &emergency_id[..16.min(emergency_id.len())],

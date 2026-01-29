@@ -497,13 +497,22 @@ pub async fn send_nutzap(
         .map_err(|e| format!("Swap failed: {}", e))?
         .ok_or("Swap returned no proofs")?;
 
-    // CDK pattern: filter to only NEW proofs (not in pre-swap set)
+    // Build set of send proof secrets to exclude (defensive: these should be Reserved state)
+    let send_secrets: std::collections::HashSet<String> = send_proofs
+        .iter()
+        .map(|p| p.secret.to_string())
+        .collect();
+
+    // CDK pattern: filter to only CHANGE proofs (not in pre-swap set AND not send proofs)
     let keep_proofs: Vec<_> = wallet
         .get_unspent_proofs()
         .await
         .map_err(|e| format!("Failed to get change proofs: {}", e))?
         .into_iter()
-        .filter(|p| !pre_swap_secrets.contains(&p.secret.to_string()))
+        .filter(|p| {
+            let secret = p.secret.to_string();
+            !pre_swap_secrets.contains(&secret) && !send_secrets.contains(&secret)
+        })
         .collect();
 
     // CRITICAL: Update local state IMMEDIATELY after successful swap

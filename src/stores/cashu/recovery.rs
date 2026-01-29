@@ -1059,6 +1059,8 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
 
                         if !spent_secrets.is_empty() {
                             move_proofs_to_spent(&spent_secrets);
+                            // CDK pattern: bidirectional consistency - remove from all tracking
+                            remove_from_pending_at_mint(&spent_secrets);
                         }
                     }
                 }
