@@ -257,8 +257,11 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
                     let mut contact = Contact::new(pk);
                     // Preserve relay hint if present
                     if let Some(relay) = c.relay_url {
-                        if let Ok(url) = nostr::RelayUrl::parse(&relay) {
-                            contact.relay_url = Some(url);
+                        match nostr::RelayUrl::parse(&relay) {
+                            Ok(url) => contact.relay_url = Some(url),
+                            Err(e) => {
+                                log::debug!("Invalid relay URL '{}' in contact, skipping: {}", relay, e);
+                            }
                         }
                     }
                     // Preserve petname/alias if present

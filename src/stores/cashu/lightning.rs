@@ -468,7 +468,10 @@ pub async fn melt_tokens(
             // Recovery will happen on next startup if needed
             remove_in_flight_melt_request(&tx_id);
             if let Err(persist_err) = persist_in_flight_melt_requests().await {
-                log::warn!("Failed to persist in-flight melt cleanup after error: {}", persist_err);
+                log::warn!(
+                    "Failed to persist in-flight melt cleanup for tx_id={}: {} (state may diverge, recovery will handle on restart)",
+                    tx_id, persist_err
+                );
             }
             return Err(e);
         }

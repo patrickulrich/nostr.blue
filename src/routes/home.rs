@@ -639,7 +639,7 @@ pub fn Home(list: String) -> Element {
                             // Batch fetch interaction counts for all events, then start streaming
                             if !is_stale() {
                                 let items_for_counts = feed_items.clone();
-                                let is_first_load = !*interactions_loaded.peek();
+                                // Use outer is_first_load (includes feed_type_changed check)
                                 let req_id = request_id;
                                 let curr_id = current_id;
                                 spawn(async move {

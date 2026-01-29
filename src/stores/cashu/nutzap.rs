@@ -382,6 +382,11 @@ pub async fn send_nutzap(
     target_kind: Option<u16>,
     comment: Option<&str>,
 ) -> Result<NutzapSendResult, String> {
+    // CDK pattern: Guard against zero amounts before any network/mint operations
+    if amount == 0 {
+        return Err("Cannot send zero amount nutzap".to_string());
+    }
+
     use cdk::amount::SplitTarget;
     use cdk::nuts::SpendingConditions;
     use cdk::Amount;
@@ -762,7 +767,13 @@ pub async fn start_nutzap_subscription() -> Result<(), String> {
 pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, String> {
     log::info!("Processing nutzap event: {}", event.id.to_hex());
 
-    // Extract data from tags
+    // nostr-sdk pattern: Verify signature before trusting event data
+    // (JSON deserialization doesn't verify - must call verify() explicitly)
+    event
+        .verify()
+        .map_err(|e| format!("Invalid signature on nutzap event: {}", e))?;
+
+    // Extract data from tags (only after verification)
     let mut proofs_json = Vec::new();
     let mut mint_url = None;
     let mut unit = "sat".to_string();

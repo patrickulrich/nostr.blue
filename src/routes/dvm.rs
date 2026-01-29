@@ -102,6 +102,8 @@ pub fn DVM() -> Element {
                     // Guard: skip state update if refresh occurred during fetch
                     if *refresh_trigger.peek() != trigger_snapshot {
                         log::debug!("Discarding stale DVM interaction counts");
+                        // Dioxus pattern: Reset state on ALL paths (use_action.rs:42,47)
+                        fetch_in_progress.set(false);
                         return;
                     }
 
@@ -118,6 +120,10 @@ pub fn DVM() -> Element {
                         // Guard: skip state update if refresh occurred during stream setup
                         if *refresh_trigger.peek() != trigger_snapshot {
                             log::debug!("Discarding stale DVM stream handle");
+                            // nostr-sdk pattern: Cleanup subscription before return (relay/mod.rs:577-584)
+                            handle.unsubscribe().await;
+                            // Dioxus pattern: Reset state on ALL paths
+                            fetch_in_progress.set(false);
                             return;
                         }
                         interaction_stream_handle.set(Some(handle));
