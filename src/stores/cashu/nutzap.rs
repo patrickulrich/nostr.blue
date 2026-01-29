@@ -299,6 +299,15 @@ pub async fn fetch_nutzap_info(pubkey: &str) -> Result<NutzapInfo, String> {
     let p2pk_pubkey =
         p2pk_pubkey.ok_or_else(|| format!("Nutzap info missing P2PK pubkey for {}", pubkey))?;
 
+    // Validate P2PK pubkey format (should be 64 hex chars for 32-byte key, or 66 for compressed with prefix)
+    // NIP-61 requires "02" prefix, so expect 66 hex chars
+    if p2pk_pubkey.len() != 66 || !p2pk_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "Invalid P2PK pubkey format for {}: expected 66 hex chars (02-prefixed), got '{}' ({} chars)",
+            pubkey, &p2pk_pubkey[..p2pk_pubkey.len().min(16)], p2pk_pubkey.len()
+        ));
+    }
+
     if mints.is_empty() {
         return Err(format!("Nutzap info has no mints for {}", pubkey));
     }
@@ -414,11 +423,12 @@ pub async fn send_nutzap(
         return Err("No tokens found for compatible mint".to_string());
     }
 
-    // Check balance
+    // Check balance (CDK pattern: use checked_add with explicit error for financial transactions)
     let total_available: u64 = all_proofs
         .iter()
         .map(|p| u64::from(p.amount))
-        .fold(0u64, |acc, amt| acc.saturating_add(amt));
+        .try_fold(0u64, |acc, amt| acc.checked_add(amt))
+        .ok_or("Balance overflow calculating available amount")?;
 
     if total_available < amount {
         return Err(format!(
@@ -454,6 +464,16 @@ pub async fn send_nutzap(
         .await
         .map_err(|e| format!("Failed to calculate fee: {}", e))?;
     let fee_u64 = u64::from(fee);
+
+    // Validate sufficient funds including fee (CDK pattern: inputs - fee == outputs)
+    let required_with_fee = amount.checked_add(fee_u64)
+        .ok_or("Amount overflow when adding fee")?;
+    if total_available < required_with_fee {
+        return Err(format!(
+            "Insufficient funds: need {} + {} fee = {}, have {}",
+            amount, fee_u64, required_with_fee, total_available
+        ));
+    }
 
     // CDK pattern: capture input proof secrets to identify change proofs after swap
     let pre_swap_secrets: std::collections::HashSet<String> = wallet

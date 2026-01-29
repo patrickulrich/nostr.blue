@@ -115,6 +115,18 @@ pub async fn publish_note_tracked(content: String, tags: Vec<Vec<String>>) -> st
     let quote_tags = extract_quote_tags(&content);
     mention_tags.extend(quote_tags);
 
+    // Deduplicate "p" tags by pubkey (preserves first occurrence)
+    // Per nostr-sdk: tag order affects event ID - use insertion-order dedup
+    let mut seen_pubkeys = std::collections::HashSet::new();
+    mention_tags.retain(|tag| {
+        if tag.kind() == nostr::TagKind::p() {
+            if let Some(pk) = tag.content() {
+                return seen_pubkeys.insert(pk.to_string());
+            }
+        }
+        true // Keep non-"p" tags
+    });
+
     // Build the event
     let builder = nostr::EventBuilder::text_note(&content).tags(mention_tags);
 

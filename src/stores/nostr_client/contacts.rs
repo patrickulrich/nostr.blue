@@ -176,11 +176,13 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
                 // Safe to cache - generation matches (or no generation check requested)
                 {
                     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    // Preserve last_refresh_spawned from existing cache entry to maintain cooldown tracking
+                    let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
                     *cache = Some(CachedContacts {
                         pubkey: normalized_pubkey,
                         contacts: contacts.clone(),
                         cached_at: instant::Instant::now(),
-                        last_refresh_spawned: None,
+                        last_refresh_spawned: existing_refresh,
                         generation: current_gen,
                     });
                 }
@@ -201,11 +203,13 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
                 // nostr-sdk cache pattern: Cache empty result to avoid repeated relay queries
                 {
                     let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    // Preserve last_refresh_spawned from existing cache entry to maintain cooldown tracking
+                    let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
                     *cache = Some(CachedContacts {
                         pubkey: normalized_pubkey,
                         contacts: Vec::new(),
                         cached_at: instant::Instant::now(),
-                        last_refresh_spawned: None,
+                        last_refresh_spawned: existing_refresh,
                         generation: current_gen,
                     });
                 }

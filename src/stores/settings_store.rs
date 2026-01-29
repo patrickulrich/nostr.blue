@@ -253,10 +253,14 @@ pub async fn update_notification_sync(enabled: bool) {
 
 /// Update payment method preference and save to Nostr
 pub async fn update_payment_method_preference(preference: String) {
-    let mut settings = SETTINGS.read().clone();
-    settings.payment_method_preference = preference;
+    // Update in-memory state immediately so UI reflects change (Dioxus pattern)
+    let settings = {
+        let mut w = SETTINGS.write();
+        w.payment_method_preference = preference;
+        w.clone() // Clone for async save
+    }; // Lock released here
 
-    // Save to Nostr
+    // Async persist to Nostr
     if let Err(e) = save_settings(&settings).await {
         log::error!("Failed to save payment method preference: {}", e);
     }

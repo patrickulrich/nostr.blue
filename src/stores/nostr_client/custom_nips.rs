@@ -98,11 +98,12 @@ pub async fn fetch_custom_nip_by_naddr(
                 ));
             }
 
+            // Addressable events are unique by kind+pubkey+d-tag, so limit(1) is sufficient
             let filter = Filter::new()
                 .kind(coord.kind)
                 .author(coord.public_key)
                 .identifier(coord.identifier)
-                .limit(10);
+                .limit(1);
 
             // nostr-sdk pattern: For addressable events, always get max created_at
             let events = fetch_events_aggregated(filter, Duration::from_secs(10)).await?;

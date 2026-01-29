@@ -1042,16 +1042,24 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
             if !valid_pairs.is_empty() {
                 let cdk_proofs: Vec<_> = valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
 
-                if let Ok(states) = wallet.check_proofs_spent(cdk_proofs).await {
-                    // Mark spent proofs using original proof secrets for correct alignment
-                    let spent_secrets: Vec<_> = valid_pairs.iter()
-                        .zip(states.iter())
-                        .filter(|(_, s)| s.state == State::Spent)
-                        .map(|((original, _), _)| original.secret.clone())
-                        .collect();
+                if let Ok(states) = wallet.check_proofs_spent(cdk_proofs.clone()).await {
+                    // Validate lengths match before zip (defensive best practice per nostr-sdk)
+                    if states.len() != valid_pairs.len() {
+                        log::warn!(
+                            "Proof state count mismatch: {} states for {} proofs, skipping spent check",
+                            states.len(), valid_pairs.len()
+                        );
+                    } else {
+                        // Mark spent proofs using original proof secrets for correct alignment
+                        let spent_secrets: Vec<_> = valid_pairs.iter()
+                            .zip(states.iter())
+                            .filter(|(_, s)| s.state == State::Spent)
+                            .map(|((original, _), _)| original.secret.clone())
+                            .collect();
 
-                    if !spent_secrets.is_empty() {
-                        move_proofs_to_spent(&spent_secrets);
+                        if !spent_secrets.is_empty() {
+                            move_proofs_to_spent(&spent_secrets);
+                        }
                     }
                 }
             }
@@ -1107,12 +1115,14 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     Ok(change_amount) => {
                         result.change_recovered += change_amount;
                         result.quotes_paid += 1;
+                        result.quotes_checked += 1;
                         log::info!("Recovered {} sats change from quote {}", change_amount, request.quote_id);
                         // Only remove from in-flight on success
                         remove_in_flight_melt_request(&request.transaction_id);
                     }
                     Err(e) => {
                         // Keep in-flight for retry on next restart
+                        result.quotes_checked += 1;
                         log::warn!("Failed to recover change for quote {}, keeping for retry: {}", request.quote_id, e);
                         result.errors.push(format!("Change recovery failed for {}: {}", request.quote_id, e));
                     }

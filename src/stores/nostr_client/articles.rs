@@ -158,11 +158,13 @@ pub async fn publish_article_tracked(
     ));
 
     // Add hashtags - sanitize: trim, filter empty, dedupe (Tag::hashtag already lowercases)
+    // Per nostr-sdk: Tag order affects event ID - use insertion-order dedup to preserve determinism
     use std::collections::HashSet;
-    let sanitized: HashSet<String> = hashtags
+    let mut seen = HashSet::new();
+    let sanitized: Vec<String> = hashtags
         .into_iter()
         .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty())
+        .filter(|h| !h.is_empty() && seen.insert(h.clone()))
         .collect();
 
     for hashtag in sanitized {

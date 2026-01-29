@@ -116,7 +116,14 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                 redeeming_ids.write().remove(&event_id);
 
                 // Small delay between redemptions to avoid overwhelming the mint
-                gloo_timers::future::TimeoutFuture::new(100).await;
+                #[cfg(target_arch = "wasm32")]
+                {
+                    gloo_timers::future::TimeoutFuture::new(100).await;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
             }
 
             // Set summary message after all complete

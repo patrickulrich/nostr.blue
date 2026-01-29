@@ -429,12 +429,8 @@ pub async fn receive_tokens_with_options(
         .ok_or("Client not initialized")?
         .clone();
 
-    // Get signer and pubkey for pre-signing
-    let signer = crate::stores::signer::get_signer()
-        .ok_or("No signer available")?
-        .as_nostr_signer();
-
     // Pre-sign the event so we have the real event ID even on duplicate errors
+    // Note: reuses `signer` from line 409-411 to avoid redundant get_signer() call
     let signed_event = builder
         .build(pubkey)
         .sign(&signer)

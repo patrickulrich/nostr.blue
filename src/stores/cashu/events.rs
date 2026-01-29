@@ -1094,9 +1094,11 @@ pub async fn publish_orphaned_proofs_event(
 
     // 2. Insert into WALLET_TOKENS right before publish (saga setup - persist before network)
     // This ensures we don't leave dangling entries if serialize/encrypt/sign fails
+    // Normalize mint URL for consistent balance lookups (matches fetch_tokens pattern)
+    let normalized_mint = normalize_mint_url(mint_url);
     let token_data = TokenData {
         event_id: pending_id.clone(),
-        mint: mint_url.to_string(),
+        mint: normalized_mint.clone(),
         unit: unit.to_string(),
         proofs: proofs.to_vec(),
         created_at: chrono::Utc::now().timestamp() as u64,

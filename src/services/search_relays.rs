@@ -44,9 +44,15 @@ pub async fn get_connected_search_relays(client: &Client) -> Vec<String> {
     // Connect search relays and cache the result
     let connected = relay::ensure_search_relays_connected(client).await;
 
-    // Cache if successful
+    // Cache if successful (double-check pattern: re-check cache after acquiring write lock)
     if !connected.is_empty() {
         let mut cached = lock.write().await;
+        // Double-check: another task may have populated cache while we waited for write lock
+        if let Some(existing) = cached.get(&cache_key) {
+            if !existing.is_empty() {
+                return existing.clone();
+            }
+        }
         cached.insert(cache_key, connected.clone());
     }
 

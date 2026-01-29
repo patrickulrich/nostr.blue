@@ -12,8 +12,7 @@ use nostr_sdk::PublicKey;
 use crate::stores::{nostr_client, dvm_store};
 use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
 use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
-use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, stream_interaction_counts};
-use crate::stores::subscription_manager;
+use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle, fetch_interaction_counts_batch, stream_interaction_counts};
 use crate::hooks::use_mute_block_cache;
 
 /// Main Explore page component - DVM-powered content discovery
@@ -26,8 +25,8 @@ pub fn Explore() -> Element {
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
 
-    // Track interaction stream subscription for cleanup
-    let mut interaction_stream_id = use_signal(|| None::<nostr_sdk::SubscriptionId>);
+    // Track interaction stream subscription for cleanup (store full handle for graceful cleanup)
+    let mut interaction_stream_handle = use_signal(|| None::<InteractionStreamHandle>);
 
     // Cached mute/block lists for N+1 optimization (uses centralized hook)
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
@@ -47,16 +46,14 @@ pub fn Explore() -> Element {
             return;
         }
 
-        // Cleanup interaction stream subscription on refresh
-        if let Some(stream_id) = interaction_stream_id.peek().clone() {
+        // Cleanup interaction stream subscription on refresh (use full handle for graceful cleanup)
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
             spawn(async move {
-                if let Some(client) = nostr_client::get_client() {
-                    log::info!("Cleaning up interaction stream subscription due to refresh");
-                    subscription_manager::unsubscribe(&client, &stream_id).await;
-                }
+                log::info!("Cleaning up interaction stream subscription due to refresh");
+                handle.unsubscribe().await;
             });
         }
-        interaction_stream_id.set(None);
+        interaction_stream_handle.set(None);
 
         // Reset interaction counts on refresh
         interactions_loaded.set(false);
@@ -98,12 +95,13 @@ pub fn Explore() -> Element {
                     interactions_loaded.set(true);
 
                     // Start streaming interactions after batch fetch completes
+                    // Store full handle for graceful cleanup (not just subscription_id)
                     if let Ok(handle) = stream_interaction_counts(
                         event_ids,
                         interaction_counts,
                         Some(600), // 10 minute idle timeout
                     ).await {
-                        interaction_stream_id.set(Some(handle.subscription_id));
+                        interaction_stream_handle.set(Some(handle));
                     }
                 }
                 Err(e) => {

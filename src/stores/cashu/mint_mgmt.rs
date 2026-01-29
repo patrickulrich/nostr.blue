@@ -1010,7 +1010,12 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
                     Ok(states) => {
                         for (proof, state) in proof_batch.iter().zip(states.iter()) {
                             if state.state == cdk::nuts::State::Spent {
-                                log::info!("Proof {} was spent by mint despite error", proof.secret);
+                                // Log non-sensitive identifiers only (CDK pattern: never log secrets)
+                                log::info!(
+                                    "Proof (amount={}, keyset={}) was spent by mint despite error",
+                                    proof.amount,
+                                    &proof.keyset_id.to_string()[..8]
+                                );
                             }
                         }
                     }
@@ -1417,6 +1422,9 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         ) {
             log::error!("Failed to update WALLET_TOKENS: {}", e);
             // Continue - proofs are in CDK database and will be recovered
+        } else {
+            // Rebuild proof-to-event mapping after successful consolidation
+            super::proofs::rebuild_proof_event_map();
         }
     }
 

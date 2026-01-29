@@ -616,12 +616,23 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
     // SAFETY: Only perform atomic_token_replace when it's safe to do so:
     // - If new_event_id.is_some(): We have a new token event, safe to replace
     // - If available_proofs.is_empty(): No proofs left to track, safe to delete old events
-    // - Otherwise: Publish failed but proofs exist - do NOT delete old events or we lose tokens
+    // - Otherwise: Publish failed but proofs exist - create synthetic local pending ID
     let available_proofs_is_empty = available_proofs.is_empty();
-    let available_proofs_count = available_proofs.len(); // Capture BEFORE move
     let tokens_to_add = if let Some(ref event_id) = new_event_id {
         vec![super::types::TokenData {
             event_id: event_id.clone(),
+            mint: mint_url.to_string(),
+            unit: "sat".to_string(),
+            proofs: available_proofs,
+            created_at: chrono::Utc::now().timestamp() as u64,
+        }]
+    } else if !available_proofs.is_empty() {
+        // Fallback: create local pending event for unspent proofs when publish fails
+        // This ensures proofs remain accessible via pending_id for future recovery
+        let synthetic_id = format!("local_pending_{}", chrono::Utc::now().timestamp_millis());
+        log::warn!("Publish failed, using synthetic event_id: {}", synthetic_id);
+        vec![super::types::TokenData {
+            event_id: synthetic_id,
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: available_proofs,
@@ -631,7 +642,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         vec![]
     };
 
-    if new_event_id.is_some() || available_proofs_is_empty {
+    // Always call atomic_token_replace - either we have new tokens or we're just deleting
+    if new_event_id.is_some() || available_proofs_is_empty || !tokens_to_add.is_empty() {
         if let Err(e) = super::signals::atomic_token_replace(tokens_to_add, &event_ids_to_delete) {
             log::error!("Failed atomic token replacement during cleanup: {}", e);
         } else {
@@ -639,11 +651,6 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
             // This ensures the map stays consistent with token state
             super::proofs::rebuild_proof_event_map();
         }
-    } else {
-        log::error!(
-            "Skipping atomic_token_replace: publish failed but {} proofs remain - keeping old token events to prevent token loss",
-            available_proofs_count
-        );
     }
 
     log::info!(
