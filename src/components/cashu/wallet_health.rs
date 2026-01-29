@@ -13,10 +13,12 @@ use crate::stores::cashu::proof_recovery;
 #[component]
 pub fn WalletHealthIndicator(on_open_modal: EventHandler<()>) -> Element {
     // use_memo tracks signal dependencies and recomputes when they change
-    // Reading WALLET_BALANCES inside memo auto-tracks it as dependency (Dioxus pattern)
+    // Reading signals inside memo auto-tracks them as dependencies (Dioxus pattern)
     let stats = use_memo(move || {
-        // Touch WALLET_BALANCES to establish reactive dependency
+        // Touch WALLET_BALANCES and WALLET_TOKENS to establish reactive dependencies
+        // get_wallet_health_stats() reads both, so memo must track both
         let _ = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read();
+        let _ = crate::stores::cashu::WALLET_TOKENS.read();
         proof_recovery::get_wallet_health_stats()
     });
 

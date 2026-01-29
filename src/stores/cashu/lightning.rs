@@ -850,6 +850,10 @@ fn update_local_state_after_melt(
 
     let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
 
+    // CDK pattern: Rebuild entire mapping atomically to ensure consistency
+    // This removes stale mappings from deleted tokens and adds new ones
+    super::proofs::rebuild_proof_event_map();
+
     // Register proofs for recovery tracking (mirrors send.rs pattern)
     if let Some((event_id, proof_data)) = proofs_to_register {
         register_proofs_in_event_map(&event_id, &proof_data);

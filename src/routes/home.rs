@@ -164,6 +164,12 @@ pub fn Home(list: String) -> Element {
             return;
         }
 
+        // Guard against transient login state (authenticated but pubkey not yet set)
+        if current_pubkey.is_none() {
+            log::debug!("Skipping mute list fetch - pubkey not yet available");
+            return;
+        }
+
         // Only fetch if not already loaded (cache cleared by invalidation or pubkey change)
         if cached_muted_posts.peek().is_some() && cached_blocked_users.peek().is_some() {
             return;

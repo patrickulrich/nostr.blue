@@ -863,17 +863,27 @@ pub async fn process_nutzap_event(event: &nostr_sdk::Event) -> Result<bool, Stri
             match redeem_nutzap(&pending.event_id).await {
                 Ok(result) => {
                     log::info!("Auto-redeemed nutzap: {} sats", result.amount);
+                    // Success case: redeem_nutzap already updates status to Redeemed
                 }
                 Err(e) => {
+                    // CDK pattern: validate current state before transition
+                    // Check status before updating to avoid overwriting manual changes
+                    let current_status = get_pending_nutzap_status(&pending.event_id);
+
+                    // Only update if still in expected Pending state
+                    if !matches!(current_status, Some(NutzapStatus::Pending)) {
+                        log::debug!(
+                            "Nutzap {} status changed during redeem (now {:?}), skipping update",
+                            pending.event_id, current_status
+                        );
+                        return;
+                    }
+
                     // Classify error: only mark as Failed for permanent errors
                     // Transient errors keep Pending status for background retry
                     if is_transient_error(&e) {
                         log::warn!("Transient error auto-redeeming nutzap {}, will retry: {}", pending.event_id, e);
-                        // Leave status as Pending for background retry
-                        update_pending_nutzap_status(
-                            &pending.event_id,
-                            NutzapStatus::Pending,
-                        );
+                        // Leave status as Pending for background retry (no state change needed)
                     } else {
                         log::error!("Permanent error auto-redeeming nutzap {}: {}", pending.event_id, e);
                         update_pending_nutzap_status(
@@ -1344,4 +1354,71 @@ pub async fn fetch_pending_nutzaps() -> Result<usize, String> {
 
     log::info!("Fetched {} new pending nutzaps", new_count);
     Ok(new_count)
+}
+
+// =============================================================================
+// Unit Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::is_transient_error;
+
+    /// Test transient (network/connectivity) errors - safe to retry
+    /// CDK pattern: These map to temporary failures, not protocol violations
+    #[test]
+    fn test_transient_errors_network() {
+        // Network layer failures
+        assert!(is_transient_error("network error"), "network should be transient");
+        assert!(is_transient_error("connection refused"), "connection should be transient");
+        assert!(is_transient_error("request timeout"), "timeout should be transient");
+        assert!(is_transient_error("relay unavailable"), "unavailable should be transient");
+        assert!(is_transient_error("temporary failure"), "temporary should be transient");
+    }
+
+    #[test]
+    fn test_transient_errors_protocol() {
+        // Protocol layer failures
+        assert!(is_transient_error("http 503 service unavailable"));
+        assert!(is_transient_error("websocket disconnected"));
+        assert!(is_transient_error("fetch failed"));
+    }
+
+    /// Test permanent (validation/state) errors - do NOT retry
+    /// CDK pattern: These map to error codes 10xxx (proofs) and 11xxx (state)
+    #[test]
+    fn test_permanent_errors_cdk() {
+        // CDK error codes (normalized to lowercase in is_transient_error)
+        assert!(!is_transient_error("TokenAlreadySpent"), "already spent is permanent");
+        assert!(!is_transient_error("token already spent"), "already spent variant");
+        assert!(!is_transient_error("InvalidProofs"), "invalid proofs is permanent");
+        assert!(!is_transient_error("KeysetNotFound"), "unknown keyset is permanent");
+    }
+
+    #[test]
+    fn test_permanent_errors_validation() {
+        // Generic validation failures
+        assert!(!is_transient_error("invalid signature"));
+        assert!(!is_transient_error("unknown mint"));
+        assert!(!is_transient_error("keyset expired"));
+        assert!(!is_transient_error("malformed token data"));
+    }
+
+    /// Test unknown errors default to transient (safer to retry)
+    /// CDK pattern: Unknown errors should be treated as potentially recoverable
+    #[test]
+    fn test_unknown_defaults_to_transient() {
+        assert!(is_transient_error("some random error"), "unknown should default transient");
+        assert!(is_transient_error("unexpected failure"), "unexpected should retry");
+        assert!(is_transient_error("oops something went wrong"), "generic errors retry");
+    }
+
+    /// Test precedence: permanent patterns checked before transient
+    #[test]
+    fn test_pattern_precedence() {
+        // "invalid" is permanent even if "network" is in the message
+        assert!(!is_transient_error("network returned invalid response"));
+        // "expired" is permanent
+        assert!(!is_transient_error("connection expired keyset"));
+    }
 }

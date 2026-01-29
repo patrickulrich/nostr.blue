@@ -157,33 +157,52 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         .collect();
 
     // Populate total_member_count for people lists
-    // Public count can always be computed; private content requires signer for NIP-44 decryption
+    // Public lists - computed synchronously first (no await needed)
     for list in &mut lists {
-        if list.kind == NAMED_PEOPLE {
-            if list.has_private_content {
-                // Only attempt decryption if signer is available
-                if *nostr_client::HAS_SIGNER.peek() {
-                    match get_all_list_members_with_status(&list.event).await {
-                        Ok(result) => {
-                            // Only set count if decryption succeeded
-                            // Otherwise leave as None → UI shows "N+" fallback
-                            if result.private_decryption_succeeded {
-                                list.total_member_count = Some(result.members.len());
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to get members for list '{}': {}", list.name, e);
-                            // Keep as None - will show public count with "+" indicator
+        if list.kind == NAMED_PEOPLE && !list.has_private_content {
+            // No private content - public count is the total (always computable)
+            list.total_member_count = Some(get_item_count(&list.tags));
+        }
+    }
+
+    // Private lists - concurrent decryption (nostr-sdk pattern: join_all)
+    if *nostr_client::HAS_SIGNER.peek() {
+        // Collect indices and events for private lists
+        let private_indices: Vec<usize> = lists.iter()
+            .enumerate()
+            .filter(|(_, list)| list.kind == NAMED_PEOPLE && list.has_private_content)
+            .map(|(i, _)| i)
+            .collect();
+
+        if !private_indices.is_empty() {
+            // Pre-sized futures vec (nostr-sdk pattern)
+            let mut futures = Vec::with_capacity(private_indices.len());
+            for &idx in &private_indices {
+                futures.push(get_all_list_members_with_status(&lists[idx].event));
+            }
+
+            // Join all concurrently instead of sequential await
+            let results = futures::future::join_all(futures).await;
+
+            // Zip indices with results to update lists
+            for (idx, result) in private_indices.into_iter().zip(results) {
+                match result {
+                    Ok(r) => {
+                        // Only set count if decryption succeeded
+                        // Otherwise leave as None → UI shows "N+" fallback
+                        if r.private_decryption_succeeded {
+                            lists[idx].total_member_count = Some(r.members.len());
                         }
                     }
+                    Err(e) => {
+                        log::warn!("Failed to get members for list '{}': {}", lists[idx].name, e);
+                        // Keep as None - will show public count with "+" indicator
+                    }
                 }
-                // If no signer, leave as None - UI shows public count with "+" indicator
-            } else {
-                // No private content - public count is the total (always computable)
-                list.total_member_count = Some(get_item_count(&list.tags));
             }
         }
     }
+    // If no signer, leave as None - UI shows public count with "+" indicator
 
     // Sort by creation time (newest first)
     lists.sort_by(|a, b| b.created_at.cmp(&a.created_at));

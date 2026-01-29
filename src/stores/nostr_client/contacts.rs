@@ -119,12 +119,25 @@ async fn fetch_enriched_contacts_from_relay(pubkey_str: String) -> std::result::
                 let contacts: Vec<EnrichedContact> = event.tags.iter()
                     .filter_map(|tag| {
                         let parts: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
-                        // Must be a p-tag with at least pubkey
+                        // nostr-sdk pattern: check tag type and minimum length
                         if parts.first() != Some(&"p") || parts.len() < 2 {
                             return None;
                         }
+
+                        // nostr-sdk pattern: try hex first (most common), then parse for npub
+                        // Normalize to canonical lowercase hex for consistent comparisons
+                        let normalized_pubkey = match nostr::PublicKey::from_hex(parts[1])
+                            .or_else(|_| nostr::PublicKey::parse(parts[1])) {
+                            Ok(pk) => pk.to_hex(), // Canonical lowercase hex
+                            Err(_) => {
+                                log::debug!("Skipping invalid pubkey in contact p-tag: {}", parts[1]);
+                                return None;
+                            }
+                        };
+
+                        // nostr-sdk pattern: extract optional fields by position, check empty
                         Some(EnrichedContact {
-                            pubkey: parts[1].to_string(),
+                            pubkey: normalized_pubkey,
                             // Position 2: relay hint (nostr-sdk: tag_2)
                             relay_url: parts.get(2)
                                 .filter(|s| !s.is_empty())
@@ -193,19 +206,21 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
-    log::info!("Publishing enriched contact list with {} contacts", contacts.len());
+    let input_count = contacts.len();
+    log::info!("Publishing enriched contact list with {} contacts", input_count);
 
     use nostr::PublicKey;
     use nostr_sdk::nips::nip02::Contact;
+
+    let mut dropped_pubkeys: Vec<String> = Vec::new();
 
     let contact_list: Vec<Contact> = contacts
         .into_iter()
         .filter_map(|c| {
             // Parse pubkey (nostr-sdk pattern: try hex first, then parse)
-            PublicKey::from_hex(&c.pubkey)
-                .or_else(|_| PublicKey::parse(&c.pubkey))
-                .ok()
-                .map(|pk| {
+            match PublicKey::from_hex(&c.pubkey)
+                .or_else(|_| PublicKey::parse(&c.pubkey)) {
+                Ok(pk) => {
                     let mut contact = Contact::new(pk);
                     // Preserve relay hint if present
                     if let Some(relay) = c.relay_url {
@@ -217,12 +232,25 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
                     if let Some(alias) = c.petname {
                         contact.alias = Some(alias);
                     }
-                    contact
-                })
+                    Some(contact)
+                }
+                Err(_) => {
+                    dropped_pubkeys.push(c.pubkey);
+                    None
+                }
+            }
         })
         .collect();
 
-    log::info!("Parsed {} valid contacts", contact_list.len());
+    if !dropped_pubkeys.is_empty() {
+        log::warn!(
+            "Dropped {} invalid pubkeys from contact list: {:?}",
+            dropped_pubkeys.len(),
+            dropped_pubkeys.iter().take(5).collect::<Vec<_>>() // Show first 5
+        );
+    }
+
+    log::info!("Publishing {} valid contacts (dropped {} invalid)", contact_list.len(), input_count - contact_list.len());
 
     let builder = nostr::EventBuilder::contact_list(contact_list);
 

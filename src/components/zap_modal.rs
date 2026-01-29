@@ -288,8 +288,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
                     let timeout = gloo_timers::future::TimeoutFuture::new(5000);
                     let check_done = async {
+                        // Poll at reasonable interval - select timeout provides 5s upper bound
                         while *checking_nutzap.peek() { // Use peek() to avoid subscription
-                            gloo_timers::future::TimeoutFuture::new(50).await;
+                            gloo_timers::future::TimeoutFuture::new(100).await; // 100ms vs 50ms to reduce CPU usage
                         }
                     };
 
