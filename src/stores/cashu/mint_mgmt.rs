@@ -15,19 +15,26 @@ use super::errors::CashuResult;
 use super::internal::create_ephemeral_wallet;
 use super::proofs::{proof_data_to_cdk_proof, cdk_proof_to_proof_data};
 use super::signals::{
-    COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS, WALLET_BALANCE,
+    COUNTER_BACKUPS, SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS,
     try_acquire_mint_lock,
 };
 use super::types::{
     CounterBackup, MintInfoDisplay, DiscoveredMint, MintRecommendation, ConsolidationResult,
     ProofData, TokenData, ExtendedCashuProof, ExtendedTokenEvent, WalletTokensStoreStoreExt,
+    InFlightSendRequest, OperationType,
 };
-use super::utils::{mint_matches, normalize_mint_url};
+use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, nostr_client};
 
 /// Maximum number of proofs to swap in a single batch (CDK pattern)
 /// Mints may reject requests with too many input proofs
 const BATCH_PROOF_SIZE: usize = 100;
+
+// =============================================================================
+// RAII Guard for In-Flight Tracking (CDK Transaction Guard Pattern)
+// =============================================================================
+
+use super::signals::InFlightGuard;
 
 // =============================================================================
 // Keyset Collision Detection
@@ -56,14 +63,38 @@ pub async fn check_keyset_collision(new_mint_url: &str) -> Result<Vec<KeysetColl
     // Get existing keyset IDs from all current mints
     let mut existing_keyset_to_mint: HashMap<String, String> = HashMap::new();
 
-    // Collect keysets from all existing mints in the MultiMintWallet
-    if let Some(ref multi_wallet) = *cashu_cdk_bridge::MULTI_WALLET.read() {
-        for wallet in multi_wallet.get_wallets().await {
-            let mint_url = wallet.mint_url.to_string();
-            if let Ok(keysets) = wallet.get_mint_keysets().await {
-                for keyset in keysets {
-                    existing_keyset_to_mint.insert(keyset.id.to_string(), mint_url.clone());
+    // Clone the Option<Arc<MultiMintWallet>> out of the read guard immediately (CDK pattern)
+    // This releases the lock before any await points
+    let multi_wallet_opt = cashu_cdk_bridge::MULTI_WALLET.read().clone();
+
+    // Collect keysets from all existing mints in parallel (read-only, safe)
+    if let Some(ref multi_wallet) = multi_wallet_opt {
+        let wallets = multi_wallet.get_wallets().await;
+
+        let futures: Vec<_> = wallets
+            .iter()
+            .map(|wallet| {
+                let mint_url = wallet.mint_url.to_string();
+                let wallet = wallet.clone();
+                async move {
+                    match wallet.get_mint_keysets().await {
+                        Ok(keysets) => Some((mint_url, keysets)),
+                        Err(e) => {
+                            // Log failure with context (nostr-sdk error pattern)
+                            log::warn!("Failed to get keysets for {}: {}", mint_url, e);
+                            None
+                        }
+                    }
                 }
+            })
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
+        for result in results.into_iter().flatten() {
+            let (mint_url, keysets) = result;
+            for keyset in keysets {
+                existing_keyset_to_mint.insert(keyset.id.to_string(), mint_url.clone());
             }
         }
     }
@@ -167,7 +198,8 @@ pub fn get_mints() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Get balance for a specific mint
+/// Get balance for a specific mint (includes all proofs regardless of state)
+/// For spendable balance, use get_mint_spendable_balance instead
 pub fn get_mint_balance(mint_url: &str) -> u64 {
     let store = WALLET_TOKENS.read();
     let data = store.data();
@@ -176,6 +208,42 @@ pub fn get_mint_balance(mint_url: &str) -> u64 {
     tokens.iter()
         .filter(|t| mint_matches(&t.mint, mint_url))
         .flat_map(|t| t.proofs.iter())
+        .map(|p| p.amount)
+        .fold(0u64, |acc, amt| acc.saturating_add(amt))
+}
+
+/// Get spendable balance for a specific mint (only Unspent proofs)
+/// CDK pattern: filter by state to exclude pending/reserved/spent proofs
+pub fn get_mint_spendable_balance(mint_url: &str) -> u64 {
+    use super::types::ProofState;
+
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    tokens.iter()
+        .filter(|t| mint_matches(&t.mint, mint_url))
+        .flat_map(|t| t.proofs.iter())
+        .filter(|p| p.state == ProofState::Unspent)
+        .map(|p| p.amount)
+        .fold(0u64, |acc, amt| acc.saturating_add(amt))
+}
+
+/// Get spendable balance for a specific mint AND unit (CDK pattern)
+/// Filters by both mint URL and unit for multi-unit mint support
+/// Issue #1: Unit-aware balance check for nutzaps
+pub fn get_mint_unit_spendable_balance(mint_url: &str, unit: &str) -> u64 {
+    use super::types::ProofState;
+
+    let store = WALLET_TOKENS.read();
+    let data = store.data();
+    let tokens = data.read();
+
+    // CDK pattern: always pair mint_url + unit, filter by State::Unspent
+    tokens.iter()
+        .filter(|t| mint_matches(&t.mint, mint_url) && t.unit == unit)
+        .flat_map(|t| t.proofs.iter())
+        .filter(|p| p.state == ProofState::Unspent)
         .map(|p| p.amount)
         .fold(0u64, |acc, amt| acc.saturating_add(amt))
 }
@@ -790,17 +858,8 @@ pub async fn remove_mint(mint_url: &str) -> Result<(usize, u64), String> {
         }
     }
 
-    // Recalculate balance
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     log::info!("Removed mint {} ({} sats)", mint_url, total_amount);
 
@@ -826,8 +885,14 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     let _lock_guard = try_acquire_mint_lock(&mint_url)
         .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
 
-    // Get all proofs for this mint
-    let (all_proofs, event_ids_to_delete) = {
+    // Preflight: Verify localstore available before any swaps (nostr-sdk ensure_operational pattern)
+    let localstore = SHARED_LOCALSTORE.read()
+        .as_ref()
+        .ok_or("Localstore not initialized - cannot safely persist proofs")?
+        .clone();
+
+    // Get all proofs for this mint and extract/validate unit consistency
+    let (all_proofs, event_ids_to_delete, unit_str) = {
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
@@ -841,15 +906,29 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
         let mut all_proofs = Vec::new();
         let mut event_ids = Vec::new();
+        let mut detected_unit: Option<String> = None;
 
         for token in &mint_tokens {
+            // Validate unit consistency (CDK pattern: all proofs should share the same unit)
+            if let Some(ref existing) = detected_unit {
+                if &token.unit != existing {
+                    return Err(format!(
+                        "Mixed units in mint proofs: '{}' and '{}' - cannot consolidate",
+                        existing, token.unit
+                    ));
+                }
+            } else {
+                detected_unit = Some(token.unit.clone());
+            }
+
             event_ids.push(token.event_id.clone());
             for proof in &token.proofs {
                 all_proofs.push(proof_data_to_cdk_proof(proof)?);
             }
         }
 
-        (all_proofs, event_ids)
+        let unit = detected_unit.ok_or("No proofs found to determine unit")?;
+        (all_proofs, event_ids, unit)
     };
 
     let proofs_before = all_proofs.len();
@@ -874,68 +953,260 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     // Create wallet for swaps
     let wallet = create_ephemeral_wallet(&mint_url, all_proofs.clone()).await?;
 
+    // Generate transaction ID for in-flight tracking (CDK pattern)
+    let tx_id = format!("swap_{}", uuid::Uuid::new_v4());
+
+    // Collect proof secrets for recovery protection
+    let proof_secrets: Vec<String> = all_proofs
+        .iter()
+        .map(|p| p.secret.to_string())
+        .collect();
+
+    // Add in-flight tracking BEFORE swap (protects from recovery during operation)
+    let in_flight = InFlightSendRequest {
+        transaction_id: tx_id.clone(),
+        mint_url: mint_url.clone(),
+        proof_secrets,
+        amount: total_amount,
+        operation_type: OperationType::Swap,
+        created_at: now_secs(),
+    };
+    super::signals::add_in_flight_send_request(in_flight);
+
+    // CDK Transaction Guard pattern: auto-cleanup on drop unless dismissed
+    let mut in_flight_guard = InFlightGuard::new(tx_id.clone());
+
+    // Pre-compute values needed for per-batch persistence (CDK saga pattern)
+    let mint_url_parsed: cdk::mint_url::MintUrl = mint_url.parse()
+        .map_err(|e| format!("Invalid mint URL: {}", e))?;
+
     // Batch proofs to avoid exceeding mint limits (CDK pattern)
+    let total_batches = all_proofs.chunks(BATCH_PROOF_SIZE).count();
     let mut new_proofs: Vec<cdk::nuts::Proof> = Vec::new();
+    let mut persistence_failures: Vec<(usize, String)> = Vec::new();
     for (batch_idx, proof_batch) in all_proofs.chunks(BATCH_PROOF_SIZE).enumerate() {
         let batch_amount: u64 = proof_batch.iter()
             .map(|p| u64::from(p.amount))
             .fold(0u64, |acc, amt| acc.saturating_add(amt));
 
-        log::debug!("Swapping batch {} with {} proofs ({} sats)",
-            batch_idx + 1, proof_batch.len(), batch_amount);
+        log::debug!("Swapping batch {}/{} with {} proofs ({} sats)",
+            batch_idx + 1, total_batches, proof_batch.len(), batch_amount);
 
-        let batch_result = wallet.swap(
+        let batch_result = match wallet.swap(
             Some(Amount::from(batch_amount)),
             SplitTarget::default(),  // PowerOfTwo split
             proof_batch.to_vec(),
             None,   // No spending conditions
             false,  // Don't add fees to amount
-        ).await
-            .map_err(|e| format!("Swap failed on batch {}: {}", batch_idx + 1, e))?;
+        ).await {
+            Ok(result) => result,
+            Err(e) => {
+                // If swap fails, sync proof states with mint (CDK try_proof_operation_or_reclaim pattern)
+                // Mint is source of truth - proofs may have been consumed even if we got network error
+                log::warn!("Swap failed on batch {}/{}, syncing proof states with mint: {}", batch_idx + 1, total_batches, e);
+
+                // Check spent status with mint (NUT-07)
+                match wallet.check_proofs_spent(proof_batch.to_vec()).await {
+                    Ok(states) => {
+                        for (proof, state) in proof_batch.iter().zip(states.iter()) {
+                            if state.state == cdk::nuts::State::Spent {
+                                log::info!("Proof {} was spent by mint despite error", proof.secret);
+                            }
+                        }
+                    }
+                    Err(sync_err) => {
+                        log::warn!("NUT-07 check failed: {}", sync_err);
+                    }
+                }
+
+                // If any prior batches succeeded, sync wallet state before returning
+                // Follows CDK's "explicit state queries on failure" pattern
+                // and nostr.blue's non-critical sync pattern (send.rs:224, swap.rs:518)
+                if batch_idx > 0 {
+                    log::warn!("Partial swap succeeded ({} batches); syncing wallet state", batch_idx);
+                    if let Err(sync_err) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
+                        log::warn!("Failed to sync after partial swap: {}", sync_err);
+                    }
+                    super::signals::update_wallet_balances();
+                }
+
+                // InFlightGuard will auto-cleanup on return (CDK pattern)
+                return Err(format!("Swap failed on batch {}/{}: {}", batch_idx + 1, total_batches, e));
+            }
+        };
 
         if let Some(proofs) = batch_result {
+            // CDK saga pattern: Persist THIS batch's proofs immediately before continuing
+            // This ensures partial success survives later batch failures
+            {
+                use cdk_common::database::WalletDatabase;
+
+                // Convert unit string to CurrencyUnit, preserving unknown units as Custom
+                use std::str::FromStr;
+                let currency_unit = cdk::nuts::CurrencyUnit::from_str(&unit_str)
+                    .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(unit_str.clone()));
+
+                let proof_infos: Vec<cdk::types::ProofInfo> = proofs.iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        cdk::types::ProofInfo::new(
+                            p.clone(),
+                            mint_url_parsed.clone(),
+                            cdk::nuts::State::Unspent,
+                            currency_unit.clone(),  // Use extracted unit
+                        ).map_err(|e| format!(
+                            "ProofInfo conversion failed in batch {}, proof {}: {}",
+                            batch_idx + 1, i, e
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+
+                if !proof_infos.is_empty() {
+                    // Track failures without early return - proofs are safe in CDK wallet after swap
+                    if let Err(e) = localstore.update_proofs(proof_infos, vec![]).await {
+                        log::error!(
+                            "CRITICAL: Batch {}/{} persistence failed AFTER successful swap: {}",
+                            batch_idx + 1, total_batches, e
+                        );
+                        persistence_failures.push((batch_idx + 1, e.to_string()));
+                        // Continue - proofs are safe in CDK wallet
+                    } else {
+                        log::info!("Batch {}/{} persisted {} proofs", batch_idx + 1, total_batches, proofs.len());
+                    }
+                }
+            }
+
             new_proofs.extend(proofs);
         }
     }
+
+    // Track emergency event ID for later replacement (CDK saga pattern)
+    let mut emergency_event_id: Option<String> = None;
+
+    // Emergency recovery if any persistence failed (nostr-sdk Output pattern)
+    // Update WALLET_TOKENS so funds are visible in UI even if localstore persistence failed
+    if !persistence_failures.is_empty() {
+        log::warn!(
+            "Consolidation had {} persistence failures. Updating in-memory state.",
+            persistence_failures.len()
+        );
+
+        let emergency_proof_data: Vec<ProofData> = new_proofs.iter()
+            .map(cdk_proof_to_proof_data)
+            .collect();
+
+        let temp_emergency_id = format!("recovery_{}", uuid::Uuid::new_v4());
+        emergency_event_id = Some(temp_emergency_id.clone());
+
+        let emergency_token = TokenData {
+            event_id: temp_emergency_id.clone(),
+            mint: mint_url.clone(),
+            unit: unit_str.clone(),
+            proofs: emergency_proof_data.clone(),
+            created_at: now_secs(),
+        };
+
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![emergency_token],
+            &event_ids_to_delete,
+        ) {
+            log::error!("Emergency WALLET_TOKENS update failed: {}", e);
+        } else {
+            super::proofs::register_proofs_in_event_map(&temp_emergency_id, &emergency_proof_data);
+            super::signals::update_wallet_balances();
+            log::info!("Emergency recovery: {} proofs now visible in UI", new_proofs.len());
+        }
+
+        // Schedule background retry for failed persistence (nostr-sdk adaptive retry pattern)
+        #[cfg(target_arch = "wasm32")]
+        {
+            use cdk_common::database::WalletDatabase;
+            use std::str::FromStr;
+            let retry_proofs = new_proofs.clone();
+            let retry_mint_url = mint_url_parsed.clone();
+            let retry_unit_str = unit_str.clone();
+
+            dioxus::prelude::spawn(async move {
+                // Exponential backoff: 1s, 2s, 4s (with jitter)
+                for (attempt, base_delay_ms) in [1000u32, 2000, 4000].iter().enumerate() {
+                    let jitter = (js_sys::Math::random() * 200.0) as u32;
+                    let delay = base_delay_ms.saturating_sub(100) + jitter;
+                    gloo_timers::future::TimeoutFuture::new(delay).await;
+
+                    let retry_localstore = match SHARED_LOCALSTORE.read().as_ref() {
+                        Some(store) => store.clone(),
+                        None => {
+                            log::warn!("Background retry {}: localstore unavailable", attempt + 1);
+                            continue;
+                        }
+                    };
+
+                    // Convert unit string to CurrencyUnit (same logic as main path)
+                    let currency_unit = cdk::nuts::CurrencyUnit::from_str(&retry_unit_str)
+                        .unwrap_or_else(|_| cdk::nuts::CurrencyUnit::Custom(retry_unit_str.clone()));
+
+                    let mut proof_infos: Vec<cdk::types::ProofInfo> = Vec::with_capacity(retry_proofs.len());
+                    for p in &retry_proofs {
+                        match cdk::types::ProofInfo::new(
+                            p.clone(),
+                            retry_mint_url.clone(),
+                            cdk::nuts::State::Unspent,
+                            currency_unit.clone(),
+                        ) {
+                            Ok(info) => proof_infos.push(info),
+                            Err(e) => {
+                                log::error!(
+                                    "Background retry {}: ProofInfo conversion failed: {} \
+                                     (mint: {}, unit: {}, proof_amount: {})",
+                                    attempt + 1,
+                                    e,
+                                    retry_mint_url,
+                                    retry_unit_str,
+                                    p.amount
+                                );
+                            }
+                        }
+                    }
+
+                    if let Err(e) = retry_localstore.update_proofs(proof_infos, vec![]).await {
+                        log::warn!("Background retry {} failed: {}", attempt + 1, e);
+                    } else {
+                        log::info!("Background retry {}: persistence succeeded", attempt + 1);
+                        return;
+                    }
+                }
+
+                log::error!(
+                    "All background persistence retries failed. \
+                     Proofs are in WALLET_TOKENS but not fully persisted. \
+                     Run sync_wallet_state() to reconcile."
+                );
+            });
+        }
+    }
+
+    // Remove in-flight tracking on success (CDK inc/dec pattern - must be before dismiss)
+    super::signals::remove_in_flight_send_request(&tx_id);
+
+    // Dismiss guard - cleanup already done above, prevent Drop from double-cleaning
+    in_flight_guard.dismiss();
 
     if new_proofs.is_empty() {
         return Err("Swap returned no proofs".to_string());
     }
 
     let proofs_after = new_proofs.len();
-    log::info!("Consolidated to {} proofs", proofs_after);
-
-    // Persist new proofs to CDK database BEFORE publishing (CDK saga pattern)
-    // This ensures proofs survive if publish fails - can be recovered on next startup
-    {
-        use cdk_common::database::WalletDatabase;
-
-        let localstore = SHARED_LOCALSTORE.read()
-            .as_ref()
-            .ok_or("Localstore not initialized")?
-            .clone();
-
-        let mint_url_parsed: cdk::mint_url::MintUrl = mint_url.parse()
-            .map_err(|e| format!("Invalid mint URL: {}", e))?;
-
-        // Create ProofInfo entries for each proof
-        let proof_infos: Vec<cdk::types::ProofInfo> = new_proofs.iter()
-            .filter_map(|p| {
-                cdk::types::ProofInfo::new(
-                    p.clone(),
-                    mint_url_parsed.clone(),
-                    cdk::nuts::State::Unspent,
-                    cdk::nuts::CurrencyUnit::Sat,
-                ).ok()
-            })
-            .collect();
-
-        if !proof_infos.is_empty() {
-            localstore.update_proofs(proof_infos, vec![]).await
-                .map_err(|e| format!("Failed to persist proofs to CDK database: {}", e))?;
-            log::debug!("Persisted {} proofs to CDK database before publish", proofs_after);
-        }
+    if persistence_failures.is_empty() {
+        log::info!("Consolidated to {} proofs (all batches persisted)", proofs_after);
+    } else {
+        log::info!(
+            "Consolidated to {} proofs ({} batch failures; emergency recovery performed)",
+            proofs_after,
+            persistence_failures.len()
+        );
     }
+
+    // Note: Proofs already persisted per-batch above (CDK saga pattern)
 
     // Prepare event data
     let signer = crate::stores::signer::get_signer()
@@ -962,7 +1233,7 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let token_event_data = ExtendedTokenEvent {
         mint: mint_url.clone(),
-        unit: "sat".to_string(),
+        unit: unit_str.clone(),
         proofs: extended_proofs,
         del: event_ids_to_delete.clone(),
     };
@@ -975,36 +1246,178 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
 
     let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
-    // Publish new token event
-    let new_event_id = match client.send_event_builder(builder.clone()).await {
-        Ok(event_output) => {
-            let id = event_output.id().to_hex();
-            log::info!("Published consolidated token event: {}", id);
-            id
+    // CDK pattern: Sign ONCE before retry loop (idempotent retries with consistent event ID)
+    let mut unsigned = builder.clone().build(pubkey);
+    let pre_signed_event_id = unsigned.id().to_hex();
+    let signed_event = unsigned.sign(&signer).await
+        .map_err(|e| format!("Failed to sign token event: {}", e))?;
+
+    // Attempt publish with immediate retries using SAME signed event
+    // Proofs are already safely persisted in CDK IndexedDB per-batch above
+    let mut publish_succeeded = false;
+    let mut last_error = String::new();
+    let mut retryable = true;
+
+    // Retry delays: 500ms, 1s, 2s (with jitter)
+    let delays = [500u32, 1000, 2000];
+
+    for (attempt, delay_ms) in std::iter::once(0).chain(delays.iter().copied()).enumerate() {
+        if attempt > 0 {
+            // Add jitter: ±100ms
+            #[cfg(target_arch = "wasm32")]
+            {
+                let jitter = (js_sys::Math::random() * 200.0) as u32;
+                let actual_delay = delay_ms.saturating_sub(100) + jitter;
+                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
+            }
+            log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
-        Err(e) => {
-            log::error!("Failed to publish token event: {}", e);
-            return Err(format!("Failed to publish: {}", e));
+
+        // Use pre-signed event for consistent event ID across retries
+        match client.send_event(&signed_event).await {
+            Ok(output) => {
+                // Check for partial success (at least 1 relay succeeded)
+                if !output.success.is_empty() {
+                    log::info!(
+                        "Published token event {} to {}/{} relays",
+                        pre_signed_event_id,
+                        output.success.len(),
+                        output.success.len() + output.failed.len()
+                    );
+                    publish_succeeded = true;
+                    break;
+                } else {
+                    // All relays failed - treat as error
+                    last_error = format!("All {} relays failed", output.failed.len());
+                    log::warn!("Publish attempt {} - all relays failed", attempt + 1);
+                }
+            }
+            Err(e) => {
+                last_error = e.to_string();
+                // Check for non-retryable errors
+                let err_str = last_error.to_lowercase();
+                if err_str.contains("banned") || err_str.contains("invalid") ||
+                   err_str.contains("malformed") || err_str.contains("too large") {
+                    log::error!("Non-retryable error: {}", last_error);
+                    retryable = false;
+                    break;
+                }
+                log::warn!("Publish attempt {} failed: {}", attempt + 1, e);
+            }
         }
+    }
+
+    // Handle final result
+    let new_event_id = if publish_succeeded {
+        pre_signed_event_id
+    } else if retryable {
+        // All retries failed - use pending_id for background retry
+        log::error!("All publish attempts failed, using pending ID for background retry: {}", last_error);
+
+        let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
+
+        // Queue with token tracking info (builder for re-signing in background retry)
+        super::events::queue_token_event_for_retry(
+            builder,
+            pending_id.clone(),
+            mint_url.clone(),
+        ).await;
+
+        // Use pending_id as event_id - continues to update local state below
+        pending_id
+    } else {
+        // Non-retryable error - CDK saga pattern: persist state before returning error
+        // This ensures swapped proofs are visible even when publish permanently fails
+        log::error!("Non-retryable publish error: {}", last_error);
+
+        // CDK pattern: local-only ID marks token as unconfirmed (like State::Pending)
+        let local_only_id = format!("local_{}", uuid::Uuid::new_v4());
+
+        // Persist swapped proofs to WALLET_TOKENS so UI shows them
+        let local_token = TokenData {
+            event_id: local_only_id.clone(),
+            mint: mint_url.clone(),
+            unit: unit_str.clone(),
+            proofs: proof_data.clone(),
+            created_at: now_secs(),
+        };
+
+        // CDK atomic pattern: add new BEFORE delete old (crash-safe)
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![local_token],
+            &event_ids_to_delete,
+        ) {
+            log::error!("Failed to persist local-only token: {}", e);
+            // Proofs still exist in CDK database - recoverable via sync_wallet_state()
+        } else {
+            // Register proofs for lookup
+            super::proofs::register_proofs_in_event_map(&local_only_id, &proof_data);
+            log::info!(
+                "Persisted {} proofs as local-only token {} (publish_error={})",
+                proof_data.len(),
+                &local_only_id[..16.min(local_only_id.len())],
+                &last_error[..50.min(last_error.len())]
+            );
+        }
+
+        // Update balances to reflect the swapped proofs
+        super::signals::update_wallet_balances();
+
+        // Return error - do NOT queue for retry (non-retryable) or publish deletion
+        // Note: Deletion event not published since token event was never published
+        return Err(format!("Non-retryable publish error: {}", last_error));
     };
 
-    // Update local state with new proofs
-    {
-        let store = WALLET_TOKENS.read();
-        let mut data_signal = store.data();
-        let mut data = data_signal.write();
-
-        // Remove old token events
-        data.retain(|t| !event_ids_to_delete.contains(&t.event_id));
-
-        // Add new consolidated token
-        data.push(TokenData {
+    // CDK saga pattern: Replace emergency token with real event_id after publish
+    if let Some(ref emergency_id) = emergency_event_id {
+        // Create replacement token with real published event_id
+        let replacement_token = TokenData {
             event_id: new_event_id.clone(),
             mint: mint_url.clone(),
-            unit: "sat".to_string(),
+            unit: unit_str.clone(),
+            proofs: proof_data.clone(),
+            created_at: now_secs(),
+        };
+
+        // Atomic replacement: add new BEFORE delete old (CDK pattern)
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![replacement_token],
+            std::slice::from_ref(emergency_id),
+        ) {
+            log::error!("Failed to replace emergency token with real event_id: {}", e);
+            // Continue - emergency token still has correct proofs, just wrong event_id
+        } else {
+            // Update proofs map to point to real event_id (CDK state sync)
+            super::proofs::register_proofs_in_event_map(&new_event_id, &proof_data);
+            log::info!(
+                "Replaced emergency token {} with published event {}",
+                &emergency_id[..16.min(emergency_id.len())],
+                &new_event_id[..16.min(new_event_id.len())]
+            );
+        }
+    } else {
+        // CRITICAL: Update local state IMMEDIATELY (even with pending_id)
+        // This ensures UI reflects the consolidation operation.
+        // atomic_token_replace: adds new BEFORE deleting old (crash-safe)
+        let new_token = TokenData {
+            event_id: new_event_id.clone(),
+            mint: mint_url.clone(),
+            unit: unit_str.clone(),
             proofs: proof_data,
-            created_at: (js_sys::Date::now() / 1000.0) as u64,
-        });
+            created_at: now_secs(),
+        };
+
+        if let Err(e) = super::signals::atomic_token_replace(
+            vec![new_token],
+            &event_ids_to_delete,
+        ) {
+            log::error!("Failed to update WALLET_TOKENS: {}", e);
+            // Continue - proofs are in CDK database and will be recovered
+        }
     }
 
     // Publish deletion event for old tokens
@@ -1020,17 +1433,8 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
         log::warn!("Failed to publish deletion event: {}", e);
     }
 
-    // Recalculate balance from all tokens
-    {
-        let store = WALLET_TOKENS.read();
-        let data = store.data();
-        let tokens = data.read();
-        let new_balance: u64 = tokens.iter()
-            .flat_map(|t| &t.proofs)
-            .map(|p| p.amount)
-            .fold(0u64, |acc, amount| acc.saturating_add(amount));
-        *WALLET_BALANCE.write() = new_balance;
-    }
+    // Update balance from proof state
+    super::signals::update_wallet_balances();
 
     // Sync MultiMintWallet state (non-critical)
     if let Err(e) = crate::stores::cashu_cdk_bridge::sync_wallet_state().await {
@@ -1046,24 +1450,38 @@ pub async fn consolidate_proofs(mint_url: String) -> Result<ConsolidationResult,
     })
 }
 
-/// Consolidate proofs across all mints
+/// Consolidate proofs across all mints (parallel execution)
 pub async fn consolidate_all_mints() -> Result<Vec<(String, ConsolidationResult)>, String> {
     let mints = get_mints();
-    let mut results = Vec::new();
 
-    for mint in mints {
-        match consolidate_proofs(mint.clone()).await {
-            Ok(result) => {
-                results.push((mint, result));
+    if mints.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Parallel consolidation - each mint has its own lock
+    let futures: Vec<_> = mints
+        .iter()
+        .map(|mint| {
+            let mint = mint.clone();
+            async move {
+                let result = consolidate_proofs(mint.clone()).await;
+                (mint, result)
             }
-            Err(e) => {
-                log::warn!("Failed to consolidate {}: {}", mint, e);
-                // Continue with other mints even if one fails
-            }
+        })
+        .collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    // Collect successful results, log failures
+    let mut output = Vec::new();
+    for (mint, result) in results {
+        match result {
+            Ok(r) => output.push((mint, r)),
+            Err(e) => log::warn!("Failed to consolidate {}: {}", mint, e),
         }
     }
 
-    Ok(results)
+    Ok(output)
 }
 
 // =============================================================================

@@ -216,7 +216,7 @@ pub fn RecipesAll() -> Element {
                 // Loading state
                 else if *loading.read() {
                     div {
-                        class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4",
+                        class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4",
 
                         for i in 0..12 {
                             DiscoverRecipeCardSkeleton { key: "{i}" }
@@ -255,7 +255,7 @@ pub fn RecipesAll() -> Element {
                 // Recipe grid
                 else {
                     div {
-                        class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4",
+                        class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4",
 
                         for recipe in recipes.read().iter() {
                             DiscoverRecipeCard {

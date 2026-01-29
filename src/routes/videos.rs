@@ -129,9 +129,12 @@ pub fn Videos() -> Element {
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
 
-        // Only show loading if no data exists
-        if !has_data {
-            loading_feed.set(true);
+        // Always set loading (shows spinner during refresh)
+        loading_feed.set(true);
+        // Clear feed only when switching types; keep visible during same-feed refresh
+        // (Dioxus pattern: clear data before async to prevent stale UI)
+        if feed_type_changed {
+            feed_events.set(Vec::new());
         }
         error.set(None);
         oldest_timestamp.set(None);

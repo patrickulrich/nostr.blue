@@ -295,7 +295,7 @@ fn CategoryTiles(props: CategoryTilesProps) -> Element {
                 "Browse by Category"
             }
             div {
-                class: "grid grid-cols-5 gap-2",
+                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2",
                 // "All" tile
                 button {
                     class: if props.selected.is_none() {

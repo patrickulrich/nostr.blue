@@ -76,52 +76,8 @@ fn create_http_client() -> Result<reqwest::Client, LnUrlError> {
         .map_err(|e| LnUrlError::FetchError(e.to_string()))
 }
 
-/// Trusted LNURL domains for DNS rebinding protection
-/// This whitelist includes well-known Lightning service providers
-/// Add domains here as needed for your deployment
-const TRUSTED_LNURL_DOMAINS: &[&str] = &[
-    // Major Lightning wallets and services
-    "getalby.com",
-    "ln.tips",
-    "walletofsatoshi.com",
-    "zbd.gg",
-    "strike.me",
-    "pay.btcpayserver.org",
-    "legend.lnbits.com",
-    "lnbits.com",
-    "coinos.io",
-    "fountain.fm",
-    "stacker.news",
-    "primal.net",
-    "wavlake.com",
-    "nostrich.house",
-    "lnproxy.org",
-    // Self-hosted / common patterns - allow any .well-known/lnurlp path
-    // These are validated by the lud16 flow which constructs known-safe URLs
-];
-
-/// Check if a domain is trusted for LNURL requests
-/// Returns true if the domain matches a trusted domain or is a subdomain of one
-fn is_trusted_lnurl_domain(host: &str) -> bool {
-    let host_lower = host.to_lowercase();
-
-    for trusted in TRUSTED_LNURL_DOMAINS {
-        // Exact match
-        if host_lower == *trusted {
-            return true;
-        }
-        // Subdomain match (e.g., "api.getalby.com" matches "getalby.com")
-        if host_lower.ends_with(&format!(".{}", trusted)) {
-            return true;
-        }
-    }
-
-    false
-}
-
 /// Validate that a URL is safe for LNURL requests
-/// For WASM/browser builds: validates scheme and checks domain whitelist
-/// For desktop builds: would additionally check resolved IPs (not implemented for WASM-only app)
+/// Validates scheme and blocks private/local IP addresses to prevent SSRF attacks
 fn validate_url(url: &str) -> Result<(), LnUrlError> {
     // First check basic URL validity
     if !crate::utils::validation::is_valid_http_url(url) {
@@ -203,36 +159,6 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
             "Private/local addresses not allowed: {}",
             host
         )));
-    }
-
-    // Domain whitelist check - warn-only mode for compatibility
-    //
-    // SECURITY NOTE: The private IP checks above are the primary defense against
-    // DNS rebinding attacks. The whitelist below is a secondary measure.
-    //
-    // We use warn-only (not blocking) to preserve compatibility with:
-    // - Self-hosted Lightning nodes with custom domains
-    // - Newer Lightning services not yet in our whitelist
-    // - User-controlled LNURL endpoints
-    //
-    // Alternatives for stricter deployments:
-    // 1. Enable strict whitelist by uncommenting the error return below
-    // 2. Add user confirmation UI before requests to unknown domains
-    // 3. Make this configurable via app settings/environment variable
-    // 4. Implement hybrid: allow .well-known/lnurlp paths, block arbitrary URLs
-    //
-    // To enable strict mode, uncomment the error return and remove the warn.
-    if !is_trusted_lnurl_domain(host) {
-        log::warn!(
-            "LNURL request to non-whitelisted domain: {}. \
-             Add to TRUSTED_LNURL_DOMAINS if this is a legitimate Lightning service.",
-            host
-        );
-        // Strict mode (disabled for compatibility):
-        // return Err(LnUrlError::UntrustedDomain(format!(
-        //     "Domain not in trusted LNURL whitelist: {}",
-        //     host
-        // )));
     }
 
     Ok(())

@@ -1278,8 +1278,8 @@ fn Layout() -> Element {
                 // Center Content Area
                 main {
                     class: match (is_wide_page, music_player_visible) {
-                        (true, true) => "w-full flex-1 border-r border-border pb-24",
-                        (true, false) => "w-full flex-1 border-r border-border",
+                        (true, true) => "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border pb-24",
+                        (true, false) => "w-full flex-1 min-w-0 overflow-x-hidden border-r border-border",
                         (false, true) => "w-full max-w-[600px] shrink grow border-r border-border pb-24",
                         (false, false) => "w-full max-w-[600px] shrink grow border-r border-border",
                     },

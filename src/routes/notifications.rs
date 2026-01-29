@@ -1,10 +1,14 @@
+use std::collections::HashSet;
+use std::rc::Rc;
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
+
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 use crate::components::{NoteCard, ClientInitializing};
-use crate::hooks::use_infinite_scroll;
+use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
-use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -59,6 +63,9 @@ pub fn Notifications() -> Element {
     let mut active_filter = use_signal(|| NotificationFilter::All);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+
+    // Use centralized mute/block cache hook (subscribes to MUTE_BLOCK_INVALIDATE)
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     // Load initial notifications (limit: 100 for historical data)
     use_effect(move || {
@@ -322,7 +329,7 @@ pub fn Notifications() -> Element {
                         div {
                             class: "divide-y divide-border",
                             for notification in filtered_notifications.iter() {
-                                {render_notification(notification)}
+                                {render_notification(notification, cached_muted_posts.read().clone(), cached_blocked_users.read().clone())}
                             }
 
                             // Infinite scroll sentinel
@@ -351,7 +358,11 @@ pub fn Notifications() -> Element {
     }
 }
 
-fn render_notification(notification: &NotificationType) -> Element {
+fn render_notification(
+    notification: &NotificationType,
+    cached_muted_posts: Option<Rc<HashSet<String>>>,
+    cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     match notification {
         NotificationType::Mention(event) | NotificationType::Reply(event) => {
             rsx! {
@@ -370,7 +381,9 @@ fn render_notification(notification: &NotificationType) -> Element {
                     }
                     NoteCard {
                         event: event.clone(),
-                        collapsible: true
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             }
@@ -379,7 +392,9 @@ fn render_notification(notification: &NotificationType) -> Element {
             rsx! {
                 ReactionNotification {
                     key: "{event.id}",
-                    event: event.clone()
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone()
                 }
             }
         }
@@ -387,7 +402,9 @@ fn render_notification(notification: &NotificationType) -> Element {
             rsx! {
                 RepostNotification {
                     key: "{event.id}",
-                    event: event.clone()
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone()
                 }
             }
         }
@@ -395,7 +412,9 @@ fn render_notification(notification: &NotificationType) -> Element {
             rsx! {
                 ZapNotification {
                     key: "{event.id}",
-                    event: event.clone()
+                    event: event.clone(),
+                    cached_muted_posts: cached_muted_posts.clone(),
+                    cached_blocked_users: cached_blocked_users.clone()
                 }
             }
         }
@@ -403,7 +422,11 @@ fn render_notification(notification: &NotificationType) -> Element {
 }
 
 #[component]
-fn ReactionNotification(event: NostrEvent) -> Element {
+fn ReactionNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reacted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
@@ -545,7 +568,9 @@ fn ReactionNotification(event: NostrEvent) -> Element {
                     class: "ml-13 mt-2",
                     NoteCard {
                         event: post.clone(),
-                        collapsible: true
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             } else if *loading.read() {
@@ -559,7 +584,11 @@ fn ReactionNotification(event: NostrEvent) -> Element {
 }
 
 #[component]
-fn RepostNotification(event: NostrEvent) -> Element {
+fn RepostNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut reposted_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
@@ -666,7 +695,9 @@ fn RepostNotification(event: NostrEvent) -> Element {
                     class: "ml-13 mt-2",
                     NoteCard {
                         event: post.clone(),
-                        collapsible: true
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             } else if *loading.read() {
@@ -680,7 +711,11 @@ fn RepostNotification(event: NostrEvent) -> Element {
 }
 
 #[component]
-fn ZapNotification(event: NostrEvent) -> Element {
+fn ZapNotification(
+    event: NostrEvent,
+    #[props(default = None)] cached_muted_posts: Option<Rc<HashSet<String>>>,
+    #[props(default = None)] cached_blocked_users: Option<Rc<HashSet<String>>>,
+) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut zapped_post = use_signal(|| None::<NostrEvent>);
     let mut loading = use_signal(|| true);
@@ -797,7 +832,10 @@ fn ZapNotification(event: NostrEvent) -> Element {
                 div {
                     class: "ml-13 mt-2",
                     NoteCard {
-                        event: post.clone()
+                        event: post.clone(),
+                        collapsible: true,
+                        cached_muted_posts: cached_muted_posts.clone(),
+                        cached_blocked_users: cached_blocked_users.clone()
                     }
                 }
             } else if *loading.read() {
@@ -918,6 +956,10 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
 async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>, String> {
     let client = nostr_client::NOSTR_CLIENT.read().as_ref()
         .ok_or("Client not initialized")?.clone();
+
+    // Ensure at least one relay is connected before fetching
+    // This is critical - CLIENT_INITIALIZED may be true but relays not yet connected
+    nostr_client::ensure_relays_ready(&client).await;
 
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated")?;

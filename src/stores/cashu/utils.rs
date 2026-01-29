@@ -172,8 +172,125 @@ pub async fn validate_and_filter_proofs(
 }
 
 // =============================================================================
-// Token Sanitization
+// Counter/Signature Healing
 // =============================================================================
+
+/// Check if error indicates counter/signature desync
+///
+/// These errors mean the mint has already seen these blind signatures.
+/// This typically happens when:
+/// - App crashed after sending blinded messages but before receiving proofs
+/// - Counter got desynced between CDK's IndexedDB and mint's state
+///
+/// Solution: Increment counter and retry with fresh signatures.
+pub fn should_heal_outputs_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("already signed")
+        || lower.contains("duplicate key")
+        || lower.contains("outputs have already been signed")
+        || lower.contains("blind signature already exists")
+        || lower.contains("blinded message already used")
+        || lower.contains("already exists in database")
+}
+
+/// Counter healing retry loop result
+#[derive(Debug)]
+pub struct CounterHealResult<T> {
+    pub result: T,
+    pub heal_attempts: u32,
+}
+
+/// Execute an operation with counter healing retry
+///
+/// If the operation fails with a signature desync error, this will:
+/// 1. Increment the keyset counter by increasing amounts
+/// 2. Retry the operation with fresh signatures
+/// 3. Give up after MAX_COUNTER_HEAL_ATTEMPTS
+///
+/// SAFETY: Limited to 3 retries to prevent infinite loops (Risk 5)
+pub async fn with_counter_healing<F, Fut, T, E>(
+    wallet: &cdk::Wallet,
+    keyset_id: &cdk::nuts::Id,
+    operation: F,
+) -> Result<CounterHealResult<T>, E>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    use super::types::{MAX_COUNTER_HEAL_ATTEMPTS, COUNTER_HEAL_INCREMENTS};
+
+    let mut heal_attempt = 0u32;
+
+    loop {
+        match operation().await {
+            Ok(result) => {
+                if heal_attempt > 0 {
+                    log::info!(
+                        "Counter healing succeeded after {} attempt(s)",
+                        heal_attempt
+                    );
+                }
+                return Ok(CounterHealResult {
+                    result,
+                    heal_attempts: heal_attempt,
+                });
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+
+                if should_heal_outputs_error(&error_str) && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS {
+                    let increment = match COUNTER_HEAL_INCREMENTS.get(heal_attempt as usize) {
+                        Some(&inc) => inc,
+                        None => {
+                            log::error!("Counter heal increment not found for attempt {}", heal_attempt);
+                            return Err(e);
+                        }
+                    };
+                    log::warn!(
+                        "Counter desync detected (attempt {}/{}), incrementing keyset counter by {}",
+                        heal_attempt + 1,
+                        MAX_COUNTER_HEAL_ATTEMPTS,
+                        increment
+                    );
+
+                    // Increment the keyset counter to skip over used outputs
+                    if let Err(incr_err) = wallet
+                        .localstore
+                        .increment_keyset_counter(keyset_id, increment)
+                        .await
+                    {
+                        // IMPORTANT: Returning original error `e` because function is generic over E
+                        // and we cannot change the error type. The counter increment failure is the
+                        // TRUE cause - callers should grep logs for "COUNTER_INCREMENT_FAILED".
+                        log::error!(
+                            "COUNTER_INCREMENT_FAILED: keyset={}, increment={}, counter_error='{}', triggering_error='{}'",
+                            keyset_id, increment, incr_err, e
+                        );
+                        return Err(e);
+                    }
+
+                    heal_attempt += 1;
+
+                    // Brief delay before retry to avoid rapid-fire requests to mint
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        gloo_timers::future::TimeoutFuture::new(500).await;
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+
+                    // Continue to next iteration to retry
+                } else {
+                    // Not a counter error or max retries exceeded
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
 
 /// Sanitize a Cashu token string by removing all whitespace
 /// and validating the format prefix.

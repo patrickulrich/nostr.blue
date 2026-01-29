@@ -16,7 +16,7 @@ use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
 
 use crate::utils::recipe::{
-    RECIPE_TAG_PREFIX, RECIPE_TAG_PREFIXES, ParsedRecipe, RecipeMetadata,
+    RECIPE_TAG_PREFIX, RECIPE_TAG_PREFIX_ALT, RECIPE_TAG_PREFIXES, ParsedRecipe, RecipeMetadata,
     parse_recipe, extract_metadata, is_recipe_event
 };
 
@@ -690,6 +690,7 @@ pub async fn publish_recipe(
         Tag::identifier(&slug),
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
+        Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
         // Title-based hashtag for discoverability
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
         Tag::custom(
@@ -755,6 +756,7 @@ pub async fn fork_recipe(
         Tag::identifier(&slug),
         Tag::title(new_title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
+        Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
         // Title-based hashtag for discoverability
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
         Tag::custom(
@@ -819,6 +821,7 @@ pub async fn update_recipe(
         Tag::identifier(original_slug),
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
+        Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
         // Title-based hashtag for discoverability
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, original_slug)),
         Tag::custom(
