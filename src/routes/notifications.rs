@@ -58,7 +58,7 @@ pub fn Notifications() -> Element {
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     use_effect(move || {
-        let is_authenticated = auth_store::is_authenticated();
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !is_authenticated || !client_initialized {
             return;

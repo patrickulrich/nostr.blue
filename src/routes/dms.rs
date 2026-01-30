@@ -56,15 +56,15 @@ pub fn DMs() -> Element {
     let mut new_dm_mode = use_signal(|| false);
     use_effect(
         use_reactive(
-            &*nostr_client::CLIENT_INITIALIZED.read(),
-            move |client_initialized| {
+            (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
+            move |(client_initialized, is_authenticated)| {
                 if !client_initialized {
                     log::debug!(
                         "Waiting for client initialization before loading DMs..."
                     );
                     return;
                 }
-                if !auth_store::is_authenticated() {
+                if !is_authenticated {
                     return;
                 }
                 loading.set(true);
@@ -85,9 +85,9 @@ pub fn DMs() -> Element {
     );
     use_effect(
         use_reactive(
-            &*nostr_client::CLIENT_INITIALIZED.read(),
-            move |client_initialized| {
-                if !client_initialized || !auth_store::is_authenticated() {
+            (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
+            move |(client_initialized, is_authenticated)| {
+                if !client_initialized || !is_authenticated {
                     return;
                 }
                 spawn(async move {
