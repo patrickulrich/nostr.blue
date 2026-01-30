@@ -4,16 +4,16 @@ use crate::components::{
 };
 use crate::routes::Route;
 use crate::stores::bookmarks;
-use crate::stores::pending_comments::get_pending_comments;
+use crate::stores::nostr_client;
 use crate::utils::article_meta::{
     calculate_read_time, get_hashtags, get_image, get_published_at, get_summary,
     get_title,
 };
-use crate::utils::{
-    build_thread_tree, format_relative_time_or, merge_pending_into_tree, truncate_pubkey,
-};
+use crate::utils::{build_thread_tree, format_relative_time_or, truncate_pubkey};
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind};
+use dioxus_core::use_drop;
+use nostr_sdk::prelude::*;
+use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 #[component]
 pub fn ArticleDetail(naddr: String) -> Element {
@@ -28,10 +28,11 @@ pub fn ArticleDetail(naddr: String) -> Element {
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
-    let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
+    let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let has_signer = *nostr_client::HAS_SIGNER.read();
     use_effect(move || {
         let naddr_str = naddr.clone();
-        let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             log::info!("Waiting for client initialization before loading article...");
             return;
@@ -42,7 +43,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
             match decode_naddr(&naddr_str) {
                 Ok((pubkey, identifier)) => {
                     crate::stores::profiles::PROFILE_CACHE.write().pop(&pubkey);
-                    match crate::stores::nostr_client::fetch_event_by_coordinate(
+                    match nostr_client::fetch_event_by_coordinate(
                             nostr_sdk::Kind::LongFormTextNote.as_u16(),
                             pubkey.clone(),
                             identifier,
@@ -104,7 +105,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     .kind(Kind::Comment)
                     .event(event_id)
                     .limit(500);
-                match crate::stores::nostr_client::fetch_events_aggregated(
+                match nostr_client::fetch_events_aggregated(
                         filter,
                         Duration::from_secs(10),
                     )
@@ -120,9 +121,65 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     }
                 }
                 loading_comments.set(false);
+
+                // Set up real-time subscription for new comments
+                if let Some(client) = nostr_client::get_client() {
+                    let filter = Filter::new()
+                        .kind(Kind::Comment)
+                        .event(event_id)
+                        .since(Timestamp::now())
+                        .limit(0);
+
+                    match client.subscribe(filter, None).await {
+                        Ok(output) => {
+                            let subscription_id = output.val;
+                            comment_sub_id.set(Some(subscription_id.clone()));
+                            log::debug!("Subscribed for new comments on article {}", event_id.to_hex());
+
+                            spawn(async move {
+                                let mut notifications = client.notifications();
+                                while let Ok(notification) = notifications.recv().await {
+                                    if let RelayPoolNotification::Event {
+                                        subscription_id: sub_id,
+                                        event,
+                                        ..
+                                    } = notification
+                                    {
+                                        if sub_id == subscription_id {
+                                            let already_exists =
+                                                comments.read().iter().any(|e| e.id == event.id);
+                                            if !already_exists {
+                                                log::info!(
+                                                    "New comment received via streaming: {}",
+                                                    event.id.to_hex()
+                                                );
+                                                comments.write().push((*event).clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to subscribe for comments: {}", e);
+                        }
+                    }
+                }
             });
         }
     });
+    // Cleanup subscription on unmount
+    use_drop(move || {
+        if let Some(sub_id) = comment_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up comment subscription");
+                }
+            });
+        }
+    });
+
     use_effect(move || {
         let article_data = article.read();
         if let Some(event) = article_data.as_ref() {
@@ -136,7 +193,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     .kind(Kind::Reaction)
                     .event(event_id)
                     .limit(500);
-                match crate::stores::nostr_client::fetch_events_aggregated(
+                match nostr_client::fetch_events_aggregated(
                         filter,
                         Duration::from_secs(10),
                     )
@@ -184,7 +241,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                 }
             }
             div { class: "max-w-4xl mx-auto px-4 py-8",
-                if !*crate::stores::nostr_client::CLIENT_INITIALIZED.read()
+                if !*nostr_client::CLIENT_INITIALIZED.read()
                     || (*loading.read() && article.read().is_none())
                 {
                     ClientInitializing {}
@@ -373,9 +430,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                     } else {
                                         {
                                             let comment_vec = comments.read().clone();
-                                            let confirmed_tree = build_thread_tree(comment_vec, &event.id);
-                                            let pending = get_pending_comments(&event.id);
-                                            let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
+                                            let thread_tree = build_thread_tree(comment_vec, &event.id);
                                             rsx! {
                                                 if thread_tree.is_empty() {
                                                     div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
@@ -404,7 +459,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                             spawn(async move {
                                                 loading_comments.set(true);
                                                 let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
-                                                if let Ok(mut comment_events) = crate::stores::nostr_client::fetch_events_aggregated(
+                                                if let Ok(mut comment_events) = nostr_client::fetch_events_aggregated(
                                                         filter,
                                                         Duration::from_secs(10),
                                                     )
@@ -433,7 +488,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
     }
 }
 /// Decode naddr to extract pubkey and identifier
-fn decode_naddr(naddr: &str) -> Result<(String, String), String> {
+fn decode_naddr(naddr: &str) -> std::result::Result<(String, String), String> {
     use nostr::nips::nip19::{FromBech32, Nip19Coordinate};
     match Nip19Coordinate::from_bech32(naddr) {
         Ok(nip19_coord) => {

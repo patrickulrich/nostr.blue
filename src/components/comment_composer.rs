@@ -1,16 +1,14 @@
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete};
 use crate::stores::nostr_client::{get_client, HAS_SIGNER};
-use crate::stores::pending_comments::{
-    add_pending_comment, update_pending_status, CommentStatus, PendingComment,
-};
-use crate::utils::{get_current_user_pubkey, SignerValidationResult};
+use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use dioxus::prelude::*;
-use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventBuilder, Kind, Timestamp};
+use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
+
 const MAX_LENGTH: usize = 5000;
+
 /// NIP-22 Comment Composer for articles, videos, photos, etc.
 #[component]
 pub fn CommentComposer(
@@ -24,7 +22,9 @@ pub fn CommentComposer(
     let mut content = use_signal(String::new);
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(Vec::<String>::new);
+    let mut is_publishing = use_signal(|| false);
     let toast = consume_toast();
+
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
         let separator_len = if content_len > 0 { 2 } else { 0 };
@@ -41,9 +41,11 @@ pub fn CommentComposer(
     let remaining = MAX_LENGTH.saturating_sub(char_count);
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;
+
     let has_signer = *HAS_SIGNER.read();
-    let can_publish = char_count > 0 && !is_over_limit && has_signer;
+    let can_publish = char_count > 0 && !is_over_limit && has_signer && !*is_publishing.read();
     let is_reply = parent_comment.is_some();
+
     let mut thread_participants = Vec::new();
     thread_participants.push(comment_on.pubkey);
     if let Some(parent) = &parent_comment {
@@ -51,9 +53,7 @@ pub fn CommentComposer(
             thread_participants.push(parent.pubkey);
         }
         for tag in parent.tags.iter() {
-            if let Some(TagStandard::PublicKey { public_key, .. }) = tag
-                .as_standardized()
-            {
+            if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
                 if !thread_participants.contains(public_key) {
                     thread_participants.push(*public_key);
                 }
@@ -67,6 +67,7 @@ pub fn CommentComposer(
             }
         }
     }
+
     let counter_color = if is_over_limit {
         "text-red-500"
     } else if show_warning {
@@ -74,10 +75,12 @@ pub fn CommentComposer(
     } else {
         "text-gray-500"
     };
+
     let handle_media_uploaded = move |url: String| {
         uploaded_media.write().push(url);
         show_media_uploader.set(false);
     };
+
     let mut handle_remove_media = move |index: usize| {
         let mut media = uploaded_media.write();
         if index < media.len() {
@@ -86,6 +89,7 @@ pub fn CommentComposer(
             log::warn!("Attempted to remove media at invalid index: {}", index);
         }
     };
+
     let mut cursor_position = use_signal(|| 0usize);
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
@@ -93,7 +97,10 @@ pub fn CommentComposer(
         let pos = if pos > current.len() {
             current.len()
         } else if !current.is_char_boundary(pos) {
-            (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+            (0..=pos)
+                .rev()
+                .find(|&i| current.is_char_boundary(i))
+                .unwrap_or(0)
         } else {
             pos
         };
@@ -101,9 +108,11 @@ pub fn CommentComposer(
         content.set(current);
         cursor_position.set(pos + text.len());
     };
+
     let handle_emoji_selected = move |emoji: String| {
         insert_at_cursor(emoji);
     };
+
     let handle_gif_selected = move |gif_url: String| {
         let mut url_with_space = gif_url.clone();
         {
@@ -123,6 +132,7 @@ pub fn CommentComposer(
         insert_at_cursor(url_with_space);
         log::info!("GIF URL inserted: {}", gif_url);
     };
+
     let handle_publish = {
         let toast_api = toast;
         move |_| {
@@ -136,113 +146,65 @@ pub fn CommentComposer(
                     content_value.push('\n');
                 }
             }
+
             if content_value.is_empty() || is_over_limit {
                 return;
             }
-            let author_pubkey = match get_current_user_pubkey() {
-                SignerValidationResult::Ok(pk) => pk,
-                SignerValidationResult::InvalidPubkey => {
-                    log::error!("Invalid pubkey in signer info");
-                    toast_api
-                        .error(
-                            "Unable to publish".to_string(),
-                            ToastOptions::new()
-                                .description("Invalid signer configuration")
-                                .duration(Duration::from_secs(3)),
-                        );
-                    return;
-                }
-                SignerValidationResult::NotSignedIn => {
-                    log::error!("No signer info available");
-                    toast_api
-                        .error(
-                            "Unable to publish".to_string(),
-                            ToastOptions::new()
-                                .description("Please sign in first")
-                                .duration(Duration::from_secs(3)),
-                        );
-                    return;
-                }
-            };
+
+            is_publishing.set(true);
+
             let target_event = comment_on.clone();
             let parent = parent_comment.clone();
-            let local_id = uuid::Uuid::new_v4().to_string();
-            let pending = PendingComment {
-                local_id: local_id.clone(),
-                content: content_value.clone(),
-                target_event_id: target_event.id,
-                parent_comment_id: parent.as_ref().map(|p| p.id),
-                kind: Kind::Comment,
-                status: CommentStatus::Pending,
-                created_at: Timestamp::now(),
-                author_pubkey,
-                target_event: target_event.clone(),
-                parent_comment: parent.clone(),
-            };
-            add_pending_comment(pending);
+            let content_for_publish = content_value.clone();
+            let toast_for_async = toast_api;
+
             content.set(String::new());
             uploaded_media.set(Vec::new());
             on_success.call(());
-            let local_id_clone = local_id.clone();
-            let content_for_publish = content_value.clone();
-            let toast_for_async = toast_api;
-            spawn_forever(async move {
+
+            spawn(async move {
                 let client = match get_client() {
                     Some(c) => c,
                     None => {
                         log::error!("Client not initialized");
-                        update_pending_status(
-                            &local_id_clone,
-                            CommentStatus::Failed("Client not initialized".to_string()),
+                        toast_for_async.error(
+                            "Unable to publish".to_string(),
+                            ToastOptions::new()
+                                .description("Client not initialized")
+                                .duration(Duration::from_secs(3)),
                         );
-                        toast_for_async
-                            .error(
-                                "Unable to publish".to_string(),
-                                ToastOptions::new()
-                                    .description("Client not initialized")
-                                    .duration(Duration::from_secs(3)),
-                            );
                         return;
                     }
                 };
+
                 let (comment_to, root) = if let Some(parent_ref) = parent.as_ref() {
                     (parent_ref, Some(&target_event))
                 } else {
                     (&target_event, None)
                 };
-                let builder = EventBuilder::comment(
-                    content_for_publish,
-                    comment_to,
-                    root,
-                );
+
+                let builder = EventBuilder::comment(content_for_publish, comment_to, root);
+
                 match client.send_event_builder(builder).await {
                     Ok(send_output) => {
-                        log::info!(
-                            "NIP-22 comment published: {}", send_output.id().to_hex()
-                        );
-                        update_pending_status(
-                            &local_id_clone,
-                            CommentStatus::Confirmed(*send_output.id()),
-                        );
+                        log::info!("NIP-22 comment published: {}", send_output.id().to_hex());
+                        // Invalidate cache so new comments appear on refresh
+                        invalidate_thread_tree_cache(&target_event.id);
                     }
                     Err(e) => {
                         log::error!("Failed to publish comment: {}", e);
-                        update_pending_status(
-                            &local_id_clone,
-                            CommentStatus::Failed(format!("{}", e)),
+                        toast_for_async.error(
+                            "Failed to publish".to_string(),
+                            ToastOptions::new()
+                                .description(format!("{}", e))
+                                .duration(Duration::from_secs(3)),
                         );
-                        toast_for_async
-                            .error(
-                                "Failed to publish".to_string(),
-                                ToastOptions::new()
-                                    .description(format!("{}", e))
-                                    .duration(Duration::from_secs(3)),
-                            );
                     }
                 }
             });
         }
     };
+
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4",
@@ -274,7 +236,7 @@ pub fn CommentComposer(
                         class: "w-full min-h-[200px] p-4 bg-background border border-border rounded-lg resize-y focus:outline-hidden focus:ring-2 focus:ring-primary"
                             .to_string(),
                         rows: 8,
-                        disabled: !has_signer,
+                        disabled: !has_signer || *is_publishing.read(),
                         thread_participants: thread_participants.clone(),
                         cursor_position,
                     }
@@ -301,9 +263,9 @@ pub fn CommentComposer(
                                     key: "{index}",
                                     class: "flex items-center gap-2 p-2 bg-accent rounded-lg",
                                     if url.ends_with(".mp4") || url.ends_with(".webm") || url.contains("video") {
-                                        span { class: "text-sm", "🎥 Video" }
+                                        span { class: "text-sm", "Video" }
                                     } else {
-                                        span { class: "text-sm", "🖼️ Image" }
+                                        span { class: "text-sm", "Image" }
                                     }
                                     a {
                                         class: "text-sm text-primary hover:underline truncate flex-1",
@@ -323,7 +285,7 @@ pub fn CommentComposer(
                     if !has_signer {
                         div { class: "p-4 bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg",
                             p { class: "text-yellow-800 dark:text-yellow-200 text-sm",
-                                "⚠️ Please sign in to post comments"
+                                "Please sign in to post comments"
                             }
                         }
                     }
@@ -337,7 +299,8 @@ pub fn CommentComposer(
                                     let current = *show_media_uploader.read();
                                     show_media_uploader.set(!current);
                                 },
-                                "📎 Media"
+                                disabled: *is_publishing.read(),
+                                "Media"
                             }
                             EmojiPicker { on_emoji_selected: handle_emoji_selected }
                             GifPicker { on_gif_selected: handle_gif_selected }
@@ -350,10 +313,15 @@ pub fn CommentComposer(
                             "Cancel"
                         }
                         button {
-                            class: if can_publish { "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition" } else { "px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed" },
+                            class: if can_publish { "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center gap-2" } else { "px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed" },
                             disabled: !can_publish,
                             onclick: handle_publish,
-                            "Publish Comment"
+                            if *is_publishing.read() {
+                                span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
+                                "Publishing..."
+                            } else {
+                                "Publish Comment"
+                            }
                         }
                     }
                 }

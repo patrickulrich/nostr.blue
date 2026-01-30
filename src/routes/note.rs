@@ -1,22 +1,21 @@
-use std::time::Duration;
 use dioxus::prelude::*;
+use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
+use std::time::Duration;
+
 use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::use_mute_block_cache;
 use crate::routes::Route;
 use crate::stores::nostr_client;
-use crate::stores::pending_comments::get_pending_comments;
-use crate::utils::{build_thread_tree, event::is_voice_message, merge_pending_into_tree};
+use crate::utils::{build_thread_tree, event::is_voice_message};
+
 async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
-    let events = nostr_client::fetch_events_aggregated_outbox(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+    let events = nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
     events.into_iter().next().ok_or("Event not found".to_string())
 }
+
 /// Extract parent event IDs from note tags (NIP-10 lowercase 'e' and NIP-22 uppercase 'E')
 fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
     let mut ids: Vec<EventId> = note.tags.event_ids().cloned().collect();
@@ -34,17 +33,7 @@ fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
     }
     ids
 }
-/// Extract the thread root event ID from a note's tags (NIP-10)
-/// Returns the event ID from the "root" marker tag, or None if this note is the root
-fn extract_thread_root_id(note: &NostrEvent) -> Option<EventId> {
-    for tag in note.tags.iter() {
-        let tag_vec = tag.clone().to_vec();
-        if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
-            return EventId::from_hex(&tag_vec[1]).ok();
-        }
-    }
-    None
-}
+
 /// Fetch parent events by their IDs
 async fn fetch_parents_by_ids(
     parent_ids: Vec<EventId>,
@@ -52,21 +41,16 @@ async fn fetch_parents_by_ids(
     if parent_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let filter = Filter::new()
-        .ids(parent_ids)
-        .kinds(
-            vec![
-                Kind::TextNote,
-                Kind::VoiceMessage,
-                Kind::VoiceMessageReply,
-                Kind::Comment,
-            ],
-        );
+    let filter = Filter::new().ids(parent_ids).kinds(vec![
+        Kind::TextNote,
+        Kind::VoiceMessage,
+        Kind::VoiceMessageReply,
+        Kind::Comment,
+    ]);
     nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
 }
-async fn fetch_replies(
-    event_id: EventId,
-) -> std::result::Result<Vec<NostrEvent>, String> {
+
+async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>, String> {
     let event_id_hex = event_id.to_hex();
     let filter_lower = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply])
@@ -79,10 +63,8 @@ async fn fetch_replies(
         .limit(100);
     let mut all_replies = Vec::new();
     let (lower_result, upper_result) = tokio::join!(
-        nostr_client::fetch_events_aggregated_outbox(filter_lower,
-        Duration::from_secs(10)),
-        nostr_client::fetch_events_aggregated_outbox(filter_upper,
-        Duration::from_secs(10))
+        nostr_client::fetch_events_aggregated_outbox(filter_lower, Duration::from_secs(10)),
+        nostr_client::fetch_events_aggregated_outbox(filter_upper, Duration::from_secs(10))
     );
     if let Ok(lower_replies) = lower_result {
         all_replies.extend(lower_replies);
@@ -97,6 +79,7 @@ async fn fetch_replies(
         .collect();
     Ok(unique_replies)
 }
+
 #[component]
 pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let initial_is_voice = from_voice.as_ref().is_some_and(|v| v == "true");
@@ -107,39 +90,141 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
     let mut loading_parents = use_signal(|| false);
     let mut loading_replies = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let mut reply_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-    use_effect(
-        use_reactive!(
-            | note_id | { let note_id_str = note_id.clone(); let client_initialized = *
-            nostr_client::CLIENT_INITIALIZED.read(); if ! client_initialized {
+
+    use_effect(use_reactive!(|note_id| {
+        let note_id_str = note_id.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
             log::info!("Waiting for client initialization before loading note...");
-            return; } spawn(async move { loading.set(true); loading_parents.set(true);
-            loading_replies.set(true); error.set(None); crate
-            ::stores::profiles::PROFILE_CACHE.write().clear(); let event_id = match
-            EventId::from_bech32(& note_id_str).or_else(| _ | EventId::from_hex(&
-            note_id_str)) { Ok(id) => id, Err(e) => { error
-            .set(Some(format!("Invalid note ID: {}", e))); loading.set(false);
-            loading_parents.set(false); loading_replies.set(false); return; } }; let
-            note_result = fetch_main_note(event_id). await; let parent_ids = match &
-            note_result { Ok(event) => { note_data.set(Some(event.clone())); loading
-            .set(false); extract_parent_ids(event) } Err(e) => { error.set(Some(e
-            .clone())); loading.set(false); loading_parents.set(false); loading_replies
-            .set(false); return; } }; let (parents_result, replies_result) =
-            tokio::join!(fetch_parents_by_ids(parent_ids), fetch_replies(event_id)); if
-            let Ok(mut parents) = parents_result { parents.sort_by(| a, b | a.created_at
-            .cmp(& b.created_at)); parent_events.set(parents); }
-            if let Ok(mut reply_vec)
-            = replies_result { reply_vec.sort_by(| a, b | a.created_at.cmp(& b
-            .created_at)); let count = reply_vec.len(); replies.set(reply_vec);
-            log::info!("Loaded {} replies", count); } use crate
-            ::utils::profile_prefetch; let mut all_events = Vec::new(); if let Some(note)
-            = note_data.read().as_ref() { all_events.push(note.clone()); } all_events
-            .extend(parent_events.read().iter().cloned()); all_events.extend(replies
-            .read().iter().cloned()); if ! all_events.is_empty() { spawn(async move {
-            profile_prefetch::prefetch_event_authors(& all_events). await; }); } loading
-            .set(false); loading_parents.set(false); loading_replies.set(false); }); }
-        ),
-    );
+            return;
+        }
+        spawn(async move {
+            loading.set(true);
+            loading_parents.set(true);
+            loading_replies.set(true);
+            error.set(None);
+            crate::stores::profiles::PROFILE_CACHE.write().clear();
+
+            let event_id =
+                match EventId::from_bech32(&note_id_str).or_else(|_| EventId::from_hex(&note_id_str))
+                {
+                    Ok(id) => id,
+                    Err(e) => {
+                        error.set(Some(format!("Invalid note ID: {}", e)));
+                        loading.set(false);
+                        loading_parents.set(false);
+                        loading_replies.set(false);
+                        return;
+                    }
+                };
+
+            let note_result = fetch_main_note(event_id).await;
+            let parent_ids = match &note_result {
+                Ok(event) => {
+                    note_data.set(Some(event.clone()));
+                    loading.set(false);
+                    extract_parent_ids(event)
+                }
+                Err(e) => {
+                    error.set(Some(e.clone()));
+                    loading.set(false);
+                    loading_parents.set(false);
+                    loading_replies.set(false);
+                    return;
+                }
+            };
+
+            let (parents_result, replies_result) =
+                tokio::join!(fetch_parents_by_ids(parent_ids), fetch_replies(event_id));
+
+            if let Ok(mut parents) = parents_result {
+                parents.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                parent_events.set(parents);
+            }
+            if let Ok(mut reply_vec) = replies_result {
+                reply_vec.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                let count = reply_vec.len();
+                replies.set(reply_vec);
+                log::info!("Loaded {} replies", count);
+            }
+
+            use crate::utils::profile_prefetch;
+            let mut all_events = Vec::new();
+            if let Some(note) = note_data.read().as_ref() {
+                all_events.push(note.clone());
+            }
+            all_events.extend(parent_events.read().iter().cloned());
+            all_events.extend(replies.read().iter().cloned());
+            if !all_events.is_empty() {
+                spawn(async move {
+                    profile_prefetch::prefetch_event_authors(&all_events).await;
+                });
+            }
+
+            loading.set(false);
+            loading_parents.set(false);
+            loading_replies.set(false);
+
+            // Set up real-time subscription for new replies
+            if let Some(client) = nostr_client::get_client() {
+                let filter = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Comment, Kind::VoiceMessageReply])
+                    .event(event_id)
+                    .since(Timestamp::now())
+                    .limit(0);
+
+                match client.subscribe(filter, None).await {
+                    Ok(output) => {
+                        let subscription_id = output.val;
+                        reply_sub_id.set(Some(subscription_id.clone()));
+                        log::debug!("Subscribed for new replies on note {}", event_id.to_hex());
+
+                        spawn(async move {
+                            let mut notifications = client.notifications();
+                            while let Ok(notification) = notifications.recv().await {
+                                if let RelayPoolNotification::Event {
+                                    subscription_id: sub_id,
+                                    event,
+                                    ..
+                                } = notification
+                                {
+                                    if sub_id == subscription_id {
+                                        let already_exists =
+                                            replies.read().iter().any(|e| e.id == event.id);
+                                        if !already_exists {
+                                            log::info!(
+                                                "New reply received via streaming: {}",
+                                                event.id.to_hex()
+                                            );
+                                            replies.write().push((*event).clone());
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe for replies: {}", e);
+                    }
+                }
+            }
+        });
+    }));
+
+    // Cleanup subscription on unmount
+    use_drop(move || {
+        if let Some(sub_id) = reply_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up reply subscription");
+                }
+            });
+        }
+    });
+
     rsx! {
         div { class: "min-h-screen",
             {
@@ -148,9 +233,15 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 let back_route = if is_voice_note {
                     Route::VoiceMessages {}
                 } else {
-                    Route::Home { list: String::new() }
+                    Route::Home {
+                        list: String::new(),
+                    }
                 };
-                let title = if is_voice_note { "Voice Message" } else { "Post" };
+                let title = if is_voice_note {
+                    "Voice Message"
+                } else {
+                    "Post"
+                };
                 rsx! {
                     div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                         div { class: "flex items-center gap-4 p-4",
@@ -210,7 +301,10 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                     }
                 }
                 if is_voice_message(event) {
-                    VoiceMessageCard { key: "{event.id}", event: event.clone() }
+                    VoiceMessageCard {
+                        key: "{event.id}",
+                        event: event.clone(),
+                    }
                 } else {
                     NoteCard {
                         key: "{event.id}",
@@ -231,10 +325,7 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                 } else {
                     {
                         let reply_vec = replies.read().clone();
-                        let confirmed_tree = build_thread_tree(reply_vec, &event.id);
-                        let thread_root_id = extract_thread_root_id(event).unwrap_or(event.id);
-                        let pending = get_pending_comments(&thread_root_id);
-                        let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
+                        let thread_tree = build_thread_tree(reply_vec, &event.id);
                         rsx! {
                             if thread_tree.is_empty() {
                                 div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
@@ -244,7 +335,11 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                             } else {
                                 div { class: "divide-y divide-border",
                                     for node in thread_tree {
-                                        ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
+                                        ThreadedComment {
+                                            key: "{node.event.id}",
+                                            node: node.clone(),
+                                            depth: 0,
+                                        }
                                     }
                                 }
                             }

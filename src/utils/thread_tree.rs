@@ -1,59 +1,27 @@
 use instant::{Duration, Instant};
 use lru::LruCache;
-use nostr_sdk::{Event, EventId, PublicKey, TagKind};
+use nostr_sdk::{Event, EventId, TagKind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
-use crate::stores::pending_comments::{CommentStatus, PendingComment};
-/// Source of a thread node - distinguishes confirmed vs pending comments
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum ThreadNodeSource {
-    /// Confirmed event from relays
-    #[default]
-    Confirmed,
-    /// Pending local comment awaiting confirmation
-    Pending {
-        local_id: String,
-        status: CommentStatus,
-        /// Author's public key (stored explicitly since display event may have dummy pubkey)
-        author_pubkey: PublicKey,
-    },
-}
+
 /// Represents a node in a threaded conversation tree
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadNode {
     pub event: Event,
     pub children: Vec<ThreadNode>,
-    /// Source of this node (confirmed or pending)
-    pub source: ThreadNodeSource,
 }
+
 impl ThreadNode {
-    /// Create a confirmed thread node
-    pub fn confirmed(event: Event) -> Self {
+    /// Create a new thread node
+    pub fn new(event: Event) -> Self {
         Self {
             event,
             children: Vec::new(),
-            source: ThreadNodeSource::Confirmed,
-        }
-    }
-    /// Create a pending thread node
-    pub fn pending(
-        event: Event,
-        local_id: String,
-        status: CommentStatus,
-        author_pubkey: PublicKey,
-    ) -> Self {
-        Self {
-            event,
-            children: Vec::new(),
-            source: ThreadNodeSource::Pending {
-                local_id,
-                status,
-                author_pubkey,
-            },
         }
     }
 }
+
 /// Get the parent event ID from a reply event
 ///
 /// This implements NIP-10 logic for regular replies and NIP-22 logic for comments:
@@ -126,12 +94,14 @@ fn get_parent_id(event: &Event) -> Option<EventId> {
     }
     None
 }
+
 /// Cached thread tree with TTL tracking
 #[derive(Clone, Debug)]
 struct CachedThreadTree {
     tree: Vec<ThreadNode>,
     cached_at: Instant,
 }
+
 impl CachedThreadTree {
     fn new(tree: Vec<ThreadNode>) -> Self {
         Self {
@@ -139,11 +109,13 @@ impl CachedThreadTree {
             cached_at: Instant::now(),
         }
     }
+
     /// Check if cache entry is still valid (within TTL)
     fn is_valid(&self, ttl: Duration) -> bool {
         self.cached_at.elapsed() < ttl
     }
 }
+
 /// L2 cache for NIP-10 thread trees (Phase 3.5)
 ///
 /// In-memory LRU cache that sits between database and UI:
@@ -154,6 +126,7 @@ struct ThreadTreeCache {
     cache: LruCache<String, CachedThreadTree>,
     ttl: Duration,
 }
+
 impl ThreadTreeCache {
     fn new(capacity: usize, ttl: Duration) -> Self {
         Self {
@@ -161,6 +134,7 @@ impl ThreadTreeCache {
             ttl,
         }
     }
+
     /// Get cached thread tree if it exists and is still valid
     fn get(&mut self, root_event_id: &str) -> Option<Vec<ThreadNode>> {
         if let Some(cached) = self.cache.get(root_event_id) {
@@ -170,10 +144,12 @@ impl ThreadTreeCache {
         }
         None
     }
+
     /// Cache thread tree for a root event
     fn insert(&mut self, root_event_id: String, tree: Vec<ThreadNode>) {
         self.cache.put(root_event_id, CachedThreadTree::new(tree));
     }
+
     /// Invalidate (remove) cached thread tree for a root event
     ///
     /// Useful when a new reply is posted to the thread
@@ -181,19 +157,19 @@ impl ThreadTreeCache {
         self.cache.pop(root_event_id);
     }
 }
+
 /// Global L2 cache for thread trees
 ///
 /// Cache configuration:
 /// - Capacity: 200 threads (enough for typical browsing session)
 /// - TTL: 10 minutes (threads don't change as frequently as counts)
 static THREAD_TREE_CACHE: OnceLock<Mutex<ThreadTreeCache>> = OnceLock::new();
+
 /// Get or initialize the thread tree cache
 fn get_thread_tree_cache() -> &'static Mutex<ThreadTreeCache> {
-    THREAD_TREE_CACHE
-        .get_or_init(|| {
-            Mutex::new(ThreadTreeCache::new(200, Duration::from_secs(600)))
-        })
+    THREAD_TREE_CACHE.get_or_init(|| Mutex::new(ThreadTreeCache::new(200, Duration::from_secs(600))))
 }
+
 /// Build a threaded conversation tree from a flat list of reply events
 ///
 /// Returns a vec of top-level ThreadNode objects (direct replies to root event)
@@ -213,10 +189,7 @@ fn get_thread_tree_cache() -> &'static Mutex<ThreadTreeCache> {
 /// 4. Build parent-child relationships
 /// 5. Sort by timestamp (chronological order)
 /// 6. Cache result for future calls
-pub fn build_thread_tree(
-    replies: Vec<Event>,
-    root_event_id: &EventId,
-) -> Vec<ThreadNode> {
+pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<ThreadNode> {
     let root_id_hex = root_event_id.to_hex();
     {
         let mut cache = get_thread_tree_cache()
@@ -229,11 +202,14 @@ pub fn build_thread_tree(
             log::debug!("Thread tree cache HIT for {}", root_id_hex);
             return cached_tree;
         }
-        log::debug!("Thread tree cache MISS for {}, building tree...", root_id_hex);
+        log::debug!(
+            "Thread tree cache MISS for {}, building tree...",
+            root_id_hex
+        );
     }
     let mut node_map: HashMap<EventId, ThreadNode> = HashMap::new();
     for reply in &replies {
-        node_map.insert(reply.id, ThreadNode::confirmed(reply.clone()));
+        node_map.insert(reply.id, ThreadNode::new(reply.clone()));
     }
     let mut root_replies: Vec<ThreadNode> = Vec::new();
     for reply in &replies {
@@ -255,13 +231,13 @@ pub fn build_thread_tree(
                     if let Some(node) = node_map.remove(&reply.id) {
                         root_replies.push(node);
                     }
-                } 
+                }
             }
         }
     }
     let mut node_map: HashMap<EventId, ThreadNode> = HashMap::new();
     for reply in &replies {
-        node_map.insert(reply.id, ThreadNode::confirmed(reply.clone()));
+        node_map.insert(reply.id, ThreadNode::new(reply.clone()));
     }
     let mut processed: HashMap<EventId, ThreadNode> = HashMap::new();
     for reply in &replies {
@@ -285,11 +261,7 @@ pub fn build_thread_tree(
             if let Some(reply_parent_id) = get_parent_id(reply) {
                 if reply_parent_id == *parent_id && reply.id != *parent_id {
                     if let Some(mut node) = node_map.remove(&reply.id) {
-                        node.children = attach_children(
-                            &reply.id,
-                            all_replies,
-                            node_map,
-                        );
+                        node.children = attach_children(&reply.id, all_replies, node_map);
                         children.push(node);
                     }
                 }
@@ -314,6 +286,7 @@ pub fn build_thread_tree(
     }
     root_replies
 }
+
 /// Count the total number of replies in a thread tree (including nested replies)
 #[cfg(test)]
 #[allow(dead_code)]
@@ -325,6 +298,7 @@ pub fn count_total_replies(nodes: &[ThreadNode]) -> usize {
     }
     count
 }
+
 /// Invalidate cached thread tree for a root event
 ///
 /// Call this when a new reply is published to a thread to ensure
@@ -348,86 +322,4 @@ pub fn invalidate_thread_tree_cache(root_event_id: &EventId) {
         cache.invalidate(&root_id_hex);
     }
     log::debug!("Invalidated thread tree cache for {}", root_id_hex);
-}
-/// Merge pending comments into a confirmed thread tree
-///
-/// This function takes a tree of confirmed comments and a list of pending comments,
-/// and returns a new tree with pending comments inserted at appropriate positions.
-///
-/// Pending comments are:
-/// - Added as children of their parent comment (if replying to a comment)
-/// - Added to the root level (if replying to the root event)
-/// - Sorted by timestamp along with confirmed comments
-/// - Deduplicated (if a pending comment was already confirmed)
-pub fn merge_pending_into_tree(
-    mut confirmed_tree: Vec<ThreadNode>,
-    pending: Vec<PendingComment>,
-    _root_event_id: &EventId,
-) -> Vec<ThreadNode> {
-    if pending.is_empty() {
-        return confirmed_tree;
-    }
-    fn collect_event_ids(nodes: &[ThreadNode]) -> std::collections::HashSet<EventId> {
-        let mut ids = std::collections::HashSet::new();
-        for node in nodes {
-            ids.insert(node.event.id);
-            ids.extend(collect_event_ids(&node.children));
-        }
-        ids
-    }
-    let confirmed_ids = collect_event_ids(&confirmed_tree);
-    let mut pending = pending;
-    pending.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-    for pending_comment in pending {
-        if let CommentStatus::Confirmed(confirmed_id) = &pending_comment.status {
-            if confirmed_ids.contains(confirmed_id) {
-                continue;
-            }
-        }
-        let display_event = pending_comment.to_display_event();
-        if confirmed_ids.contains(&display_event.id) {
-            continue;
-        }
-        let pending_node = ThreadNode::pending(
-            display_event,
-            pending_comment.local_id.clone(),
-            pending_comment.status.clone(),
-            pending_comment.author_pubkey,
-        );
-        if let Some(parent_id) = pending_comment.parent_comment_id {
-            fn insert_as_child(
-                nodes: &mut [ThreadNode],
-                parent_id: &EventId,
-                mut node: ThreadNode,
-            ) -> Option<ThreadNode> {
-                for existing in nodes.iter_mut() {
-                    if existing.event.id == *parent_id {
-                        existing.children.push(node);
-                        existing
-                            .children
-                            .sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
-                        return None;
-                    }
-                }
-                for existing in nodes.iter_mut() {
-                    match insert_as_child(&mut existing.children, parent_id, node) {
-                        None => return None,
-                        Some(returned) => node = returned,
-                    }
-                }
-                Some(node)
-            }
-            if let Some(orphan_node) = insert_as_child(
-                &mut confirmed_tree,
-                &parent_id,
-                pending_node,
-            ) {
-                confirmed_tree.push(orphan_node);
-            }
-        } else {
-            confirmed_tree.push(pending_node);
-        }
-    }
-    confirmed_tree.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
-    confirmed_tree
 }

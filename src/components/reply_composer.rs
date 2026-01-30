@@ -1,21 +1,15 @@
 use crate::components::icons::{BarChartIcon, CameraIcon};
 use crate::components::{
-    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal,
-    RichContent,
+    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal, RichContent,
 };
 use crate::stores::nostr_client::{publish_note_tracked, HAS_SIGNER};
-use crate::stores::pending_comments::{
-    add_pending_comment, update_pending_status, CommentStatus, PendingComment,
-};
 use crate::stores::relay;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
-use crate::utils::{get_current_user_pubkey, truncate_pubkey, SignerValidationResult};
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use dioxus_core::spawn_forever;
-use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
-use std::time::Duration;
+use nostr_sdk::Event as NostrEvent;
+
 /// Extract relay hint for reply tagging (NIP-10)
 /// First tries to find a relay hint from parent's e-tags, then falls back to user's write relays
 fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
@@ -33,7 +27,9 @@ fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
     }
     hint
 }
+
 const MAX_LENGTH: usize = 5000;
+
 #[component]
 pub fn ReplyComposer(
     reply_to: NostrEvent,
@@ -45,7 +41,7 @@ pub fn ReplyComposer(
     let mut show_media_uploader = use_signal(|| false);
     let mut uploaded_media = use_signal(Vec::<String>::new);
     let mut show_poll_modal = use_signal(|| false);
-    let toast = consume_toast();
+
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
         let separator_len = if content_len > 0 { 2 } else { 0 };
@@ -62,9 +58,11 @@ pub fn ReplyComposer(
     let remaining = MAX_LENGTH.saturating_sub(char_count);
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;
+
     let has_signer = *HAS_SIGNER.read();
-    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read()
-        && has_signer;
+    let can_publish =
+        char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
+
     let counter_color = if is_over_limit {
         "text-red-500"
     } else if show_warning {
@@ -72,11 +70,13 @@ pub fn ReplyComposer(
     } else {
         "text-gray-500"
     };
+
     let author_pubkey = reply_to.pubkey.to_hex();
     let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_id = reply_to.id.to_hex();
+
     let mut thread_participants = Vec::new();
     thread_participants.push(reply_to.pubkey);
     for public_key in reply_to.tags.public_keys() {
@@ -86,13 +86,20 @@ pub fn ReplyComposer(
     }
     log::info!(
         "Reply composer: Extracted {} thread participants: author={}, others={:?}",
-        thread_participants.len(), reply_to.pubkey.to_hex(), thread_participants.iter()
-        .skip(1).map(| pk | pk.to_hex()).collect::< Vec < _ >> ()
+        thread_participants.len(),
+        reply_to.pubkey.to_hex(),
+        thread_participants
+            .iter()
+            .skip(1)
+            .map(|pk| pk.to_hex())
+            .collect::<Vec<_>>()
     );
+
     let handle_media_uploaded = move |url: String| {
         uploaded_media.write().push(url);
         show_media_uploader.set(false);
     };
+
     let mut handle_remove_media = move |index: usize| {
         let mut media = uploaded_media.write();
         if index < media.len() {
@@ -101,6 +108,7 @@ pub fn ReplyComposer(
             log::warn!("Attempted to remove media at invalid index: {}", index);
         }
     };
+
     let mut cursor_position = use_signal(|| 0usize);
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
@@ -110,6 +118,7 @@ pub fn ReplyComposer(
         content.set(current);
         cursor_position.set(pos + text.len());
     };
+
     let mut insert_with_spacing = move |text: String| {
         let mut text_with_space = text;
         let current = content.read().clone();
@@ -130,212 +139,136 @@ pub fn ReplyComposer(
         }
         insert_at_cursor(text_with_space);
     };
+
     let handle_emoji_selected = move |emoji: String| {
         insert_at_cursor(emoji);
     };
+
     let handle_gif_selected = move |gif_url: String| {
         log::info!("GIF URL inserted: {}", gif_url);
         insert_with_spacing(gif_url);
     };
+
     let handle_poll_created = move |nevent_ref: String| {
         log::info!("Poll reference inserted: {}", nevent_ref);
         insert_with_spacing(nevent_ref);
         show_poll_modal.set(false);
     };
-    let handle_publish = {
-        let toast_api = toast;
-        move |_| {
-            let mut content_value = content.read().clone();
-            if !uploaded_media.read().is_empty() {
-                if !content_value.is_empty() {
-                    content_value.push_str("\n\n");
-                }
-                for url in uploaded_media.read().iter() {
-                    content_value.push_str(url);
-                    content_value.push('\n');
-                }
+
+    let handle_publish = move |_| {
+        let mut content_value = content.read().clone();
+        if !uploaded_media.read().is_empty() {
+            if !content_value.is_empty() {
+                content_value.push_str("\n\n");
             }
-            if content_value.is_empty() || is_over_limit {
-                return;
+            for url in uploaded_media.read().iter() {
+                content_value.push_str(url);
+                content_value.push('\n');
             }
-            let current_user_pubkey = match get_current_user_pubkey() {
-                SignerValidationResult::Ok(pk) => pk,
-                SignerValidationResult::InvalidPubkey => {
-                    log::error!("Invalid pubkey in signer info");
-                    toast_api
-                        .error(
-                            "Unable to reply".to_string(),
-                            ToastOptions::new()
-                                .description("Invalid signer configuration")
-                                .duration(Duration::from_secs(3)),
-                        );
-                    return;
-                }
-                SignerValidationResult::NotSignedIn => {
-                    log::error!("No signer info available");
-                    toast_api
-                        .error(
-                            "Unable to reply".to_string(),
-                            ToastOptions::new()
-                                .description("Please sign in first")
-                                .duration(Duration::from_secs(3)),
-                        );
-                    return;
-                }
-            };
-            is_publishing.set(true);
-            let event_id = reply_id.clone();
-            let author_pk = author_pubkey.clone();
-            let parent_tags = reply_to.tags.clone();
-            let reply_to_event = reply_to.clone();
-            let local_id = uuid::Uuid::new_v4().to_string();
-            let parent_root = parent_tags
-                .iter()
-                .find_map(|tag| {
-                    let tag_vec = tag.clone().to_vec();
-                    if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
-                        Some(tag_vec[1].clone())
-                    } else {
-                        None
-                    }
-                });
-            let thread_root_id = if let Some(root_id) = &parent_root {
-                root_id.clone()
-            } else {
-                event_id.clone()
-            };
-            let target_event_id = if let Ok(id) = EventId::from_hex(&thread_root_id) {
-                id
-            } else {
-                log::error!("Invalid thread root ID");
-                is_publishing.set(false);
-                return;
-            };
-            let is_nested_reply = parent_root.is_some();
-            let pending = PendingComment {
-                local_id: local_id.clone(),
-                content: content_value.clone(),
-                target_event_id,
-                parent_comment_id: if is_nested_reply {
-                    Some(reply_to_event.id)
-                } else {
-                    None
-                },
-                kind: Kind::TextNote,
-                status: CommentStatus::Pending,
-                created_at: Timestamp::now(),
-                author_pubkey: current_user_pubkey,
-                target_event: reply_to_event.clone(),
-                parent_comment: if is_nested_reply {
-                    Some(reply_to_event.clone())
-                } else {
-                    None
-                },
-            };
-            add_pending_comment(pending);
-            content.set(String::new());
-            uploaded_media.set(Vec::new());
-            is_publishing.set(false);
-            on_success.call(());
-            let local_id_clone = local_id.clone();
-            let content_for_publish = content_value.clone();
-            let thread_root_id_clone = thread_root_id.clone();
-            let relay_hint = get_relay_hint_for_reply(&parent_tags);
-            spawn_forever(async move {
-                let mut tags = Vec::new();
-                if let Some(root_id) = parent_root {
-                    tags.push(
-                        vec![
-                            "e".to_string(),
-                            root_id,
-                            relay_hint.clone(),
-                            "root".to_string(),
-                        ],
-                    );
-                    tags.push(
-                        vec![
-                            "e".to_string(),
-                            event_id.clone(),
-                            relay_hint.clone(),
-                            "reply".to_string(),
-                        ],
-                    );
-                } else {
-                    tags.push(
-                        vec![
-                            "e".to_string(),
-                            event_id.clone(),
-                            relay_hint.clone(),
-                            "root".to_string(),
-                        ],
-                    );
-                }
-                tags.push(vec!["p".to_string(), author_pk.clone()]);
-                for tag in parent_tags.iter() {
-                    let tag_vec = tag.clone().to_vec();
-                    if tag_vec.len() >= 2 && tag_vec[0] == "p" {
-                        let pubkey = tag_vec[1].clone();
-                        if pubkey != author_pk {
-                            tags.push(vec!["p".to_string(), pubkey]);
-                        }
-                    }
-                }
-                match publish_note_tracked(content_for_publish, tags).await {
-                    Ok(result) => {
-                        log::info!(
-                            "Reply published: {} ({}/{} relays)", result.event_id, result
-                            .success_count(), result.total_attempted()
-                        );
-                        if result.has_failures() {
-                            for (relay, error) in &result.failed_relays {
-                                log::warn!("Relay {} failed for reply: {}", relay, error);
-                            }
-                        }
-                        if let Ok(root_event_id) = EventId::from_hex(
-                            &thread_root_id_clone,
-                        ) {
-                            invalidate_thread_tree_cache(&root_event_id);
-                            log::debug!(
-                                "Invalidated thread tree cache for root: {}",
-                                thread_root_id_clone
-                            );
-                        }
-                        match EventId::from_hex(&result.event_id) {
-                            Ok(event_id_parsed) => {
-                                update_pending_status(
-                                    &local_id_clone,
-                                    CommentStatus::Confirmed(event_id_parsed),
-                                );
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "Failed to parse published event ID '{}': {}", result
-                                    .event_id, e
-                                );
-                                update_pending_status(
-                                    &local_id_clone,
-                                    CommentStatus::Failed("Event ID parse error".to_string()),
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to publish reply: {}", e);
-                        update_pending_status(
-                            &local_id_clone,
-                            CommentStatus::Failed(e.to_string()),
-                        );
-                    }
-                }
-            });
         }
+
+        if content_value.is_empty() || is_over_limit {
+            return;
+        }
+
+        is_publishing.set(true);
+
+        let event_id = reply_id.clone();
+        let author_pk = author_pubkey.clone();
+        let parent_tags = reply_to.tags.clone();
+
+        let parent_root = parent_tags.iter().find_map(|tag| {
+            let tag_vec = tag.clone().to_vec();
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
+                Some(tag_vec[1].clone())
+            } else {
+                None
+            }
+        });
+        let thread_root_id = if let Some(root_id) = &parent_root {
+            root_id.clone()
+        } else {
+            event_id.clone()
+        };
+
+        content.set(String::new());
+        uploaded_media.set(Vec::new());
+        is_publishing.set(false);
+        on_success.call(());
+
+        let content_for_publish = content_value.clone();
+        let thread_root_id_clone = thread_root_id.clone();
+        let relay_hint = get_relay_hint_for_reply(&parent_tags);
+
+        spawn(async move {
+            let mut tags = Vec::new();
+            if let Some(root_id) = parent_root {
+                tags.push(vec![
+                    "e".to_string(),
+                    root_id,
+                    relay_hint.clone(),
+                    "root".to_string(),
+                ]);
+                tags.push(vec![
+                    "e".to_string(),
+                    event_id.clone(),
+                    relay_hint.clone(),
+                    "reply".to_string(),
+                ]);
+            } else {
+                tags.push(vec![
+                    "e".to_string(),
+                    event_id.clone(),
+                    relay_hint.clone(),
+                    "root".to_string(),
+                ]);
+            }
+            tags.push(vec!["p".to_string(), author_pk.clone()]);
+            for tag in parent_tags.iter() {
+                let tag_vec = tag.clone().to_vec();
+                if tag_vec.len() >= 2 && tag_vec[0] == "p" {
+                    let pubkey = tag_vec[1].clone();
+                    if pubkey != author_pk {
+                        tags.push(vec!["p".to_string(), pubkey]);
+                    }
+                }
+            }
+            match publish_note_tracked(content_for_publish, tags).await {
+                Ok(result) => {
+                    log::info!(
+                        "Reply published: {} ({}/{} relays)",
+                        result.event_id,
+                        result.success_count(),
+                        result.total_attempted()
+                    );
+                    if result.has_failures() {
+                        for (relay, error) in &result.failed_relays {
+                            log::warn!("Relay {} failed for reply: {}", relay, error);
+                        }
+                    }
+                    // Invalidate cache so new replies appear on refresh
+                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
+                        invalidate_thread_tree_cache(&root_event_id);
+                        log::debug!(
+                            "Invalidated thread tree cache for root: {}",
+                            thread_root_id_clone
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to publish reply: {}", e);
+                }
+            }
+        });
     };
+
     let handle_cancel = move |_| {
         content.set(String::new());
         uploaded_media.set(Vec::new());
         show_media_uploader.set(false);
         on_close.call(());
     };
+
     rsx! {
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-16 px-4",
@@ -402,9 +335,9 @@ pub fn ReplyComposer(
                                         key: "{index}",
                                         class: "flex items-center gap-2 p-2 bg-accent rounded-lg",
                                         if url.ends_with(".mp4") || url.ends_with(".webm") || url.contains("video") {
-                                            span { class: "text-sm", "🎥 Video" }
+                                            span { class: "text-sm", "Video" }
                                         } else {
-                                            span { class: "text-sm", "🖼️ Image" }
+                                            span { class: "text-sm", "Image" }
                                         }
                                         a {
                                             class: "text-sm text-primary hover:underline truncate flex-1",
@@ -477,6 +410,7 @@ pub fn ReplyComposer(
         PollCreatorModal { show: show_poll_modal, on_poll_created: handle_poll_created }
     }
 }
+
 /// Find the nearest valid UTF-8 char boundary at or before the given byte position.
 /// This prevents panics when inserting text at cursor positions in strings with
 /// multi-byte characters (emojis, accented characters, etc.).

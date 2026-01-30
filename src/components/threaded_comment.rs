@@ -6,84 +6,62 @@ use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client::{get_client, publish_repost, HAS_SIGNER};
-use crate::stores::pending_comments::{
-    remove_pending_comment, retry_pending_comment, CommentStatus,
-};
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::voice_messages_store;
 use crate::utils::format_sats_compact;
 use crate::utils::time::format_relative_time_ex;
-use crate::utils::{event::is_voice_message, ThreadNode, ThreadNodeSource};
+use crate::utils::{event::is_voice_message, ThreadNode};
 use dioxus::events::MediaData;
 use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
 use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
+
 const MAX_DEPTH: usize = 8;
+
 #[component]
 pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event = &node.event;
     let children = &node.children;
-    let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node
-        .source
-    {
-        ThreadNodeSource::Confirmed => (false, None, None, event.pubkey),
-        ThreadNodeSource::Pending { local_id, status, author_pubkey } => {
-            (true, Some(local_id.clone()), Some(status.clone()), *author_pubkey)
-        }
-    };
+    let author_pubkey = event.pubkey;
+
     let event_id = event.id.to_string();
     let event_id_like = event_id.clone();
     let event_id_repost = event_id.clone();
     let event_id_bookmark = event_id.clone();
     let event_id_memo = event_id.clone();
     let event_id_counts = event_id.clone();
+
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
     let author_metadata = use_author_metadata(author_pubkey_str.clone());
+
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = use_memo(move || bookmarks::is_bookmarked(&event_id_memo));
+
     let has_signer = *HAS_SIGNER.read();
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
-    let mut hide_confirmed_badge = use_signal(|| false);
-    let mut badge_timer_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| {
-        None
-    });
-    let mut pending_status_signal = use_signal(|| pending_status.clone());
-    let pending_status_for_sync = pending_status.clone();
-    use_effect(move || {
-        pending_status_signal.set(pending_status_for_sync.clone());
-    });
-    use_effect(move || {
-        let status = pending_status_signal.read();
-        let is_confirmed = matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)));
-        if is_confirmed && badge_timer_task.read().is_none() {
-            let task = spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(3_000).await;
-                hide_confirmed_badge.set(true);
-            });
-            badge_timer_task.set(Some(task));
-        } else if !is_confirmed && badge_timer_task.read().is_some() {
-            if let Some(task) = badge_timer_task.write().take() {
-                task.cancel();
-            }
-            hide_confirmed_badge.set(false);
-        }
-    });
+
     let reaction = use_reaction(event_id_like.clone(), author_pubkey_like.clone(), None);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
+
     let is_voice = is_voice_message(event);
-    let audio_url = if is_voice { event.content.clone() } else { String::new() };
+    let audio_url = if is_voice {
+        event.content.clone()
+    } else {
+        String::new()
+    };
     let audio_id = format!("voice-comment-{}", event_id);
     let mut duration = use_signal(|| 0.0f64);
     let mut current_time = use_signal(|| 0.0f64);
     let event_id_parsed = event.id;
+
     let imeta_duration: Option<f64> = if is_voice {
         event
             .tags
@@ -103,6 +81,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     } else {
         None
     };
+
     use_effect(move || {
         let event_id_for_counts = event_id_counts.clone();
         spawn(async move {
@@ -110,12 +89,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 Some(c) => c,
                 None => return,
             };
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(
-                &event_id_for_counts,
-            ) {
-                Ok(id) => id,
-                Err(_) => return,
-            };
+            let event_id_parsed =
+                match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+                    Ok(id) => id,
+                    Err(_) => return,
+                };
             let reply_filter = Filter::new()
                 .kind(Kind::TextNote)
                 .event(event_id_parsed)
@@ -161,32 +139,28 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 let total_sats: u64 = zaps
                     .iter()
                     .filter_map(|zap_event| {
-                        zap_event
-                            .tags
-                            .iter()
-                            .find_map(|tag| {
-                                let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<
-                                        serde_json::Value,
-                                    >(zap_request_json) {
-                                        if let Some(tags) = zap_request
-                                            .get("tags")
-                                            .and_then(|t| t.as_array())
-                                        {
-                                            for tag_array in tags {
-                                                if let Some(tag_vals) = tag_array.as_array() {
-                                                    if tag_vals.first().and_then(|v| v.as_str())
-                                                        == Some("amount")
+                        zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "description" {
+                                let zap_request_json = tag_vec.get(1)?.as_str();
+                                if let Ok(zap_request) =
+                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                {
+                                    if let Some(tags) =
+                                        zap_request.get("tags").and_then(|t| t.as_array())
+                                    {
+                                        for tag_array in tags {
+                                            if let Some(tag_vals) = tag_array.as_array() {
+                                                if tag_vals.first().and_then(|v| v.as_str())
+                                                    == Some("amount")
+                                                {
+                                                    if let Some(amount_str) =
+                                                        tag_vals.get(1).and_then(|v| v.as_str())
                                                     {
-                                                        if let Some(amount_str) = tag_vals
-                                                            .get(1)
-                                                            .and_then(|v| v.as_str())
+                                                        if let Ok(millisats) =
+                                                            amount_str.parse::<u64>()
                                                         {
-                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                                return Some(millisats / 1000);
-                                                            }
+                                                            return Some(millisats / 1000);
                                                         }
                                                     }
                                                 }
@@ -194,14 +168,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                         }
                                     }
                                 }
-                                None
-                            })
+                            }
+                            None
+                        })
                     })
                     .sum();
                 zap_amount_sats.set(total_sats);
             }
         });
     });
+
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 hover:text-green-600 transition"
     } else {
@@ -212,8 +188,10 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     } else {
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
     };
+
     let audio_id_for_effect = audio_id.clone();
     let audio_id_for_handlers = audio_id.clone();
+
     use_effect(move || {
         if !is_voice {
             return;
@@ -238,15 +216,14 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             None => return,
         };
         if is_playing {
-            let _ = audio
-                .play()
-                .map_err(|e| {
-                    log::debug!("Play failed: {:?}", e);
-                });
+            let _ = audio.play().map_err(|e| {
+                log::debug!("Play failed: {:?}", e);
+            });
         } else if let Err(e) = audio.pause() {
             log::debug!("Pause failed: {:?}", e);
         }
     });
+
     let handle_timeupdate = move |evt: Event<MediaData>| {
         if let Some(target) = evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
@@ -258,6 +235,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             }
         }
     };
+
     let handle_loadedmetadata = move |evt: Event<MediaData>| {
         if let Some(target) = evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
@@ -271,13 +249,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             }
         }
     };
+
     let handle_ended = move |_| {
         voice_messages_store::pause_voice_message();
         current_time.set(0.0);
     };
+
     let toggle_play = move |_| {
         voice_messages_store::toggle_voice_message(event_id_parsed);
     };
+
     let duration_val = imeta_duration.unwrap_or(*duration.read());
     let current_time_str = voice_messages_store::format_time(*current_time.read());
     let duration_str = voice_messages_store::format_time(duration_val);
@@ -286,30 +267,25 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     } else {
         0.0
     };
+
     let indent_level = depth.min(MAX_DEPTH);
     let margin_left = indent_level * 4;
+
     let event_id_nav = event.id.to_hex();
     let nav = use_navigator();
+
     rsx! {
         div { class: "comment-thread", style: "margin-left: {margin_left}px;",
             div {
-                class: if is_pending && matches!(pending_status.as_ref(), Some(CommentStatus::Pending)) { "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer opacity-70" } else { "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer" },
+                class: "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer",
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav;
-                    let is_pending_node = is_pending;
-                    let status = pending_status.clone();
                     move |_| {
-                        if is_pending_node
-                            && !matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)))
-                        {
-                            return;
-                        }
-                        navigator
-                            .push(Route::Note {
-                                note_id: event_id_click.clone(),
-                                from_voice: None,
-                            });
+                        navigator.push(Route::Note {
+                            note_id: event_id_click.clone(),
+                            from_voice: None,
+                        });
                     }
                 },
                 div { class: "flex items-start gap-2 mb-2",
@@ -367,57 +343,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             }
                             span { class: "text-xs text-muted-foreground",
                                 "{format_relative_time_ex(event.created_at, true, true)}"
-                            }
-                            if is_pending {
-                                match pending_status.as_ref() {
-                                    Some(CommentStatus::Pending) => rsx! {
-                                        span { class: "ml-2 px-2 py-0.5 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full animate-pulse",
-                                            "Posting..."
-                                        }
-                                    },
-                                    Some(CommentStatus::Confirmed(_)) => {
-                                        if !*hide_confirmed_badge.read() {
-                                            rsx! {
-                                                span { class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
-                                                    "Posted!"
-                                                }
-                                            }
-                                        } else {
-                                            rsx! {}
-                                        }
-                                    }
-                                    Some(CommentStatus::Failed(error)) => {
-                                        let local_id_retry = pending_local_id.clone().unwrap_or_default();
-                                        let local_id_dismiss = pending_local_id.clone().unwrap_or_default();
-                                        let error_msg = error.clone();
-                                        rsx! {
-                                            div {
-                                                class: "ml-2 flex items-center gap-2 flex-wrap",
-                                                onclick: move |e: MouseEvent| e.stop_propagation(),
-                                                span {
-                                                    class: "px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full",
-                                                    title: "{error_msg}",
-                                                    "Failed"
-                                                }
-                                                button {
-                                                    class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90",
-                                                    onclick: move |_| {
-                                                        retry_pending_comment(&local_id_retry);
-                                                    },
-                                                    "Retry"
-                                                }
-                                                button {
-                                                    class: "px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground",
-                                                    onclick: move |_| {
-                                                        remove_pending_comment(&local_id_dismiss);
-                                                    },
-                                                    "Dismiss"
-                                                }
-                                            }
-                                        }
-                                    }
-                                    None => rsx! {},
-                                }
                             }
                         }
                         div { class: "text-sm mt-1",
@@ -498,10 +423,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     e.stop_propagation();
                                     show_reply_modal.set(true);
                                 },
-                                MessageCircleIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: false,
-                                }
+                                MessageCircleIcon { class: "h-4 w-4".to_string(), filled: false }
                                 span { class: "text-xs",
                                     {
                                         let count = *reply_count.read();
@@ -541,10 +463,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                         }
                                     });
                                 },
-                                Repeat2Icon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: false,
-                                }
+                                Repeat2Icon { class: "h-4 w-4".to_string(), filled: false }
                                 span { class: "text-xs",
                                     {
                                         let count = *repost_count.read();
@@ -624,10 +543,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     e.stop_propagation();
                                     log::info!("Share button clicked for event");
                                 },
-                                ShareIcon {
-                                    class: "h-4 w-4".to_string(),
-                                    filled: false,
-                                }
+                                ShareIcon { class: "h-4 w-4".to_string(), filled: false }
                             }
                         }
                     }

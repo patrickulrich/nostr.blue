@@ -2,14 +2,15 @@ use crate::components::{
     icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal,
     ThreadedComment,
 };
-use crate::stores::pending_comments::get_pending_comments;
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::format_sats_compact;
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::utils::build_thread_tree;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
+use dioxus_core::use_drop;
+use nostr_sdk::prelude::*;
+use nostr_sdk::{Event, EventId, PublicKey};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlVideoElement;
@@ -100,6 +101,7 @@ fn LandscapePlayer(event: Event) -> Element {
     let mut comments = use_signal(Vec::<Event>::new);
     let mut loading_comments = use_signal(|| false);
     let mut show_comment_composer = use_signal(|| false);
+    let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let event_id = event.id;
     use_effect(move || {
         spawn(async move {
@@ -141,7 +143,63 @@ fn LandscapePlayer(event: Event) -> Element {
             sorted_comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
             comments.set(sorted_comments);
             loading_comments.set(false);
+
+            // Set up real-time subscription for new comments
+            if let Some(client) = nostr_client::get_client() {
+                let filter = Filter::new()
+                    .kinds(vec![Kind::TextNote, Kind::Comment])
+                    .event(event_id)
+                    .since(Timestamp::now())
+                    .limit(0);
+
+                match client.subscribe(filter, None).await {
+                    Ok(output) => {
+                        let subscription_id = output.val;
+                        comment_sub_id.set(Some(subscription_id.clone()));
+                        log::debug!("Subscribed for new comments on video {}", event_id.to_hex());
+
+                        spawn(async move {
+                            let mut notifications = client.notifications();
+                            while let Ok(notification) = notifications.recv().await {
+                                if let RelayPoolNotification::Event {
+                                    subscription_id: sub_id,
+                                    event,
+                                    ..
+                                } = notification
+                                {
+                                    if sub_id == subscription_id {
+                                        let already_exists =
+                                            comments.read().iter().any(|e| e.id == event.id);
+                                        if !already_exists {
+                                            log::info!(
+                                                "New comment received via streaming: {}",
+                                                event.id.to_hex()
+                                            );
+                                            comments.write().push((*event).clone());
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        log::error!("Failed to subscribe for comments: {}", e);
+                    }
+                }
+            }
         });
+    });
+
+    // Cleanup subscription on unmount
+    use_drop(move || {
+        if let Some(sub_id) = comment_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up video comment subscription");
+                }
+            });
+        }
     });
     let video_meta = parse_video_meta(&event);
     rsx! {
@@ -236,9 +294,7 @@ fn LandscapePlayer(event: Event) -> Element {
                     } else {
                         {
                             let comment_vec = comments.read().clone();
-                            let confirmed_tree = build_thread_tree(comment_vec, &event_id);
-                            let pending = get_pending_comments(&event_id);
-                            let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event_id);
+                            let thread_tree = build_thread_tree(comment_vec, &event_id);
                             rsx! {
                                 if thread_tree.is_empty() {
                                     div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
@@ -922,13 +978,7 @@ fn VideoInfo(
                             } else {
                                 {
                                     let comment_vec = comments.read().clone();
-                                    let confirmed_tree = build_thread_tree(comment_vec, &event_id_parsed);
-                                    let pending = get_pending_comments(&event_id_parsed);
-                                    let thread_tree = merge_pending_into_tree(
-                                        confirmed_tree,
-                                        pending,
-                                        &event_id_parsed,
-                                    );
+                                    let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
                                     rsx! {
                                         if thread_tree.is_empty() {
                                             div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
@@ -1336,7 +1386,7 @@ fn parse_video_id_and_feed(video_id: &str) -> (String, FeedType) {
         (video_id.to_string(), FeedType::Global)
     }
 }
-async fn load_video_by_id(video_id: &str) -> Result<Event, String> {
+async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, String> {
     log::info!("Loading video by ID: {}", video_id);
     let event_id = EventId::parse(video_id)
         .map_err(|e| format!("Invalid video ID: {}", e))?;
@@ -1346,7 +1396,7 @@ async fn load_video_by_id(video_id: &str) -> Result<Event, String> {
         .map_err(|e| format!("Failed to fetch video: {}", e))?;
     events.into_iter().next().ok_or_else(|| "Video not found".to_string())
 }
-async fn load_shorts_following(until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
@@ -1386,7 +1436,7 @@ async fn load_shorts_following(until: Option<u64>) -> Result<Vec<Event>, String>
         }
     }
 }
-async fn load_shorts_global(until: Option<u64>) -> Result<Vec<Event>, String> {
+async fn load_shorts_global(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
     let mut filter = Filter::new().kind(Kind::Custom(22)).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));

@@ -2,10 +2,11 @@ use crate::components::{
     ClientInitializing, ThreadedComment, VoiceMessageCard, VoiceReplyComposer,
 };
 use crate::stores::nostr_client;
-use crate::stores::pending_comments::get_pending_comments;
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::utils::build_thread_tree;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, EventId, Filter, Kind};
+use dioxus_core::use_drop;
+use nostr_sdk::prelude::*;
+use nostr_sdk::{Event, EventId};
 use std::time::Duration;
 #[component]
 pub fn VoiceMessageDetail(voice_id: String) -> Element {
@@ -15,6 +16,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
     let mut replies = use_signal(Vec::<Event>::new);
     let mut loading_replies = use_signal(|| false);
     let mut show_voice_reply_composer = use_signal(|| false);
+    let mut reply_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     use_effect(move || {
         let id = voice_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -89,6 +91,62 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                 log::info!("Total unique replies: {}", sorted_replies.len());
                 replies.set(sorted_replies);
                 loading_replies.set(false);
+
+                // Set up real-time subscription for new replies
+                if let Some(client) = nostr_client::get_client() {
+                    let filter = Filter::new()
+                        .kinds(vec![Kind::TextNote, Kind::VoiceMessageReply])
+                        .event(event_id)
+                        .since(Timestamp::now())
+                        .limit(0);
+
+                    match client.subscribe(filter, None).await {
+                        Ok(output) => {
+                            let subscription_id = output.val;
+                            reply_sub_id.set(Some(subscription_id.clone()));
+                            log::debug!("Subscribed for new replies on voice message {}", event_id.to_hex());
+
+                            spawn(async move {
+                                let mut notifications = client.notifications();
+                                while let Ok(notification) = notifications.recv().await {
+                                    if let RelayPoolNotification::Event {
+                                        subscription_id: sub_id,
+                                        event,
+                                        ..
+                                    } = notification
+                                    {
+                                        if sub_id == subscription_id {
+                                            let already_exists =
+                                                replies.read().iter().any(|e| e.id == event.id);
+                                            if !already_exists {
+                                                log::info!(
+                                                    "New reply received via streaming: {}",
+                                                    event.id.to_hex()
+                                                );
+                                                replies.write().push((*event).clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to subscribe for replies: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    // Cleanup subscription on unmount
+    use_drop(move || {
+        if let Some(sub_id) = reply_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up voice message reply subscription");
+                }
             });
         }
     });
@@ -148,9 +206,7 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                             } else {
                                 {
                                     let reply_vec = replies.read().clone();
-                                    let confirmed_tree = build_thread_tree(reply_vec.clone(), &event.id);
-                                    let pending = get_pending_comments(&event.id);
-                                    let thread_tree = merge_pending_into_tree(confirmed_tree, pending, &event.id);
+                                    let thread_tree = build_thread_tree(reply_vec.clone(), &event.id);
                                     rsx! {
                                         div { class: "divide-y divide-border",
                                             for node in thread_tree {
@@ -269,7 +325,7 @@ fn render_reply_node(node: &crate::utils::thread_tree::ThreadNode) -> Element {
         }
     }
 }
-async fn load_voice_message_by_id(voice_id: &str) -> Result<Event, String> {
+async fn load_voice_message_by_id(voice_id: &str) -> std::result::Result<Event, String> {
     log::info!("Loading voice message by ID: {}", voice_id);
     let event_id = EventId::parse(voice_id)
         .map_err(|e| format!("Invalid voice message ID: {}", e))?;

@@ -48,15 +48,11 @@ pub use format::{
     shorten_url, truncate_pubkey,
 };
 pub use list_kinds::{get_item_count, get_list_icon, get_list_type_name};
-pub use thread_tree::{
-    build_thread_tree, merge_pending_into_tree, ThreadNode, ThreadNodeSource,
-};
+pub use thread_tree::{build_thread_tree, ThreadNode};
 pub use error::log_fetch_error;
 pub use repost::{extract_reposted_event, FeedItem};
 pub use time::{format_time_ago, safe_duration_millis};
-pub use validation::{
-    css_safe_url, get_current_user_pubkey, is_valid_http_url, SignerValidationResult,
-};
+pub use validation::{css_safe_url, is_valid_http_url};
 /// Generate a random alphanumeric ID (9 characters)
 /// Used for poll options and other unique identifiers
 pub fn generate_option_id() -> String {

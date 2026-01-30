@@ -5,10 +5,11 @@ use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::services::github_nips;
 use crate::stores::nostr_client;
-use crate::stores::pending_comments::get_pending_comments;
-use crate::utils::{build_thread_tree, merge_pending_into_tree, truncate_pubkey};
+use crate::utils::{build_thread_tree, truncate_pubkey};
 use dioxus::prelude::*;
-use nostr_sdk::{Alphabet, Event as NostrEvent, Filter, Kind, SingleLetterTag, TagKind};
+use dioxus_core::use_drop;
+use nostr_sdk::prelude::*;
+use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
 /// NIP detail page - displays either an official NIP from GitHub or a custom NIP from Nostr
 #[component]
@@ -33,6 +34,7 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut is_liking = use_signal(|| false);
     let mut is_liked = use_signal(|| false);
     let mut like_count = use_signal(|| 0usize);
+    let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = *nostr_client::HAS_SIGNER.read();
     use_effect(move || {
         let id = nip_id.clone();
@@ -133,9 +135,66 @@ pub fn NipDetail(nip_id: String) -> Element {
                     }
                 }
                 loading_comments.set(false);
+
+                // Set up real-time subscription for new comments
+                if let Some(client) = nostr_client::get_client() {
+                    let filter = Filter::new()
+                        .kind(Kind::Comment)
+                        .event(event_id)
+                        .since(Timestamp::now())
+                        .limit(0);
+
+                    match client.subscribe(filter, None).await {
+                        Ok(output) => {
+                            let subscription_id = output.val;
+                            comment_sub_id.set(Some(subscription_id.clone()));
+                            log::debug!("Subscribed for new comments on custom NIP {}", event_id.to_hex());
+
+                            spawn(async move {
+                                let mut notifications = client.notifications();
+                                while let Ok(notification) = notifications.recv().await {
+                                    if let RelayPoolNotification::Event {
+                                        subscription_id: sub_id,
+                                        event,
+                                        ..
+                                    } = notification
+                                    {
+                                        if sub_id == subscription_id {
+                                            let already_exists =
+                                                comments.read().iter().any(|e| e.id == event.id);
+                                            if !already_exists {
+                                                log::info!(
+                                                    "New comment received via streaming: {}",
+                                                    event.id.to_hex()
+                                                );
+                                                comments.write().push((*event).clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to subscribe for comments: {}", e);
+                        }
+                    }
+                }
             });
         }
     });
+
+    // Cleanup subscription on unmount
+    use_drop(move || {
+        if let Some(sub_id) = comment_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up NIP comment subscription");
+                }
+            });
+        }
+    });
+
     use_effect(move || {
         let event = custom_event.read();
         if let Some(e) = event.as_ref() {
@@ -216,9 +275,7 @@ pub fn NipDetail(nip_id: String) -> Element {
     let comment_tree = use_memo(move || {
         let event = custom_event.read();
         if let Some(e) = event.as_ref() {
-            let tree = build_thread_tree(comments.read().clone(), &e.id);
-            let pending = get_pending_comments(&e.id);
-            merge_pending_into_tree(tree, pending, &e.id)
+            build_thread_tree(comments.read().clone(), &e.id)
         } else {
             Vec::new()
         }

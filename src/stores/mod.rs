@@ -27,7 +27,6 @@ pub mod nostr_music;
 pub mod notifications;
 pub mod nwc_store;
 pub mod p2p_store;
-pub mod pending_comments;
 pub mod pin_boards_store;
 pub mod pinned_communities;
 pub mod pinned_notes;
