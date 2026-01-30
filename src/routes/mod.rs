@@ -562,6 +562,7 @@ fn Layout() -> Element {
     let mut more_menu_open = use_signal(|| false);
     let mut radial_menu_open = use_signal(|| false);
     let mut sidebar_customizer_open = use_signal(|| false);
+    let mut mobile_search_open = use_signal(|| false);
     let current_route = use_route::<Route>();
     let navigator = navigator();
     let is_dms_page = matches!(current_route, Route::DMs {});
@@ -1074,6 +1075,13 @@ fn Layout() -> Element {
                         }
                     }
                 }
+                // Mobile search slideout
+                if *mobile_search_open.read() {
+                    crate::components::MobileSearchSlideout {
+                        show: mobile_search_open,
+                        on_close: move |_| mobile_search_open.set(false),
+                    }
+                }
                 main {
                     class: match (is_wide_page, music_player_visible) {
                         (true, true) => {
@@ -1091,7 +1099,11 @@ fn Layout() -> Element {
                                 "☰ Menu"
                             }
                             div { class: "text-lg font-bold", "nostr.blue" }
-                            div { class: "w-10" }
+                            button {
+                                class: "p-2 hover:bg-accent rounded-lg",
+                                onclick: move |_| mobile_search_open.set(true),
+                                crate::components::icons::SearchIcon { class: "w-5 h-5".to_string() }
+                            }
                         }
                     }
                     Outlet::<Route> {}
