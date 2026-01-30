@@ -8,11 +8,11 @@
 
 Run before committing:
 ```bash
-cargo check                                                # Native
+cargo check
+dx check                                                
 cargo clippy -- -D warnings                                # Native lints
 cargo clippy --target wasm32-unknown-unknown -- -D warnings  # WASM lints (CI enforced)
 cargo test
-dx check
 ```
 
 Local dev:

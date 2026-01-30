@@ -5,23 +5,11 @@ use crate::stores::profiles;
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use dioxus_core::Task;
+use dioxus_core::use_drop;
 use nostr::TagKind;
-use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, Tag};
+use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, Tag, Timestamp};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
-/// Guard struct that cancels polling task on drop
-#[derive(Clone)]
-struct PollTaskGuard {
-    task: Signal<Option<Task>>,
-}
-impl Drop for PollTaskGuard {
-    fn drop(&mut self) {
-        if let Some(task) = self.task.read().as_ref() {
-            task.cancel();
-        }
-    }
-}
 #[wasm_bindgen(
     inline_js = r#"
 export function scrollChatToBottom(elementId) {
@@ -39,16 +27,11 @@ export function isScrolledNearBottom(elementId, threshold) {
     const clientHeight = element.clientHeight;
     return scrollHeight - scrollTop - clientHeight < threshold;
 }
-
-export function isPageVisible() {
-    return !document.hidden;
-}
 "#
 )]
 extern "C" {
     fn scrollChatToBottom(element_id: &str);
     fn isScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
-    fn isPageVisible() -> bool;
 }
 #[component]
 pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
@@ -56,6 +39,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut loading = use_signal(|| false);
     let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
+    let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let chat_container_id = {
         let timestamp = js_sys::Date::now() as u64;
@@ -108,55 +92,56 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                         }
                     }
                     loading.set(false);
-                });
-            },
-        ),
-    );
-    let mut poll_task = use_signal(|| None::<Task>);
-    use_effect(
-        use_reactive(
-            (&stream_author_pubkey, &stream_d_tag),
-            move |(author, dtag)| {
-                if let Some(task) = poll_task.peek().as_ref() {
-                    task.cancel();
-                }
-                let tag = format!("30311:{}:{}", author, dtag);
-                let new_task = spawn(async move {
-                    loop {
-                        gloo_timers::future::TimeoutFuture::new(5000).await;
-                        if !isPageVisible() {
-                            continue;
-                        }
-                        let parts: Vec<&str> = tag.split(':').collect();
-                        if parts.len() == 3 {
-                            let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
-                            if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                                let _identifier = parts[2];
-                                let filter = Filter::new()
-                                    .kind(Kind::from(1311))
-                                    .custom_tag(
-                                        nostr_sdk::SingleLetterTag::lowercase(
-                                            nostr_sdk::Alphabet::A,
-                                        ),
-                                        tag.as_str(),
-                                    )
-                                    .limit(200);
-                                if let Ok(events) = fetch_events_aggregated(
-                                        filter,
-                                        Duration::from_secs(10),
-                                    )
-                                    .await
-                                {
-                                    let mut sorted_messages = events;
-                                    sorted_messages
-                                        .sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                    messages.set(sorted_messages);
-                                }
+
+                    // Set up real-time subscription for new messages
+                    if let Some(client) = get_client() {
+                        let realtime_filter = Filter::new()
+                            .kind(Kind::from(1311))
+                            .custom_tag(
+                                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                                tag.as_str(),
+                            )
+                            .since(Timestamp::now())
+                            .limit(0);
+
+                        match client.subscribe(realtime_filter, None).await {
+                            Ok(output) => {
+                                let subscription_id = output.val;
+                                chat_sub_id.set(Some(subscription_id.clone()));
+                                log::debug!("Subscribed to live chat for {}", tag);
+
+                                spawn(async move {
+                                    let mut notifications = client.notifications();
+                                    while let Ok(notification) = notifications.recv().await {
+                                        if let RelayPoolNotification::Event {
+                                            subscription_id: recv_sub_id,
+                                            event,
+                                            ..
+                                        } = notification
+                                        {
+                                            if recv_sub_id == subscription_id {
+                                                let already_exists = messages.read().iter().any(|e| e.id == event.id);
+                                                if !already_exists {
+                                                    log::info!("New chat message via streaming: {}", event.id.to_hex());
+                                                    let mut msgs = messages.write();
+                                                    msgs.push((*event).clone());
+                                                    // Enforce 200 message limit
+                                                    let len = msgs.len();
+                                                    if len > 200 {
+                                                        msgs.drain(0..(len - 200));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                log::error!("Failed to subscribe to live chat: {}", e);
                             }
                         }
                     }
                 });
-                poll_task.set(Some(new_task));
             },
         ),
     );
@@ -174,7 +159,16 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             }
         });
     });
-    use_hook(move || PollTaskGuard { task: poll_task });
+    use_drop(move || {
+        if let Some(sub_id) = chat_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up live chat subscription");
+                }
+            });
+        }
+    });
     use_effect(move || {
         let msg_count = messages.read().len();
         spawn(async move {
@@ -196,35 +190,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                         Ok(event_id) => {
                             log::info!("Chat message sent: {:?}", event_id);
                             message_input.set(String::new());
-                            sending.set(false);
-                            let tag_clone_bg = tag_clone.clone();
-                            spawn(async move {
-                                let parts: Vec<&str> = tag_clone_bg.split(':').collect();
-                                if parts.len() == 3 {
-                                    if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                                        let filter = Filter::new()
-                                            .kind(Kind::from(1311))
-                                            .custom_tag(
-                                                nostr_sdk::SingleLetterTag::lowercase(
-                                                    nostr_sdk::Alphabet::A,
-                                                ),
-                                                tag_clone_bg.as_str(),
-                                            )
-                                            .limit(200);
-                                        if let Ok(events) = fetch_events_aggregated(
-                                                filter,
-                                                Duration::from_secs(10),
-                                            )
-                                            .await
-                                        {
-                                            let mut sorted_messages = events;
-                                            sorted_messages
-                                                .sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                            messages.set(sorted_messages);
-                                        }
-                                    }
-                                }
-                            });
+                            // Message will arrive via real-time subscription
                         }
                         Err(e) => {
                             log::error!("Failed to send chat message: {}", e);
