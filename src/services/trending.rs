@@ -1,10 +1,10 @@
+use crate::stores::nostr_client::get_client;
+use crate::utils::truncate_pubkey;
 use nostr_sdk::{EventId, Filter, Kind};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
-use crate::stores::nostr_client::get_client;
-use crate::utils::truncate_pubkey;
 
 const NOSTR_WINE_API: &str = "https://api.nostr.wine";
 
@@ -108,14 +108,20 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
     }
 
     // Parse JSON response - nostr.wine returns an array directly
-    let json = JsFuture::from(resp.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?)
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let json = JsFuture::from(
+        resp.json()
+            .map_err(|e| format!("Failed to get JSON: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
     let trending_items: Vec<NostrWineTrendingItem> = serde_wasm_bindgen::from_value(json)
         .map_err(|e| format!("Failed to deserialize trending items: {:?}", e))?;
 
-    log::info!("Got {} trending event IDs from nostr.wine", trending_items.len());
+    log::info!(
+        "Got {} trending event IDs from nostr.wine",
+        trending_items.len()
+    );
 
     if trending_items.is_empty() {
         return Ok(Vec::new());
@@ -145,9 +151,7 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         .filter_map(|item| EventId::from_hex(&item.event_id).ok())
         .collect();
 
-    let filter = Filter::new()
-        .ids(event_ids.clone())
-        .kind(Kind::TextNote);
+    let filter = Filter::new().ids(event_ids.clone()).kind(Kind::TextNote);
 
     let events = client
         .fetch_events(filter, std::time::Duration::from_secs(10))
@@ -160,10 +164,8 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
     let mut trending_notes: Vec<TrendingNote> = Vec::new();
 
     // Create a map for quick event lookup
-    let events_map: std::collections::HashMap<String, _> = events
-        .into_iter()
-        .map(|e| (e.id.to_hex(), e))
-        .collect();
+    let events_map: std::collections::HashMap<String, _> =
+        events.into_iter().map(|e| (e.id.to_hex(), e)).collect();
 
     // Iterate in the original trending order
     for item in &trending_items {
@@ -211,7 +213,10 @@ pub async fn get_trending_notes(limit: Option<usize>) -> Result<Vec<TrendingNote
         );
     }
 
-    log::info!("Built {} trending notes from nostr.wine", trending_notes.len());
+    log::info!(
+        "Built {} trending notes from nostr.wine",
+        trending_notes.len()
+    );
     Ok(trending_notes)
 }
 

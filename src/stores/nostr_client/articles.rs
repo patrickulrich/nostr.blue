@@ -2,14 +2,14 @@
 //!
 //! Functions for fetching and publishing long-form articles (NIP-23).
 
-use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
-use crate::stores::relay;
-use super::fetching::{get_client, fetch_events_aggregated};
+use super::fetching::{fetch_events_aggregated, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use crate::stores::relay;
 
 // =============================================================================
 // Article Fetching
@@ -25,9 +25,7 @@ pub async fn fetch_articles(
 
     use nostr::{Filter, Kind, Timestamp};
 
-    let mut filter = Filter::new()
-        .kind(Kind::LongFormTextNote)
-        .limit(limit);
+    let mut filter = Filter::new().kind(Kind::LongFormTextNote).limit(limit);
 
     if let Some(until_timestamp) = until {
         filter = filter.until(Timestamp::from(until_timestamp));
@@ -36,7 +34,7 @@ pub async fn fetch_articles(
     // Use aggregated fetch pattern (DB cache first, background relay sync)
     match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            let mut sorted = events;  // Reuse owned Vec
+            let mut sorted = events; // Reuse owned Vec
             sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             // Enforce limit after sorting (API contract)
             sorted.truncate(limit);
@@ -83,7 +81,8 @@ pub async fn fetch_event_by_coordinate_with_relays(
     relay_hints: Vec<String>,
 ) -> std::result::Result<Option<nostr::Event>, String> {
     let client = get_client().ok_or("Client not initialized")?;
-    relay::fetch_event_by_coordinate_with_relays(&client, kind, &pubkey, &identifier, relay_hints).await
+    relay::fetch_event_by_coordinate_with_relays(&client, kind, &pubkey, &identifier, relay_hints)
+        .await
 }
 
 // =============================================================================
@@ -137,7 +136,7 @@ pub async fn publish_article_tracked(
     if !summary.is_empty() {
         tags.push(Tag::custom(
             nostr::TagKind::Custom("summary".into()),
-            vec![summary.to_string()]
+            vec![summary.to_string()],
         ));
     }
 
@@ -145,7 +144,7 @@ pub async fn publish_article_tracked(
     if !cover_image.is_empty() {
         tags.push(Tag::custom(
             nostr::TagKind::Custom("image".into()),
-            vec![cover_image.to_string()]
+            vec![cover_image.to_string()],
         ));
     }
 
@@ -154,7 +153,7 @@ pub async fn publish_article_tracked(
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("published_at".into()),
-        vec![timestamp]
+        vec![timestamp],
     ));
 
     // Add hashtags - sanitize: trim, filter empty, dedupe (Tag::hashtag already lowercases)
@@ -172,11 +171,12 @@ pub async fn publish_article_tracked(
     }
 
     // Build the event (Kind 30023 - LongFormTextNote)
-    let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content)
-        .tags(tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::LongFormTextNote, content).tags(tags);
 
     // Publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish article: {}", e))?;
 
     let result = PublishResult::from_output(output);

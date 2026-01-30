@@ -1,7 +1,10 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use stores::{auth_store, cashu, feed_cache, nostr_client, theme_store, music_player, nwc_store, reactions_store, relay, settings_store, shop_store, sidebar_store};
+use stores::{
+    auth_store, cashu, feed_cache, music_player, nostr_client, nwc_store, reactions_store, relay,
+    settings_store, shop_store, sidebar_store, theme_store,
+};
 
 // Modules
 mod components;
@@ -98,7 +101,9 @@ fn App() -> Element {
                                         }
                                     }
                                     Ok(false) => {
-                                        log::debug!("Cashu terms not yet accepted, skipping auto-load");
+                                        log::debug!(
+                                            "Cashu terms not yet accepted, skipping auto-load"
+                                        );
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to check Cashu terms: {}", e);
@@ -158,4 +163,3 @@ fn App() -> Element {
         components::password_modal::PasswordModal {}
     }
 }
-

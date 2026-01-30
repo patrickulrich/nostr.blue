@@ -7,12 +7,11 @@ static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 use crate::stores::{
     auth_store,
-    nostr_client::{self, HAS_SIGNER},
     blossom_store::{
-        self, BlossomTab, MediaFilter, MediaItem,
-        MEDIA_ITEMS, MEDIA_LOADING, MEDIA_ERROR,
+        self, BlossomTab, MediaFilter, MediaItem, MEDIA_ERROR, MEDIA_ITEMS, MEDIA_LOADING,
         UPLOAD_PROGRESS,
     },
+    nostr_client::{self, HAS_SIGNER},
 };
 
 /// Blossom Media Management Page
@@ -121,19 +120,23 @@ pub fn BlossomPage() -> Element {
     let servers = blossom_store::get_servers();
 
     let filtered_items: Vec<MediaItem> = match active_tab() {
-        BlossomTab::Images => media_items.iter()
+        BlossomTab::Images => media_items
+            .iter()
             .filter(|i| MediaFilter::Images.matches(&i.mime_type))
             .cloned()
             .collect(),
-        BlossomTab::Videos => media_items.iter()
+        BlossomTab::Videos => media_items
+            .iter()
             .filter(|i| MediaFilter::Videos.matches(&i.mime_type))
             .cloned()
             .collect(),
-        BlossomTab::Audio => media_items.iter()
+        BlossomTab::Audio => media_items
+            .iter()
             .filter(|i| MediaFilter::Audio.matches(&i.mime_type))
             .cloned()
             .collect(),
-        BlossomTab::Files => media_items.iter()
+        BlossomTab::Files => media_items
+            .iter()
             .filter(|i| MediaFilter::Files.matches(&i.mime_type))
             .cloned()
             .collect(),
@@ -170,7 +173,8 @@ pub fn BlossomPage() -> Element {
         let items_to_mirror: Vec<MediaItem> = {
             let selected = selected_items.read();
             let current_items = MEDIA_ITEMS.read();
-            current_items.iter()
+            current_items
+                .iter()
                 .filter(|i| selected.contains(&i.sha256))
                 .cloned()
                 .collect()
@@ -580,9 +584,8 @@ fn FileDetailModal(
                 spawn(async move {
                     if let Some(window) = web_sys::window() {
                         let clipboard = window.navigator().clipboard();
-                        match wasm_bindgen_futures::JsFuture::from(
-                            clipboard.write_text(&url)
-                        ).await {
+                        match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&url)).await
+                        {
                             Ok(_) => {
                                 copied.set(true);
                                 gloo_timers::future::TimeoutFuture::new(2000).await;
@@ -778,10 +781,7 @@ fn FileDetailModal(
 
 /// Upload modal component
 #[component]
-fn UploadModal(
-    on_close: EventHandler<()>,
-    on_upload_complete: EventHandler<()>,
-) -> Element {
+fn UploadModal(on_close: EventHandler<()>, on_upload_complete: EventHandler<()>) -> Element {
     // Generate unique ID for ARIA accessibility
     let modal_id = use_signal(|| MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
     let title_id = format!("upload-modal-title-{}", modal_id());
@@ -1122,8 +1122,7 @@ fn validate_and_normalize_server_url(input: &str) -> Result<String, String> {
         trimmed.to_string()
     };
 
-    let url = url::Url::parse(&url_str)
-        .map_err(|e| format!("Invalid URL: {}", e))?;
+    let url = url::Url::parse(&url_str).map_err(|e| format!("Invalid URL: {}", e))?;
 
     // Validate scheme (only http/https allowed)
     if url.scheme() != "http" && url.scheme() != "https" {
@@ -1170,18 +1169,19 @@ fn ServerList(
 
     // Shared add-server logic - defined once and used by both button click and Enter keypress
     // Uses Callback for proper Dioxus integration with interior mutability
-    let handle_add = use_callback(move |_: ()| {
-        match validate_and_normalize_server_url(&new_server_url()) {
-            Ok(normalized) => {
-                on_add_server.call(normalized);
-                new_server_url.set(String::new());
-                new_server_error.set(None);
-            }
-            Err(e) => {
-                new_server_error.set(Some(e));
-            }
-        }
-    });
+    let handle_add =
+        use_callback(
+            move |_: ()| match validate_and_normalize_server_url(&new_server_url()) {
+                Ok(normalized) => {
+                    on_add_server.call(normalized);
+                    new_server_url.set(String::new());
+                    new_server_error.set(None);
+                }
+                Err(e) => {
+                    new_server_error.set(Some(e));
+                }
+            },
+        );
 
     let handle_publish = move |_| {
         publishing.set(true);

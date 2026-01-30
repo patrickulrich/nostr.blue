@@ -1,12 +1,14 @@
+use dioxus::prelude::Event as DioxusEvent;
 use dioxus::prelude::*;
 use dioxus_core::Task;
-use dioxus::prelude::Event as DioxusEvent;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
-use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult};
+use crate::services::profile_search::{
+    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+};
 use crate::utils::is_valid_http_url;
 
 /// Groups autocomplete-related signals to reduce parameter count in helper functions
@@ -95,11 +97,23 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         props.on_input.call(new_value.clone());
 
         // Detect @ mentions
-        detect_mention(&new_value, cursor_pos, &mut autocomplete, contact_pubkeys, &props.thread_participants);
+        detect_mention(
+            &new_value,
+            cursor_pos,
+            &mut autocomplete,
+            contact_pubkeys,
+            &props.thread_participants,
+        );
 
         // Update dropdown position if showing
         if *autocomplete.show.read() {
-            update_dropdown_position(&textarea_id.read(), &mut dropdown_top, &mut dropdown_left, &mut show_below, &mut is_mobile);
+            update_dropdown_position(
+                &textarea_id.read(),
+                &mut dropdown_top,
+                &mut dropdown_left,
+                &mut show_below,
+                &mut is_mobile,
+            );
         }
     };
 
@@ -274,8 +288,12 @@ fn detect_mention(
         let cached_results = search_cached_profiles(&query, 10, &contacts, thread_pubkeys);
         state.results.set(cached_results.clone());
 
-        log::debug!("Autocomplete search for '{}': found {} results ({} thread participants)",
-            query, cached_results.len(), thread_pubkeys.len());
+        log::debug!(
+            "Autocomplete search for '{}': found {} results ({} thread participants)",
+            query,
+            cached_results.len(),
+            thread_pubkeys.len()
+        );
 
         // Only query relays if we don't have enough results and query is long enough
         if query.len() >= 3 && cached_results.len() < 5 {
@@ -315,8 +333,11 @@ fn detect_mention(
                             results_signal.set(results);
                             searching_signal.set(false);
                         } else {
-                            log::debug!("Ignoring stale search results for '{}' (current query: '{}')",
-                                query_snapshot, query_signal.read());
+                            log::debug!(
+                                "Ignoring stale search results for '{}' (current query: '{}')",
+                                query_snapshot,
+                                query_signal.read()
+                            );
                         }
                     }
                     Err(e) => {
@@ -347,8 +368,7 @@ fn insert_mention(
     on_input: EventHandler<String>,
     mention_start_pos: usize,
     query_len: usize,
-    #[allow(unused_variables)]
-    textarea_id: String,
+    #[allow(unused_variables)] textarea_id: String,
     mut show_autocomplete: Signal<bool>,
     external_cursor_position: Option<Signal<usize>>,
 ) {
@@ -379,8 +399,14 @@ fn insert_mention(
 
         // Bounds check - content may have changed since autocomplete was triggered
         // Also validate UTF-8 char boundary to prevent panic on multi-byte characters
-        if mention_start_pos > current_content.len() || !current_content.is_char_boundary(mention_start_pos) {
-            log::warn!("Mention start position {} is invalid for content of length {}", mention_start_pos, current_content.len());
+        if mention_start_pos > current_content.len()
+            || !current_content.is_char_boundary(mention_start_pos)
+        {
+            log::warn!(
+                "Mention start position {} is invalid for content of length {}",
+                mention_start_pos,
+                current_content.len()
+            );
             show_autocomplete.set(false);
             return;
         }
@@ -425,8 +451,10 @@ fn insert_mention(
                     if let Some(element) = document.get_element_by_id(&textarea_id) {
                         if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
                             // Convert to UTF-16 code unit index for DOM
-                            let new_cursor_utf16_pos = utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
-                            let _ = textarea.set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
+                            let new_cursor_utf16_pos =
+                                utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
+                            let _ = textarea
+                                .set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
                             let _ = textarea.focus();
                         }
                     }
@@ -531,7 +559,8 @@ fn update_dropdown_position(
                         dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     } else if top_space >= dropdown_height {
                         show_below.set(false);
-                        dropdown_top.set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
+                        dropdown_top
+                            .set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
                     } else {
                         // Default to below
                         show_below.set(true);

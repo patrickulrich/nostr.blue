@@ -1,8 +1,8 @@
 //! ProductGrid component - responsive grid layout for products
 
-use dioxus::prelude::*;
-use crate::utils::nip99::Product;
 use super::{ProductCard, ProductCardSkeleton};
+use crate::utils::nip99::Product;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ProductGridProps {

@@ -1,9 +1,9 @@
 // Music Source Filter Tabs Component
 // Allows filtering between All, Wavlake, Nostr, and Following sources
 
-use dioxus::prelude::*;
-use crate::stores::nostr_music::MusicFeedFilter;
 use crate::stores::auth_store;
+use crate::stores::nostr_music::MusicFeedFilter;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MusicSourceTabsProps {

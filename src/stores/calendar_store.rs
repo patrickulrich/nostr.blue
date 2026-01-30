@@ -8,8 +8,8 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -18,15 +18,14 @@ use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
 
 use crate::utils::nip52::{
-    parse_calendar_event, parse_calendar_rsvp,
-    CalendarEvent, CalendarRsvp, AvailabilityTemplate, AvailabilityBlock, EventSource, EventTime,
-    KIND_DATE_CALENDAR_EVENT, KIND_TIME_CALENDAR_EVENT, KIND_CALENDAR_RSVP,
-    KIND_AVAILABILITY_TEMPLATE, KIND_AVAILABILITY_BLOCK,
+    parse_calendar_event, parse_calendar_rsvp, AvailabilityBlock, AvailabilityTemplate,
+    CalendarEvent, CalendarRsvp, EventSource, EventTime, KIND_AVAILABILITY_BLOCK,
+    KIND_AVAILABILITY_TEMPLATE, KIND_CALENDAR_RSVP, KIND_DATE_CALENDAR_EVENT,
+    KIND_TIME_CALENDAR_EVENT,
 };
 use crate::utils::nip53::{
-    parse_meeting_room_event, parse_meeting_space, parse_room_presence,
-    LiveActivityEvent, RoomPresence,
-    KIND_MEETING_ROOM, KIND_MEETING_SPACE, KIND_ROOM_PRESENCE,
+    parse_meeting_room_event, parse_meeting_space, parse_room_presence, LiveActivityEvent,
+    RoomPresence, KIND_MEETING_ROOM, KIND_MEETING_SPACE, KIND_ROOM_PRESENCE,
 };
 
 // ============================================================================
@@ -50,8 +49,7 @@ pub static LIVE_EVENTS_CACHE: GlobalSignal<LruCache<String, LiveActivityEvent>> 
     GlobalSignal::new(|| LruCache::new(NonZeroUsize::new(EVENT_CACHE_SIZE).unwrap()));
 
 /// Private calendar events (NIP-59 gift wraps)
-pub static PRIVATE_EVENTS_CACHE: GlobalSignal<Vec<CalendarEvent>> =
-    GlobalSignal::new(Vec::new);
+pub static PRIVATE_EVENTS_CACHE: GlobalSignal<Vec<CalendarEvent>> = GlobalSignal::new(Vec::new);
 
 /// RSVPs cache (keyed by event coordinate)
 pub static RSVPS_CACHE: GlobalSignal<HashMap<String, Vec<CalendarRsvp>>> =
@@ -120,7 +118,9 @@ pub fn cache_event(event: CalendarEvent) {
         }
     }
 
-    CALENDAR_EVENTS_CACHE.write().put(event.coordinate.clone(), event);
+    CALENDAR_EVENTS_CACHE
+        .write()
+        .put(event.coordinate.clone(), event);
 }
 
 /// Get date key (YYYY-MM-DD) from EventTime
@@ -161,16 +161,18 @@ pub fn cache_calendar_events(events: &[NostrEvent]) {
 
             // Update by date index - O(1) deduplication via HashSet
             let date_key = get_date_key(&cal_event.start);
-            let existing = existing_by_date
-                .entry(date_key.clone())
-                .or_insert_with(|| {
-                    by_date.get(&date_key)
-                        .map(|v| v.iter().cloned().collect())
-                        .unwrap_or_default()
-                });
+            let existing = existing_by_date.entry(date_key.clone()).or_insert_with(|| {
+                by_date
+                    .get(&date_key)
+                    .map(|v| v.iter().cloned().collect())
+                    .unwrap_or_default()
+            });
 
             if existing.insert(cal_event.coordinate.clone()) {
-                by_date.entry(date_key).or_default().push(cal_event.coordinate.clone());
+                by_date
+                    .entry(date_key)
+                    .or_default()
+                    .push(cal_event.coordinate.clone());
             }
 
             cache.put(cal_event.coordinate.clone(), cal_event);
@@ -186,16 +188,12 @@ pub fn cache_live_events(events: &[NostrEvent]) {
     for event in events {
         let kind = event.kind.as_u16();
         let activity = match kind {
-            KIND_MEETING_ROOM => {
-                parse_meeting_room_event(event)
-                    .ok()
-                    .map(LiveActivityEvent::Meeting)
-            }
-            KIND_MEETING_SPACE => {
-                parse_meeting_space(event)
-                    .ok()
-                    .map(LiveActivityEvent::Space)
-            }
+            KIND_MEETING_ROOM => parse_meeting_room_event(event)
+                .ok()
+                .map(LiveActivityEvent::Meeting),
+            KIND_MEETING_SPACE => parse_meeting_space(event)
+                .ok()
+                .map(LiveActivityEvent::Space),
             _ => None,
         };
 
@@ -270,11 +268,7 @@ pub fn get_events_in_range(start_date: &str, end_date: &str) -> Vec<CalendarEven
 
     by_date
         .range(start_date.to_string()..=end_date.to_string())
-        .flat_map(|(_, coords)| {
-            coords
-                .iter()
-                .filter_map(|coord| cache.peek(coord).cloned())
-        })
+        .flat_map(|(_, coords)| coords.iter().filter_map(|coord| cache.peek(coord).cloned()))
         .collect()
 }
 
@@ -453,22 +447,34 @@ impl UnifiedEvent {
 
 /// Cache RSVPs for an event
 pub fn cache_rsvps(event_coordinate: &str, rsvps: Vec<CalendarRsvp>) {
-    RSVPS_CACHE.write().insert(event_coordinate.to_string(), rsvps);
+    RSVPS_CACHE
+        .write()
+        .insert(event_coordinate.to_string(), rsvps);
 }
 
 /// Get RSVPs for an event
 pub fn get_rsvps(event_coordinate: &str) -> Vec<CalendarRsvp> {
-    RSVPS_CACHE.read().get(event_coordinate).cloned().unwrap_or_default()
+    RSVPS_CACHE
+        .read()
+        .get(event_coordinate)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Get RSVP count for an event
 pub fn get_rsvp_count(event_coordinate: &str) -> usize {
-    RSVPS_CACHE.read().get(event_coordinate).map(|r| r.len()).unwrap_or(0)
+    RSVPS_CACHE
+        .read()
+        .get(event_coordinate)
+        .map(|r| r.len())
+        .unwrap_or(0)
 }
 
 /// Cache user's own RSVP
 pub fn cache_my_rsvp(rsvp: CalendarRsvp) {
-    MY_RSVPS_CACHE.write().insert(rsvp.event_coordinate.clone(), rsvp);
+    MY_RSVPS_CACHE
+        .write()
+        .insert(rsvp.event_coordinate.clone(), rsvp);
 }
 
 /// Get user's RSVP for an event
@@ -593,7 +599,11 @@ pub fn filter_events(events: &[UnifiedEvent], filters: &EventFilterState) -> Vec
 }
 
 /// Filter unified events with option to skip search term filter for NIP-50 results
-pub fn filter_events_with_nip50(events: &[UnifiedEvent], filters: &EventFilterState, from_nip50: bool) -> Vec<UnifiedEvent> {
+pub fn filter_events_with_nip50(
+    events: &[UnifiedEvent],
+    filters: &EventFilterState,
+    from_nip50: bool,
+) -> Vec<UnifiedEvent> {
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
     let today_start = now_secs - (now_secs % 86400);
     let week_end = today_start + (7 * 86400);
@@ -684,13 +694,21 @@ pub fn filter_events_with_nip50(events: &[UnifiedEvent], filters: &EventFilterSt
                 LocationFilter::All => {}
                 LocationFilter::InPerson => {
                     let locs = event.locations();
-                    if locs.is_empty() || locs.iter().all(|l| crate::utils::nip52::is_online_location(l)) {
+                    if locs.is_empty()
+                        || locs
+                            .iter()
+                            .all(|l| crate::utils::nip52::is_online_location(l))
+                    {
                         return false;
                     }
                 }
                 LocationFilter::Online => {
                     let locs = event.locations();
-                    if locs.is_empty() || locs.iter().all(|l| !crate::utils::nip52::is_online_location(l)) {
+                    if locs.is_empty()
+                        || locs
+                            .iter()
+                            .all(|l| !crate::utils::nip52::is_online_location(l))
+                    {
                         return false;
                     }
                 }
@@ -739,14 +757,20 @@ pub fn sort_events_for_display(events: &mut [UnifiedEvent]) {
 /// Build filter for calendar events (date and time-based)
 pub fn calendar_events_filter(limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .limit(limit)
 }
 
 /// Build filter for calendar events since a timestamp
 pub fn calendar_events_filter_since(since: u64, limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .since(Timestamp::from(since))
         .limit(limit)
 }
@@ -754,14 +778,20 @@ pub fn calendar_events_filter_since(since: u64, limit: usize) -> Filter {
 /// Build filter for meetings (spaces and rooms)
 pub fn meetings_filter(limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .kinds([
+            Kind::Custom(KIND_MEETING_SPACE),
+            Kind::Custom(KIND_MEETING_ROOM),
+        ])
         .limit(limit)
 }
 
 /// Build filter for calendar events until a timestamp (for pagination)
 pub fn calendar_events_filter_until(until: u64, limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .until(Timestamp::from(until))
         .limit(limit)
 }
@@ -769,7 +799,10 @@ pub fn calendar_events_filter_until(until: u64, limit: usize) -> Filter {
 /// Build filter for meetings until a timestamp (for pagination)
 pub fn meetings_filter_until(until: u64, limit: usize) -> Filter {
     Filter::new()
-        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .kinds([
+            Kind::Custom(KIND_MEETING_SPACE),
+            Kind::Custom(KIND_MEETING_ROOM),
+        ])
         .until(Timestamp::from(until))
         .limit(limit)
 }
@@ -790,9 +823,7 @@ pub fn my_rsvps_filter(pubkey: PublicKey) -> Filter {
 
 /// Build filter for private calendar events (gift wraps to user)
 pub fn private_events_filter(pubkey: PublicKey) -> Filter {
-    Filter::new()
-        .kind(Kind::GiftWrap)
-        .pubkey(pubkey)
+    Filter::new().kind(Kind::GiftWrap).pubkey(pubkey)
 }
 
 /// Build filter for availability templates by author
@@ -826,7 +857,8 @@ pub async fn fetch_calendar_events(limit: usize) -> StdResult<Vec<CalendarEvent>
     *LOADING_EVENTS.write() = true;
 
     let filter = calendar_events_filter(limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
 
     *LOADING_EVENTS.write() = false;
 
@@ -846,7 +878,9 @@ pub async fn fetch_calendar_events(limit: usize) -> StdResult<Vec<CalendarEvent>
 /// Fetch meetings (spaces and rooms)
 pub async fn fetch_meetings(limit: usize) -> StdResult<Vec<LiveActivityEvent>, String> {
     let filter = meetings_filter(limit);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
+            .await?;
 
     cache_live_events(&events);
 
@@ -855,7 +889,9 @@ pub async fn fetch_meetings(limit: usize) -> StdResult<Vec<LiveActivityEvent>, S
         .filter_map(|e| {
             let kind = e.kind.as_u16();
             match kind {
-                KIND_MEETING_ROOM => parse_meeting_room_event(e).ok().map(LiveActivityEvent::Meeting),
+                KIND_MEETING_ROOM => parse_meeting_room_event(e)
+                    .ok()
+                    .map(LiveActivityEvent::Meeting),
                 KIND_MEETING_SPACE => parse_meeting_space(e).ok().map(LiveActivityEvent::Space),
                 _ => None,
             }
@@ -875,7 +911,10 @@ pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, Stri
 
     let (cal_result, meetings_result) = futures::join!(
         crate::stores::nostr_client::fetch_events_aggregated(cal_filter, Duration::from_secs(15)),
-        crate::stores::nostr_client::fetch_events_aggregated(meetings_filter, Duration::from_secs(15))
+        crate::stores::nostr_client::fetch_events_aggregated(
+            meetings_filter,
+            Duration::from_secs(15)
+        )
     );
 
     *LOADING_EVENTS.write() = false;
@@ -898,8 +937,12 @@ pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, Stri
         for event in events {
             let kind = event.kind.as_u16();
             let activity = match kind {
-                KIND_MEETING_ROOM => parse_meeting_room_event(&event).ok().map(LiveActivityEvent::Meeting),
-                KIND_MEETING_SPACE => parse_meeting_space(&event).ok().map(LiveActivityEvent::Space),
+                KIND_MEETING_ROOM => parse_meeting_room_event(&event)
+                    .ok()
+                    .map(LiveActivityEvent::Meeting),
+                KIND_MEETING_SPACE => parse_meeting_space(&event)
+                    .ok()
+                    .map(LiveActivityEvent::Space),
                 _ => None,
             };
             if let Some(activity) = activity {
@@ -913,17 +956,17 @@ pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, Stri
 
 /// Fetch all events (calendar + meetings) with pagination support
 /// Returns (events, oldest_timestamp) where oldest_timestamp can be used for next page
-pub async fn fetch_all_events_paginated(limit: usize, until: Option<u64>) -> StdResult<(Vec<UnifiedEvent>, Option<u64>), String> {
+pub async fn fetch_all_events_paginated(
+    limit: usize,
+    until: Option<u64>,
+) -> StdResult<(Vec<UnifiedEvent>, Option<u64>), String> {
     // Use pagination filters if until is provided
     let (cal_filter, mtg_filter) = match until {
         Some(ts) => (
             calendar_events_filter_until(ts, limit),
-            meetings_filter_until(ts, limit)
+            meetings_filter_until(ts, limit),
         ),
-        None => (
-            calendar_events_filter(limit),
-            meetings_filter(limit)
-        ),
+        None => (calendar_events_filter(limit), meetings_filter(limit)),
     };
 
     let (cal_result, mtg_result) = futures::join!(
@@ -958,8 +1001,12 @@ pub async fn fetch_all_events_paginated(limit: usize, until: Option<u64>) -> Std
 
             let kind = event.kind.as_u16();
             let activity = match kind {
-                KIND_MEETING_ROOM => parse_meeting_room_event(event).ok().map(LiveActivityEvent::Meeting),
-                KIND_MEETING_SPACE => parse_meeting_space(event).ok().map(LiveActivityEvent::Space),
+                KIND_MEETING_ROOM => parse_meeting_room_event(event)
+                    .ok()
+                    .map(LiveActivityEvent::Meeting),
+                KIND_MEETING_SPACE => parse_meeting_space(event)
+                    .ok()
+                    .map(LiveActivityEvent::Space),
                 _ => None,
             };
             if let Some(activity) = activity {
@@ -979,23 +1026,30 @@ pub async fn fetch_all_events_paginated(limit: usize, until: Option<u64>) -> Std
 /// - User's availability blocks
 /// - Private events (gift wrapped to user)
 pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, String> {
-    let pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    let pk = PublicKey::from_hex(&pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    log::info!("[calendar_store] Fetching personal calendar events for {}", pubkey);
+    log::info!(
+        "[calendar_store] Fetching personal calendar events for {}",
+        pubkey
+    );
 
     // Filter 1: Calendar events authored by user
     let authored_filter = Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .author(pk)
         .limit(200);
 
     // Filter 2: Calendar events where user is invited (p tag)
     let invited_filter = Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .pubkey(pk)
         .limit(200);
 
@@ -1012,18 +1066,27 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         .limit(200);
 
     // Filter 5: Private events (gift wraps to user)
-    let private_filter = Filter::new()
-        .kind(Kind::GiftWrap)
-        .pubkey(pk)
-        .limit(200);
+    let private_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pk).limit(200);
 
     // Fetch all in parallel
     let (authored_result, invited_result, blocks_result, rsvps_result, private_result) = futures::join!(
-        crate::stores::nostr_client::fetch_events_aggregated(authored_filter, Duration::from_secs(15)),
-        crate::stores::nostr_client::fetch_events_aggregated(invited_filter, Duration::from_secs(15)),
-        crate::stores::nostr_client::fetch_events_aggregated(blocks_filter, Duration::from_secs(15)),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            authored_filter,
+            Duration::from_secs(15)
+        ),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            invited_filter,
+            Duration::from_secs(15)
+        ),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            blocks_filter,
+            Duration::from_secs(15)
+        ),
         crate::stores::nostr_client::fetch_events_aggregated(rsvps_filter, Duration::from_secs(15)),
-        crate::stores::nostr_client::fetch_events_aggregated(private_filter, Duration::from_secs(15))
+        crate::stores::nostr_client::fetch_events_aggregated(
+            private_filter,
+            Duration::from_secs(15)
+        )
     );
 
     use crate::utils::nip52::RsvpStatus;
@@ -1062,7 +1125,10 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
     // Process availability blocks - skip for now, they use a different structure
     // TODO: Add AvailabilityBlock to UnifiedEvent enum to properly support these
     if let Ok(events) = blocks_result {
-        log::info!("[calendar_store] Found {} availability blocks (not displayed yet)", events.len());
+        log::info!(
+            "[calendar_store] Found {} availability blocks (not displayed yet)",
+            events.len()
+        );
     }
 
     // Process RSVPs - fetch the events they reference
@@ -1107,7 +1173,9 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
                         let wrap_id = wrap.id.to_string();
                         if let Ok(mut cal_event) = parse_calendar_rumor(&rumor, &wrap_id) {
                             cal_event.pubkey = unwrapped.sender.to_string();
-                            cal_event.source = EventSource::Private { gift_wrap_id: wrap_id.clone() };
+                            cal_event.source = EventSource::Private {
+                                gift_wrap_id: wrap_id.clone(),
+                            };
                             let coord = cal_event.coordinate.clone();
                             if seen_coords.insert(coord) {
                                 all_events.push(UnifiedEvent::Calendar(cal_event));
@@ -1122,7 +1190,10 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         }
     }
 
-    log::info!("[calendar_store] Total personal calendar events: {}", all_events.len());
+    log::info!(
+        "[calendar_store] Total personal calendar events: {}",
+        all_events.len()
+    );
     Ok(all_events)
 }
 
@@ -1137,8 +1208,7 @@ async fn fetch_event_by_coordinate(coordinate: &str) -> StdResult<Option<Unified
     let pubkey = parts[1];
     let d_tag = parts[2..].join(":");
 
-    let pk = PublicKey::from_hex(pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pk = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = Filter::new()
         .kind(Kind::Custom(kind))
@@ -1146,7 +1216,9 @@ async fn fetch_event_by_coordinate(coordinate: &str) -> StdResult<Option<Unified
         .identifier(&d_tag)
         .limit(1);
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     if let Some(event) = events.first() {
         if let Ok(cal_event) = parse_calendar_event(event) {
@@ -1159,22 +1231,17 @@ async fn fetch_event_by_coordinate(coordinate: &str) -> StdResult<Option<Unified
 
 /// Fetch private calendar events (NIP-59 gift wraps)
 pub async fn fetch_private_calendar_events() -> StdResult<Vec<CalendarEvent>, String> {
-    let pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    let pk = PublicKey::from_hex(&pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Fetch gift wraps addressed to us
-    let filter = Filter::new()
-        .kind(Kind::GiftWrap)
-        .pubkey(pk)
-        .limit(200);
+    let filter = Filter::new().kind(Kind::GiftWrap).pubkey(pk).limit(200);
 
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
-    let events = client.fetch_events(filter, Duration::from_secs(15))
+    let events = client
+        .fetch_events(filter, Duration::from_secs(15))
         .await
         .map_err(|e| format!("Failed to fetch gift wraps: {}", e))?;
 
@@ -1188,7 +1255,8 @@ pub async fn fetch_private_calendar_events() -> StdResult<Vec<CalendarEvent>, St
                 let rumor_kind = rumor.kind.as_u16();
 
                 // Check if it's a calendar event
-                if rumor_kind == KIND_DATE_CALENDAR_EVENT || rumor_kind == KIND_TIME_CALENDAR_EVENT {
+                if rumor_kind == KIND_DATE_CALENDAR_EVENT || rumor_kind == KIND_TIME_CALENDAR_EVENT
+                {
                     // Convert rumor to Event-like structure for parsing
                     let gift_wrap_id = gift_wrap.id.to_string();
                     if let Ok(mut cal_event) = parse_calendar_rumor(&rumor, &gift_wrap_id) {
@@ -1211,8 +1279,11 @@ pub async fn fetch_private_calendar_events() -> StdResult<Vec<CalendarEvent>, St
 }
 
 /// Parse a calendar event from an unsigned rumor (for NIP-59)
-fn parse_calendar_rumor(rumor: &UnsignedEvent, gift_wrap_id: &str) -> StdResult<CalendarEvent, String> {
-    use crate::utils::nip52::{EventTime, CalendarEventType};
+fn parse_calendar_rumor(
+    rumor: &UnsignedEvent,
+    gift_wrap_id: &str,
+) -> StdResult<CalendarEvent, String> {
+    use crate::utils::nip52::{CalendarEventType, EventTime};
 
     let kind = rumor.kind.as_u16();
 
@@ -1247,14 +1318,14 @@ fn parse_calendar_rumor(rumor: &UnsignedEvent, gift_wrap_id: &str) -> StdResult<
                 } else if let Ok(ts) = values[1].parse::<u64>() {
                     start = Some(EventTime::Timestamp(ts));
                 }
-            },
+            }
             "end" if values.len() > 1 => {
                 if kind == KIND_DATE_CALENDAR_EVENT {
                     end = Some(EventTime::Date(values[1].to_string()));
                 } else if let Ok(ts) = values[1].parse::<u64>() {
                     end = Some(EventTime::Timestamp(ts));
                 }
-            },
+            }
             "summary" if values.len() > 1 => summary = Some(values[1].to_string()),
             "image" if values.len() > 1 => image = Some(values[1].to_string()),
             "location" if values.len() > 1 => locations.push(values[1].to_string()),
@@ -1265,14 +1336,14 @@ fn parse_calendar_rumor(rumor: &UnsignedEvent, gift_wrap_id: &str) -> StdResult<
             "r" if values.len() > 1 => references.push(values[1].to_string()),
             "a" if values.len() > 1 && values[1].starts_with("31924:") => {
                 calendar_refs.push(values[1].to_string());
-            },
+            }
             "p" if values.len() > 1 => {
                 participants.push(crate::utils::nip52::EventParticipant {
                     pubkey: values[1].to_string(),
                     relay_hint: values.get(2).map(|s| s.to_string()),
                     role: values.get(3).map(|s| s.to_string()),
                 });
-            },
+            }
             _ => {}
         }
     }
@@ -1311,7 +1382,9 @@ fn parse_calendar_rumor(rumor: &UnsignedEvent, gift_wrap_id: &str) -> StdResult<
         references,
         calendar_refs,
         color: None,
-        source: EventSource::Private { gift_wrap_id: gift_wrap_id.to_string() },
+        source: EventSource::Private {
+            gift_wrap_id: gift_wrap_id.to_string(),
+        },
         created_at: rumor.created_at.as_secs(),
     })
 }
@@ -1319,7 +1392,9 @@ fn parse_calendar_rumor(rumor: &UnsignedEvent, gift_wrap_id: &str) -> StdResult<
 /// Fetch RSVPs for a specific event
 pub async fn fetch_event_rsvps(event_coordinate: &str) -> StdResult<Vec<CalendarRsvp>, String> {
     let filter = rsvps_filter(event_coordinate);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     let rsvps: Vec<CalendarRsvp> = events
         .iter()
@@ -1346,16 +1421,23 @@ pub struct CalendarEventComment {
 /// Fetch comments for a calendar event by coordinate
 /// Comments reference the event via 'A' tag (root scope per NIP-22)
 /// Uses fetch_events_from_relays to bypass cache and get fresh data
-pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEventComment>, String> {
+pub async fn fetch_event_comments(
+    coordinate: &str,
+) -> StdResult<Vec<CalendarEventComment>, String> {
     // Use kind 1111 (NIP-22 comment) with uppercase 'A' tag for root scope
     // This finds all comments in the thread (both top-level and nested replies)
     let filter = Filter::new()
         .kind(Kind::Custom(1111))
-        .custom_tag(SingleLetterTag::uppercase(Alphabet::A), coordinate.to_string())
+        .custom_tag(
+            SingleLetterTag::uppercase(Alphabet::A),
+            coordinate.to_string(),
+        )
         .limit(100);
 
     // Use fetch_events_from_relays to bypass cache for fresh comment data
-    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10))
+            .await?;
 
     // Validate NIP-22 required tags and filter out malformed events
     let mut comments: Vec<CalendarEventComment> = Vec::new();
@@ -1374,7 +1456,9 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
         let has_valid_kind_tag = |tag_name: &str| -> bool {
             e.tags.iter().any(|t| {
                 t.as_slice().first().map(|s| s.as_str()) == Some(tag_name)
-                    && t.as_slice().get(1).is_some_and(|s| s.parse::<u32>().is_ok())
+                    && t.as_slice()
+                        .get(1)
+                        .is_some_and(|s| s.parse::<u32>().is_ok())
             })
         };
 
@@ -1382,16 +1466,14 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
         if !has_tag_value("A", coordinate) {
             log::debug!(
                 "Skipping event {} - no 'A' tag matching coordinate '{}'",
-                e.id, coordinate
+                e.id,
+                coordinate
             );
             continue;
         }
 
         if !has_valid_kind_tag("K") {
-            log::debug!(
-                "Skipping event {} - missing or invalid 'K' tag",
-                e.id
-            );
+            log::debug!("Skipping event {} - missing or invalid 'K' tag", e.id);
             continue;
         }
 
@@ -1422,10 +1504,7 @@ pub async fn fetch_event_comments(coordinate: &str) -> StdResult<Vec<CalendarEve
 /// Publish a comment on a calendar event
 /// Uses proper NIP-22 threading tags (A/K/P for root, a/k/p for parent)
 /// Author is derived from coordinate (format: kind:pubkey:d-tag) to ensure consistency
-pub async fn publish_event_comment(
-    coordinate: &str,
-    content: &str,
-) -> StdResult<String, String> {
+pub async fn publish_event_comment(coordinate: &str, content: &str) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     // Parse coordinate to extract kind and author (format: "kind:pubkey:d-tag")
@@ -1437,7 +1516,8 @@ pub async fn publish_event_comment(
             coordinate
         ));
     }
-    let event_kind: u16 = parts[0].parse()
+    let event_kind: u16 = parts[0]
+        .parse()
         .map_err(|_| format!("Invalid kind in coordinate: {}", parts[0]))?;
 
     // Extract and validate author pubkey from coordinate using SDK's PublicKey::parse()
@@ -1449,13 +1529,31 @@ pub async fn publish_event_comment(
     // Build NIP-22 comment (kind 1111) with full tag set
     let builder = EventBuilder::new(Kind::Custom(1111), content)
         // Root scope tags (uppercase) - for the calendar event being commented on
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)), vec![coordinate.to_string()]))
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::K)), vec![event_kind.to_string()]))
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)), vec![author_hex.clone()]))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::A)),
+            vec![coordinate.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::K)),
+            vec![event_kind.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::uppercase(Alphabet::P)),
+            vec![author_hex.clone()],
+        ))
         // Parent scope tags (lowercase) - same as root for top-level comments
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)), vec![coordinate.to_string()]))
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)), vec![event_kind.to_string()]))
-        .tag(Tag::custom(TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)), vec![author_hex]));
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+            vec![coordinate.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)),
+            vec![event_kind.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+            vec![author_hex],
+        ));
 
     let output = client
         .send_event_builder(builder)
@@ -1478,7 +1576,10 @@ const MAX_QUERY_LEN: usize = 256;
 /// Search calendar events using NIP-50 relay search
 /// Searches across title, description, and content fields
 /// Uses fetch_events_from_relays to bypass cache for fresh search results
-pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
+pub async fn search_calendar_events(
+    query: &str,
+    limit: usize,
+) -> StdResult<Vec<UnifiedEvent>, String> {
     // Validate and clamp inputs (use chars() to avoid UTF-8 boundary panic)
     let query: String = query.chars().take(MAX_QUERY_LEN).collect();
     let query = query.as_str();
@@ -1490,12 +1591,17 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
 
     // NIP-50 search filter for calendar event kinds (31922, 31923)
     let filter = Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .search(query)
         .limit(limit);
 
     // Use fetch_events_from_relays to bypass cache for fresh search results
-    let events = crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_from_relays(filter, Duration::from_secs(10))
+            .await?;
 
     // Parse events into UnifiedEvent, deduplicating by coordinate
     let mut seen_coords = std::collections::HashSet::new();
@@ -1524,7 +1630,10 @@ pub async fn search_calendar_events(query: &str, limit: usize) -> StdResult<Vec<
 /// Searches across title, description, and content fields for both calendar events and meetings
 /// Uses fetch_events_from_relays to bypass cache for fresh search results
 pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
-    use crate::utils::nip53::{parse_meeting_room_event, parse_meeting_space, LiveActivityEvent, KIND_MEETING_ROOM, KIND_MEETING_SPACE};
+    use crate::utils::nip53::{
+        parse_meeting_room_event, parse_meeting_space, LiveActivityEvent, KIND_MEETING_ROOM,
+        KIND_MEETING_SPACE,
+    };
 
     // Validate and clamp inputs (use chars() to avoid UTF-8 boundary panic)
     let query: String = query.chars().take(MAX_QUERY_LEN).collect();
@@ -1537,27 +1646,35 @@ pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<Unifi
 
     // Build filters for both calendar and meeting kinds
     let cal_filter = Filter::new()
-        .kinds([Kind::Custom(KIND_DATE_CALENDAR_EVENT), Kind::Custom(KIND_TIME_CALENDAR_EVENT)])
+        .kinds([
+            Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+            Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        ])
         .search(query)
         .limit(limit);
 
     let meeting_filter = Filter::new()
-        .kinds([Kind::Custom(KIND_MEETING_SPACE), Kind::Custom(KIND_MEETING_ROOM)])
+        .kinds([
+            Kind::Custom(KIND_MEETING_SPACE),
+            Kind::Custom(KIND_MEETING_ROOM),
+        ])
         .search(query)
         .limit(limit);
 
     // Fetch in parallel
     let (cal_result, meeting_result) = futures::join!(
         crate::stores::nostr_client::fetch_events_from_relays(cal_filter, Duration::from_secs(10)),
-        crate::stores::nostr_client::fetch_events_from_relays(meeting_filter, Duration::from_secs(10))
+        crate::stores::nostr_client::fetch_events_from_relays(
+            meeting_filter,
+            Duration::from_secs(10)
+        )
     );
 
     // Only fail if BOTH fetches failed (following Nostr SDK graceful degradation pattern)
     if let (Err(cal_err), Err(meeting_err)) = (&cal_result, &meeting_result) {
         return Err(format!(
             "Search failed - calendar: {}, meetings: {}",
-            cal_err,
-            meeting_err
+            cal_err, meeting_err
         ));
     }
 
@@ -1579,8 +1696,12 @@ pub async fn search_all_events(query: &str, limit: usize) -> StdResult<Vec<Unifi
         for event in &events {
             let kind = event.kind.as_u16();
             let activity = match kind {
-                KIND_MEETING_ROOM => parse_meeting_room_event(event).ok().map(LiveActivityEvent::Meeting),
-                KIND_MEETING_SPACE => parse_meeting_space(event).ok().map(LiveActivityEvent::Space),
+                KIND_MEETING_ROOM => parse_meeting_room_event(event)
+                    .ok()
+                    .map(LiveActivityEvent::Meeting),
+                KIND_MEETING_SPACE => parse_meeting_space(event)
+                    .ok()
+                    .map(LiveActivityEvent::Space),
                 _ => None,
             };
             if let Some(activity) = activity {
@@ -1601,7 +1722,9 @@ pub async fn fetch_my_rsvps(pubkey: &str) -> StdResult<Vec<CalendarRsvp>, String
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = my_rsvps_filter(pk);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     let rsvps: Vec<CalendarRsvp> = events
         .iter()
@@ -1620,11 +1743,12 @@ pub async fn fetch_my_rsvps(pubkey: &str) -> StdResult<Vec<CalendarRsvp>, String
 pub async fn fetch_private_events() -> StdResult<Vec<CalendarEvent>, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let pk = PublicKey::from_hex(&pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = private_events_filter(pk);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
+            .await?;
 
     let mut private_events = Vec::new();
 
@@ -1676,13 +1800,17 @@ fn parse_unsigned_calendar_event(rumor: &UnsignedEvent) -> StdResult<CalendarEve
 
     // Helper to get tag value
     let get_tag = |name: &str| -> Option<String> {
-        rumor.tags.iter()
+        rumor
+            .tags
+            .iter()
             .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(name))
             .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
     };
 
     let get_all_tags = |name: &str| -> Vec<String> {
-        rumor.tags.iter()
+        rumor
+            .tags
+            .iter()
             .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some(name))
             .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
             .collect()
@@ -1703,14 +1831,26 @@ fn parse_unsigned_calendar_event(rumor: &UnsignedEvent) -> StdResult<CalendarEve
     let end = get_tag("end").and_then(|s| EventTime::parse(&s, event_type));
 
     // Parse participants
-    let participants: Vec<EventParticipant> = rumor.tags.iter()
+    let participants: Vec<EventParticipant> = rumor
+        .tags
+        .iter()
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
         .filter_map(|t| {
             let slice = t.as_slice();
             let pk = slice.get(1)?.to_string();
-            let relay = slice.get(2).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            Some(EventParticipant { pubkey: pk, relay_hint: relay, role })
+            let relay = slice
+                .get(2)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            let role = slice
+                .get(3)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            Some(EventParticipant {
+                pubkey: pk,
+                relay_hint: relay,
+                role,
+            })
         })
         .collect();
 
@@ -1744,7 +1884,10 @@ fn parse_unsigned_calendar_event(rumor: &UnsignedEvent) -> StdResult<CalendarEve
 
 /// Fetch specific event by naddr
 pub async fn fetch_event_by_naddr(naddr: &str) -> StdResult<Option<CalendarEvent>, String> {
-    log::info!("[calendar_store] fetch_event_by_naddr called with: {}", naddr);
+    log::info!(
+        "[calendar_store] fetch_event_by_naddr called with: {}",
+        naddr
+    );
 
     // Check cache first
     if let Some(cached) = get_cached_event_by_naddr(naddr) {
@@ -1753,29 +1896,44 @@ pub async fn fetch_event_by_naddr(naddr: &str) -> StdResult<Option<CalendarEvent
     }
 
     // Parse naddr
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| {
-            log::error!("[calendar_store] Invalid naddr '{}': {}", naddr, e);
-            format!("Invalid naddr: {}", e)
-        })?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| {
+        log::error!("[calendar_store] Invalid naddr '{}': {}", naddr, e);
+        format!("Invalid naddr: {}", e)
+    })?;
 
     let coord = nip19.coordinate;
     let pk = coord.public_key;
     let kind = coord.kind.as_u16();
     let identifier = coord.identifier.clone();
 
-    log::info!("[calendar_store] Parsed naddr - kind: {}, pubkey: {}, identifier: {}", kind, pk, identifier);
+    log::info!(
+        "[calendar_store] Parsed naddr - kind: {}, pubkey: {}, identifier: {}",
+        kind,
+        pk,
+        identifier
+    );
 
     let filter = event_by_coordinate_filter(pk, kind, &identifier);
     log::info!("[calendar_store] Fetching from relays with 10s timeout...");
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    log::info!("[calendar_store] Received {} events from relays", events.len());
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
+    log::info!(
+        "[calendar_store] Received {} events from relays",
+        events.len()
+    );
 
     if let Some(event) = events.first() {
-        log::info!("[calendar_store] Attempting to parse event kind {}", event.kind.as_u16());
+        log::info!(
+            "[calendar_store] Attempting to parse event kind {}",
+            event.kind.as_u16()
+        );
         if let Ok(cal_event) = parse_calendar_event(event) {
-            log::info!("[calendar_store] Successfully parsed event: {}", cal_event.title);
+            log::info!(
+                "[calendar_store] Successfully parsed event: {}",
+                cal_event.title
+            );
             cache_event(cal_event.clone());
             return Ok(Some(cal_event));
         } else {
@@ -1783,17 +1941,26 @@ pub async fn fetch_event_by_naddr(naddr: &str) -> StdResult<Option<CalendarEvent
         }
     }
 
-    log::warn!("[calendar_store] No matching event found for naddr: {}", naddr);
+    log::warn!(
+        "[calendar_store] No matching event found for naddr: {}",
+        naddr
+    );
     Ok(None)
 }
 
 /// Fetch unified event by naddr (handles both calendar events and meetings)
 pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<UnifiedEvent>, String> {
-    log::info!("[calendar_store] fetch_unified_event_by_naddr called with: {}", naddr);
+    log::info!(
+        "[calendar_store] fetch_unified_event_by_naddr called with: {}",
+        naddr
+    );
 
     // Check calendar cache first
     if let Some(cached) = get_cached_event_by_naddr(naddr) {
-        log::info!("[calendar_store] Found calendar event in cache: {}", cached.title);
+        log::info!(
+            "[calendar_store] Found calendar event in cache: {}",
+            cached.title
+        );
         return Ok(Some(UnifiedEvent::Calendar(cached)));
     }
 
@@ -1801,41 +1968,59 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
     {
         let cache = LIVE_EVENTS_CACHE.read();
         if let Some((_, activity)) = cache.iter().find(|(_, e)| e.naddr() == naddr) {
-            log::info!("[calendar_store] Found meeting in cache: {}", activity.title());
+            log::info!(
+                "[calendar_store] Found meeting in cache: {}",
+                activity.title()
+            );
             return Ok(Some(UnifiedEvent::Live(activity.clone())));
         }
     }
 
     // Parse naddr
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| {
-            log::error!("[calendar_store] Invalid naddr '{}': {}", naddr, e);
-            format!("Invalid naddr: {}", e)
-        })?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| {
+        log::error!("[calendar_store] Invalid naddr '{}': {}", naddr, e);
+        format!("Invalid naddr: {}", e)
+    })?;
 
     let coord = nip19.coordinate;
     let pk = coord.public_key;
     let kind = coord.kind.as_u16();
     let identifier = coord.identifier.clone();
 
-    log::info!("[calendar_store] Parsed naddr - kind: {}, pubkey: {}, identifier: {}", kind, pk, identifier);
+    log::info!(
+        "[calendar_store] Parsed naddr - kind: {}, pubkey: {}, identifier: {}",
+        kind,
+        pk,
+        identifier
+    );
 
     let filter = event_by_coordinate_filter(pk, kind, &identifier);
     log::info!("[calendar_store] Fetching from relays with 10s timeout...");
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
-    log::info!("[calendar_store] Received {} events from relays", events.len());
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
+    log::info!(
+        "[calendar_store] Received {} events from relays",
+        events.len()
+    );
 
     if let Some(event) = events.first() {
         let event_kind = event.kind.as_u16();
-        log::info!("[calendar_store] Attempting to parse event kind {}", event_kind);
+        log::info!(
+            "[calendar_store] Attempting to parse event kind {}",
+            event_kind
+        );
 
         // Try parsing based on kind
         match event_kind {
             // Calendar events (NIP-52)
             KIND_DATE_CALENDAR_EVENT | KIND_TIME_CALENDAR_EVENT => {
                 if let Ok(cal_event) = parse_calendar_event(event) {
-                    log::info!("[calendar_store] Successfully parsed calendar event: {}", cal_event.title);
+                    log::info!(
+                        "[calendar_store] Successfully parsed calendar event: {}",
+                        cal_event.title
+                    );
                     cache_event(cal_event.clone());
                     return Ok(Some(UnifiedEvent::Calendar(cal_event)));
                 }
@@ -1843,18 +2028,28 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
             // Meeting Space (NIP-53 kind 30312)
             KIND_MEETING_SPACE => {
                 if let Ok(space) = parse_meeting_space(event) {
-                    log::info!("[calendar_store] Successfully parsed meeting space: {}", space.room_name);
+                    log::info!(
+                        "[calendar_store] Successfully parsed meeting space: {}",
+                        space.room_name
+                    );
                     let activity = LiveActivityEvent::Space(space);
-                    LIVE_EVENTS_CACHE.write().put(activity.coordinate().to_string(), activity.clone());
+                    LIVE_EVENTS_CACHE
+                        .write()
+                        .put(activity.coordinate().to_string(), activity.clone());
                     return Ok(Some(UnifiedEvent::Live(activity)));
                 }
             }
             // Meeting Room (NIP-53 kind 30313)
             KIND_MEETING_ROOM => {
                 if let Ok(meeting) = parse_meeting_room_event(event) {
-                    log::info!("[calendar_store] Successfully parsed meeting room: {}", meeting.title);
+                    log::info!(
+                        "[calendar_store] Successfully parsed meeting room: {}",
+                        meeting.title
+                    );
                     let activity = LiveActivityEvent::Meeting(meeting);
-                    LIVE_EVENTS_CACHE.write().put(activity.coordinate().to_string(), activity.clone());
+                    LIVE_EVENTS_CACHE
+                        .write()
+                        .put(activity.coordinate().to_string(), activity.clone());
                     return Ok(Some(UnifiedEvent::Live(activity)));
                 }
             }
@@ -1864,7 +2059,10 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
         }
     }
 
-    log::warn!("[calendar_store] No matching event found for naddr: {}", naddr);
+    log::warn!(
+        "[calendar_store] No matching event found for naddr: {}",
+        naddr
+    );
     Ok(None)
 }
 
@@ -1877,7 +2075,7 @@ pub async fn fetch_unified_event_by_naddr(naddr: &str) -> StdResult<Option<Unifi
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_date_event(
     title: &str,
-    start_date: &str,  // YYYY-MM-DD
+    start_date: &str, // YYYY-MM-DD
     end_date: Option<&str>,
     summary: Option<&str>,
     content: Option<&str>,
@@ -1893,29 +2091,50 @@ pub async fn publish_date_event(
     let d_tag = format!("event-{}", js_sys::Date::now() as u64);
 
     // Build the event
-    let mut builder = EventBuilder::new(Kind::Custom(KIND_DATE_CALENDAR_EVENT), content.unwrap_or(""))
-        .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]))
-        .tag(Tag::custom(TagKind::Custom("start".into()), vec![start_date.to_string()]));
+    let mut builder = EventBuilder::new(
+        Kind::Custom(KIND_DATE_CALENDAR_EVENT),
+        content.unwrap_or(""),
+    )
+    .tag(Tag::identifier(&d_tag))
+    .tag(Tag::custom(
+        TagKind::Custom("title".into()),
+        vec![title.to_string()],
+    ))
+    .tag(Tag::custom(
+        TagKind::Custom("start".into()),
+        vec![start_date.to_string()],
+    ));
 
     // Optional end date
     if let Some(end) = end_date {
-        builder = builder.tag(Tag::custom(TagKind::Custom("end".into()), vec![end.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("end".into()),
+            vec![end.to_string()],
+        ));
     }
 
     // Optional summary
     if let Some(s) = summary {
-        builder = builder.tag(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
 
     // Optional image
     if let Some(img) = image {
-        builder = builder.tag(Tag::custom(TagKind::Custom("image".into()), vec![img.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("image".into()),
+            vec![img.to_string()],
+        ));
     }
 
     // Locations
     for loc in locations {
-        builder = builder.tag(Tag::custom(TagKind::Custom("location".into()), vec![loc.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("location".into()),
+            vec![loc.to_string()],
+        ));
     }
 
     // Hashtags
@@ -1931,7 +2150,7 @@ pub async fn publish_date_event(
                 // Format: ["p", pubkey, relay_hint, role]
                 builder = builder.tag(Tag::custom(
                     TagKind::p(),
-                    vec![pk.to_hex(), "".to_string(), role.clone()]
+                    vec![pk.to_hex(), "".to_string(), role.clone()],
                 ));
             }
             Err(e) => {
@@ -1952,7 +2171,10 @@ pub async fn publish_date_event(
 
     // Build nostr:naddr1... URI (NIP-21)
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let naddr = format!("nostr:{}", encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag));
+    let naddr = format!(
+        "nostr:{}",
+        encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag)
+    );
 
     Ok(naddr)
 }
@@ -1979,34 +2201,58 @@ pub async fn publish_time_event(
     let d_tag = format!("event-{}", js_sys::Date::now() as u64);
 
     // Build the event
-    let mut builder = EventBuilder::new(Kind::Custom(KIND_TIME_CALENDAR_EVENT), content.unwrap_or(""))
-        .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]))
-        .tag(Tag::custom(TagKind::Custom("start".into()), vec![start_timestamp.to_string()]));
+    let mut builder = EventBuilder::new(
+        Kind::Custom(KIND_TIME_CALENDAR_EVENT),
+        content.unwrap_or(""),
+    )
+    .tag(Tag::identifier(&d_tag))
+    .tag(Tag::custom(
+        TagKind::Custom("title".into()),
+        vec![title.to_string()],
+    ))
+    .tag(Tag::custom(
+        TagKind::Custom("start".into()),
+        vec![start_timestamp.to_string()],
+    ));
 
     // Optional end timestamp
     if let Some(end) = end_timestamp {
-        builder = builder.tag(Tag::custom(TagKind::Custom("end".into()), vec![end.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("end".into()),
+            vec![end.to_string()],
+        ));
     }
 
     // Optional summary
     if let Some(s) = summary {
-        builder = builder.tag(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
 
     // Optional image
     if let Some(img) = image {
-        builder = builder.tag(Tag::custom(TagKind::Custom("image".into()), vec![img.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("image".into()),
+            vec![img.to_string()],
+        ));
     }
 
     // Timezone
     if let Some(tz) = timezone {
-        builder = builder.tag(Tag::custom(TagKind::Custom("start_tzid".into()), vec![tz.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("start_tzid".into()),
+            vec![tz.to_string()],
+        ));
     }
 
     // Locations
     for loc in locations {
-        builder = builder.tag(Tag::custom(TagKind::Custom("location".into()), vec![loc.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("location".into()),
+            vec![loc.to_string()],
+        ));
     }
 
     // Hashtags
@@ -2022,7 +2268,7 @@ pub async fn publish_time_event(
                 // Format: ["p", pubkey, relay_hint, role]
                 builder = builder.tag(Tag::custom(
                     TagKind::p(),
-                    vec![pk.to_hex(), "".to_string(), role.clone()]
+                    vec![pk.to_hex(), "".to_string(), role.clone()],
                 ));
             }
             Err(e) => {
@@ -2043,7 +2289,10 @@ pub async fn publish_time_event(
 
     // Build nostr:naddr1... URI (NIP-21)
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let naddr = format!("nostr:{}", encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag));
+    let naddr = format!(
+        "nostr:{}",
+        encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag)
+    );
 
     Ok(naddr)
 }
@@ -2082,13 +2331,22 @@ pub async fn publish_rsvp(
 
     let event = EventBuilder::new(Kind::Custom(KIND_CALENDAR_RSVP), note)
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(TagKind::a(), vec![event_coordinate.to_string()]))
+        .tag(Tag::custom(
+            TagKind::a(),
+            vec![event_coordinate.to_string()],
+        ))
         .tag(Tag::public_key(
             PublicKey::from_hex(event_author)
                 .map_err(|e| format!("Invalid author pubkey: {}", e))?,
         ))
-        .tag(Tag::custom(TagKind::Custom("status".into()), vec![status.as_str().to_string()]))
-        .tag(Tag::custom(TagKind::Custom("fb".into()), vec![free_busy.as_str().to_string()]));
+        .tag(Tag::custom(
+            TagKind::Custom("status".into()),
+            vec![status.as_str().to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom("fb".into()),
+            vec![free_busy.as_str().to_string()],
+        ));
 
     let output = client
         .send_event_builder(event)
@@ -2142,7 +2400,9 @@ pub async fn init_calendar_store() -> StdResult<(), String> {
 // ============================================================================
 
 /// Fetch availability templates for a user (kind 31926)
-pub async fn fetch_availability_templates(pubkey: &str) -> StdResult<Vec<AvailabilityTemplate>, String> {
+pub async fn fetch_availability_templates(
+    pubkey: &str,
+) -> StdResult<Vec<AvailabilityTemplate>, String> {
     use crate::utils::nip52::parse_availability_template;
 
     let pk = PublicKey::from_hex(pubkey)
@@ -2150,7 +2410,9 @@ pub async fn fetch_availability_templates(pubkey: &str) -> StdResult<Vec<Availab
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = availability_templates_filter(pk);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     let templates: Vec<AvailabilityTemplate> = events
         .iter()
@@ -2177,7 +2439,9 @@ pub async fn fetch_availability_blocks(pubkey: &str) -> StdResult<Vec<Availabili
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = availability_blocks_filter(pk);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     let blocks: Vec<AvailabilityBlock> = events
         .iter()
@@ -2196,7 +2460,9 @@ pub async fn fetch_availability_blocks(pubkey: &str) -> StdResult<Vec<Availabili
 }
 
 /// Fetch all booking data (templates + blocks) for a user
-pub async fn fetch_booking_data(pubkey: &str) -> StdResult<(Vec<AvailabilityTemplate>, Vec<AvailabilityBlock>), String> {
+pub async fn fetch_booking_data(
+    pubkey: &str,
+) -> StdResult<(Vec<AvailabilityTemplate>, Vec<AvailabilityBlock>), String> {
     let (templates, blocks) = futures::join!(
         fetch_availability_templates(pubkey),
         fetch_availability_blocks(pubkey)
@@ -2217,7 +2483,7 @@ pub async fn publish_availability_template(
     min_notice_days: Option<u32>,
     max_advance_days: Option<u32>,
     amount_sats: Option<u64>,
-    schedule: &[(String, String, String)],  // [(day, start_time, end_time)]
+    schedule: &[(String, String, String)], // [(day, start_time, end_time)]
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
@@ -2225,42 +2491,69 @@ pub async fn publish_availability_template(
 
     let mut builder = EventBuilder::new(Kind::Custom(KIND_AVAILABILITY_TEMPLATE), "")
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]))
-        .tag(Tag::custom(TagKind::Custom("duration".into()), vec![format!("PT{}M", duration_minutes)]));
+        .tag(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![title.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom("duration".into()),
+            vec![format!("PT{}M", duration_minutes)],
+        ));
 
     if let Some(interval) = interval_minutes {
-        builder = builder.tag(Tag::custom(TagKind::Custom("interval".into()), vec![format!("PT{}M", interval)]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("interval".into()),
+            vec![format!("PT{}M", interval)],
+        ));
     }
 
     if let Some(before) = buffer_before {
-        builder = builder.tag(Tag::custom(TagKind::Custom("buffer_before".into()), vec![format!("PT{}M", before)]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("buffer_before".into()),
+            vec![format!("PT{}M", before)],
+        ));
     }
 
     if let Some(after) = buffer_after {
-        builder = builder.tag(Tag::custom(TagKind::Custom("buffer_after".into()), vec![format!("PT{}M", after)]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("buffer_after".into()),
+            vec![format!("PT{}M", after)],
+        ));
     }
 
     if let Some(tz) = timezone {
-        builder = builder.tag(Tag::custom(TagKind::Custom("tzid".into()), vec![tz.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("tzid".into()),
+            vec![tz.to_string()],
+        ));
     }
 
     if let Some(notice) = min_notice_days {
-        builder = builder.tag(Tag::custom(TagKind::Custom("min_notice".into()), vec![format!("P{}D", notice)]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("min_notice".into()),
+            vec![format!("P{}D", notice)],
+        ));
     }
 
     if let Some(advance) = max_advance_days {
-        builder = builder.tag(Tag::custom(TagKind::Custom("max_advance".into()), vec![format!("P{}D", advance)]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("max_advance".into()),
+            vec![format!("P{}D", advance)],
+        ));
     }
 
     if let Some(amount) = amount_sats {
-        builder = builder.tag(Tag::custom(TagKind::Custom("amount".into()), vec![amount.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("amount".into()),
+            vec![amount.to_string()],
+        ));
     }
 
     // Add schedule entries
     for (day, start, end) in schedule {
         builder = builder.tag(Tag::custom(
             TagKind::Custom("sch".into()),
-            vec![day.clone(), start.clone(), end.clone()]
+            vec![day.clone(), start.clone(), end.clone()],
         ));
     }
 
@@ -2284,11 +2577,20 @@ pub async fn publish_availability_block(
 
     let mut builder = EventBuilder::new(Kind::Custom(KIND_AVAILABILITY_BLOCK), "")
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(TagKind::Custom("start".into()), vec![start.to_string()]))
-        .tag(Tag::custom(TagKind::Custom("end".into()), vec![end.to_string()]));
+        .tag(Tag::custom(
+            TagKind::Custom("start".into()),
+            vec![start.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom("end".into()),
+            vec![end.to_string()],
+        ));
 
     if let Some(t) = title {
-        builder = builder.tag(Tag::custom(TagKind::Custom("title".into()), vec![t.to_string()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![t.to_string()],
+        ));
     }
 
     let output = client
@@ -2301,7 +2603,10 @@ pub async fn publish_availability_block(
 
 /// Get cached availability template
 pub fn get_cached_availability_template(coordinate: &str) -> Option<AvailabilityTemplate> {
-    AVAILABILITY_TEMPLATES_CACHE.read().peek(coordinate).cloned()
+    AVAILABILITY_TEMPLATES_CACHE
+        .read()
+        .peek(coordinate)
+        .cloned()
 }
 
 /// Get cached availability block
@@ -2311,12 +2616,20 @@ pub fn get_cached_availability_block(coordinate: &str) -> Option<AvailabilityBlo
 
 /// Get all cached availability templates
 pub fn get_all_cached_templates() -> Vec<AvailabilityTemplate> {
-    AVAILABILITY_TEMPLATES_CACHE.read().iter().map(|(_, t)| t.clone()).collect()
+    AVAILABILITY_TEMPLATES_CACHE
+        .read()
+        .iter()
+        .map(|(_, t)| t.clone())
+        .collect()
 }
 
 /// Get all cached availability blocks
 pub fn get_all_cached_blocks() -> Vec<AvailabilityBlock> {
-    AVAILABILITY_BLOCKS_CACHE.read().iter().map(|(_, b)| b.clone()).collect()
+    AVAILABILITY_BLOCKS_CACHE
+        .read()
+        .iter()
+        .map(|(_, b)| b.clone())
+        .collect()
 }
 
 // ============================================================================
@@ -2336,7 +2649,9 @@ pub fn calendars_filter(pubkey: PublicKey) -> Filter {
 }
 
 /// Fetch calendars for a user (kind 31924)
-pub async fn fetch_calendars(pubkey: &str) -> StdResult<Vec<crate::utils::nip52::Calendar>, String> {
+pub async fn fetch_calendars(
+    pubkey: &str,
+) -> StdResult<Vec<crate::utils::nip52::Calendar>, String> {
     use crate::utils::nip52::parse_calendar;
 
     let pk = PublicKey::from_hex(pubkey)
@@ -2344,7 +2659,9 @@ pub async fn fetch_calendars(pubkey: &str) -> StdResult<Vec<crate::utils::nip52:
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = calendars_filter(pk);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     let calendars: Vec<crate::utils::nip52::Calendar> = events
         .iter()
@@ -2376,7 +2693,10 @@ pub async fn publish_calendar(
 
     let mut builder = EventBuilder::new(Kind::Custom(KIND_CALENDAR), description)
         .tag(Tag::identifier(&d_tag))
-        .tag(Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]));
+        .tag(Tag::custom(
+            TagKind::Custom("title".into()),
+            vec![title.to_string()],
+        ));
 
     // Add event references
     for coord in event_coordinates {
@@ -2401,7 +2721,11 @@ pub fn get_cached_calendar(coordinate: &str) -> Option<crate::utils::nip52::Cale
 
 /// Get all cached calendars
 pub fn get_all_cached_calendars() -> Vec<crate::utils::nip52::Calendar> {
-    CALENDARS_CACHE.read().iter().map(|(_, c)| c.clone()).collect()
+    CALENDARS_CACHE
+        .read()
+        .iter()
+        .map(|(_, c)| c.clone())
+        .collect()
 }
 
 // ============================================================================
@@ -2410,7 +2734,10 @@ pub fn get_all_cached_calendars() -> Vec<crate::utils::nip52::Calendar> {
 
 /// Fetch room presence for a meeting/space coordinate
 /// Returns list of users present in the room within the last `max_age_secs` seconds
-pub async fn fetch_room_presence(room_coordinate: &str, max_age_secs: u64) -> StdResult<Vec<RoomPresence>, String> {
+pub async fn fetch_room_presence(
+    room_coordinate: &str,
+    max_age_secs: u64,
+) -> StdResult<Vec<RoomPresence>, String> {
     let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
@@ -2419,10 +2746,16 @@ pub async fn fetch_room_presence(room_coordinate: &str, max_age_secs: u64) -> St
     // Filter for kind 10312 presence events referencing this room
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_ROOM_PRESENCE))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), room_coordinate.to_string())
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            room_coordinate.to_string(),
+        )
         .since(Timestamp::from(since_ts));
 
-    log::info!("[calendar_store] Fetching room presence for: {}", room_coordinate);
+    log::info!(
+        "[calendar_store] Fetching room presence for: {}",
+        room_coordinate
+    );
 
     let events = client
         .fetch_events(filter, Duration::from_secs(5))
@@ -2432,7 +2765,8 @@ pub async fn fetch_room_presence(room_coordinate: &str, max_age_secs: u64) -> St
     log::info!("[calendar_store] Found {} presence events", events.len());
 
     // Parse and deduplicate by pubkey (keep most recent per user)
-    let mut presence_by_user: std::collections::HashMap<String, RoomPresence> = std::collections::HashMap::new();
+    let mut presence_by_user: std::collections::HashMap<String, RoomPresence> =
+        std::collections::HashMap::new();
 
     for event in events.iter() {
         if let Ok(presence) = parse_room_presence(event) {

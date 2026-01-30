@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
-use crate::stores::auth_store;
-use crate::hooks::{use_user_lists, delete_list, UserList};
-use crate::utils::{get_list_type_name, get_list_icon, get_item_count};
-use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::components::{CreateListModal, PeopleListMembersModal};
+use crate::hooks::{delete_list, use_user_lists, UserList};
+use crate::stores::auth_store;
+use crate::utils::list_kinds::NAMED_PEOPLE;
+use crate::utils::{get_item_count, get_list_icon, get_list_type_name};
+use dioxus::prelude::*;
 
 #[component]
 pub fn Lists() -> Element {

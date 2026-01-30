@@ -5,24 +5,23 @@
 
 use dioxus::prelude::*;
 
-use crate::components::ClientInitializing;
-use crate::components::icons::{PenSquareIcon, SearchIcon};
 use crate::components::citation::card::{CitationCard, CitationCardSkeleton};
 use crate::components::citation::editor_modal::CitationEditorModal;
-use crate::stores::{auth_store, nostr_client};
+use crate::components::icons::{PenSquareIcon, SearchIcon};
+use crate::components::ClientInitializing;
 use crate::stores::citation_store::{
-    CachedCitation, CitationGroup, USER_CITATIONS,
-    fetch_citations_by_author, search_citations,
+    fetch_citations_by_author, search_citations, CachedCitation, CitationGroup, USER_CITATIONS,
 };
+use crate::stores::{auth_store, nostr_client};
 
 /// Tab selection for the Citations page
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CitationsTab {
     All,
-    Internal,   // Kind 30 - Nostr references
-    External,   // Kind 31 - Web references
-    Hardcopy,   // Kind 32 - Book/journal references
-    Prompt,     // Kind 33 - AI citations
+    Internal, // Kind 30 - Nostr references
+    External, // Kind 31 - Web references
+    Hardcopy, // Kind 32 - Book/journal references
+    Prompt,   // Kind 33 - AI citations
 }
 
 impl CitationsTab {

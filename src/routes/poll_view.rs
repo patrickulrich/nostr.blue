@@ -1,7 +1,7 @@
+use crate::components::{ClientInitializing, PollCard};
+use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind};
-use crate::stores::nostr_client;
-use crate::components::{PollCard, ClientInitializing};
 use std::time::Duration;
 
 #[component]
@@ -166,23 +166,19 @@ pub fn PollView(noteid: String) -> Element {
 fn decode_event_id(noteid: &str) -> Result<EventId, String> {
     // Try bech32 first (note1...)
     if noteid.starts_with("note1") {
-        EventId::parse(noteid)
-            .map_err(|e| format!("Invalid note ID (bech32): {}", e))
+        EventId::parse(noteid).map_err(|e| format!("Invalid note ID (bech32): {}", e))
     } else {
         // Try hex
-        EventId::from_hex(noteid)
-            .map_err(|e| format!("Invalid note ID (hex): {}", e))
+        EventId::from_hex(noteid).map_err(|e| format!("Invalid note ID (hex): {}", e))
     }
 }
 
 /// Fetch a poll event by ID
 async fn fetch_poll_by_id(event_id: EventId) -> Result<Option<NostrEvent>, String> {
-    let filter = Filter::new()
-        .id(event_id)
-        .kind(Kind::Poll)
-        .limit(1);
+    let filter = Filter::new().id(event_id).kind(Kind::Poll).limit(1);
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch poll: {}", e))?;
 
     Ok(events.into_iter().next())

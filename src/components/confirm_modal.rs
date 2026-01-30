@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
 use std::cell::Cell;
 
 // Thread-local counter for generating unique modal IDs (simpler than AtomicU32 for single-threaded WASM)

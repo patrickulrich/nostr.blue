@@ -46,20 +46,13 @@ pub fn get_published_at(event: &Event) -> u64 {
 
 /// Extract hashtags (t tags) from the event
 pub fn get_hashtags(event: &Event) -> Vec<String> {
-    event
-        .tags
-        .hashtags()
-        .map(|s| s.to_string())
-        .collect()
+    event.tags.hashtags().map(|s| s.to_string()).collect()
 }
 
 /// Extract the article identifier (d tag)
 /// This is required for NIP-23 articles
 pub fn get_identifier(event: &Event) -> Option<String> {
-    event
-        .tags
-        .identifier()
-        .map(|s| s.to_string())
+    event.tags.identifier().map(|s| s.to_string())
 }
 
 /// Calculate estimated read time in minutes based on word count
@@ -93,7 +86,8 @@ pub fn get_content_preview(content: &str, max_chars: usize) -> String {
 #[allow(dead_code)]
 pub fn get_coordinate(event: &Event) -> Option<String> {
     let identifier = get_identifier(event)?;
-    Some(format!("{}:{}:{}",
+    Some(format!(
+        "{}:{}:{}",
         event.kind.as_u16(),
         event.pubkey.to_hex(),
         identifier
@@ -103,30 +97,31 @@ pub fn get_coordinate(event: &Event) -> Option<String> {
 /// Convert coordinate to naddr (NIP-19 format)
 /// This is used for creating shareable links with relay hints
 #[allow(dead_code)]
-pub fn coordinate_to_naddr(kind: u16, pubkey: &str, identifier: &str, relays: Vec<String>) -> Result<String, String> {
+pub fn coordinate_to_naddr(
+    kind: u16,
+    pubkey: &str,
+    identifier: &str,
+    relays: Vec<String>,
+) -> Result<String, String> {
     use nostr::prelude::*;
     use nostr::types::url::RelayUrl;
 
-    let pk = PublicKey::from_hex(pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pk = PublicKey::from_hex(pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-    let coord = Coordinate::new(Kind::from(kind), pk)
-        .identifier(identifier);
+    let coord = Coordinate::new(Kind::from(kind), pk).identifier(identifier);
 
     // Parse relay URLs
-    let relay_urls: Result<Vec<RelayUrl>, _> = relays
-        .into_iter()
-        .map(|r| RelayUrl::parse(&r))
-        .collect();
+    let relay_urls: Result<Vec<RelayUrl>, _> =
+        relays.into_iter().map(|r| RelayUrl::parse(&r)).collect();
 
-    let relay_urls = relay_urls
-        .map_err(|e| format!("Invalid relay URL: {}", e))?;
+    let relay_urls = relay_urls.map_err(|e| format!("Invalid relay URL: {}", e))?;
 
     // Create Nip19Coordinate with relay hints
     let nip19_coord = Nip19Coordinate::new(coord, relay_urls);
 
     // Encode to bech32 naddr string
-    nip19_coord.to_bech32()
+    nip19_coord
+        .to_bech32()
         .map_err(|e| format!("Failed to encode naddr: {}", e))
 }
 

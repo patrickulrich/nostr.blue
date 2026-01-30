@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 
 use crate::components::icons;
-use crate::services::git_hosting::stars::{publish_star, remove_star, check_user_star};
+use crate::services::git_hosting::stars::{check_user_star, publish_star, remove_star};
 use crate::stores::code_store::is_repo_starred;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::clipboard::copy_to_clipboard;
@@ -18,10 +18,7 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 /// Repository action bar with Watch, Star, Fork, Zap, Share buttons
 #[allow(clippy::clone_on_copy)] // handle_watch closure is Copy only on non-wasm32 targets
 #[component]
-pub fn RepoActionBar(
-    repo: Repository,
-    naddr: String,
-) -> Element {
+pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let toast = consume_toast();
     let mut is_starred = use_signal(|| false);
     let mut star_count = use_signal(|| repo.star_count);
@@ -126,7 +123,10 @@ pub fn RepoActionBar(
             // Read HAS_SIGNER fresh to get current auth state (not stale capture)
             if !*HAS_SIGNER.read() {
                 star_loading.set(false);
-                toast.warning("Sign in to star repositories".to_string(), ToastOptions::new());
+                toast.warning(
+                    "Sign in to star repositories".to_string(),
+                    ToastOptions::new(),
+                );
                 return;
             }
 
@@ -178,10 +178,7 @@ pub fn RepoActionBar(
             #[cfg(target_arch = "wasm32")]
             {
                 // Read signals fresh inside closure - signals are Copy
-                let repo_coord = format!("{}:{}",
-                    repo_pubkey_signal.read(),
-                    repo_id_signal.read()
-                );
+                let repo_coord = format!("{}:{}", repo_pubkey_signal.read(), repo_id_signal.read());
 
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
@@ -237,14 +234,25 @@ pub fn RepoActionBar(
     let handle_zap = move |_| {
         // Read HAS_SIGNER fresh to get current auth state (not stale capture)
         if !*HAS_SIGNER.read() {
-            toast.warning("Sign in to zap repositories".to_string(), ToastOptions::new());
+            toast.warning(
+                "Sign in to zap repositories".to_string(),
+                ToastOptions::new(),
+            );
             return;
         }
         toast.info("Zap modal coming soon".to_string(), ToastOptions::new());
     };
 
-    let star_text = if *is_starred.read() { "Starred" } else { "Star" };
-    let watch_text = if *is_watching.read() { "Unwatch" } else { "Watch" };
+    let star_text = if *is_starred.read() {
+        "Starred"
+    } else {
+        "Star"
+    };
+    let watch_text = if *is_watching.read() {
+        "Unwatch"
+    } else {
+        "Watch"
+    };
 
     rsx! {
         div {

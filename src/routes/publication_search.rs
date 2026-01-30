@@ -1,11 +1,11 @@
 //! Publication Search Route
 //! Search for publications by book reference parameters (NKBIP-08)
 
-use dioxus::prelude::*;
 use crate::components::icons::{ArrowLeftIcon, BookOpenIcon, SearchIcon};
-use crate::stores::{publication_store, nostr_client};
 use crate::routes::Route;
-use crate::utils::nkbip08::{BookReference, extract_book_reference_from_tags};
+use crate::stores::{nostr_client, publication_store};
+use crate::utils::nkbip08::{extract_book_reference_from_tags, BookReference};
+use dioxus::prelude::*;
 
 /// Parse query string into a BookReference
 fn parse_query_to_reference(query: &str) -> Option<BookReference> {

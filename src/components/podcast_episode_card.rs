@@ -8,13 +8,13 @@ use dioxus::prelude::*;
 /// D-tag used for podcast metadata events (Kind 30078)
 /// This is a convention for Nostr podcast coordination
 const PODCAST_METADATA_D_TAG: &str = "podcast-metadata";
-use crate::stores::music_player::{self, MusicTrack};
-use crate::stores::nostr_music::TrackSource;
-use crate::utils::podcast::{PodcastEpisode, ValueBlock, TranscriptRef, Soundbite, Person};
-use crate::services::podcast_rss::{RssEpisode, RssPodcast, format_duration};
-use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
 use crate::components::icons;
 use crate::routes::Route;
+use crate::services::podcast_index::{Episode as PodcastIndexEpisode, PodcastFeed};
+use crate::services::podcast_rss::{format_duration, RssEpisode, RssPodcast};
+use crate::stores::music_player::{self, MusicTrack};
+use crate::stores::nostr_music::TrackSource;
+use crate::utils::podcast::{Person, PodcastEpisode, Soundbite, TranscriptRef, ValueBlock};
 
 /// Unified podcast episode for display
 #[derive(Clone, Debug, PartialEq)]
@@ -100,7 +100,9 @@ impl DisplayEpisode {
     /// Create from RSS episode
     pub fn from_rss_episode(episode: &RssEpisode, podcast: &RssPodcast) -> Self {
         // Parse RFC 2822 date to timestamp for sorting
-        let created_at = episode.pub_date.as_ref()
+        let created_at = episode
+            .pub_date
+            .as_ref()
             .and_then(|d| parse_rfc2822_to_timestamp(d))
             .unwrap_or(0);
 
@@ -147,12 +149,17 @@ impl DisplayEpisode {
         });
 
         // Convert transcripts (filter out invalid ones)
-        let transcripts: Vec<TranscriptRef> = episode.transcripts.iter()
+        let transcripts: Vec<TranscriptRef> = episode
+            .transcripts
+            .iter()
             .filter_map(|t| {
                 let url = t.url.clone()?;
                 Some(TranscriptRef {
                     url,
-                    transcript_type: t.transcript_type.clone().unwrap_or_else(|| "text/plain".to_string()),
+                    transcript_type: t
+                        .transcript_type
+                        .clone()
+                        .unwrap_or_else(|| "text/plain".to_string()),
                     language: None,
                     rel: None,
                 })
@@ -160,7 +167,9 @@ impl DisplayEpisode {
             .collect();
 
         // Convert soundbites (filter out invalid ones)
-        let soundbites: Vec<Soundbite> = episode.soundbites.iter()
+        let soundbites: Vec<Soundbite> = episode
+            .soundbites
+            .iter()
             .filter_map(|s| {
                 Some(Soundbite {
                     start_time: s.start_time?,
@@ -193,25 +202,36 @@ impl DisplayEpisode {
             },
             // Episode-level V4V overrides podcast-level
             // Convert podcast_index::ValueBlock to utils::podcast::ValueBlock
-            value: episode.value.as_ref()
-                .or(feed.value.as_ref())
-                .map(|v| {
-                    let model = v.model.as_ref();
-                    crate::utils::podcast::ValueBlock {
-                        value_type: model.and_then(|m| m.model_type.clone()).unwrap_or_else(|| "lightning".to_string()),
-                        method: model.and_then(|m| m.method.clone()).unwrap_or_else(|| "keysend".to_string()),
-                        suggested: model.and_then(|m| m.suggested.as_ref()).and_then(|s| s.parse().ok()),
-                        recipients: v.destinations.iter().map(|d| crate::utils::podcast::ValueRecipient {
+            value: episode.value.as_ref().or(feed.value.as_ref()).map(|v| {
+                let model = v.model.as_ref();
+                crate::utils::podcast::ValueBlock {
+                    value_type: model
+                        .and_then(|m| m.model_type.clone())
+                        .unwrap_or_else(|| "lightning".to_string()),
+                    method: model
+                        .and_then(|m| m.method.clone())
+                        .unwrap_or_else(|| "keysend".to_string()),
+                    suggested: model
+                        .and_then(|m| m.suggested.as_ref())
+                        .and_then(|s| s.parse().ok()),
+                    recipients: v
+                        .destinations
+                        .iter()
+                        .map(|d| crate::utils::podcast::ValueRecipient {
                             name: d.name.clone(),
-                            recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
+                            recipient_type: d
+                                .dest_type
+                                .clone()
+                                .unwrap_or_else(|| "node".to_string()),
                             address: d.address.clone().unwrap_or_default(),
                             custom_key: None,
                             custom_value: None,
                             split: d.split.unwrap_or(100),
                             fee: None,
-                        }).collect(),
-                    }
-                }),
+                        })
+                        .collect(),
+                }
+            }),
             transcripts,
             soundbites,
             persons: Vec::new(), // Podcast Index API doesn't return persons
@@ -220,7 +240,10 @@ impl DisplayEpisode {
     }
 
     /// Create from Podcast Index API live episode
-    pub fn from_podcast_index_live_episode(episode: &PodcastIndexEpisode, feed: &PodcastFeed) -> Self {
+    pub fn from_podcast_index_live_episode(
+        episode: &PodcastIndexEpisode,
+        feed: &PodcastFeed,
+    ) -> Self {
         let mut ep = Self::from_podcast_index_episode(episode, feed);
         ep.is_live = true;
         // For live episodes, use current time as created_at to sort to top (WASM-compatible)
@@ -260,8 +283,8 @@ impl DisplayEpisode {
                 // For Nostr podcasts, we need to construct an naddr for the podcast metadata
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = Coordinate::new(Kind::from(30078), pk)
-                        .identifier(PODCAST_METADATA_D_TAG);
+                    let coord =
+                        Coordinate::new(Kind::from(30078), pk).identifier(PODCAST_METADATA_D_TAG);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
                         return Some(Route::PodcastNostrDetail { naddr });
@@ -271,7 +294,7 @@ impl DisplayEpisode {
             }
             TrackSource::RssPodcast { podcast_id, .. } => {
                 podcast_id.map(|id| Route::PodcastRssFeedDetail {
-                    podcast_id: id.to_string()
+                    podcast_id: id.to_string(),
                 })
             }
             _ => None,
@@ -285,8 +308,7 @@ impl DisplayEpisode {
                 // Construct naddr for the episode (Kind 30054)
                 use nostr::prelude::*;
                 if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                    let coord = Coordinate::new(Kind::from(30054), pk)
-                        .identifier(d_tag);
+                    let coord = Coordinate::new(Kind::from(30054), pk).identifier(d_tag);
                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                     if let Ok(naddr) = nip19_coord.to_bech32() {
                         return Some(Route::PodcastNostrEpisodeDetail { naddr });
@@ -294,12 +316,14 @@ impl DisplayEpisode {
                 }
                 None
             }
-            TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
-                podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
-                    podcast_id: id.to_string(),
-                    episode_id: urlencoding::encode(episode_guid).to_string(),
-                })
-            }
+            TrackSource::RssPodcast {
+                podcast_id,
+                episode_guid,
+                ..
+            } => podcast_id.map(|id| Route::PodcastRssEpisodeDetail {
+                podcast_id: id.to_string(),
+                episode_id: urlencoding::encode(episode_guid).to_string(),
+            }),
             _ => None,
         }
     }
@@ -368,14 +392,22 @@ pub fn PodcastEpisodeCard(props: PodcastEpisodeCardProps) -> Element {
     };
 
     // Format duration
-    let duration_str = episode.duration
+    let duration_str = episode
+        .duration
         .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
 
     // Image URL with fallback
-    let image_url = episode.image.clone()
+    let image_url = episode
+        .image
+        .clone()
         .or(episode.podcast_image.clone())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                episode.id
+            )
+        });
 
     // Episode number display
     let episode_label = match (episode.season, episode.episode_number) {

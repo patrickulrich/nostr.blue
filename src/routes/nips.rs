@@ -1,8 +1,10 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
-use crate::components::{OfficialNipCard, CustomNipCard, NipCardSkeleton, ClientInitializing, MarkdownEditor};
-use crate::services::github_nips::{self, OfficialNip, EventKindInfo};
+use crate::components::{
+    ClientInitializing, CustomNipCard, MarkdownEditor, NipCardSkeleton, OfficialNipCard,
+};
 use crate::hooks::use_infinite_scroll;
+use crate::services::github_nips::{self, EventKindInfo, OfficialNip};
+use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
 use nostr_sdk::Event;
 
 /// Tab selection for the NIPs page
@@ -171,11 +173,11 @@ pub fn NipsHome() -> Element {
         if query.len() < 2 {
             return Vec::new();
         }
-        official_nips.read()
+        official_nips
+            .read()
             .iter()
             .filter(|n| {
-                n.title.to_lowercase().contains(&query)
-                    || n.number.to_lowercase().contains(&query)
+                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -187,11 +189,11 @@ pub fn NipsHome() -> Element {
         if query.is_empty() {
             return official_nips.read().clone();
         }
-        official_nips.read()
+        official_nips
+            .read()
             .iter()
             .filter(|n| {
-                n.title.to_lowercase().contains(&query)
-                    || n.number.to_lowercase().contains(&query)
+                n.title.to_lowercase().contains(&query) || n.number.to_lowercase().contains(&query)
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -203,7 +205,8 @@ pub fn NipsHome() -> Element {
         if query.is_empty() {
             return event_kinds.read().clone();
         }
-        event_kinds.read()
+        event_kinds
+            .read()
             .iter()
             .filter(|k| {
                 k.kind.to_lowercase().contains(&query)
@@ -220,18 +223,23 @@ pub fn NipsHome() -> Element {
         if query.is_empty() {
             return custom_nips.read().clone();
         }
-        custom_nips.read()
+        custom_nips
+            .read()
             .iter()
             .filter(|event| {
                 // Search in title tag
-                let title_match = event.tags.iter()
+                let title_match = event
+                    .tags
+                    .iter()
                     .find(|t| t.kind() == nostr_sdk::TagKind::Title)
                     .and_then(|t| t.content())
                     .map(|s| s.to_lowercase().contains(&query))
                     .unwrap_or(false);
 
                 // Search in d-tag (identifier)
-                let id_match = event.tags.identifier()
+                let id_match = event
+                    .tags
+                    .identifier()
                     .map(|s| s.to_lowercase().contains(&query))
                     .unwrap_or(false);
 
@@ -630,7 +638,8 @@ pub fn NipNew() -> Element {
 
     // Parse related kinds from comma-separated input
     let parse_related_kinds = move || -> Vec<u32> {
-        related_kinds_input.read()
+        related_kinds_input
+            .read()
             .split(',')
             .filter_map(|s| s.trim().parse::<u32>().ok())
             .collect()
@@ -663,7 +672,9 @@ pub fn NipNew() -> Element {
                 content_val,
                 identifier_val.clone(),
                 related_kinds,
-            ).await {
+            )
+            .await
+            {
                 Ok(_event_id) => {
                     is_publishing.set(false);
                     // Generate naddr and navigate to detail page

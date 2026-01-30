@@ -1,7 +1,7 @@
 //! OrderStatusBadge component - displays order status with color
 
-use dioxus::prelude::*;
 use crate::utils::nip99::OrderStatus;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct OrderStatusBadgeProps {
@@ -15,27 +15,27 @@ pub fn OrderStatusBadge(props: OrderStatusBadgeProps) -> Element {
         OrderStatus::Pending => (
             "bg-yellow-100 dark:bg-yellow-900/30",
             "text-yellow-700 dark:text-yellow-400",
-            "Pending"
+            "Pending",
         ),
         OrderStatus::Confirmed => (
             "bg-blue-100 dark:bg-blue-900/30",
             "text-blue-700 dark:text-blue-400",
-            "Confirmed"
+            "Confirmed",
         ),
         OrderStatus::Processing => (
             "bg-purple-100 dark:bg-purple-900/30",
             "text-purple-700 dark:text-purple-400",
-            "Processing"
+            "Processing",
         ),
         OrderStatus::Completed => (
             "bg-green-100 dark:bg-green-900/30",
             "text-green-700 dark:text-green-400",
-            "Completed"
+            "Completed",
         ),
         OrderStatus::Cancelled => (
             "bg-gray-100 dark:bg-gray-900/30",
             "text-gray-700 dark:text-gray-400",
-            "Cancelled"
+            "Cancelled",
         ),
     };
 

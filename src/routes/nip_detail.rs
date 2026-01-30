@@ -1,12 +1,14 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind, TagKind, SingleLetterTag, Alphabet};
-use crate::routes::Route;
-use crate::stores::nostr_client;
-use crate::services::github_nips;
+use crate::components::{
+    ArticleContent, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+};
 use crate::hooks::use_author_metadata;
-use crate::components::{ClientInitializing, ThreadedComment, CommentComposer, ShareModal, ArticleContent};
-use crate::utils::{build_thread_tree, merge_pending_into_tree, truncate_pubkey};
+use crate::routes::Route;
+use crate::services::github_nips;
+use crate::stores::nostr_client;
 use crate::stores::pending_comments::get_pending_comments;
+use crate::utils::{build_thread_tree, merge_pending_into_tree, truncate_pubkey};
+use dioxus::prelude::*;
+use nostr_sdk::{Alphabet, Event as NostrEvent, Filter, Kind, SingleLetterTag, TagKind};
 use std::time::Duration;
 
 /// NIP detail page - displays either an official NIP from GitHub or a custom NIP from Nostr
@@ -24,12 +26,8 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut related_kinds = use_signal(Vec::<String>::new);
 
     // Fetch author metadata reactively using the hook
-    let author_pubkey = use_memo(move || {
-        custom_event.read().as_ref().map(|e| e.pubkey.to_hex())
-    });
-    let author_metadata = use_author_metadata(
-        author_pubkey.read().clone().unwrap_or_default()
-    );
+    let author_pubkey = use_memo(move || custom_event.read().as_ref().map(|e| e.pubkey.to_hex()));
+    let author_metadata = use_author_metadata(author_pubkey.read().clone().unwrap_or_default());
 
     // Comments state
     let mut comments = use_signal(Vec::<NostrEvent>::new);
@@ -67,14 +65,23 @@ pub fn NipDetail(nip_id: String) -> Element {
                 match nostr_client::fetch_custom_nip_by_naddr(&id).await {
                     Ok(Some(event)) => {
                         // Extract title from tags
-                        let title = event.tags.iter()
+                        let title = event
+                            .tags
+                            .iter()
                             .find(|t| t.kind() == TagKind::Title)
                             .and_then(|t| t.content().map(|s| s.to_string()))
                             .unwrap_or_else(|| "Custom NIP".to_string());
 
                         // Extract related kinds from k tags
-                        let kinds: Vec<String> = event.tags.iter()
-                            .filter(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)))
+                        let kinds: Vec<String> = event
+                            .tags
+                            .iter()
+                            .filter(|t| {
+                                t.kind()
+                                    == TagKind::SingleLetter(SingleLetterTag::lowercase(
+                                        Alphabet::K,
+                                    ))
+                            })
                             .filter_map(|t| t.content().map(|s| s.to_string()))
                             .collect();
 
@@ -101,7 +108,10 @@ pub fn NipDetail(nip_id: String) -> Element {
                 match github_nips::fetch_nip_content(&id).await {
                     Ok(content) => {
                         // Try to extract title from first heading
-                        if let Some(first_line) = content.lines().find(|l| l.starts_with("# ") || l.starts_with("## ")) {
+                        if let Some(first_line) = content
+                            .lines()
+                            .find(|l| l.starts_with("# ") || l.starts_with("## "))
+                        {
                             let title = first_line.trim_start_matches('#').trim();
                             nip_title.set(format!("NIP-{}: {}", id, title));
                         }
@@ -127,10 +137,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 loading_comments.set(true);
 
                 // Fetch NIP-22 comments
-                let filter = Filter::new()
-                    .kind(Kind::Comment)
-                    .event(event_id)
-                    .limit(500);
+                let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
 
                 match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(mut comment_events) => {
@@ -153,7 +160,8 @@ pub fn NipDetail(nip_id: String) -> Element {
         let event = custom_event.read();
         if let Some(e) = event.as_ref() {
             let event_id = e.id;
-            let current_user_pubkey = crate::stores::signer::SIGNER_INFO.read()
+            let current_user_pubkey = crate::stores::signer::SIGNER_INFO
+                .read()
                 .as_ref()
                 .map(|info| info.public_key.clone());
 
@@ -165,17 +173,27 @@ pub fn NipDetail(nip_id: String) -> Element {
 
                 match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(reactions) => {
-                        let positive_count = reactions.iter()
-                            .filter(|r| r.content == "+" || r.content == "❤️" || r.content == "👍" || r.content.is_empty())
+                        let positive_count = reactions
+                            .iter()
+                            .filter(|r| {
+                                r.content == "+"
+                                    || r.content == "❤️"
+                                    || r.content == "👍"
+                                    || r.content.is_empty()
+                            })
                             .count();
 
                         like_count.set(positive_count);
 
                         // Check if current user has liked
                         if let Some(user_pk) = current_user_pubkey {
-                            let user_has_liked = reactions.iter()
-                                .any(|r| r.pubkey.to_hex() == user_pk &&
-                                    (r.content == "+" || r.content == "❤️" || r.content == "👍" || r.content.is_empty()));
+                            let user_has_liked = reactions.iter().any(|r| {
+                                r.pubkey.to_hex() == user_pk
+                                    && (r.content == "+"
+                                        || r.content == "❤️"
+                                        || r.content == "👍"
+                                        || r.content.is_empty())
+                            });
                             is_liked.set(user_has_liked);
                         }
                     }
@@ -206,7 +224,9 @@ pub fn NipDetail(nip_id: String) -> Element {
                     event_pubkey.to_hex(),
                     "+".to_string(),
                     None,
-                ).await {
+                )
+                .await
+                {
                     Ok(_) => {
                         is_liked.set(true);
                         let new_count = *like_count.peek() + 1;
@@ -238,7 +258,9 @@ pub fn NipDetail(nip_id: String) -> Element {
         let event = custom_event.read();
         if let Some(e) = event.as_ref() {
             let pubkey = e.pubkey.to_hex();
-            author_metadata.read().as_ref()
+            author_metadata
+                .read()
+                .as_ref()
                 .and_then(|m| m.display_name.clone().or(m.name.clone()))
                 .unwrap_or_else(|| truncate_pubkey(&pubkey))
         } else {
@@ -247,7 +269,9 @@ pub fn NipDetail(nip_id: String) -> Element {
     });
 
     let author_picture = use_memo(move || {
-        author_metadata.read().as_ref()
+        author_metadata
+            .read()
+            .as_ref()
             .and_then(|m| m.picture.clone())
             .map(|u| u.to_string())
     });

@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, feed_cache, nostr_client};
-use crate::stores::feed_cache::FeedCacheKey;
-use crate::utils::FeedItem;
-use crate::components::{PhotoCard, ClientInitializing};
+use crate::components::{ClientInitializing, PhotoCard};
 use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::stores::{auth_store, feed_cache, nostr_client};
+use crate::utils::FeedItem;
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -62,7 +62,9 @@ pub fn Photos() -> Element {
         let refresh_changed = refresh != last_refresh;
 
         if has_data && !feed_type_changed && !refresh_changed {
-            log::debug!("Skipping photos feed re-load: data already present, no intentional change");
+            log::debug!(
+                "Skipping photos feed re-load: data already present, no intentional change"
+            );
             return;
         }
 
@@ -112,7 +114,8 @@ pub fn Photos() -> Element {
             if !cached_items.is_empty() {
                 log::info!("Loaded {} photos from cache", cached_items.len());
                 // Convert FeedItem to Event
-                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+                let cached_events: Vec<Event> =
+                    cached_items.iter().map(|i| i.event().clone()).collect();
 
                 // Set pagination cursor from cache (enables scroll if network fails)
                 if let Some(oldest_event) = cached_events.last() {
@@ -146,18 +149,20 @@ pub fn Photos() -> Element {
                     let effective_cache_key = if did_fallback {
                         log::info!("No contacts, switched to Global photos feed");
                         feed_type.set(FeedType::Global);
-                        FeedCacheKey::PhotosGlobal  // Use Global key, not Following
+                        FeedCacheKey::PhotosGlobal // Use Global key, not Following
                     } else {
                         cache_key.clone()
                     };
 
                     // STEP 3: Store to cache using effective key
-                    let feed_items: Vec<FeedItem> = photo_events.iter()
+                    let feed_items: Vec<FeedItem> = photo_events
+                        .iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
                     let cache_key_for_store = effective_cache_key;
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
+                        let _ =
+                            feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
 
@@ -211,7 +216,7 @@ pub fn Photos() -> Element {
                         Ok((events, did_fallback)) => {
                             if did_fallback {
                                 log::info!("Pagination fallback detected, returning empty to preserve feed type");
-                                Ok(Vec::new())  // Triggers has_more.set(false)
+                                Ok(Vec::new()) // Triggers has_more.set(false)
                             } else {
                                 Ok(events)
                             }
@@ -233,12 +238,12 @@ pub fn Photos() -> Element {
 
                     // Deduplicate: build set of existing event IDs
                     let current = events.read().clone();
-                    let existing_ids: std::collections::HashSet<_> = current.iter()
-                        .map(|e| e.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        current.iter().map(|e| e.id).collect();
 
                     // Filter out duplicates
-                    let unique_events: Vec<_> = new_events.iter()
+                    let unique_events: Vec<_> = new_events
+                        .iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .cloned()
                         .collect();
@@ -267,11 +272,7 @@ pub fn Photos() -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
 
     rsx! {
         div {
@@ -463,16 +464,22 @@ pub fn Photos() -> Element {
 /// Returns (events, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_photos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     // Get current user's pubkey
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading following photos feed for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following photos feed for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     // Fetch the user's contact list (people they follow)
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_global_photos(until).await?;
             return Ok((global, true));
         }
@@ -513,7 +520,10 @@ async fn load_following_photos(until: Option<u64>) -> Result<(Vec<Event>, bool),
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
-    log::info!("Fetching photo events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    log::info!(
+        "Fetching photo events from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
+    );
 
     // Use fast fetch (bypasses gossip) for following feed - avoids 30+ second timeouts
     match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
@@ -534,7 +544,10 @@ async fn load_following_photos(until: Option<u64>) -> Result<(Vec<Event>, bool),
             Ok((event_vec, false))
         }
         Err(e) => {
-            log::error!("Failed to fetch following photos: {}, falling back to global", e);
+            log::error!(
+                "Failed to fetch following photos: {}, falling back to global",
+                e
+            );
             let global = load_global_photos(until).await?;
             Ok((global, true))
         }
@@ -546,9 +559,7 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
     log::info!("Loading global photos feed (until: {:?})...", until);
 
     // Create filter for NIP-68 picture events (kind 20)
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(20))
-        .limit(50);
+    let mut filter = Filter::new().kind(Kind::Custom(20)).limit(50);
 
     // Add until for pagination, or since for initial load
     // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)

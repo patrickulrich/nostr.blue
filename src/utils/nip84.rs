@@ -6,11 +6,11 @@
 // These functions are used in wasm builds only
 #![allow(dead_code)]
 
-use nostr_sdk::prelude::*;
+use crate::stores::nostr_client;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::borrow::Cow;
 use std::time::Duration;
-use crate::stores::nostr_client;
 
 // ============================================================================
 // Constants
@@ -122,7 +122,8 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
             }
             if let Some(coord) = slice.get(1) {
                 // Filter out "source" marker from relay hint
-                let relay = slice.get(2)
+                let relay = slice
+                    .get(2)
                     .filter(|s| *s != "source")
                     .map(|s| s.to_string());
                 return HighlightSource::Article {
@@ -144,7 +145,8 @@ fn parse_highlight_source(event: &NostrEvent) -> HighlightSource {
             }
             if let Some(id) = slice.get(1) {
                 // Filter out "source" marker from relay hint
-                let relay = slice.get(2)
+                let relay = slice
+                    .get(2)
                     .filter(|s| *s != "source")
                     .map(|s| s.to_string());
                 return HighlightSource::Event {
@@ -281,9 +283,15 @@ pub async fn fetch_highlights_by_authors(
         log::warn!("No connected relays for highlights, falling back to gossip");
         client.fetch_events(filter, Duration::from_secs(10)).await
     } else {
-        log::info!("Fast fetching highlights from {} connected relays", connected_urls.len());
-        client.fetch_events_from(connected_urls, filter, Duration::from_secs(10)).await
-    }.map_err(|e| format!("Failed to fetch highlights: {}", e))?;
+        log::info!(
+            "Fast fetching highlights from {} connected relays",
+            connected_urls.len()
+        );
+        client
+            .fetch_events_from(connected_urls, filter, Duration::from_secs(10))
+            .await
+    }
+    .map_err(|e| format!("Failed to fetch highlights: {}", e))?;
 
     let mut highlights: Vec<Highlight> = events.iter().filter_map(parse_highlight).collect();
 
@@ -436,8 +444,5 @@ pub fn is_bible_highlight(highlight: &Highlight) -> bool {
 
 /// Filter highlights to only Bible highlights
 pub fn filter_bible_highlights(highlights: Vec<Highlight>) -> Vec<Highlight> {
-    highlights
-        .into_iter()
-        .filter(is_bible_highlight)
-        .collect()
+    highlights.into_iter().filter(is_bible_highlight).collect()
 }

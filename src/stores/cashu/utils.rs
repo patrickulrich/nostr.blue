@@ -26,10 +26,7 @@ pub fn normalize_mint_url(url: &str) -> String {
         if let Some(host) = parsed.host_str() {
             // Reconstruct URL with lowercase host
             let scheme = parsed.scheme();
-            let port_str = parsed
-                .port()
-                .map(|p| format!(":{}", p))
-                .unwrap_or_default();
+            let port_str = parsed.port().map(|p| format!(":{}", p)).unwrap_or_default();
             let path = parsed.path();
             // Only include path if it's not just "/"
             let path_str = if path == "/" { "" } else { path };
@@ -89,8 +86,8 @@ pub async fn validate_proofs_batched(
     wallet: &cdk::Wallet,
     proofs: Vec<cdk::nuts::Proof>,
 ) -> Result<ProofValidationResult, String> {
-    use cdk::nuts::State;
     use super::signals::MAX_SYNC_INPUT_SIZE;
+    use cdk::nuts::State;
 
     if proofs.is_empty() {
         return Ok(ProofValidationResult::default());
@@ -117,7 +114,11 @@ pub async fn validate_proofs_batched(
         let states = match wallet.check_proofs_spent(batch.to_vec()).await {
             Ok(s) => s,
             Err(e) => {
-                log::warn!("Failed to check proof states for batch {}: {}", batch_idx, e);
+                log::warn!(
+                    "Failed to check proof states for batch {}: {}",
+                    batch_idx,
+                    e
+                );
                 // On error, assume all proofs in batch are valid (fail-safe)
                 valid_proofs.extend(batch.iter().cloned());
                 continue;
@@ -234,7 +235,7 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
     E: std::fmt::Display,
 {
-    use super::types::{MAX_COUNTER_HEAL_ATTEMPTS, COUNTER_HEAL_INCREMENTS};
+    use super::types::{COUNTER_HEAL_INCREMENTS, MAX_COUNTER_HEAL_ATTEMPTS};
 
     let mut heal_attempt = 0u32;
 
@@ -255,11 +256,15 @@ where
             Err(e) => {
                 let error_str = e.to_string();
 
-                if should_heal_outputs_error(&error_str) && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS {
+                if should_heal_outputs_error(&error_str) && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS
+                {
                     let increment = match COUNTER_HEAL_INCREMENTS.get(heal_attempt as usize) {
                         Some(&inc) => inc,
                         None => {
-                            log::error!("Counter heal increment not found for attempt {}", heal_attempt);
+                            log::error!(
+                                "Counter heal increment not found for attempt {}",
+                                heal_attempt
+                            );
                             return Err(e);
                         }
                     };
@@ -360,9 +365,15 @@ mod tests {
 
     #[test]
     fn test_mint_matches() {
-        assert!(mint_matches("https://mint.example.com/", "https://mint.example.com"));
+        assert!(mint_matches(
+            "https://mint.example.com/",
+            "https://mint.example.com"
+        ));
         assert!(mint_matches("mint.example.com", "https://mint.example.com"));
-        assert!(!mint_matches("https://other.mint.com", "https://mint.example.com"));
+        assert!(!mint_matches(
+            "https://other.mint.com",
+            "https://mint.example.com"
+        ));
     }
 
     #[test]

@@ -24,7 +24,9 @@ use crate::utils::FeedItem;
 use std::collections::HashSet;
 
 #[cfg(target_arch = "wasm32")]
-use super::feed_cache_db::{CachedFeedItem, CachedFeedItemType, FeedCacheMetadata, LruEntry, FeedCacheDb};
+use super::feed_cache_db::{
+    CachedFeedItem, CachedFeedItemType, FeedCacheDb, FeedCacheMetadata, LruEntry,
+};
 
 #[cfg(target_arch = "wasm32")]
 use std::sync::OnceLock;
@@ -87,7 +89,9 @@ impl FeedCacheKey {
     pub fn to_string_key(&self) -> String {
         match self {
             FeedCacheKey::Following { pubkey } => format!("following:{}", pubkey),
-            FeedCacheKey::FollowingWithReplies { pubkey } => format!("following_replies:{}", pubkey),
+            FeedCacheKey::FollowingWithReplies { pubkey } => {
+                format!("following_replies:{}", pubkey)
+            }
             FeedCacheKey::Global => "global".to_string(),
             FeedCacheKey::Photos { pubkey } => format!("photos:{}", pubkey),
             FeedCacheKey::PhotosGlobal => "photos_global".to_string(),
@@ -209,10 +213,7 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
     };
 
     // Get event IDs up to limit
-    let event_ids: Vec<String> = metadata.event_ids
-        .into_iter()
-        .take(limit)
-        .collect();
+    let event_ids: Vec<String> = metadata.event_ids.into_iter().take(limit).collect();
 
     if event_ids.is_empty() {
         return Ok(Vec::new());
@@ -232,7 +233,9 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
         // Prune failed keys from metadata to prevent perpetual retries
         if let Ok(Some(mut updated_metadata)) = db.get_feed_metadata(&feed_key).await {
             let failed_set: HashSet<&String> = cached_result.failed_keys.iter().collect();
-            updated_metadata.event_ids.retain(|id| !failed_set.contains(id));
+            updated_metadata
+                .event_ids
+                .retain(|id| !failed_set.contains(id));
             if let Err(e) = db.put_feed_metadata(&feed_key, &updated_metadata).await {
                 log::error!("Failed to persist pruned feed metadata: {}", e);
             }
@@ -249,7 +252,10 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
 
         let feed_item = match cached.item_type {
             CachedFeedItemType::OriginalPost => FeedItem::OriginalPost(event),
-            CachedFeedItemType::Repost { reposted_by, repost_timestamp } => {
+            CachedFeedItemType::Repost {
+                reposted_by,
+                repost_timestamp,
+            } => {
                 // For reposts, reconstruct the FeedItem::Repost variant
                 use nostr_sdk::{PublicKey, Timestamp};
                 match PublicKey::parse(&reposted_by) {
@@ -259,7 +265,11 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
                         repost_timestamp: Timestamp::from(repost_timestamp),
                     },
                     Err(e) => {
-                        log::warn!("Invalid reposted_by pubkey '{}': {}, skipping", reposted_by, e);
+                        log::warn!(
+                            "Invalid reposted_by pubkey '{}': {}, skipping",
+                            reposted_by,
+                            e
+                        );
                         continue; // Skip item with invalid pubkey
                     }
                 }
@@ -275,10 +285,16 @@ pub async fn load_cached_feed(key: &FeedCacheKey, limit: usize) -> Result<Vec<Fe
     let now = current_timestamp();
     for item in &feed_items {
         let event_id = item.event().id.to_string();
-        let _ = db.put_lru_entry(&event_id, &LruEntry { last_access: now }).await;
+        let _ = db
+            .put_lru_entry(&event_id, &LruEntry { last_access: now })
+            .await;
     }
 
-    log::info!("Loaded {} items from cache for {}", feed_items.len(), feed_key);
+    log::info!(
+        "Loaded {} items from cache for {}",
+        feed_items.len(),
+        feed_key
+    );
 
     Ok(feed_items)
 }
@@ -324,10 +340,15 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
 
         // Create cached item
         let cached_item = CachedFeedItem {
-            event_json: serde_json::to_string(event).map_err(|e| format!("Serialize error: {}", e))?,
+            event_json: serde_json::to_string(event)
+                .map_err(|e| format!("Serialize error: {}", e))?,
             item_type: match item {
                 FeedItem::OriginalPost(_) => CachedFeedItemType::OriginalPost,
-                FeedItem::Repost { reposted_by, repost_timestamp, .. } => CachedFeedItemType::Repost {
+                FeedItem::Repost {
+                    reposted_by,
+                    repost_timestamp,
+                    ..
+                } => CachedFeedItemType::Repost {
                     reposted_by: reposted_by.to_string(),
                     repost_timestamp: repost_timestamp.as_secs(),
                 },
@@ -341,7 +362,8 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
         db.put_feed_item(&event_id, &cached_item).await?;
 
         // Update LRU
-        db.put_lru_entry(&event_id, &LruEntry { last_access: now }).await?;
+        db.put_lru_entry(&event_id, &LruEntry { last_access: now })
+            .await?;
 
         event_ids.push(event_id);
     }
@@ -357,7 +379,11 @@ pub async fn store_feed_items(key: &FeedCacheKey, items: &[FeedItem]) -> Result<
 
     db.put_feed_metadata(&feed_key, &metadata).await?;
 
-    log::info!("Stored {} items to cache for {}", items.len().min(MAX_ITEMS_PER_FEED), feed_key);
+    log::info!(
+        "Stored {} items to cache for {}",
+        items.len().min(MAX_ITEMS_PER_FEED),
+        feed_key
+    );
 
     Ok(())
 }
@@ -424,16 +450,20 @@ pub async fn run_eviction_if_needed() -> Result<usize, String> {
         .collect();
 
     // Fallback: if no candidates but still over limit, evict oldest items anyway
-    let eviction_candidates = if eviction_candidates.is_empty() && total_items > MAX_TOTAL_ITEMS as u32 {
-        log::warn!("All items are recent but over hard cap, evicting oldest {} items", EVICTION_BATCH_SIZE);
-        lru_entries
-            .iter()
-            .take(EVICTION_BATCH_SIZE)
-            .cloned()
-            .collect()
-    } else {
-        eviction_candidates
-    };
+    let eviction_candidates =
+        if eviction_candidates.is_empty() && total_items > MAX_TOTAL_ITEMS as u32 {
+            log::warn!(
+                "All items are recent but over hard cap, evicting oldest {} items",
+                EVICTION_BATCH_SIZE
+            );
+            lru_entries
+                .iter()
+                .take(EVICTION_BATCH_SIZE)
+                .cloned()
+                .collect()
+        } else {
+            eviction_candidates
+        };
 
     let mut evicted = 0;
     let mut evicted_ids: Vec<String> = Vec::new();
@@ -476,7 +506,9 @@ pub async fn touch_items(event_ids: &[String]) -> Result<(), String> {
     let now = current_timestamp();
 
     for event_id in event_ids {
-        let _ = db.put_lru_entry(event_id, &LruEntry { last_access: now }).await;
+        let _ = db
+            .put_lru_entry(event_id, &LruEntry { last_access: now })
+            .await;
     }
 
     Ok(())
@@ -491,4 +523,3 @@ fn current_timestamp() -> u64 {
     use web_sys::js_sys::Date;
     (Date::now() / 1000.0) as u64
 }
-

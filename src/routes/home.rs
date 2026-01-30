@@ -1,24 +1,29 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, feed_cache, nostr_client, subscription_manager};
-use crate::stores::feed_cache::FeedCacheKey;
-use crate::routes::Route;
-use crate::components::{NoteCard, NoteCardSkeleton, NoteComposer, ArticleCard, ClientInitializing};
+use crate::components::{
+    ArticleCard, ClientInitializing, NoteCard, NoteCardSkeleton, NoteComposer,
+};
 use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
-use crate::utils::{DataState, FeedItem, extract_reposted_event, get_item_count};
-use crate::utils::list_kinds::NAMED_PEOPLE;
+use crate::routes::Route;
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, stream_interaction_counts, sync_interaction_counts,
+    InteractionCounts, InteractionStreamHandle,
+};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::stores::{auth_store, feed_cache, nostr_client, subscription_manager};
 use crate::utils::list_encryption::get_all_list_members;
-use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle, fetch_interaction_counts_batch, sync_interaction_counts, stream_interaction_counts};
-use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
+use crate::utils::list_kinds::NAMED_PEOPLE;
+use crate::utils::{extract_reposted_event, get_item_count, DataState, FeedItem};
+use dioxus::prelude::*;
+use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
 #[derive(Clone, PartialEq, Debug)]
 enum FeedType {
-    Following,              // Top level posts only
-    FollowingWithReplies,   // All posts including replies
-    Global,                 // Global feed from all users
-    PeopleList(Box<UserList>),   // Feed from a specific people list (boxed to reduce enum size)
+    Following,                 // Top level posts only
+    FollowingWithReplies,      // All posts including replies
+    Global,                    // Global feed from all users
+    PeopleList(Box<UserList>), // Feed from a specific people list (boxed to reduce enum size)
 }
 
 impl FeedType {
@@ -70,7 +75,8 @@ pub fn Home(list: String) -> Element {
     let mut subscription_ids = use_signal(Vec::<nostr_sdk::SubscriptionId>::new);
 
     // Track interaction stream handle for cleanup (Dioxus pattern: store full handle for cancellation)
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
 
     // Request ID for preventing stale results when feed type changes rapidly
     let mut request_id = use_signal(|| 0u32);
@@ -84,7 +90,8 @@ pub fn Home(list: String) -> Element {
 
     // Filter to only people lists (kind 30000)
     let people_lists = use_memo(move || {
-        all_lists.read()
+        all_lists
+            .read()
             .iter()
             .filter(|list| list.kind == NAMED_PEOPLE)
             .cloned()
@@ -151,7 +158,9 @@ pub fn Home(list: String) -> Element {
         }
 
         // note.rs pattern: detect account switch and clear stale caches
-        if let (Some(ref last), Some(ref current)) = (last_mute_pubkey.peek().as_ref(), current_pubkey.as_ref()) {
+        if let (Some(ref last), Some(ref current)) =
+            (last_mute_pubkey.peek().as_ref(), current_pubkey.as_ref())
+        {
             if last != current {
                 log::debug!("Account switch detected in home feed, clearing mute/block cache");
                 cached_muted_posts.set(None);
@@ -197,13 +206,18 @@ pub fn Home(list: String) -> Element {
                 }
                 Err(e) => {
                     // nostr-sdk pattern: structured logging with truncated IDs
-                    let snapshot_short = auth_pubkey_snapshot.as_ref()
-                        .map(|s| &s[..8.min(s.len())]);
-                    let current_short = auth_store::AUTH_STATE.peek().pubkey.as_ref()
+                    let snapshot_short =
+                        auth_pubkey_snapshot.as_ref().map(|s| &s[..8.min(s.len())]);
+                    let current_short = auth_store::AUTH_STATE
+                        .peek()
+                        .pubkey
+                        .as_ref()
                         .map(|s| s[..8.min(s.len())].to_string());
                     log::error!(
                         "Failed to fetch mute list: {} (snapshot={:?}, current={:?})",
-                        e, snapshot_short, current_short
+                        e,
+                        snapshot_short,
+                        current_short
                     );
                 }
             }
@@ -272,7 +286,10 @@ pub fn Home(list: String) -> Element {
         if !ids.is_empty() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
-                    log::info!("Cleaning up {} real-time subscriptions due to manual refresh", ids.len());
+                    log::info!(
+                        "Cleaning up {} real-time subscriptions due to manual refresh",
+                        ids.len()
+                    );
                     subscription_manager::unsubscribe_all(&client, &ids).await;
                 }
             });
@@ -326,11 +343,16 @@ pub fn Home(list: String) -> Element {
                         .unwrap_or_default();
 
                     // Check staleness after cache load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     // Show cached items immediately if available
                     let mut accumulated_items = if !cached_items.is_empty() {
-                        log::info!("Loaded {} items from cache for Following feed", cached_items.len());
+                        log::info!(
+                            "Loaded {} items from cache for Following feed",
+                            cached_items.len()
+                        );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                         cached_items
                     } else {
@@ -349,14 +371,18 @@ pub fn Home(list: String) -> Element {
                         }
 
                         // Progressive update: merge new batch with accumulated items
-                        accumulated_items = feed_cache::merge_feed_items(accumulated_items.clone(), batch_items);
+                        accumulated_items =
+                            feed_cache::merge_feed_items(accumulated_items.clone(), batch_items);
 
                         // Update UI with merged items
                         feed_state.set(DataState::Loaded(accumulated_items.clone()));
-                    }).await;
+                    })
+                    .await;
 
                     // Check staleness after network load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     match result {
                         Ok((feed_items, did_fallback)) => {
@@ -385,7 +411,12 @@ pub fn Home(list: String) -> Element {
                                 let cache_key_for_store = effective_cache_key;
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
-                                    if let Err(e) = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await {
+                                    if let Err(e) = feed_cache::store_feed_items(
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await
+                                    {
                                         log::warn!("Failed to store feed to cache: {}", e);
                                     }
                                     if let Err(e) = feed_cache::run_eviction_if_needed().await {
@@ -400,7 +431,10 @@ pub fn Home(list: String) -> Element {
                                 let req_id = request_id;
                                 let curr_id = current_id;
                                 spawn(async move {
-                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let event_ids: Vec<_> = items_for_counts
+                                        .iter()
+                                        .map(|item| item.event().id)
+                                        .collect();
 
                                     // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
                                     if event_ids.is_empty() {
@@ -409,12 +443,22 @@ pub fn Home(list: String) -> Element {
                                     }
 
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
-                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
+                                        sync_interaction_counts(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     // Re-check staleness after await
-                                    if *req_id.peek() != curr_id { return; }
+                                    if *req_id.peek() != curr_id {
+                                        return;
+                                    }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -424,7 +468,9 @@ pub fn Home(list: String) -> Element {
                                             event_ids.clone(),
                                             interaction_counts,
                                             Some(600), // 10 minute idle timeout
-                                        ).await {
+                                        )
+                                        .await
+                                        {
                                             Ok(handle) => {
                                                 // Re-check staleness AFTER await - if stale, cleanup and discard
                                                 if *req_id.peek() != curr_id {
@@ -476,10 +522,15 @@ pub fn Home(list: String) -> Element {
                         .unwrap_or_default();
 
                     // Check staleness after cache load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     if !cached_items.is_empty() {
-                        log::info!("Loaded {} items from cache for FollowingWithReplies feed", cached_items.len());
+                        log::info!(
+                            "Loaded {} items from cache for FollowingWithReplies feed",
+                            cached_items.len()
+                        );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
 
@@ -487,7 +538,9 @@ pub fn Home(list: String) -> Element {
                     let result = load_following_with_replies(None).await;
 
                     // Check staleness after network load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     match result {
                         Ok((feed_items, did_fallback)) => {
@@ -516,7 +569,11 @@ pub fn Home(list: String) -> Element {
                                 let cache_key_for_store = effective_cache_key;
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
-                                    let _ = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await;
+                                    let _ = feed_cache::store_feed_items(
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await;
                                     let _ = feed_cache::run_eviction_if_needed().await;
                                 });
                             }
@@ -527,7 +584,10 @@ pub fn Home(list: String) -> Element {
                                 let req_id = request_id;
                                 let curr_id = current_id;
                                 spawn(async move {
-                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let event_ids: Vec<_> = items_for_counts
+                                        .iter()
+                                        .map(|item| item.event().id)
+                                        .collect();
 
                                     // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
                                     if event_ids.is_empty() {
@@ -536,12 +596,22 @@ pub fn Home(list: String) -> Element {
                                     }
 
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
-                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
+                                        sync_interaction_counts(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     // Re-check staleness after await
-                                    if *req_id.peek() != curr_id { return; }
+                                    if *req_id.peek() != curr_id {
+                                        return;
+                                    }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -551,7 +621,9 @@ pub fn Home(list: String) -> Element {
                                             event_ids.clone(),
                                             interaction_counts,
                                             Some(600), // 10 minute idle timeout
-                                        ).await {
+                                        )
+                                        .await
+                                        {
                                             Ok(handle) => {
                                                 // Re-check staleness AFTER await - if stale, cleanup and discard
                                                 if *req_id.peek() != curr_id {
@@ -601,10 +673,15 @@ pub fn Home(list: String) -> Element {
                         .unwrap_or_default();
 
                     // Check staleness after cache load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     if !cached_items.is_empty() {
-                        log::info!("Loaded {} items from cache for Global feed", cached_items.len());
+                        log::info!(
+                            "Loaded {} items from cache for Global feed",
+                            cached_items.len()
+                        );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
 
@@ -612,7 +689,9 @@ pub fn Home(list: String) -> Element {
                     let result = load_global_feed(None).await;
 
                     // Check staleness after network load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     match result {
                         Ok(feed_items) => {
@@ -631,7 +710,11 @@ pub fn Home(list: String) -> Element {
                             if !is_stale() {
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
-                                    let _ = feed_cache::store_feed_items(&FeedCacheKey::Global, &items_for_cache).await;
+                                    let _ = feed_cache::store_feed_items(
+                                        &FeedCacheKey::Global,
+                                        &items_for_cache,
+                                    )
+                                    .await;
                                     let _ = feed_cache::run_eviction_if_needed().await;
                                 });
                             }
@@ -643,7 +726,10 @@ pub fn Home(list: String) -> Element {
                                 let req_id = request_id;
                                 let curr_id = current_id;
                                 spawn(async move {
-                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let event_ids: Vec<_> = items_for_counts
+                                        .iter()
+                                        .map(|item| item.event().id)
+                                        .collect();
 
                                     // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
                                     if event_ids.is_empty() {
@@ -652,12 +738,22 @@ pub fn Home(list: String) -> Element {
                                     }
 
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
-                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
+                                        sync_interaction_counts(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     // Re-check staleness after await
-                                    if *req_id.peek() != curr_id { return; }
+                                    if *req_id.peek() != curr_id {
+                                        return;
+                                    }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -667,7 +763,9 @@ pub fn Home(list: String) -> Element {
                                             event_ids.clone(),
                                             interaction_counts,
                                             Some(600), // 10 minute idle timeout
-                                        ).await {
+                                        )
+                                        .await
+                                        {
                                             Ok(handle) => {
                                                 // Re-check staleness AFTER await - if stale, cleanup and discard
                                                 if *req_id.peek() != curr_id {
@@ -722,10 +820,15 @@ pub fn Home(list: String) -> Element {
                         .unwrap_or_default();
 
                     // Check staleness after cache load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     if !cached_items.is_empty() {
-                        log::info!("Loaded {} items from cache for PeopleList feed", cached_items.len());
+                        log::info!(
+                            "Loaded {} items from cache for PeopleList feed",
+                            cached_items.len()
+                        );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
 
@@ -733,7 +836,9 @@ pub fn Home(list: String) -> Element {
                     let result = load_people_list_feed(&list, None).await;
 
                     // Check staleness after network load
-                    if is_stale() { return; }
+                    if is_stale() {
+                        return;
+                    }
 
                     match result {
                         Ok(feed_items) => {
@@ -753,7 +858,11 @@ pub fn Home(list: String) -> Element {
                                 let cache_key_for_store = cache_key.clone();
                                 let items_for_cache = feed_items.clone();
                                 spawn(async move {
-                                    let _ = feed_cache::store_feed_items(&cache_key_for_store, &items_for_cache).await;
+                                    let _ = feed_cache::store_feed_items(
+                                        &cache_key_for_store,
+                                        &items_for_cache,
+                                    )
+                                    .await;
                                     let _ = feed_cache::run_eviction_if_needed().await;
                                 });
                             }
@@ -764,7 +873,10 @@ pub fn Home(list: String) -> Element {
                                 let req_id = request_id;
                                 let curr_id = current_id;
                                 spawn(async move {
-                                    let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
+                                    let event_ids: Vec<_> = items_for_counts
+                                        .iter()
+                                        .map(|item| item.event().id)
+                                        .collect();
 
                                     // Dioxus pattern: Early return guard for empty collections (todomvc.rs:70)
                                     if event_ids.is_empty() {
@@ -773,12 +885,22 @@ pub fn Home(list: String) -> Element {
                                     }
 
                                     let counts = if is_first_load {
-                                        fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await
+                                        fetch_interaction_counts_batch(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     } else {
-                                        sync_interaction_counts(event_ids.clone(), Duration::from_secs(5)).await
+                                        sync_interaction_counts(
+                                            event_ids.clone(),
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
                                     };
                                     // Re-check staleness after await
-                                    if *req_id.peek() != curr_id { return; }
+                                    if *req_id.peek() != curr_id {
+                                        return;
+                                    }
                                     if let Ok(counts) = counts {
                                         interaction_counts.set(counts);
                                         interactions_loaded.set(true);
@@ -788,7 +910,9 @@ pub fn Home(list: String) -> Element {
                                             event_ids.clone(),
                                             interaction_counts,
                                             Some(600), // 10 minute idle timeout
-                                        ).await {
+                                        )
+                                        .await
+                                        {
                                             Ok(handle) => {
                                                 // Re-check staleness AFTER await - if stale, cleanup and discard
                                                 if *req_id.peek() != curr_id {
@@ -843,7 +967,10 @@ pub fn Home(list: String) -> Element {
         if !ids.is_empty() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
-                    log::info!("Cleaning up {} real-time subscriptions due to feed type change", ids.len());
+                    log::info!(
+                        "Cleaning up {} real-time subscriptions due to feed type change",
+                        ids.len()
+                    );
                     subscription_manager::unsubscribe_all(&client, &ids).await;
                 }
             });
@@ -925,7 +1052,8 @@ pub fn Home(list: String) -> Element {
             }
 
             // Parse contact pubkeys
-            let authors: Vec<PublicKey> = contacts.iter()
+            let authors: Vec<PublicKey> = contacts
+                .iter()
                 .filter_map(|contact| PublicKey::parse(contact).ok())
                 .collect();
 
@@ -966,7 +1094,10 @@ pub fn Home(list: String) -> Element {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         use tokio::time::{sleep, Duration as TokioDuration};
-                        sleep(TokioDuration::from_millis(batch_idx as u64 * BATCH_DELAY_MS)).await;
+                        sleep(TokioDuration::from_millis(
+                            batch_idx as u64 * BATCH_DELAY_MS,
+                        ))
+                        .await;
                     }
                 }
 
@@ -976,13 +1107,22 @@ pub fn Home(list: String) -> Element {
                     .since(since_timestamp)
                     .limit(0); // limit=0 means only new events
 
-                log::info!("Subscribing to batch {}/{} ({} authors)",
-                    batch_num, num_batches, batch_authors.len());
+                log::info!(
+                    "Subscribing to batch {}/{} ({} authors)",
+                    batch_num,
+                    num_batches,
+                    batch_authors.len()
+                );
 
                 match client.subscribe(filter, None).await {
                     Ok(output) => {
                         let subscription_id = output.val;
-                        log::info!("Batch {}/{} subscribed: {:?}", batch_num, num_batches, subscription_id);
+                        log::info!(
+                            "Batch {}/{} subscribed: {:?}",
+                            batch_num,
+                            num_batches,
+                            subscription_id
+                        );
 
                         // Store subscription ID for cleanup
                         subscription_ids.write().push(subscription_id.clone());
@@ -992,7 +1132,8 @@ pub fn Home(list: String) -> Element {
                         // Clone feed type for this batch's async task (UserList isn't Copy)
                         let batch_feed_type = current_feed_type.clone();
                         // Create author set for client-side filtering (defense-in-depth)
-                        let batch_author_set: std::collections::HashSet<_> = batch_authors.iter().cloned().collect();
+                        let batch_author_set: std::collections::HashSet<_> =
+                            batch_authors.iter().cloned().collect();
                         spawn(async move {
                             let mut notifications = client_for_notifications.notifications();
 
@@ -1010,7 +1151,10 @@ pub fn Home(list: String) -> Element {
 
                                     // Client-side author filtering (defense-in-depth against misbehaving relays)
                                     if !batch_author_set.contains(&event.pubkey) {
-                                        log::debug!("Filtered out event from non-followed author: {}", event.pubkey);
+                                        log::debug!(
+                                            "Filtered out event from non-followed author: {}",
+                                            event.pubkey
+                                        );
                                         continue;
                                     }
 
@@ -1027,7 +1171,11 @@ pub fn Home(list: String) -> Element {
                                                 })
                                             }
                                             Err(e) => {
-                                                log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                                                log::warn!(
+                                                    "Failed to parse repost event {}: {}",
+                                                    event.id,
+                                                    e
+                                                );
                                                 None
                                             }
                                         }
@@ -1036,9 +1184,13 @@ pub fn Home(list: String) -> Element {
                                         let should_add = match &batch_feed_type {
                                             FeedType::Following => {
                                                 // Only top-level posts (no e tags)
-                                                !event.tags.iter().any(|tag| tag.kind() == nostr_sdk::TagKind::e())
+                                                !event.tags.iter().any(|tag| {
+                                                    tag.kind() == nostr_sdk::TagKind::e()
+                                                })
                                             }
-                                            FeedType::FollowingWithReplies | FeedType::Global | FeedType::PeopleList(_) => {
+                                            FeedType::FollowingWithReplies
+                                            | FeedType::Global
+                                            | FeedType::PeopleList(_) => {
                                                 // All posts including replies
                                                 true
                                             }
@@ -1054,21 +1206,26 @@ pub fn Home(list: String) -> Element {
                                     };
 
                                     if let Some(feed_item) = feed_item_opt {
-                                        log::info!("New post received in real-time from batch {}", batch_num);
+                                        log::info!(
+                                            "New post received in real-time from batch {}",
+                                            batch_num
+                                        );
 
                                         // Buffer new posts instead of direct insertion (Twitter/X pattern)
                                         // Check if event already exists in buffer or feed (avoid duplicates)
                                         let event_id = feed_item.event().id;
 
-                                        let already_buffered = pending_posts.read().iter()
+                                        let already_buffered = pending_posts
+                                            .read()
+                                            .iter()
                                             .any(|item| item.event().id == event_id);
 
                                         // Use reference pattern matching to avoid cloning the entire feed
                                         // NOTE: Use peek() to avoid creating effect dependency on feed_state
                                         let already_in_feed = match &*feed_state.peek() {
-                                            DataState::Loaded(ref current_items) => {
-                                                current_items.iter().any(|item| item.event().id == event_id)
-                                            }
+                                            DataState::Loaded(ref current_items) => current_items
+                                                .iter()
+                                                .any(|item| item.event().id == event_id),
                                             _ => false,
                                         };
 
@@ -1076,20 +1233,30 @@ pub fn Home(list: String) -> Element {
                                             // Prefetch author metadata so it's ready when "Show new posts" is clicked
                                             let author_pk = feed_item.event().pubkey.to_hex();
                                             spawn(async move {
-                                                let _ = crate::stores::profiles::fetch_profile(author_pk).await;
+                                                let _ = crate::stores::profiles::fetch_profile(
+                                                    author_pk,
+                                                )
+                                                .await;
                                             });
 
                                             // If repost, also prefetch original author's metadata
-                                            if let FeedItem::Repost { ref original, .. } = feed_item {
+                                            if let FeedItem::Repost { ref original, .. } = feed_item
+                                            {
                                                 let original_author_pk = original.pubkey.to_hex();
                                                 spawn(async move {
-                                                    let _ = crate::stores::profiles::fetch_profile(original_author_pk).await;
+                                                    let _ = crate::stores::profiles::fetch_profile(
+                                                        original_author_pk,
+                                                    )
+                                                    .await;
                                                 });
                                             }
 
                                             // Add to pending buffer
                                             pending_posts.write().push(feed_item);
-                                            log::info!("Buffered new post, total pending: {}", pending_posts.read().len());
+                                            log::info!(
+                                                "Buffered new post, total pending: {}",
+                                                pending_posts.read().len()
+                                            );
                                         }
                                     }
                                 }
@@ -1097,7 +1264,12 @@ pub fn Home(list: String) -> Element {
                         });
                     }
                     Err(e) => {
-                        log::error!("Failed to subscribe batch {}/{}: {}", batch_num, num_batches, e);
+                        log::error!(
+                            "Failed to subscribe batch {}/{}: {}",
+                            batch_num,
+                            num_batches,
+                            e
+                        );
                     }
                 }
             }
@@ -1106,8 +1278,11 @@ pub fn Home(list: String) -> Element {
 
     // Load more function for infinite scroll
     let load_more = move || {
-        log::info!("load_more called - pagination_loading: {}, has_more: {}",
-                   *pagination_loading.peek(), *has_more.peek());
+        log::info!(
+            "load_more called - pagination_loading: {}, has_more: {}",
+            *pagination_loading.peek(),
+            *has_more.peek()
+        );
 
         if *pagination_loading.peek() || !*has_more.peek() {
             log::info!("load_more blocked by guards");
@@ -1122,36 +1297,36 @@ pub fn Home(list: String) -> Element {
             let until = *oldest_timestamp.read();
             let current_feed_type = feed_type.read().clone();
 
-            log::info!("load_more spawn executing - until: {:?}, feed_type: {:?}", until, current_feed_type);
+            log::info!(
+                "load_more spawn executing - until: {:?}, feed_type: {:?}",
+                until,
+                current_feed_type
+            );
 
             // Fetch items based on feed type
             // Check did_fallback during pagination - if fallback occurs, treat as error
             // to avoid silently injecting Global items into Following feed
             let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
-                FeedType::Following => {
-                    match load_following_feed(until).await {
-                        Ok((items, did_fallback)) => {
-                            if did_fallback {
-                                Err("Contact fetch failed during pagination".to_string())
-                            } else {
-                                Ok(items)
-                            }
+                FeedType::Following => match load_following_feed(until).await {
+                    Ok((items, did_fallback)) => {
+                        if did_fallback {
+                            Err("Contact fetch failed during pagination".to_string())
+                        } else {
+                            Ok(items)
                         }
-                        Err(e) => Err(e),
                     }
-                }
-                FeedType::FollowingWithReplies => {
-                    match load_following_with_replies(until).await {
-                        Ok((items, did_fallback)) => {
-                            if did_fallback {
-                                Err("Contact fetch failed during pagination".to_string())
-                            } else {
-                                Ok(items)
-                            }
+                    Err(e) => Err(e),
+                },
+                FeedType::FollowingWithReplies => match load_following_with_replies(until).await {
+                    Ok((items, did_fallback)) => {
+                        if did_fallback {
+                            Err("Contact fetch failed during pagination".to_string())
+                        } else {
+                            Ok(items)
                         }
-                        Err(e) => Err(e),
                     }
-                }
+                    Err(e) => Err(e),
+                },
                 FeedType::Global => load_global_feed(until).await,
                 FeedType::PeopleList(list) => load_people_list_feed(&list, until).await,
             };
@@ -1165,7 +1340,8 @@ pub fn Home(list: String) -> Element {
                         &mut has_more,
                         &mut pagination_loading,
                         &mut interaction_counts,
-                    ).await;
+                    )
+                    .await;
                 }
                 Err(e) => {
                     log::error!("Failed to load more events: {}", e);
@@ -1176,11 +1352,7 @@ pub fn Home(list: String) -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        pagination_loading
-    );
+    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
 
     // Helper to refresh feed and scroll to top
     // Used by both the refresh button and "Show N new posts" banner
@@ -2161,18 +2333,21 @@ async fn append_paginated_items(
     let current_state = feed_state.read().clone();
     if let DataState::Loaded(current) = current_state {
         // Build set of existing event IDs for O(1) lookup
-        let existing_ids: std::collections::HashSet<_> = current.iter()
-            .map(|item| item.event().id)
-            .collect();
+        let existing_ids: std::collections::HashSet<_> =
+            current.iter().map(|item| item.event().id).collect();
 
         // Filter out duplicates
-        let unique_items: Vec<_> = new_items.iter()
+        let unique_items: Vec<_> = new_items
+            .iter()
             .filter(|item| !existing_ids.contains(&item.event().id))
             .cloned()
             .collect();
 
-        log::info!("Deduplication: {} total, {} unique items after filtering",
-            new_items.len(), unique_items.len());
+        log::info!(
+            "Deduplication: {} total, {} unique items after filtering",
+            new_items.len(),
+            unique_items.len()
+        );
 
         // Always update oldest_timestamp from ALL fetched items (not just unique)
         // to ensure we make progress even if all items were duplicates
@@ -2202,11 +2377,19 @@ async fn append_paginated_items(
             // Fetch interaction counts for new items and merge with existing
             let mut counts_signal = *interaction_counts;
             spawn(async move {
-                let event_ids: Vec<_> = items_for_counts.iter().map(|item| item.event().id).collect();
-                if let Ok(new_counts) = fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await {
+                let event_ids: Vec<_> = items_for_counts
+                    .iter()
+                    .map(|item| item.event().id)
+                    .collect();
+                if let Ok(new_counts) =
+                    fetch_interaction_counts_batch(event_ids, Duration::from_secs(5)).await
+                {
                     // Merge new counts with existing using Dioxus's WritableHashMapExt for in-place update
                     counts_signal.extend(new_counts);
-                    log::info!("Fetched interaction counts for {} paginated items", items_for_counts.len());
+                    log::info!(
+                        "Fetched interaction counts for {} paginated items",
+                        items_for_counts.len()
+                    );
                 }
             });
         }
@@ -2218,10 +2401,13 @@ async fn append_paginated_items(
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool), String> {
     // Get current user's pubkey
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading following feed for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following feed for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     // OPTIMIZATION: Fetch contacts AND global feed in parallel
     // If contacts fails or is empty, global feed is already ready
@@ -2234,7 +2420,10 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool)
     let contacts = match contacts_result {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             // Global feed was fetched in parallel, use it
             let global = global_result?;
             return Ok((global, true));
@@ -2276,14 +2465,20 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool)
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    log::info!("Fetching events from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    log::info!(
+        "Fetching events from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
+    );
 
     // Use fast fetch (bypasses gossip) for pagination - avoids 30+ second timeouts
     // The initial feed load already populated the connected relays
     match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             let raw_count = events.len();
-            log::info!("Loaded {} events (including reposts) from following feed via outbox", raw_count);
+            log::info!(
+                "Loaded {} events (including reposts) from following feed via outbox",
+                raw_count
+            );
 
             // Process events into FeedItems
             let mut feed_items: Vec<FeedItem> = Vec::new();
@@ -2317,7 +2512,11 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool)
             // Sort by timestamp (repost time for reposts, created_at for originals)
             feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
 
-            log::info!("After processing: {} feed items (raw: {})", feed_items.len(), raw_count);
+            log::info!(
+                "After processing: {} feed items (raw: {})",
+                feed_items.len(),
+                raw_count
+            );
 
             // If no events found, return empty (valid result - user's contacts just haven't posted)
             // Don't fall back to global here - empty following is different from no contacts
@@ -2329,7 +2528,10 @@ async fn load_following_feed(until: Option<u64>) -> Result<(Vec<FeedItem>, bool)
             Ok((feed_items, false))
         }
         Err(e) => {
-            log::error!("Failed to fetch following feed: {}, falling back to global", e);
+            log::error!(
+                "Failed to fetch following feed: {}, falling back to global",
+                e
+            );
             let global = load_global_feed(until).await?;
             Ok((global, true))
         }
@@ -2383,16 +2585,22 @@ where
     use std::collections::HashSet;
 
     // Get current user's pubkey
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading following feed (streaming) for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following feed (streaming) for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     // Fetch contacts (need to wait for this before we can stream posts)
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_global_feed(until).await?;
             return Ok((global, true));
         }
@@ -2441,8 +2649,8 @@ where
     // Use fast path that bypasses gossip discovery for initial feed load
     let stream_result = nostr_client::stream_events_from_connected_relays_batched(
         filter,
-        Duration::from_secs(10),  // Shorter timeout since no gossip wait
-        10, // batch size
+        Duration::from_secs(10), // Shorter timeout since no gossip wait
+        10,                      // batch size
         |batch| {
             // Process batch into FeedItems
             let mut batch_items = process_events_to_feed_items(batch);
@@ -2461,10 +2669,14 @@ where
                 on_batch(batch_items);
             }
         },
-    ).await;
+    )
+    .await;
 
     if let Err(e) = stream_result {
-        log::error!("Failed to stream following feed: {}, falling back to global", e);
+        log::error!(
+            "Failed to stream following feed: {}, falling back to global",
+            e
+        );
         let global = load_global_feed(until).await?;
         return Ok((global, true));
     }
@@ -2487,16 +2699,22 @@ where
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_with_replies(until: Option<u64>) -> Result<(Vec<FeedItem>, bool), String> {
     // Get current user's pubkey
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading following feed with replies for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following feed with replies for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     // Fetch the user's contact list (people they follow)
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_global_feed(until).await?;
             return Ok((global, true));
         }
@@ -2540,12 +2758,18 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<(Vec<FeedItem
         filter = filter.since(since);
     }
 
-    log::info!("Fetching all events (including replies and reposts) from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    log::info!(
+        "Fetching all events (including replies and reposts) from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
+    );
 
     // Use fast fetch (bypasses gossip) for following feed - avoids 30+ second timeouts
     match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            log::info!("Loaded {} events (including replies and reposts) from following feed via outbox", events.len());
+            log::info!(
+                "Loaded {} events (including replies and reposts) from following feed via outbox",
+                events.len()
+            );
 
             // Process events into FeedItems
             let mut feed_items: Vec<FeedItem> = Vec::new();
@@ -2585,7 +2809,10 @@ async fn load_following_with_replies(until: Option<u64>) -> Result<(Vec<FeedItem
             Ok((feed_items, false))
         }
         Err(e) => {
-            log::error!("Failed to fetch following feed with replies: {}, falling back to global", e);
+            log::error!(
+                "Failed to fetch following feed with replies: {}, falling back to global",
+                e
+            );
             let global = load_global_feed(until).await?;
             Ok((global, true))
         }
@@ -2664,9 +2891,13 @@ async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
             FeedItem::OriginalPost(event) => {
                 pubkeys.push(event.pubkey);
             }
-            FeedItem::Repost { original, reposted_by, .. } => {
+            FeedItem::Repost {
+                original,
+                reposted_by,
+                ..
+            } => {
                 pubkeys.push(original.pubkey); // Original author
-                pubkeys.push(*reposted_by);     // Reposter
+                pubkeys.push(*reposted_by); // Reposter
             }
         }
     }
@@ -2681,8 +2912,15 @@ async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
 
 /// Helper function to load feed from a people list
 /// Fetches posts from all members (public + private) of the list
-async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Vec<FeedItem>, String> {
-    log::info!("Loading people list feed for '{}' (until: {:?})", list.name, until);
+async fn load_people_list_feed(
+    list: &UserList,
+    until: Option<u64>,
+) -> Result<Vec<FeedItem>, String> {
+    log::info!(
+        "Loading people list feed for '{}' (until: {:?})",
+        list.name,
+        until
+    );
 
     // Get all members from the list (both public and private via NIP-44 decryption)
     let members = get_all_list_members(&list.event).await.map_err(|e| {
@@ -2691,7 +2929,10 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
     })?;
 
     if members.is_empty() {
-        log::warn!("People list '{}' has no members - check if private decryption failed", list.name);
+        log::warn!(
+            "People list '{}' has no members - check if private decryption failed",
+            list.name
+        );
         return Ok(Vec::new());
     }
 
@@ -2712,7 +2953,11 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
     // This queries all connected relays directly, avoiding 30+ second NIP-65 timeouts
     match nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10)).await {
         Ok(events) => {
-            log::info!("Loaded {} events from people list '{}'", events.len(), list.name);
+            log::info!(
+                "Loaded {} events from people list '{}'",
+                events.len(),
+                list.name
+            );
 
             // Process events into FeedItems
             let mut feed_items: Vec<FeedItem> = Vec::new();
@@ -2744,7 +2989,11 @@ async fn load_people_list_feed(list: &UserList, until: Option<u64>) -> Result<Ve
             Ok(feed_items)
         }
         Err(e) => {
-            log::error!("Failed to fetch events for people list '{}': {}", list.name, e);
+            log::error!(
+                "Failed to fetch events for people list '{}': {}",
+                list.name,
+                e
+            );
             Err(format!("Failed to load feed: {}", e))
         }
     }

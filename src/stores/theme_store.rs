@@ -3,15 +3,13 @@ use dioxus::signals::ReadableExt;
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum Theme {
     Light,
     Dark,
     #[default]
     System,
 }
-
 
 impl Theme {
     pub fn as_str(&self) -> &'static str {

@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
-use crate::stores::auth_store;
 use crate::components::MediaUploader;
+use crate::stores::auth_store;
+use dioxus::prelude::*;
 
 #[component]
 pub fn VideoNewLandscape() -> Element {
@@ -19,9 +19,8 @@ pub fn VideoNewLandscape() -> Element {
     let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
 
     // Validation
-    let can_publish = title.read().chars().count() > 0
-        && video_url.read().is_some()
-        && !*is_publishing.read();
+    let can_publish =
+        title.read().chars().count() > 0 && video_url.read().is_some() && !*is_publishing.read();
 
     // Handle close
     let handle_close = move |_| {
@@ -72,7 +71,9 @@ pub fn VideoNewLandscape() -> Element {
                 thumbnail_url_val,
                 tags_vec,
                 false, // landscape video
-            ).await {
+            )
+            .await
+            {
                 Ok(event_id) => {
                     log::info!("Video published successfully: {}", event_id);
                     is_publishing.set(false);
@@ -90,7 +91,9 @@ pub fn VideoNewLandscape() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home { list: String::new() });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
 

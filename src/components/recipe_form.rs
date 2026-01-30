@@ -1,12 +1,12 @@
 //! Recipe Form Component
 //! Complete form for creating or editing recipes
 
-use dioxus::prelude::*;
-use crate::components::recipe_ingredients_editor::RecipeIngredientsEditor;
-use crate::components::recipe_directions_editor::RecipeDirectionsEditor;
-use crate::components::recipe_tag_selector::RecipeTagSelector;
 use crate::components::media_uploader::MediaUploader;
+use crate::components::recipe_directions_editor::RecipeDirectionsEditor;
+use crate::components::recipe_ingredients_editor::RecipeIngredientsEditor;
+use crate::components::recipe_tag_selector::RecipeTagSelector;
 use crate::stores::recipe_store::CachedRecipe;
+use dioxus::prelude::*;
 
 /// Form data for recipe creation/editing
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -34,14 +34,28 @@ impl RecipeFormData {
             title: recipe.metadata.title.clone(),
             summary: recipe.metadata.summary.clone().unwrap_or_default(),
             image_urls: recipe.metadata.images.clone(),
-            chef_notes: parsed.and_then(|p| p.chef_notes.clone()).unwrap_or_default(),
-            prep_time: parsed.and_then(|p| p.details.prep_time.clone()).unwrap_or_default(),
-            cook_time: parsed.and_then(|p| p.details.cook_time.clone()).unwrap_or_default(),
-            servings: parsed.and_then(|p| p.details.servings.clone()).unwrap_or_default(),
-            ingredients: parsed.map(|p| p.ingredients.clone()).unwrap_or_else(|| vec![String::new()]),
-            directions: parsed.map(|p| p.directions.clone()).unwrap_or_else(|| vec![String::new()]),
+            chef_notes: parsed
+                .and_then(|p| p.chef_notes.clone())
+                .unwrap_or_default(),
+            prep_time: parsed
+                .and_then(|p| p.details.prep_time.clone())
+                .unwrap_or_default(),
+            cook_time: parsed
+                .and_then(|p| p.details.cook_time.clone())
+                .unwrap_or_default(),
+            servings: parsed
+                .and_then(|p| p.details.servings.clone())
+                .unwrap_or_default(),
+            ingredients: parsed
+                .map(|p| p.ingredients.clone())
+                .unwrap_or_else(|| vec![String::new()]),
+            directions: parsed
+                .map(|p| p.directions.clone())
+                .unwrap_or_else(|| vec![String::new()]),
             tags: recipe.metadata.tags.clone(),
-            additional_resources: parsed.and_then(|p| p.additional_resources.clone()).unwrap_or_default(),
+            additional_resources: parsed
+                .and_then(|p| p.additional_resources.clone())
+                .unwrap_or_default(),
         }
     }
 

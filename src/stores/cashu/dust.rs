@@ -11,12 +11,12 @@ use std::collections::HashMap;
 use dioxus::prelude::ReadableExt;
 use futures::stream::{self, StreamExt};
 
-use crate::stores::cashu_cdk_bridge;
 use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
 use super::types::{ProofData, WalletTokensStoreStoreExt};
 use super::utils::{mint_matches, normalize_mint_url};
+use crate::stores::cashu_cdk_bridge;
 
 // =============================================================================
 // Dust Thresholds
@@ -108,7 +108,11 @@ pub fn get_all_dust_stats(threshold: u64) -> HashMap<String, DustStats> {
     let tokens = data.read();
 
     let mints: Vec<String> = tokens.iter().map(|t| t.mint.clone()).collect();
-    let unique_mints: Vec<String> = mints.into_iter().collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let unique_mints: Vec<String> = mints
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
 
     let mut stats = HashMap::new();
     for mint in unique_mints {
@@ -227,7 +231,10 @@ pub async fn consolidate_dust(
 
     // Sync wallet state to update UI signals
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync wallet state after dust consolidation: {}", e);
+        log::warn!(
+            "Failed to sync wallet state after dust consolidation: {}",
+            e
+        );
     }
 
     Ok(DustConsolidationResult {

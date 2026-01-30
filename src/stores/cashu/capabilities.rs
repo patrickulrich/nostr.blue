@@ -331,11 +331,7 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
     // Sort for consistent display
     caps.supported_nuts.sort();
 
-    log::info!(
-        "Mint {} capabilities: {:?}",
-        mint_url,
-        caps.supported_nuts
-    );
+    log::info!("Mint {} capabilities: {:?}", mint_url, caps.supported_nuts);
 
     Ok(caps)
 }
@@ -351,7 +347,10 @@ pub async fn check_operation_supported(
     if missing.is_empty() {
         Ok(())
     } else {
-        let missing_str: Vec<String> = missing.iter().map(|n| format!("NUT-{}", *n as u8)).collect();
+        let missing_str: Vec<String> = missing
+            .iter()
+            .map(|n| format!("NUT-{}", *n as u8))
+            .collect();
         Err(format!(
             "Mint does not support required features: {}",
             missing_str.join(", ")

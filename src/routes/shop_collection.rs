@@ -1,11 +1,11 @@
 //! Shop Collection - View a product collection (NIP-99 Kind 30405)
 
-use dioxus::prelude::*;
-use crate::utils::nip99::{Product, ProductCollection};
-use crate::stores::shop_store::{fetch_collection_by_naddr, fetch_collection_products};
 use crate::components::shop::{ProductCard, ProductCardSkeleton};
 use crate::routes::Route;
+use crate::stores::shop_store::{fetch_collection_by_naddr, fetch_collection_products};
 use crate::utils::format::truncate_pubkey;
+use crate::utils::nip99::{Product, ProductCollection};
+use dioxus::prelude::*;
 
 /// Collection detail page
 #[component]

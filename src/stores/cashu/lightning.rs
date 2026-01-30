@@ -7,25 +7,27 @@ use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
 use super::events::{publish_quote_event, queue_event_for_retry};
-use super::recovery::is_quote_about_to_expire;
 use super::internal::{
     cleanup_spent_proofs_internal, create_ephemeral_wallet, is_token_spent_error_string,
     remove_melt_quote_from_db,
 };
-use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
+use super::proofs::{
+    cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map,
+};
+use super::recovery::is_quote_about_to_expire;
 use super::signals::{
     add_in_flight_melt_request, persist_in_flight_melt_requests, persist_single_in_flight_request,
     remove_in_flight_melt_request, try_acquire_mint_lock, MELT_PROGRESS, PENDING_MELT_QUOTES,
     PENDING_MINT_QUOTES, WALLET_TOKENS,
 };
+use super::types::PendingEventType;
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, InFlightMeltRequest, MeltProgress, MeltQuoteInfo,
-    MintQuoteInfo, MintQuoteState, MeltQuoteState, ProofData, TokenData,
-    PendingMintQuotesStoreStoreExt, PendingMeltQuotesStoreStoreExt, WalletTokensStoreStoreExt,
+    MeltQuoteState, MintQuoteInfo, MintQuoteState, PendingMeltQuotesStoreStoreExt,
+    PendingMintQuotesStoreStoreExt, ProofData, TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
-use super::types::PendingEventType;
 
 // =============================================================================
 // Mint Quote Operations (Lightning → Ecash)
@@ -39,7 +41,11 @@ pub async fn create_mint_quote(
 ) -> Result<MintQuoteInfo, String> {
     use cdk::Amount;
 
-    log::info!("Creating mint quote for {} sats at {}", amount_sats, mint_url);
+    log::info!(
+        "Creating mint quote for {} sats at {}",
+        amount_sats,
+        mint_url
+    );
 
     // Create ephemeral wallet
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
@@ -298,12 +304,15 @@ pub async fn create_melt_quote(mint_url: String, invoice: String) -> Result<Melt
 
     let wallet = create_ephemeral_wallet(&mint_url, vec![]).await?;
 
-    let quote = wallet.melt_quote(invoice.clone(), None).await.map_err(|e| {
-        *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
-            error: e.to_string(),
-        });
-        format!("Failed to create melt quote: {}", e)
-    })?;
+    let quote = wallet
+        .melt_quote(invoice.clone(), None)
+        .await
+        .map_err(|e| {
+            *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
+                error: e.to_string(),
+            });
+            format!("Failed to create melt quote: {}", e)
+        })?;
 
     log::info!("Melt quote created: {}", quote.id);
 
@@ -396,7 +405,8 @@ pub async fn melt_tokens(
         return Err(error);
     }
 
-    let amount_needed = quote_info.amount
+    let amount_needed = quote_info
+        .amount
         .checked_add(quote_info.fee_reserve)
         .ok_or("Amount + fee overflow")?;
 
@@ -448,7 +458,10 @@ pub async fn melt_tokens(
         *MELT_PROGRESS.write() = Some(MeltProgress::Failed {
             error: format!("Failed to persist recovery data: {}", e),
         });
-        return Err(format!("Cannot proceed with melt: failed to persist recovery data. {}", e));
+        return Err(format!(
+            "Cannot proceed with melt: failed to persist recovery data. {}",
+            e
+        ));
     }
 
     // Only add to memory AFTER successful persistence
@@ -461,7 +474,8 @@ pub async fn melt_tokens(
         all_proofs.clone(),
         execute_melt_with_retry(&mint_url, &quote_id, all_proofs, amount_needed),
     )
-    .await {
+    .await
+    {
         Ok(result) => result,
         Err(e) => {
             // Operation failed - remove in-flight tracking
@@ -517,20 +531,20 @@ pub async fn melt_tokens(
 
     // 3. NOW attempt Nostr publish (safe to fail - state already updated)
     // nostr-sdk saves to local database before relay transmission
-    let new_event_id = match publish_melt_events(&mint_url, &keep_proofs, &event_ids_to_delete).await
-    {
-        Ok(Some(real_event_id)) => {
-            // Update token with real Nostr event ID
-            super::events::update_token_event_id(&pending_event_id, &real_event_id);
-            Some(real_event_id)
-        }
-        Ok(None) => None, // No proofs to publish
-        Err(e) => {
-            // Event already queued for retry by publish_melt_events
-            log::warn!("Nostr melt publish failed, queued for retry: {}", e);
-            Some(pending_event_id.clone())
-        }
-    };
+    let new_event_id =
+        match publish_melt_events(&mint_url, &keep_proofs, &event_ids_to_delete).await {
+            Ok(Some(real_event_id)) => {
+                // Update token with real Nostr event ID
+                super::events::update_token_event_id(&pending_event_id, &real_event_id);
+                Some(real_event_id)
+            }
+            Ok(None) => None, // No proofs to publish
+            Err(e) => {
+                // Event already queued for retry by publish_melt_events
+                log::warn!("Nostr melt publish failed, queued for retry: {}", e);
+                Some(pending_event_id.clone())
+            }
+        };
 
     // Create history event
     // Filter out pending_* IDs - they're not valid hex event IDs
@@ -546,7 +560,9 @@ pub async fn melt_tokens(
         .collect();
 
     // Use checked_add to prevent overflow (following CDK pattern)
-    let total_amount = quote_info.amount.checked_add(fee_paid)
+    let total_amount = quote_info
+        .amount
+        .checked_add(fee_paid)
         .ok_or_else(|| "Overflow adding quote amount and fee".to_string())?;
 
     // Skip history event if both are empty (no valid event IDs to reference)
@@ -588,7 +604,8 @@ pub async fn melt_tokens(
         log::error!(
             "Failed to persist in-flight melt cleanup for tx_id={}: {}. \
              May cause spurious recovery on next startup.",
-            tx_id, e
+            tx_id,
+            e
         );
     }
 
@@ -643,7 +660,10 @@ async fn execute_melt_with_retry(
         let wallet = create_ephemeral_wallet(mint_url, all_proofs.clone()).await?;
 
         let melted = wallet.melt(quote_id).await.map_err(|e| e.to_string())?;
-        let keep_proofs = wallet.get_unspent_proofs().await.map_err(|e| e.to_string())?;
+        let keep_proofs = wallet
+            .get_unspent_proofs()
+            .await
+            .map_err(|e| e.to_string())?;
 
         Ok::<(cdk::types::Melted, Vec<cdk::nuts::Proof>), String>((melted, keep_proofs))
     }
@@ -707,10 +727,7 @@ async fn execute_melt_with_retry(
                     error: e.to_string(),
                 });
 
-                Err(format!(
-                    "Failed to melt: {}. Quote has been cleaned up.",
-                    e
-                ))
+                Err(format!("Failed to melt: {}. Quote has been cleaned up.", e))
             }
         }
     }
@@ -778,7 +795,8 @@ async fn publish_melt_events(
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(mint_url.to_string()),
-                ).await;
+                )
+                .await;
                 new_event_id = Some(pending_id);
             }
         }
@@ -813,7 +831,13 @@ async fn publish_melt_events(
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
+                    queue_event_for_retry(
+                        deletion_builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
             }
         }
@@ -837,7 +861,8 @@ fn update_local_state_after_melt(
         if keep_proofs.is_empty() {
             vec![]
         } else {
-            let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let proof_data: Vec<ProofData> =
+                keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
             vec![TokenData {
                 event_id: event_id.clone(),
                 mint: mint_url.to_string(),

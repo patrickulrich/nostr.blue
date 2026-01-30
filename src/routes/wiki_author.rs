@@ -1,13 +1,13 @@
 //! Wiki Author Route
 //! Display wiki articles by a specific author (NIP-54)
 
-use dioxus::prelude::*;
+use crate::components::icons::{ArrowLeftIcon, BookOpenIcon, UserIcon};
 use crate::components::{WikiCardSkeleton, WikiGrid};
-use crate::components::icons::{BookOpenIcon, ArrowLeftIcon, UserIcon};
-use crate::stores::{wiki_store, nostr_client, profiles};
-use crate::stores::wiki_store::CachedWikiPage;
 use crate::routes::Route;
+use crate::stores::wiki_store::CachedWikiPage;
+use crate::stores::{nostr_client, profiles, wiki_store};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 /// Wiki author page - shows all wiki articles by a specific author
 #[component]

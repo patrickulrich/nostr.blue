@@ -23,9 +23,8 @@ use std::sync::LazyLock;
 use super::markdown::{render_markdown, sanitize_html};
 use super::nip54::render_wikilinks_to_html;
 use super::nkbip03::{
-    extract_citations, has_citations, render_citations_with_data,
-    generate_footnotes_html_with_data, generate_endnotes_html_with_data,
-    ResolvedCitation, CitationReference,
+    extract_citations, generate_endnotes_html_with_data, generate_footnotes_html_with_data,
+    has_citations, render_citations_with_data, CitationReference, ResolvedCitation,
 };
 
 // ============================================================================
@@ -56,12 +55,24 @@ pub fn detect_content_format(content: &str) -> ContentFormat {
         let trimmed = line.trim();
 
         // Markdown heading: # Title (but not #hashtag)
-        if trimmed.starts_with('#') && trimmed.chars().nth(1).map(|c| c == ' ' || c == '#').unwrap_or(false) {
+        if trimmed.starts_with('#')
+            && trimmed
+                .chars()
+                .nth(1)
+                .map(|c| c == ' ' || c == '#')
+                .unwrap_or(false)
+        {
             markdown_score += 3;
         }
 
         // AsciiDoc heading: = Title
-        if trimmed.starts_with('=') && trimmed.chars().nth(1).map(|c| c == ' ' || c == '=').unwrap_or(false) {
+        if trimmed.starts_with('=')
+            && trimmed
+                .chars()
+                .nth(1)
+                .map(|c| c == ' ' || c == '=')
+                .unwrap_or(false)
+        {
             asciidoc_score += 3;
         }
     }
@@ -159,9 +170,8 @@ static HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // Bold: *text* or **text**
-static BOLD_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\*\*?([^*\n]+?)\*\*?").expect("Invalid bold regex")
-});
+static BOLD_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\*\*?([^*\n]+?)\*\*?").expect("Invalid bold regex"));
 
 // Italic: _text_ or __text__ (but not inside words)
 static ITALIC_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -169,9 +179,8 @@ static ITALIC_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // Monospace: `text` or +text+
-static MONO_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"`([^`\n]+?)`|\+([^+\n]+?)\+").expect("Invalid mono regex")
-});
+static MONO_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"`([^`\n]+?)`|\+([^+\n]+?)\+").expect("Invalid mono regex"));
 
 // Links: link:url[text] or url[text]
 static LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -179,9 +188,8 @@ static LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // Images: image:url[alt] or image::url[alt]
-static IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"image::?([^\s\[]+)\[([^\]]*)\]").expect("Invalid image regex")
-});
+static IMAGE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"image::?([^\s\[]+)\[([^\]]*)\]").expect("Invalid image regex"));
 
 // Code blocks: [source,lang] followed by ---- delimited block
 static CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -195,19 +203,16 @@ static LITERAL_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // Unordered list items: * item or - item (with nesting via **)
-static UNORDERED_LIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^(\*+|-)\s+(.+)$").expect("Invalid unordered list regex")
-});
+static UNORDERED_LIST_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^(\*+|-)\s+(.+)$").expect("Invalid unordered list regex"));
 
 // Ordered list items: . item or 1. item
-static ORDERED_LIST_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^(\.+|\d+\.)\s+(.+)$").expect("Invalid ordered list regex")
-});
+static ORDERED_LIST_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^(\.+|\d+\.)\s+(.+)$").expect("Invalid ordered list regex"));
 
 // Blockquote: > text or [quote] block
-static BLOCKQUOTE_LINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^>\s*(.*)$").expect("Invalid blockquote regex")
-});
+static BLOCKQUOTE_LINE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^>\s*(.*)$").expect("Invalid blockquote regex"));
 
 // Admonitions: NOTE: text or [NOTE] followed by ====
 static ADMONITION_INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -216,19 +221,16 @@ static ADMONITION_INLINE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // Horizontal rule: ''' or ---
-static HR_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^(?:'{3,}|-{3,})$").expect("Invalid hr regex")
-});
+static HR_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^(?:'{3,}|-{3,})$").expect("Invalid hr regex"));
 
 // Line breaks: + at end of line
-static LINE_BREAK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s+\+\s*$").expect("Invalid line break regex")
-});
+static LINE_BREAK_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+\+\s*$").expect("Invalid line break regex"));
 
 // Table: |===... (simple table parsing)
-static TABLE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)\|===\s*\n(.*?)\n\|===").expect("Invalid table regex")
-});
+static TABLE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)\|===\s*\n(.*?)\n\|===").expect("Invalid table regex"));
 
 // ============================================================================
 // Main Rendering Functions
@@ -615,8 +617,16 @@ fn render_italic(content: &str) -> String {
             let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
 
             // Preserve leading/trailing characters that aren't underscores
-            let leading = if full.starts_with('_') { "" } else { &full[..1] };
-            let trailing = if full.ends_with('_') { "" } else { &full[full.len()-1..] };
+            let leading = if full.starts_with('_') {
+                ""
+            } else {
+                &full[..1]
+            };
+            let trailing = if full.ends_with('_') {
+                ""
+            } else {
+                &full[full.len() - 1..]
+            };
 
             format!("{}<em>{}</em>{}", leading, text, trailing)
         })
@@ -714,11 +724,14 @@ pub fn markdown_to_plain_text(content: &str) -> String {
 
     // Remove wikilinks [[target|display]] or [[target]]
     let wikilink_regex = Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").unwrap();
-    text = wikilink_regex.replace_all(&text, |caps: &regex::Captures| {
-        caps.get(2).map(|m| m.as_str()).unwrap_or(
-            caps.get(1).map(|m| m.as_str()).unwrap_or("")
-        ).to_string()
-    }).to_string();
+    text = wikilink_regex
+        .replace_all(&text, |caps: &regex::Captures| {
+            caps.get(2)
+                .map(|m| m.as_str())
+                .unwrap_or(caps.get(1).map(|m| m.as_str()).unwrap_or(""))
+                .to_string()
+        })
+        .to_string();
 
     // Remove blockquotes (> text)
     let blockquote_regex = Regex::new(r"(?m)^>\s*(.*)$").unwrap();
@@ -766,7 +779,9 @@ pub fn asciidoc_to_text(content: &str) -> String {
     text = BLOCKQUOTE_LINE_REGEX.replace_all(&text, "$1 ").to_string();
 
     // Remove admonition markers
-    text = ADMONITION_INLINE_REGEX.replace_all(&text, "$2 ").to_string();
+    text = ADMONITION_INLINE_REGEX
+        .replace_all(&text, "$2 ")
+        .to_string();
 
     // Remove horizontal rules
     text = HR_REGEX.replace_all(&text, " ").to_string();
@@ -853,7 +868,8 @@ pub fn render_content_with_citations(
     let format = detect_content_format(content);
     let has_citations_flag = has_citations(content);
     let citation_refs = extract_citations(content);
-    let citation_identifiers: Vec<String> = citation_refs.iter().map(|c| c.identifier.clone()).collect();
+    let citation_identifiers: Vec<String> =
+        citation_refs.iter().map(|c| c.identifier.clone()).collect();
 
     // Process citations in the content
     let content_with_citations = if has_citations_flag {
@@ -1005,7 +1021,8 @@ mod tests {
 
     #[test]
     fn test_asciidoc_to_text() {
-        let asciidoc = "= Title\n\nThis is *bold* and _italic_ text with a link:https://example.com[link].";
+        let asciidoc =
+            "= Title\n\nThis is *bold* and _italic_ text with a link:https://example.com[link].";
         let text = asciidoc_to_text(asciidoc);
         assert!(text.contains("Title"));
         assert!(text.contains("bold"));
@@ -1018,6 +1035,9 @@ mod tests {
     #[test]
     fn test_slugify_heading() {
         assert_eq!(slugify_heading("Hello World"), "hello-world");
-        assert_eq!(slugify_heading("Chapter 1: Introduction"), "chapter-1-introduction");
+        assert_eq!(
+            slugify_heading("Chapter 1: Introduction"),
+            "chapter-1-introduction"
+        );
     }
 }

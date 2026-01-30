@@ -4,13 +4,13 @@
 
 use dioxus::prelude::*;
 
-use crate::routes::Route;
-use crate::stores::{nostr_client, calendar_store, profiles, auth_store};
-use crate::stores::calendar_store::{UnifiedEvent, CalendarEventComment};
-use crate::utils::nip52::{RsvpStatus, is_online_location};
-use crate::utils::nip53::{RoomPresence, LiveActivityEvent};
-use crate::utils::ics::{export_event_to_ics, download_ics};
 use crate::components::ClientInitializing;
+use crate::routes::Route;
+use crate::stores::calendar_store::{CalendarEventComment, UnifiedEvent};
+use crate::stores::{auth_store, calendar_store, nostr_client, profiles};
+use crate::utils::ics::{download_ics, export_event_to_ics};
+use crate::utils::nip52::{is_online_location, RsvpStatus};
+use crate::utils::nip53::{LiveActivityEvent, RoomPresence};
 use crate::utils::truncate_pubkey;
 
 #[component]
@@ -43,7 +43,11 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
         let naddr_clone = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        log::info!("[CalendarEventDetail] Effect triggered, client_initialized={}, naddr={}", client_initialized, naddr_clone);
+        log::info!(
+            "[CalendarEventDetail] Effect triggered, client_initialized={}, naddr={}",
+            client_initialized,
+            naddr_clone
+        );
 
         if !client_initialized {
             log::info!("[CalendarEventDetail] Client not initialized, waiting...");
@@ -51,14 +55,20 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
         }
 
         spawn(async move {
-            log::info!("[CalendarEventDetail] Starting fetch for naddr: {}", naddr_clone);
+            log::info!(
+                "[CalendarEventDetail] Starting fetch for naddr: {}",
+                naddr_clone
+            );
             loading.set(true);
             error.set(None);
 
             // Fetch unified event (handles both calendar events and meetings)
             match calendar_store::fetch_unified_event_by_naddr(&naddr_clone).await {
                 Ok(Some(unified_event)) => {
-                    log::info!("[CalendarEventDetail] Successfully fetched event: {}", unified_event.title());
+                    log::info!(
+                        "[CalendarEventDetail] Successfully fetched event: {}",
+                        unified_event.title()
+                    );
                     let coord = unified_event.coordinate().to_string();
                     event.set(Some(unified_event.clone()));
 
@@ -88,26 +98,41 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                         comments_loading.set(false);
                     } else {
                         // For meetings, fetch room presence (users in the last 5 minutes)
-                        if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await {
-                            log::info!("[CalendarEventDetail] Found {} users present", presence.len());
+                        if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await
+                        {
+                            log::info!(
+                                "[CalendarEventDetail] Found {} users present",
+                                presence.len()
+                            );
                             room_presence.set(presence);
                         }
 
                         // For MeetingRoom (30313), fetch parent space to get service_url
-                        if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) = unified_event {
+                        if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) =
+                            unified_event
+                        {
                             if let Some(ref space_coord) = meeting.space_coordinate {
-                                log::info!("[CalendarEventDetail] Fetching parent space: {}", space_coord);
+                                log::info!(
+                                    "[CalendarEventDetail] Fetching parent space: {}",
+                                    space_coord
+                                );
                                 // Convert coordinate to naddr format for fetching (splitn to handle identifiers with colons)
                                 let parts: Vec<&str> = space_coord.splitn(3, ':').collect();
                                 if parts.len() >= 3 {
                                     // Build naddr from coordinate parts using nostr prelude
                                     use nostr::prelude::*;
                                     if let Ok(pk) = PublicKey::from_hex(parts[1]) {
-                                        let coordinate = Coordinate::new(Kind::Custom(30312), pk).identifier(parts[2]);
+                                        let coordinate = Coordinate::new(Kind::Custom(30312), pk)
+                                            .identifier(parts[2]);
                                         let nip19 = Nip19Coordinate::new(coordinate, vec![]);
                                         if let Ok(naddr_str) = nip19.to_bech32() {
-                                            if let Ok(Some(UnifiedEvent::Live(LiveActivityEvent::Space(space)))) =
-                                                calendar_store::fetch_unified_event_by_naddr(&naddr_str).await {
+                                            if let Ok(Some(UnifiedEvent::Live(
+                                                LiveActivityEvent::Space(space),
+                                            ))) = calendar_store::fetch_unified_event_by_naddr(
+                                                &naddr_str,
+                                            )
+                                            .await
+                                            {
                                                 log::info!("[CalendarEventDetail] Found parent space service_url: {}", space.service_url);
                                                 parent_space_url.set(Some(space.service_url));
                                             }
@@ -119,7 +144,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     }
                 }
                 Ok(None) => {
-                    log::warn!("[CalendarEventDetail] Event not found for naddr: {}", naddr_clone);
+                    log::warn!(
+                        "[CalendarEventDetail] Event not found for naddr: {}",
+                        naddr_clone
+                    );
                     error.set(Some("Event not found".to_string()));
                 }
                 Err(e) => {
@@ -134,7 +162,9 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
 
     // Handle RSVP
     let handle_rsvp = move |status: RsvpStatus| {
-        let Some(evt) = event.read().as_ref().cloned() else { return };
+        let Some(evt) = event.read().as_ref().cloned() else {
+            return;
+        };
 
         spawn(async move {
             rsvp_loading.set(true);
@@ -172,7 +202,9 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
             return;
         }
 
-        let Some(evt) = event.read().as_ref().cloned() else { return };
+        let Some(evt) = event.read().as_ref().cloned() else {
+            return;
+        };
 
         let coord = match &evt {
             UnifiedEvent::Calendar(e) => e.coordinate.clone(),
@@ -935,7 +967,7 @@ fn OrganizerCard(pubkey: String) -> Element {
     let npub = nostr::PublicKey::from_hex(&pubkey)
         .ok()
         .and_then(|pk| nostr::nips::nip19::ToBech32::to_bech32(&pk).ok())
-        .map(|s| format!("{}...{}", &s[..12], &s[s.len()-8..]))
+        .map(|s| format!("{}...{}", &s[..12], &s[s.len() - 8..]))
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
 
     rsx! {
@@ -1000,9 +1032,29 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
 
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
 
-    let month_names = ["January", "February", "March", "April", "May", "June",
-                       "July", "August", "September", "October", "November", "December"];
-    let weekday_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    let month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let weekday_names = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
 
     let weekday = date.get_day() as usize;
     let month = date.get_month() as usize;
@@ -1017,10 +1069,18 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         let hours = date.get_hours();
         let minutes = date.get_minutes();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
-        let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+        let hour_12 = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
 
-        format!("{}, {} {}, {} at {}:{:02} {}",
-                weekday_str, month_str, day, year, hour_12, minutes, am_pm)
+        format!(
+            "{}, {} {}, {} at {}:{:02} {}",
+            weekday_str, month_str, day, year, hour_12, minutes, am_pm
+        )
     }
 }
 

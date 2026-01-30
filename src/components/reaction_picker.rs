@@ -1,11 +1,11 @@
 //! Inline reaction picker for notes and posts
 //! Shows user's preferred reaction emojis
 
+use crate::components::icons::SettingsIcon;
+use crate::hooks::ReactionEmoji;
+use crate::stores::reactions_store::{PreferredReaction, PREFERRED_REACTIONS};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-use crate::hooks::ReactionEmoji;
-use crate::stores::reactions_store::{PREFERRED_REACTIONS, PreferredReaction};
-use crate::components::icons::SettingsIcon;
 
 /// Inline reaction picker that appears on hover/click
 /// Shows user's preferred reactions with optional settings button

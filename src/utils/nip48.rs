@@ -12,8 +12,8 @@
 //! - rss: RSS feeds (URL with guid fragment)
 //! - web: Generic web content (URL format)
 
-use nostr_sdk::prelude::*;
 use nostr::nips::nip48::Protocol;
+use nostr_sdk::prelude::*;
 
 /// Extracted proxy tag information
 #[derive(Clone, Debug, PartialEq)]
@@ -76,7 +76,10 @@ mod tests {
 
     #[test]
     fn test_protocol_display_names() {
-        assert_eq!(get_protocol_display_name(&Protocol::ActivityPub), "Fediverse");
+        assert_eq!(
+            get_protocol_display_name(&Protocol::ActivityPub),
+            "Fediverse"
+        );
         assert_eq!(get_protocol_display_name(&Protocol::ATProto), "Bluesky");
         assert_eq!(get_protocol_display_name(&Protocol::Rss), "RSS");
         assert_eq!(get_protocol_display_name(&Protocol::Web), "Web");

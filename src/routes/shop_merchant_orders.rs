@@ -1,11 +1,15 @@
 //! Shop Merchant Orders - Seller's incoming orders
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus, extract_product_name_from_coordinate};
-use crate::stores::shop_store::{fetch_seller_orders, update_order_status, listen_for_order_updates};
 use crate::components::shop::OrderStatusBadge;
+use crate::routes::Route;
+use crate::stores::shop_store::{
+    fetch_seller_orders, listen_for_order_updates, update_order_status,
+};
 use crate::utils::format::truncate_id;
+use crate::utils::nip99::{
+    extract_product_name_from_coordinate, OrderStatus, ShippingStatus, ShopOrder,
+};
+use dioxus::prelude::*;
 
 /// Merchant orders page
 #[component]
@@ -48,18 +52,23 @@ pub fn ShopMerchantOrders() -> Element {
     let filtered_orders = {
         let all = orders.read();
         let f = *filter.read();
-        all.iter().filter(|o| {
-            match f {
+        all.iter()
+            .filter(|o| match f {
                 OrderFilter::All => true,
                 OrderFilter::Pending => o.status == OrderStatus::Pending,
                 OrderFilter::Confirmed => o.status == OrderStatus::Confirmed,
                 OrderFilter::Processing => o.status == OrderStatus::Processing,
                 OrderFilter::Completed => o.status == OrderStatus::Completed,
-            }
-        }).cloned().collect::<Vec<_>>()
+            })
+            .cloned()
+            .collect::<Vec<_>>()
     };
 
-    let pending_count = orders.read().iter().filter(|o| o.status == OrderStatus::Pending).count();
+    let pending_count = orders
+        .read()
+        .iter()
+        .filter(|o| o.status == OrderStatus::Pending)
+        .count();
 
     rsx! {
         div { class: "min-h-screen",

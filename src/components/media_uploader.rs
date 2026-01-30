@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
-use dioxus::events::FormData;
-use wasm_bindgen::JsCast;
-use web_sys::HtmlInputElement;
 use crate::stores::blossom_store;
 use crate::utils::format::display_server_url;
+use dioxus::events::FormData;
+use dioxus::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::HtmlInputElement;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MediaUploaderProps {
@@ -73,7 +73,9 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             error.set(None);
 
             spawn(async move {
-                match blossom_store::upload_image(data, mime_type, quality_val, Some(server_url)).await {
+                match blossom_store::upload_image(data, mime_type, quality_val, Some(server_url))
+                    .await
+                {
                     Ok(url) => {
                         log::info!("Upload successful: {}", url);
                         on_upload.call(url);
@@ -261,9 +263,9 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
 
 /// Helper function to read file as bytes with specific input ID
 async fn read_file_as_bytes(_file_name: &str, input_id: &str) -> Result<(Vec<u8>, String), String> {
+    use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
-    use js_sys::{Uint8Array, ArrayBuffer};
 
     let window = window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;

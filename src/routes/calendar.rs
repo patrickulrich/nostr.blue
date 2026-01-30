@@ -5,16 +5,15 @@
 use dioxus::prelude::*;
 use std::collections::HashSet;
 
-use crate::stores::{nostr_client, calendar_store, auth_store};
-use crate::stores::calendar_store::UnifiedEvent;
 use crate::components::{
-    ClientInitializing, CalendarView, CalendarViewMode, CalendarViewSkeleton,
-    MiniCalendar
+    CalendarView, CalendarViewMode, CalendarViewSkeleton, ClientInitializing, MiniCalendar,
 };
 use crate::routes::Route;
-use crate::utils::ics::{export_events_to_ics, download_ics};
+use crate::stores::calendar_store::UnifiedEvent;
+use crate::stores::{auth_store, calendar_store, nostr_client};
+use crate::utils::date_helpers::{get_event_date, get_today};
+use crate::utils::ics::{download_ics, export_events_to_ics};
 use crate::utils::nip52::CalendarEvent;
-use crate::utils::date_helpers::{get_today, get_event_date};
 
 /// Calendar page component
 #[component]
@@ -39,7 +38,9 @@ pub fn Calendar() -> Element {
         let show_livestreams = show_livestreams();
         let show_private = show_private();
 
-        events.read().iter()
+        events
+            .read()
+            .iter()
             .filter(|e| {
                 if e.is_private() {
                     show_private
@@ -57,21 +58,28 @@ pub fn Calendar() -> Element {
 
     // Memoized counts for each event type
     let all_day_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_all_day() && !e.is_private()).count()
+        events
+            .read()
+            .iter()
+            .filter(|e| e.is_all_day() && !e.is_private())
+            .count()
     });
     let timed_count = use_memo(move || {
-        events.read().iter().filter(|e| !e.is_all_day() && !e.is_private() && !e.is_livestream()).count()
+        events
+            .read()
+            .iter()
+            .filter(|e| !e.is_all_day() && !e.is_private() && !e.is_livestream())
+            .count()
     });
-    let livestream_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_livestream()).count()
-    });
-    let private_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_private()).count()
-    });
+    let livestream_count =
+        use_memo(move || events.read().iter().filter(|e| e.is_livestream()).count());
+    let private_count = use_memo(move || events.read().iter().filter(|e| e.is_private()).count());
 
     // Compute event dates for mini calendar highlights (using filtered events)
     let filtered_event_dates = use_memo(move || {
-        filtered_events.read().iter()
+        filtered_events
+            .read()
+            .iter()
             .map(get_event_date)
             .collect::<HashSet<String>>()
     });
@@ -111,9 +119,7 @@ pub fn Calendar() -> Element {
     });
 
     // Month header
-    let month_header = use_memo(move || {
-        format_month_header(&selected_date.read())
-    });
+    let month_header = use_memo(move || format_month_header(&selected_date.read()));
 
     // Navigate to previous period
     let go_prev = move |_| {
@@ -153,7 +159,10 @@ pub fn Calendar() -> Element {
         if !naddr.is_empty() {
             // Navigate to event detail
             let nav = navigator();
-            nav.push(Route::CalendarEventDetail { naddr, from: Some("calendar".to_string()) });
+            nav.push(Route::CalendarEventDetail {
+                naddr,
+                from: Some("calendar".to_string()),
+            });
         }
     };
 
@@ -587,8 +596,20 @@ fn format_month_header(date: &str) -> String {
     let year: i32 = parts[0].parse().unwrap_or(2024);
     let month: u32 = parts[1].parse().unwrap_or(1);
 
-    let month_names = ["January", "February", "March", "April", "May", "June",
-                       "July", "August", "September", "October", "November", "December"];
+    let month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
 
     format!("{} {}", month_names[(month - 1) as usize], year)
 }

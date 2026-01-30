@@ -1,10 +1,14 @@
 //! Shop Product Detail - View a single product (NIP-99 Kind 30402)
 
-use dioxus::prelude::*;
-use crate::utils::nip99::{Product, ProductReview, ShippingOption};
-use crate::stores::shop_store::{fetch_product_by_naddr, add_to_cart, fetch_product_reviews, fetch_shipping_options, CART_ITEMS};
-use crate::components::shop::{QuantitySelector, ImageCarousel, ReviewCard, MerchantCard, ConditionBadge};
+use crate::components::shop::{
+    ConditionBadge, ImageCarousel, MerchantCard, QuantitySelector, ReviewCard,
+};
 use crate::routes::Route;
+use crate::stores::shop_store::{
+    add_to_cart, fetch_product_by_naddr, fetch_product_reviews, fetch_shipping_options, CART_ITEMS,
+};
+use crate::utils::nip99::{Product, ProductReview, ShippingOption};
+use dioxus::prelude::*;
 
 /// Product detail page
 #[component]

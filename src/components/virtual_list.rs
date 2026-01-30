@@ -55,8 +55,8 @@ impl Default for VirtualScrollConfig {
     fn default() -> Self {
         Self {
             estimated_item_height: 200.0, // Typical note card height
-            overscan_count: 5,             // Render 5 extra items above/below
-            min_batch_size: 10,            // Always render at least 10 items
+            overscan_count: 5,            // Render 5 extra items above/below
+            min_batch_size: 10,           // Always render at least 10 items
         }
     }
 }
@@ -156,16 +156,12 @@ impl VirtualState {
 
     /// Calculate total height of all items
     fn calculate_total_height(&self) -> f64 {
-        (0..self.total_items)
-            .map(|i| self.get_item_height(i))
-            .sum()
+        (0..self.total_items).map(|i| self.get_item_height(i)).sum()
     }
 
     /// Calculate offset (top position) for a specific item
     fn calculate_item_offset(&self, index: usize) -> f64 {
-        (0..index)
-            .map(|i| self.get_item_height(i))
-            .sum()
+        (0..index).map(|i| self.get_item_height(i)).sum()
     }
 
     /// Update measured height for an item
@@ -252,7 +248,8 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
     // Memoize visible items calculation - only recompute when items or range changes
     // Cloning Rc<T> is cheap (just incrementing reference count)
     let visible_items = use_memo(move || {
-        props.items
+        props
+            .items
             .iter()
             .enumerate()
             .skip(start_index)

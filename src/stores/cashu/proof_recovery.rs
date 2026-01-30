@@ -14,8 +14,8 @@ use super::internal::get_or_create_wallet;
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{IN_FLIGHT_MELT_REQUESTS, IN_FLIGHT_SEND_REQUESTS, WALLET_TOKENS};
 use super::types::{
-    ProofData, ProofState, WalletTokensStoreStoreExt,
-    RESERVED_PROOF_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_SECS, IN_FLIGHT_MELT_TIMEOUT_SECS,
+    ProofData, ProofState, WalletTokensStoreStoreExt, IN_FLIGHT_MELT_TIMEOUT_SECS,
+    PENDING_SPENT_TIMEOUT_SECS, RESERVED_PROOF_TIMEOUT_SECS,
 };
 use super::utils::now_secs;
 
@@ -188,7 +188,7 @@ pub struct StuckProofInfo {
 /// Hash a proof secret for stable UI identification
 /// Uses truncated SHA-256 to avoid exposing raw secret in UI/logs
 fn hash_proof_id(secret: &str) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(secret.as_bytes());
     format!("{:x}", hasher.finalize())[..16].to_string()
@@ -274,7 +274,10 @@ pub async fn recover_reserved_proofs() -> ProofRecoveryResult {
         safe_to_recover.retain(|p| !send_secrets.contains(p.secret.as_str()));
         let filtered = before_count - safe_to_recover.len();
         if filtered > 0 {
-            log::debug!("Excluded {} proofs from active send/swap operations", filtered);
+            log::debug!(
+                "Excluded {} proofs from active send/swap operations",
+                filtered
+            );
         }
     }
 
@@ -409,7 +412,10 @@ async fn check_and_recover_proofs(
     }
 
     if conversion_errors > 0 {
-        log::warn!("Skipped {} proofs due to conversion errors", conversion_errors);
+        log::warn!(
+            "Skipped {} proofs due to conversion errors",
+            conversion_errors
+        );
     }
 
     if cdk_proofs.is_empty() {
@@ -602,7 +608,9 @@ pub fn get_wallet_health_stats() -> WalletHealthStats {
     let now = now_secs();
 
     // Get spendable balance
-    let spendable = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
+    let spendable = crate::stores::cashu_cdk_bridge::WALLET_BALANCES
+        .read()
+        .available;
 
     // Get all proofs and categorize
     let store = WALLET_TOKENS();

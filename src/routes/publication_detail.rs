@@ -1,21 +1,23 @@
 //! Publication Detail Route
 //! View NKBIP-01 publication with TOC (Kind 30040/30041)
 
+use crate::components::icons::{
+    AlertTriangleIcon, ArrowLeftIcon, BookOpenIcon, BookmarkIcon, CheckIcon, CopyIcon, Link2Icon,
+    RefreshIcon, ShareIcon,
+};
+use crate::components::{
+    CitationMetadata, PublicationProgress, PublicationSectionContent, PublicationSectionSkeleton,
+    PublicationTocDynamic, PublicationTocHorizontal, PublicationTocSkeleton, SectionMetadata,
+    SectionNavigation, SectionOutline, ShareModal,
+};
+use crate::routes::Route;
+use crate::stores::publication_store::{self, PublicationSection, PublicationTree};
+use crate::stores::{auth_store, nostr_client};
+use crate::utils::clipboard::copy_formatted_content;
+use crate::utils::nkbip08::extract_book_wikilinks;
 use dioxus::prelude::*;
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use crate::components::{
-    PublicationTocDynamic, PublicationTocSkeleton, PublicationProgress, PublicationTocHorizontal,
-    PublicationSectionContent, PublicationSectionSkeleton,
-    SectionMetadata, SectionNavigation, SectionOutline, CitationMetadata,
-    ShareModal,
-};
-use crate::components::icons::{ArrowLeftIcon, ShareIcon, BookmarkIcon, BookOpenIcon, Link2Icon, CopyIcon, CheckIcon, RefreshIcon, AlertTriangleIcon};
-use crate::utils::clipboard::copy_formatted_content;
-use crate::stores::publication_store::{self, PublicationTree, PublicationSection};
-use crate::stores::{auth_store, nostr_client};
-use crate::routes::Route;
-use crate::utils::nkbip08::extract_book_wikilinks;
 
 /// Maximum number of dynamically loaded sections to cache
 const DYNAMIC_SECTIONS_CACHE_SIZE: usize = 100;
@@ -76,7 +78,10 @@ pub fn PublicationDetail(naddr: String) -> Element {
     let mut handle_section_select = move |address: String| {
         // First, check if this address corresponds to a nested index
         // If so, we should update the TOC parent to drill into it
-        let section_opt = tree.read().as_ref().and_then(|t| t.sections.get(&address).cloned());
+        let section_opt = tree
+            .read()
+            .as_ref()
+            .and_then(|t| t.sections.get(&address).cloned());
 
         if let Some(section) = section_opt {
             if section.is_index && !section.child_addresses.is_empty() {
@@ -91,7 +96,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
     // Dynamic section storage for child sections not in the main tree (bounded LRU cache)
     let mut dynamic_sections = use_signal(|| {
         LruCache::<String, publication_store::PublicationSection>::new(
-            NonZeroUsize::new(DYNAMIC_SECTIONS_CACHE_SIZE).unwrap()
+            NonZeroUsize::new(DYNAMIC_SECTIONS_CACHE_SIZE).unwrap(),
         )
     });
 
@@ -110,7 +115,11 @@ pub fn PublicationDetail(naddr: String) -> Element {
         let sel = selected_section.read().clone();
         sel.and_then(|addr| {
             // First try to get from tree
-            if let Some(section) = tree.read().as_ref().and_then(|t| t.sections.get(&addr).cloned()) {
+            if let Some(section) = tree
+                .read()
+                .as_ref()
+                .and_then(|t| t.sections.get(&addr).cloned())
+            {
                 return Some(section);
             }
             // Then try dynamic sections LRU cache (for child sections loaded on demand)
@@ -132,7 +141,11 @@ pub fn PublicationDetail(naddr: String) -> Element {
         let sel = selected_section.read().clone();
         if let Some(addr) = sel {
             // Check if section already exists or is currently loading
-            let in_tree = tree.read().as_ref().map(|t| t.sections.contains_key(&addr)).unwrap_or(false);
+            let in_tree = tree
+                .read()
+                .as_ref()
+                .map(|t| t.sections.contains_key(&addr))
+                .unwrap_or(false);
             let in_dynamic = dynamic_sections.read().contains(&addr);
             let is_loading = section_loading.read().contains(&addr);
 
@@ -167,7 +180,9 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                 match nostr_client::fetch_events_aggregated(
                                     filter,
                                     std::time::Duration::from_secs(10),
-                                ).await {
+                                )
+                                .await
+                                {
                                     Ok(events) => {
                                         // Check if selection changed while fetching - avoid stale updates
                                         let current_sel = selected_section.read().clone();
@@ -184,36 +199,75 @@ pub fn PublicationDetail(naddr: String) -> Element {
                                         }
 
                                         if let Some(event) = events.first() {
-                                            if let Some(section) = publication_store::parse_publication_section(event) {
+                                            if let Some(section) =
+                                                publication_store::parse_publication_section(event)
+                                            {
                                                 dynamic_sections.write().put(addr.clone(), section);
                                                 section_load_errors.write().remove(&addr_for_error);
                                             } else {
                                                 log::warn!("Failed to parse publication section for addr={}", addr_for_log);
-                                                section_load_errors.write().insert(addr_for_error.clone(), "Failed to parse section content".to_string());
+                                                section_load_errors.write().insert(
+                                                    addr_for_error.clone(),
+                                                    "Failed to parse section content".to_string(),
+                                                );
                                             }
                                         } else {
-                                            log::warn!("No events found for section addr={} (took {:?})", addr_for_log, start.elapsed());
-                                            section_load_errors.write().insert(addr_for_error.clone(), "Section not found".to_string());
+                                            log::warn!(
+                                                "No events found for section addr={} (took {:?})",
+                                                addr_for_log,
+                                                start.elapsed()
+                                            );
+                                            section_load_errors.write().insert(
+                                                addr_for_error.clone(),
+                                                "Section not found".to_string(),
+                                            );
                                         }
                                     }
                                     Err(e) => {
-                                        log::warn!("Failed to fetch section addr={}: {} (took {:?})", addr_for_log, e, start.elapsed());
-                                        section_load_errors.write().insert(addr_for_error.clone(), format!("Network error: {}", e));
+                                        log::warn!(
+                                            "Failed to fetch section addr={}: {} (took {:?})",
+                                            addr_for_log,
+                                            e,
+                                            start.elapsed()
+                                        );
+                                        section_load_errors.write().insert(
+                                            addr_for_error.clone(),
+                                            format!("Network error: {}", e),
+                                        );
                                     }
                                 }
                             }
                             (Err(e), _) => {
-                                log::warn!("Failed to parse kind from addr={}: {}", addr_for_log, e);
-                                section_load_errors.write().insert(addr_for_error.clone(), format!("Invalid section address: {}", e));
+                                log::warn!(
+                                    "Failed to parse kind from addr={}: {}",
+                                    addr_for_log,
+                                    e
+                                );
+                                section_load_errors.write().insert(
+                                    addr_for_error.clone(),
+                                    format!("Invalid section address: {}", e),
+                                );
                             }
                             (_, Err(e)) => {
-                                log::warn!("Failed to parse pubkey from addr={}: {}", addr_for_log, e);
-                                section_load_errors.write().insert(addr_for_error.clone(), format!("Invalid author key: {}", e));
+                                log::warn!(
+                                    "Failed to parse pubkey from addr={}: {}",
+                                    addr_for_log,
+                                    e
+                                );
+                                section_load_errors.write().insert(
+                                    addr_for_error.clone(),
+                                    format!("Invalid author key: {}", e),
+                                );
                             }
                         }
                     } else {
-                        log::warn!("Invalid address format (expected kind:pubkey:d-tag): {}", addr_for_log);
-                        section_load_errors.write().insert(addr_for_error.clone(), "Invalid address format".to_string());
+                        log::warn!(
+                            "Invalid address format (expected kind:pubkey:d-tag): {}",
+                            addr_for_log
+                        );
+                        section_load_errors
+                            .write()
+                            .insert(addr_for_error.clone(), "Invalid address format".to_string());
                     }
 
                     // Clear loading state
@@ -235,7 +289,9 @@ pub fn PublicationDetail(naddr: String) -> Element {
         if let Some(ref section) = *current_section.read() {
             // Only handle dynamically loaded sections that are nested indexes
             // Skip if this is the root
-            let is_root = tree.read().as_ref()
+            let is_root = tree
+                .read()
+                .as_ref()
                 .map(|t| t.root.a_tag == section.a_tag)
                 .unwrap_or(false);
 
@@ -244,7 +300,9 @@ pub fn PublicationDetail(naddr: String) -> Element {
             }
 
             // Check if this section is NOT in tree.sections (was loaded dynamically)
-            let in_tree = tree.read().as_ref()
+            let in_tree = tree
+                .read()
+                .as_ref()
                 .map(|t| t.sections.contains_key(&section.a_tag))
                 .unwrap_or(false);
 
@@ -253,7 +311,8 @@ pub fn PublicationDetail(naddr: String) -> Element {
                 let current_parent = current_toc_parent.read().clone();
 
                 // Only update if not already set to this section
-                let should_update = current_parent.as_ref()
+                let should_update = current_parent
+                    .as_ref()
                     .map(|p| p.a_tag != section.a_tag)
                     .unwrap_or(true);
 
@@ -272,7 +331,10 @@ pub fn PublicationDetail(naddr: String) -> Element {
                 // First check if current parent is a direct child of root
                 // Use case-insensitive comparison since pubkey hex can vary in case
                 let parent_a_tag_lower = parent.a_tag.to_lowercase();
-                let is_direct_child_of_root = t.root.section_addresses.iter()
+                let is_direct_child_of_root = t
+                    .root
+                    .section_addresses
+                    .iter()
                     .any(|s| s.address.to_lowercase() == parent_a_tag_lower);
 
                 if is_direct_child_of_root {
@@ -289,7 +351,8 @@ pub fn PublicationDetail(naddr: String) -> Element {
                             // Going back to root level
                             current_toc_parent.set(None);
                             if !t.root.section_addresses.is_empty() {
-                                selected_section.set(Some(t.root.section_addresses[0].address.clone()));
+                                selected_section
+                                    .set(Some(t.root.section_addresses[0].address.clone()));
                             }
                         } else {
                             // Navigate to intermediate parent
@@ -320,21 +383,28 @@ pub fn PublicationDetail(naddr: String) -> Element {
         let tree_opt = tree.read().clone();
 
         if let (Some(addr), Some(ref t)) = (sel, tree_opt) {
-            let addresses: Vec<_> = t.root.section_addresses.iter()
+            let addresses: Vec<_> = t
+                .root
+                .section_addresses
+                .iter()
                 .map(|s| s.address.clone())
                 .collect();
 
             if let Some(current_idx) = addresses.iter().position(|a| a == &addr) {
                 let prev = if current_idx > 0 {
                     let prev_addr = &addresses[current_idx - 1];
-                    t.sections.get(prev_addr).map(|s| (prev_addr.clone(), s.title.clone()))
+                    t.sections
+                        .get(prev_addr)
+                        .map(|s| (prev_addr.clone(), s.title.clone()))
                 } else {
                     None
                 };
 
                 let next = if current_idx < addresses.len() - 1 {
                     let next_addr = &addresses[current_idx + 1];
-                    t.sections.get(next_addr).map(|s| (next_addr.clone(), s.title.clone()))
+                    t.sections
+                        .get(next_addr)
+                        .map(|s| (next_addr.clone(), s.title.clone()))
                 } else {
                     None
                 };

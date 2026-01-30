@@ -58,7 +58,7 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
             cached_muted_posts.set(None);
             cached_blocked_users.set(None);
             last_pubkey.set(None);
-            last_fetch_error_at.set(None);  // Clear error cooldown on logout
+            last_fetch_error_at.set(None); // Clear error cooldown on logout
             return;
         }
 
@@ -74,7 +74,9 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
         }
 
         // Detect account switch (both Some but different) and clear stale caches
-        if let (Some(ref last), Some(ref current)) = (last_pubkey.peek().as_ref(), current_pubkey.as_ref()) {
+        if let (Some(ref last), Some(ref current)) =
+            (last_pubkey.peek().as_ref(), current_pubkey.as_ref())
+        {
             if last != current {
                 log::debug!("Account switch detected, clearing mute/block cache");
                 cached_muted_posts.set(None);
@@ -113,7 +115,8 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                     // Guard: only write if same user still logged in AND no invalidation occurred
                     // Uses peek() for validation - no subscription created
                     let current = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
-                    let current_invalidate = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
+                    let current_invalidate =
+                        *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
                     if current == auth_pubkey_snapshot
                         && current_invalidate == invalidate_token_snapshot
                         && auth_pubkey_snapshot.is_some()
@@ -125,16 +128,20 @@ pub fn use_mute_block_cache() -> (MuteBlockCache, MuteBlockCache) {
                 }
                 Err(e) => {
                     // nostr-sdk pattern: structured logging with truncated IDs
-                    let snapshot_short = auth_pubkey_snapshot.as_ref()
-                        .map(|s| &s[..8.min(s.len())]);
+                    let snapshot_short =
+                        auth_pubkey_snapshot.as_ref().map(|s| &s[..8.min(s.len())]);
                     log::error!(
                         "Failed to fetch mute list: {} (snapshot={:?})",
-                        e, snapshot_short
+                        e,
+                        snapshot_short
                     );
                     // Only set error if context still valid (same user, no invalidation)
                     let current = crate::stores::auth_store::AUTH_STATE.peek().pubkey.clone();
-                    let current_invalidate = *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
-                    if current == auth_pubkey_snapshot && current_invalidate == invalidate_token_snapshot {
+                    let current_invalidate =
+                        *crate::stores::nostr_client::MUTE_BLOCK_INVALIDATE.peek();
+                    if current == auth_pubkey_snapshot
+                        && current_invalidate == invalidate_token_snapshot
+                    {
                         last_fetch_error_at.set(Some(now_secs())); // Set error timestamp
                     }
                 }

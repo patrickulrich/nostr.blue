@@ -1,15 +1,15 @@
-use dioxus::prelude::*;
-use dioxus::hooks::use_reactive;
-use dioxus::html::input_data::keyboard_types::Key;
-use nostr_sdk::{PublicKey, EventId, RelayUrl};
 use crate::services::lnurl;
 use crate::stores::nostr_client::get_client;
-use crate::stores::{signer, nwc_store, settings_store, cashu};
-use qrcode::QrCode;
-use qrcode::render::svg;
-use wasm_bindgen::prelude::*;
+use crate::stores::{cashu, nwc_store, settings_store, signer};
+use dioxus::hooks::use_reactive;
+use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr_sdk::{EventId, PublicKey, RelayUrl};
+use qrcode::render::svg;
+use qrcode::QrCode;
 use std::time::Duration;
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
@@ -30,17 +30,15 @@ async fn webln_enable() -> Result<(), String> {
 
 // Safe wrapper for webln_send_payment that handles errors gracefully
 async fn webln_send_payment(invoice: &str) -> Result<JsValue, String> {
-    webln_send_payment_raw(invoice)
-        .await
-        .map_err(|e| {
-            // Check if it's a user cancellation
-            let error_msg = format!("{:?}", e);
-            if error_msg.contains("Prompt was closed") || error_msg.contains("User rejected") {
-                "Payment cancelled by user".to_string()
-            } else {
-                format!("WebLN payment failed: {}", error_msg)
-            }
-        })
+    webln_send_payment_raw(invoice).await.map_err(|e| {
+        // Check if it's a user cancellation
+        let error_msg = format!("{:?}", e);
+        if error_msg.contains("Prompt was closed") || error_msg.contains("User rejected") {
+            "Payment cancelled by user".to_string()
+        } else {
+            format!("WebLN payment failed: {}", error_msg)
+        }
+    })
 }
 
 fn is_webln_available() -> bool {
@@ -139,7 +137,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             let signer_type = match signer::get_signer() {
                 Some(s) => s,
                 None => {
-                    error_msg.set(Some("No signer available. Please connect a signer first.".to_string()));
+                    error_msg.set(Some(
+                        "No signer available. Please connect a signer first.".to_string(),
+                    ));
                     loading.set(false);
                     return;
                 }
@@ -188,22 +188,23 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             }
 
             // Prepare zap
-            let (pay_info, amount_msats) = match lnurl::prepare_zap(
-                lud16.as_deref(),
-                lud06.as_deref(),
-                amount,
-            ).await {
-                Ok(info) => info,
-                Err(e) => {
-                    error_msg.set(Some(format!("Failed to prepare zap: {}", e)));
-                    loading.set(false);
-                    return;
-                }
-            };
+            let (pay_info, amount_msats) =
+                match lnurl::prepare_zap(lud16.as_deref(), lud06.as_deref(), amount).await {
+                    Ok(info) => info,
+                    Err(e) => {
+                        error_msg.set(Some(format!("Failed to prepare zap: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                };
 
             // Create zap request builder
             // Clone message for later use in nutzap fallback
-            let msg_opt = if message.is_empty() { None } else { Some(message.clone()) };
+            let msg_opt = if message.is_empty() {
+                None
+            } else {
+                Some(message.clone())
+            };
             let builder = lnurl::create_zap_request_unsigned(
                 recipient_pubkey,
                 relays,
@@ -215,16 +216,14 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
             // Sign the zap request based on signer type
             let zap_request = match signer_type {
-                signer::SignerType::Keys(ref keys) => {
-                    match builder.sign_with_keys(keys) {
-                        Ok(event) => event,
-                        Err(e) => {
-                            error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
-                            loading.set(false);
-                            return;
-                        }
+                signer::SignerType::Keys(ref keys) => match builder.sign_with_keys(keys) {
+                    Ok(event) => event,
+                    Err(e) => {
+                        error_msg.set(Some(format!("Failed to sign zap request: {}", e)));
+                        loading.set(false);
+                        return;
                     }
-                }
+                },
                 #[cfg(target_family = "wasm")]
                 signer::SignerType::BrowserExtension(ref signer) => {
                     #[allow(unused_imports)]
@@ -264,7 +263,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 amount_msats,
                 &zap_request,
                 lnurl_param,
-            ).await {
+            )
+            .await
+            {
                 Ok(response) => response.pr,
                 Err(e) => {
                     error_msg.set(Some(format!("Failed to get invoice: {}", e)));
@@ -276,7 +277,10 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             let inv_clone = inv.clone();
 
             // Get payment preference
-            let payment_preference = settings_store::SETTINGS.read().payment_method_preference.clone();
+            let payment_preference = settings_store::SETTINGS
+                .read()
+                .payment_method_preference
+                .clone();
             let nwc_available = nwc_store::is_connected();
 
             // Try payment based on preference
@@ -289,14 +293,17 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                     let timeout = gloo_timers::future::TimeoutFuture::new(5000);
                     let check_done = async {
                         // Poll at reasonable interval - select timeout provides 5s upper bound
-                        while *checking_nutzap.peek() { // Use peek() to avoid subscription
+                        while *checking_nutzap.peek() {
+                            // Use peek() to avoid subscription
                             gloo_timers::future::TimeoutFuture::new(100).await; // 100ms vs 50ms to reduce CPU usage
                         }
                     };
 
                     match select(Box::pin(timeout), Box::pin(check_done)).await {
                         Either::Left(_) => {
-                            log::warn!("Nutzap eligibility check timed out, proceeding with Lightning");
+                            log::warn!(
+                                "Nutzap eligibility check timed out, proceeding with Lightning"
+                            );
                         }
                         Either::Right(_) => {} // Check completed
                     }
@@ -305,34 +312,54 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                     if let Some(mint) = nutzap_mint.read().as_ref() {
                         // Dioxus pattern: Early validation check before main logic
                         if mint.unit != "sat" {
-                            log::info!("Mint {} uses unit '{}', not sats - skipping nutzap", mint.url, mint.unit);
+                            log::info!(
+                                "Mint {} uses unit '{}', not sats - skipping nutzap",
+                                mint.url,
+                                mint.unit
+                            );
                             // Fall through to Lightning
                         } else {
                             // Normalize mint URL for consistent balance lookups
                             let normalized_mint_url = cashu::normalize_mint_url(&mint.url);
                             // CDK pattern: use unit-aware spendable balance (Issue #1)
                             // Filter by mint_url + unit to support multi-unit mints
-                            let balance = cashu::get_mint_unit_spendable_balance(&normalized_mint_url, &mint.unit);
+                            let balance = cashu::get_mint_unit_spendable_balance(
+                                &normalized_mint_url,
+                                &mint.unit,
+                            );
                             if balance >= amount {
                                 log::info!("Attempting payment with Cashu nutzap via {}", mint.url);
                                 // Get event_id as hex string for nutzap
                                 let nutzap_event_id = event_id.as_ref().map(|e| e.to_hex());
                                 // Use already-captured message (avoid redundant signal read)
-                                let nutzap_comment_opt = if message.is_empty() { None } else { Some(message.clone()) };
+                                let nutzap_comment_opt = if message.is_empty() {
+                                    None
+                                } else {
+                                    Some(message.clone())
+                                };
                                 match cashu::send_nutzap(
                                     &recipient_pubkey_str,
                                     amount,
                                     nutzap_event_id.as_deref(),
                                     None, // target_kind
                                     nutzap_comment_opt.as_deref(),
-                                ).await {
+                                )
+                                .await
+                                {
                                     Ok(result) => {
-                                        log::info!("Nutzap successful: {} sats (fee: {} sats)", result.amount, result.fee);
+                                        log::info!(
+                                            "Nutzap successful: {} sats (fee: {} sats)",
+                                            result.amount,
+                                            result.fee
+                                        );
                                         loading.set(false);
                                         toast_api.success(
                                             "Nutzap sent!".to_string(),
                                             ToastOptions::new()
-                                                .description(format!("Sent {} sats via ecash (fee: {} sats)", result.amount, result.fee))
+                                                .description(format!(
+                                                    "Sent {} sats via ecash (fee: {} sats)",
+                                                    result.amount, result.fee
+                                                ))
                                                 .duration(Duration::from_secs(3))
                                                 .permanent(false),
                                         );
@@ -340,12 +367,19 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                         return;
                                     }
                                     Err(e) => {
-                                        log::warn!("Nutzap failed, falling back to Lightning: {}", e);
+                                        log::warn!(
+                                            "Nutzap failed, falling back to Lightning: {}",
+                                            e
+                                        );
                                         // Continue to Lightning fallback
                                     }
                                 }
                             } else {
-                                log::info!("Insufficient Cashu balance ({} < {}), using Lightning", balance, amount);
+                                log::info!(
+                                    "Insufficient Cashu balance ({} < {}), using Lightning",
+                                    balance,
+                                    amount
+                                );
                             }
                         }
                     } else {
@@ -359,7 +393,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 toast_api.success(
                                     "Zap sent!".to_string(),
                                     ToastOptions::new()
-                                        .description("Zap successfully sent via Nostr Wallet Connect")
+                                        .description(
+                                            "Zap successfully sent via Nostr Wallet Connect",
+                                        )
                                         .duration(Duration::from_secs(2))
                                         .permanent(false),
                                 );
@@ -406,9 +442,8 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
                     // Generate QR code
                     if let Ok(code) = QrCode::new(&inv_clone) {
-                        let svg_string = code.render::<svg::Color>()
-                            .min_dimensions(200, 200)
-                            .build();
+                        let svg_string =
+                            code.render::<svg::Color>().min_dimensions(200, 200).build();
                         qr_code_svg.set(Some(svg_string));
                     }
 
@@ -426,7 +461,9 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                                 toast_api.success(
                                     "Zap sent!".to_string(),
                                     ToastOptions::new()
-                                        .description("Zap successfully sent via Nostr Wallet Connect")
+                                        .description(
+                                            "Zap successfully sent via Nostr Wallet Connect",
+                                        )
                                         .duration(Duration::from_secs(2))
                                         .permanent(false),
                                 );
@@ -504,10 +541,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
 
             // Generate QR code
             if let Ok(code) = QrCode::new(&inv_clone) {
-                let svg_string = code
-                    .render::<svg::Color>()
-                    .min_dimensions(256, 256)
-                    .build();
+                let svg_string = code.render::<svg::Color>().min_dimensions(256, 256).build();
                 qr_code_svg.set(Some(svg_string));
             }
 

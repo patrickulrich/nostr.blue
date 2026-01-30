@@ -2,10 +2,10 @@
 //! Displays a cookbook (pinboard tagged with "cookbook") with background image and title
 //! Similar to CollectionCard but uses Pinboard data and links to PinBoardDetail
 
-use dioxus::prelude::*;
-use crate::stores::pin_boards_store::Pinboard;
 use crate::routes::Route;
+use crate::stores::pin_boards_store::Pinboard;
 use crate::utils::css_safe_url;
+use dioxus::prelude::*;
 
 /// Cookbook card for the recipes explore page
 #[component]

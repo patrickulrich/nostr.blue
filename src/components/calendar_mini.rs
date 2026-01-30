@@ -2,9 +2,9 @@
 //!
 //! A compact calendar for sidebar navigation
 
+use crate::utils::date_helpers::{get_day_number, get_month_dates, get_month_from_date, get_today};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-use crate::utils::date_helpers::{get_today, get_month_from_date, get_day_number, get_month_dates};
 
 // ============================================================================
 // Component
@@ -65,10 +65,24 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
     let (year, month) = *month_info.read();
     let current_month = month;
 
-    let month_names = ["January", "February", "March", "April", "May", "June",
-                       "July", "August", "September", "October", "November", "December"];
+    let month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
     // Safe bounds check for month index (1-12 maps to 0-11)
-    let month_name = month_names.get((month.saturating_sub(1)) as usize).unwrap_or(&"Unknown");
+    let month_name = month_names
+        .get((month.saturating_sub(1)) as usize)
+        .unwrap_or(&"Unknown");
 
     // Navigation handlers
     let go_prev_month = {

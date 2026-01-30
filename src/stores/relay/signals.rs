@@ -25,7 +25,7 @@ pub enum RelaySource {
     /// User's NIP-65 relay list (kind 10002)
     UserNip65,
     /// User's NIP-17 DM relay list (kind 10050)
-    #[allow(dead_code)]  // Reserved for NIP-17 DM relay support
+    #[allow(dead_code)] // Reserved for NIP-17 DM relay support
     UserNip17,
     /// Manually added by user
     Manual,
@@ -58,7 +58,13 @@ impl RelayInfo {
     }
 
     /// Create a new RelayInfo with specific flags
-    pub fn with_flags(url: String, status: RelayStatus, has_read: bool, has_write: bool, source: RelaySource) -> Self {
+    pub fn with_flags(
+        url: String,
+        status: RelayStatus,
+        has_read: bool,
+        has_write: bool,
+        source: RelaySource,
+    ) -> Self {
         Self {
             url,
             status,
@@ -77,7 +83,8 @@ pub struct RelayPoolStore {
 }
 
 /// Global signal for relay pool state
-pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> = Signal::global(|| Store::new(RelayPoolStore::default()));
+pub static RELAY_POOL: GlobalSignal<Store<RelayPoolStore>> =
+    Signal::global(|| Store::new(RelayPoolStore::default()));
 
 /// Whether at least one relay has connected (triggers NIP-78 retries)
 /// Once true, stays true for the session (relay may reconnect automatically)

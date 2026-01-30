@@ -185,7 +185,8 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
     // Get current keyset IDs from cache before refresh
     let old_keysets = get_cached_keysets(mint_url);
     let old_keyset_ids: Vec<String> = old_keysets.iter().map(|k| k.id.clone()).collect();
-    let old_active_ids: Vec<String> = old_keysets.iter()
+    let old_active_ids: Vec<String> = old_keysets
+        .iter()
         .filter(|k| k.active)
         .map(|k| k.id.clone())
         .collect();
@@ -194,7 +195,9 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
     let wallet = get_or_create_wallet(mint_url).await?;
 
     // Force refresh keysets from mint
-    let fresh_keysets = wallet.get_mint_keysets().await
+    let fresh_keysets = wallet
+        .get_mint_keysets()
+        .await
         .map_err(|e| format!("Failed to fetch keysets: {}", e))?;
 
     // Update cache with new keysets
@@ -217,29 +220,31 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
     }
 
     // Analyze changes
-    let new_keyset_ids: Vec<String> = fresh_keysets.iter()
-        .map(|k| k.id.to_string())
-        .collect();
+    let new_keyset_ids: Vec<String> = fresh_keysets.iter().map(|k| k.id.to_string()).collect();
 
-    let new_active_ids: Vec<String> = fresh_keysets.iter()
+    let new_active_ids: Vec<String> = fresh_keysets
+        .iter()
         .filter(|k| k.active)
         .map(|k| k.id.to_string())
         .collect();
 
     // Find newly added keysets
-    let new_keysets: Vec<Id> = new_keyset_ids.iter()
+    let new_keysets: Vec<Id> = new_keyset_ids
+        .iter()
         .filter(|id| !old_keyset_ids.contains(id))
         .filter_map(|id| Id::from_str(id).ok())
         .collect();
 
     // Find rotated keysets (were active, now inactive)
-    let rotated_keysets: Vec<Id> = old_active_ids.iter()
+    let rotated_keysets: Vec<Id> = old_active_ids
+        .iter()
         .filter(|id| !new_active_ids.contains(id))
         .filter_map(|id| Id::from_str(id).ok())
         .collect();
 
     // Get active keysets
-    let active_keysets: Vec<Id> = new_active_ids.iter()
+    let active_keysets: Vec<Id> = new_active_ids
+        .iter()
         .filter_map(|id| Id::from_str(id).ok())
         .collect();
 
@@ -279,11 +284,14 @@ pub async fn refresh_keysets(mint_url: &str) -> Result<KeysetRefreshResult, Stri
 /// This swaps all proofs from rotated/inactive keysets to the current active keyset.
 /// Should be called after detecting keyset rotation to prevent loss of funds.
 pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationResult, String> {
-    use super::proofs::proof_data_to_cdk_proof;
     use super::internal::get_or_create_wallet;
+    use super::proofs::proof_data_to_cdk_proof;
     use cdk::amount::SplitTarget;
 
-    log::info!("Migrating proofs from inactive keysets for mint: {}", mint_url);
+    log::info!(
+        "Migrating proofs from inactive keysets for mint: {}",
+        mint_url
+    );
 
     // Get proofs to migrate
     let proofs_to_migrate = get_proofs_to_migrate(mint_url);
@@ -311,7 +319,8 @@ pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationRe
     );
 
     // Convert to CDK proofs
-    let cdk_proofs: Vec<cdk::nuts::Proof> = proofs_to_migrate.iter()
+    let cdk_proofs: Vec<cdk::nuts::Proof> = proofs_to_migrate
+        .iter()
         .filter_map(|p| proof_data_to_cdk_proof(p).ok())
         .collect();
 
@@ -327,23 +336,33 @@ pub async fn migrate_inactive_proofs(mint_url: &str) -> Result<KeysetMigrationRe
     let wallet = get_or_create_wallet(mint_url).await?;
 
     // Get active keyset
-    let active_keyset = wallet.get_active_keyset().await
+    let active_keyset = wallet
+        .get_active_keyset()
+        .await
         .map_err(|e| format!("Failed to get active keyset: {}", e))?;
 
     // Swap all proofs to active keyset
     // This uses CDK's internal swap which outputs to the active keyset
-    let swap_result = wallet.swap(
-        None, // No specific amount, swap all
-        SplitTarget::default(),
-        cdk_proofs.clone(),
-        None, // No spending conditions
-        true, // Include fee
-    ).await
-    .map_err(|e| format!("Swap failed: {}", e))?;
+    let swap_result = wallet
+        .swap(
+            None, // No specific amount, swap all
+            SplitTarget::default(),
+            cdk_proofs.clone(),
+            None, // No spending conditions
+            true, // Include fee
+        )
+        .await
+        .map_err(|e| format!("Swap failed: {}", e))?;
 
     // Calculate fee paid
-    let output_value: u64 = swap_result.as_ref()
-        .map(|proofs| proofs.iter().map(|p| u64::from(p.amount)).fold(0u64, |acc, amt| acc.saturating_add(amt)))
+    let output_value: u64 = swap_result
+        .as_ref()
+        .map(|proofs| {
+            proofs
+                .iter()
+                .map(|p| u64::from(p.amount))
+                .fold(0u64, |acc, amt| acc.saturating_add(amt))
+        })
         .unwrap_or(0);
 
     let fee_paid = total_value.saturating_sub(output_value);
@@ -409,4 +428,3 @@ pub fn calculate_proofs_fee(mint_url: &str, proofs: &[ProofData]) -> u64 {
 
     total_fee
 }
-

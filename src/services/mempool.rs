@@ -124,7 +124,11 @@ pub async fn get_transaction(endpoint: &str, txid: &str) -> Result<BitcoinTransa
         .map_err(|e| format!("Request failed: {}", e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+        return Err(format!(
+            "HTTP {}: {}",
+            response.status(),
+            response.status_text()
+        ));
     }
 
     response
@@ -143,7 +147,11 @@ pub async fn get_address(endpoint: &str, address: &str) -> Result<BitcoinAddress
         .map_err(|e| format!("Request failed: {}", e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+        return Err(format!(
+            "HTTP {}: {}",
+            response.status(),
+            response.status_text()
+        ));
     }
 
     response

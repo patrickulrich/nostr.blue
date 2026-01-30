@@ -1,12 +1,16 @@
 //! Publication Section Component
 //! Renders individual publication sections (NKBIP-01 Kind 30041 or nested Kind 30040)
 
+use crate::components::icons::{
+    ArrowLeftIcon, BookOpenIcon, ChevronDownIcon, ClockIcon, FileVideoIcon,
+};
+use crate::components::{AsciiDocContent, CitationMetadata};
+use crate::stores::nostr_client;
+use crate::stores::publication_store::{
+    parse_publication_section, sections_by_addresses_filter, PublicationSection,
+};
 use dioxus::prelude::*;
 use std::time::Duration;
-use crate::stores::publication_store::{PublicationSection, sections_by_addresses_filter, parse_publication_section};
-use crate::stores::nostr_client;
-use crate::components::{AsciiDocContent, CitationMetadata};
-use crate::components::icons::{ArrowLeftIcon, FileVideoIcon, ClockIcon, ChevronDownIcon, BookOpenIcon};
 
 /// Publication section content renderer
 #[component]
@@ -102,10 +106,7 @@ fn NestedIndexContent(
             let mut errors = Vec::new();
 
             for filter in filters {
-                match nostr_client::fetch_events_aggregated(
-                    filter,
-                    Duration::from_secs(10),
-                ).await {
+                match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
                     Ok(events) => {
                         for event in events {
                             if let Some(section) = parse_publication_section(&event) {
@@ -130,11 +131,13 @@ fn NestedIndexContent(
             loaded_sections.retain(|s| seen.insert(s.a_tag.clone()));
 
             // Sort by the order in child_addresses
-            let address_order: std::collections::HashMap<_, _> = addresses.iter()
+            let address_order: std::collections::HashMap<_, _> = addresses
+                .iter()
                 .enumerate()
                 .map(|(i, a)| (a.address.clone(), i))
                 .collect();
-            loaded_sections.sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
+            loaded_sections
+                .sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
 
             child_sections.set(loaded_sections);
 
@@ -328,9 +331,7 @@ pub fn PublicationSectionSkeleton() -> Element {
 
 /// Section metadata display
 #[component]
-pub fn SectionMetadata(
-    section: PublicationSection,
-) -> Element {
+pub fn SectionMetadata(section: PublicationSection) -> Element {
     rsx! {
         div {
             class: "flex flex-wrap gap-4 text-sm text-muted-foreground",
@@ -369,10 +370,7 @@ fn estimate_reading_time(content: &str) -> usize {
 
 /// Section outline (headings extracted from content)
 #[component]
-pub fn SectionOutline(
-    content: String,
-    on_heading_click: EventHandler<String>,
-) -> Element {
+pub fn SectionOutline(content: String, on_heading_click: EventHandler<String>) -> Element {
     // Extract headings from AsciiDoc content
     let headings = use_memo(move || extract_headings(&content));
 
@@ -411,10 +409,14 @@ pub fn SectionOutline(
 fn extract_headings(content: &str) -> Vec<(usize, String, String)> {
     let heading_pattern = regex::Regex::new(r"(?m)^(=+)\s+(.+)$").unwrap();
 
-    heading_pattern.captures_iter(content)
+    heading_pattern
+        .captures_iter(content)
         .map(|cap| {
             let level = cap.get(1).map(|m| m.as_str().len()).unwrap_or(1);
-            let text = cap.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let text = cap
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let id = slug_from_text(&text);
             (level, text, id)
         })

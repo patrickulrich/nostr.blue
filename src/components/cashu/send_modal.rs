@@ -1,15 +1,13 @@
+use crate::stores::cashu;
+use crate::utils::{format::truncate_pubkey, shorten_url};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_sdk::PublicKey;
 use std::cell::Cell;
 use std::rc::Rc;
-use crate::stores::cashu;
-use crate::utils::{shorten_url, format::truncate_pubkey};
 
 #[component]
-pub fn CashuSendModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
     let mut amount = use_signal(String::new);
     let mints = cashu::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
@@ -120,76 +118,81 @@ pub fn CashuSendModal(
             let recipient = recipient_pubkey.read().clone();
             let is_mounted_for_watch = is_mounted.clone();
 
-        // Validate amount
-        let amount_sats = match amount_str.parse::<u64>() {
-            Ok(a) if a > 0 => a,
-            _ => {
-                error_message.set(Some("Please enter a valid amount".to_string()));
-                return;
-            }
-        };
-
-        if mint.is_empty() {
-            error_message.set(Some("Please select a mint".to_string()));
-            return;
-        }
-
-        // Validate recipient for P2PK
-        if is_p2pk {
-            if recipient.is_empty() {
-                error_message.set(Some("Please enter a recipient npub or public key".to_string()));
-                return;
-            }
-            // Validate pubkey format using nostr-sdk (supports npub, hex, NIP-21)
-            if PublicKey::parse(&recipient).is_err() {
-                error_message.set(Some("Invalid pubkey format. Use npub1... or 64-char hex".to_string()));
-                return;
-            }
-        }
-
-        is_sending.set(true);
-        error_message.set(None);
-        token_result.set(None);
-
-        spawn(async move {
-            // Clone mint for use in watching after send
-            let mint_for_watch = mint.clone();
-
-            let result = if is_p2pk {
-                // Send with P2PK lock (only recipient can redeem)
-                cashu::send_tokens_p2pk(mint, amount_sats, recipient).await
-            } else {
-                // Regular send (anyone with token can redeem)
-                cashu::send_tokens(mint, amount_sats).await
+            // Validate amount
+            let amount_sats = match amount_str.parse::<u64>() {
+                Ok(a) if a > 0 => a,
+                _ => {
+                    error_message.set(Some("Please enter a valid amount".to_string()));
+                    return;
+                }
             };
 
-            match result {
-                Ok(token_string) => {
-                    token_result.set(Some(token_string.clone()));
-                    token_claimed.set(Some(false)); // Initially pending
-                    is_sending.set(false);
-                    // Clear inputs
-                    amount.set(String::new());
-                    recipient_pubkey.set(String::new());
+            if mint.is_empty() {
+                error_message.set(Some("Please select a mint".to_string()));
+                return;
+            }
 
-                    // Start watching for token claims via NUT-17
-                    // Check is_mounted before updating signal to prevent panic on dropped signal
-                    if let Ok(y_values) = cashu::extract_y_values_from_token(&token_string) {
-                        cashu::watch_sent_token_claims(mint_for_watch, y_values, move || {
-                            // Only update signal if component is still mounted
-                            if is_mounted_for_watch.get() {
-                                token_claimed.set(Some(true));
-                            }
-                        });
-                    }
+            // Validate recipient for P2PK
+            if is_p2pk {
+                if recipient.is_empty() {
+                    error_message.set(Some(
+                        "Please enter a recipient npub or public key".to_string(),
+                    ));
+                    return;
                 }
-                Err(e) => {
-                    error_message.set(Some(format!("Failed to send: {}", e)));
-                    is_sending.set(false);
+                // Validate pubkey format using nostr-sdk (supports npub, hex, NIP-21)
+                if PublicKey::parse(&recipient).is_err() {
+                    error_message.set(Some(
+                        "Invalid pubkey format. Use npub1... or 64-char hex".to_string(),
+                    ));
+                    return;
                 }
             }
-        });
-    }};
+
+            is_sending.set(true);
+            error_message.set(None);
+            token_result.set(None);
+
+            spawn(async move {
+                // Clone mint for use in watching after send
+                let mint_for_watch = mint.clone();
+
+                let result = if is_p2pk {
+                    // Send with P2PK lock (only recipient can redeem)
+                    cashu::send_tokens_p2pk(mint, amount_sats, recipient).await
+                } else {
+                    // Regular send (anyone with token can redeem)
+                    cashu::send_tokens(mint, amount_sats).await
+                };
+
+                match result {
+                    Ok(token_string) => {
+                        token_result.set(Some(token_string.clone()));
+                        token_claimed.set(Some(false)); // Initially pending
+                        is_sending.set(false);
+                        // Clear inputs
+                        amount.set(String::new());
+                        recipient_pubkey.set(String::new());
+
+                        // Start watching for token claims via NUT-17
+                        // Check is_mounted before updating signal to prevent panic on dropped signal
+                        if let Ok(y_values) = cashu::extract_y_values_from_token(&token_string) {
+                            cashu::watch_sent_token_claims(mint_for_watch, y_values, move || {
+                                // Only update signal if component is still mounted
+                                if is_mounted_for_watch.get() {
+                                    token_claimed.set(Some(true));
+                                }
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        error_message.set(Some(format!("Failed to send: {}", e)));
+                        is_sending.set(false);
+                    }
+                }
+            });
+        }
+    };
 
     rsx! {
         // Modal overlay
@@ -534,4 +537,3 @@ pub fn CashuSendModal(
         }
     }
 }
-

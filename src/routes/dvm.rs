@@ -9,11 +9,16 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 
+use crate::components::{ClientInitializing, DvmSelectorModal, NoteCard};
 use crate::hooks::use_mute_block_cache;
-use crate::stores::{nostr_client, dvm_store};
-use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
-use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
-use crate::services::aggregation::{InteractionCounts, fetch_interaction_counts_batch, stream_interaction_counts, InteractionStreamHandle};
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
+    InteractionStreamHandle,
+};
+use crate::stores::dvm_store::{
+    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS, SELECTED_DVM_PROVIDER,
+};
+use crate::stores::{dvm_store, nostr_client};
 
 /// Main DVM page component
 #[component]
@@ -27,7 +32,8 @@ pub fn DVM() -> Element {
     let mut fetch_in_progress = use_signal(|| false);
 
     // Track interaction stream handle for cleanup (Dioxus pattern: store full handle for task cancellation)
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
 
     // Cached mute/block lists using centralized hook (N+1 optimization)
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
@@ -116,7 +122,9 @@ pub fn DVM() -> Element {
                         event_ids,
                         interaction_counts,
                         Some(600), // 10 minute idle timeout
-                    ).await {
+                    )
+                    .await
+                    {
                         // Guard: skip state update if refresh occurred during stream setup
                         if *refresh_trigger.peek() != trigger_snapshot {
                             log::debug!("Discarding stale DVM stream handle");
@@ -141,7 +149,8 @@ pub fn DVM() -> Element {
     let current_provider_name = {
         let providers = DVM_PROVIDERS.read();
         if let Some(pubkey) = selected_provider {
-            providers.iter()
+            providers
+                .iter()
                 .find(|p| p.pubkey == pubkey)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "Selected DVM".to_string())
@@ -297,4 +306,3 @@ pub fn DVM() -> Element {
         }
     }
 }
-

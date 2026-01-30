@@ -45,7 +45,10 @@ pub fn ProfileBadgesSection(pubkey: String) -> Element {
                                 match nip58::fetch_badge_by_coordinate(&coord).await {
                                     Ok(badge) => Some(badge),
                                     Err(e) => {
-                                        crate::utils::log_fetch_error(&format!("badge {}", coord), e);
+                                        crate::utils::log_fetch_error(
+                                            &format!("badge {}", coord),
+                                            e,
+                                        );
                                         None
                                     }
                                 }

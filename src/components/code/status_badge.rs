@@ -2,8 +2,8 @@
 //!
 //! Displays status badges for issues and pull requests.
 
-use dioxus::prelude::*;
 use crate::utils::nip34::IssueStatus;
+use dioxus::prelude::*;
 
 /// Size variants for the badge
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -17,10 +17,7 @@ pub enum BadgeSize {
 
 /// Status badge component
 #[component]
-pub fn CodeStatusBadge(
-    status: IssueStatus,
-    #[props(default)] size: BadgeSize,
-) -> Element {
+pub fn CodeStatusBadge(status: IssueStatus, #[props(default)] size: BadgeSize) -> Element {
     let (bg_class, text, icon) = match status {
         IssueStatus::Open => (
             "bg-green-500/10 text-green-500 border-green-500/20",

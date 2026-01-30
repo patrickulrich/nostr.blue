@@ -1,11 +1,11 @@
 //! Create New Recipe Page
 //! Form for creating and publishing a new recipe
 
-use dioxus::prelude::*;
-use crate::stores::recipe_store;
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::components::{RecipeForm, RecipeFormData, ClientInitializing};
+use crate::components::{ClientInitializing, RecipeForm, RecipeFormData};
 use crate::routes::Route;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::recipe_store;
+use dioxus::prelude::*;
 
 #[component]
 pub fn RecipeNew() -> Element {
@@ -43,7 +43,9 @@ pub fn RecipeNew() -> Element {
                 &form_data.image_urls,
                 &content,
                 form_data.tags.clone(),
-            ).await {
+            )
+            .await
+            {
                 Ok(naddr) => {
                     // Navigate to the new recipe
                     navigator.push(Route::RecipeDetail { naddr });

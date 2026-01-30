@@ -1,19 +1,29 @@
 //! Modal for customizing preferred reaction emojis
 //! Supports drag-to-reorder and adding both standard unicode and NIP-30 custom emojis
 
-use dioxus::prelude::*;
-use crate::stores::reactions_store::{
-    PreferredReaction, PREFERRED_REACTIONS, MAX_REACTIONS, save_preferred_reactions
-};
-use crate::stores::emoji_store::{CUSTOM_EMOJIS, EMOJI_SETS, CustomEmojisStoreStoreExt, EmojiSetsStoreStoreExt};
-use crate::components::EmojiPicker;
 use crate::components::icons::SettingsIcon;
+use crate::components::EmojiPicker;
+use crate::stores::emoji_store::{
+    CustomEmojisStoreStoreExt, EmojiSetsStoreStoreExt, CUSTOM_EMOJIS, EMOJI_SETS,
+};
+use crate::stores::reactions_store::{
+    save_preferred_reactions, PreferredReaction, MAX_REACTIONS, PREFERRED_REACTIONS,
+};
+use dioxus::prelude::*;
 
 /// Check if a reaction already exists in the list (by emoji content or shortcode)
-fn is_duplicate_reaction(reactions: &[PreferredReaction], new_reaction: &PreferredReaction) -> bool {
+fn is_duplicate_reaction(
+    reactions: &[PreferredReaction],
+    new_reaction: &PreferredReaction,
+) -> bool {
     reactions.iter().any(|r| match (r, new_reaction) {
-        (PreferredReaction::Standard { emoji: a }, PreferredReaction::Standard { emoji: b }) => a == b,
-        (PreferredReaction::Custom { shortcode: a, .. }, PreferredReaction::Custom { shortcode: b, .. }) => a == b,
+        (PreferredReaction::Standard { emoji: a }, PreferredReaction::Standard { emoji: b }) => {
+            a == b
+        }
+        (
+            PreferredReaction::Custom { shortcode: a, .. },
+            PreferredReaction::Custom { shortcode: b, .. },
+        ) => a == b,
         _ => false,
     })
 }
@@ -49,23 +59,25 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
 
         let reaction = if input.starts_with(':') && input.ends_with(':') && input.len() > 2 {
             // Custom emoji - look up URL from user's emoji list
-            let shortcode = input[1..input.len()-1].to_string();
+            let shortcode = input[1..input.len() - 1].to_string();
 
             // Try to find the custom emoji in user's emoji store
             let custom_emojis_store = CUSTOM_EMOJIS.read();
             let custom_emojis_data = custom_emojis_store.data();
             let custom_emojis_list = custom_emojis_data.read();
-            let found_emoji = custom_emojis_list.iter()
-                .find(|e| e.shortcode == shortcode);
+            let found_emoji = custom_emojis_list.iter().find(|e| e.shortcode == shortcode);
 
             if let Some(emoji) = found_emoji {
                 PreferredReaction::Custom {
                     shortcode: shortcode.clone(),
-                    url: emoji.image_url.clone()
+                    url: emoji.image_url.clone(),
                 }
             } else {
                 // Custom emoji not found, show error
-                error_msg.set(Some(format!("Custom emoji :{}: not found in your emoji list", shortcode)));
+                error_msg.set(Some(format!(
+                    "Custom emoji :{}: not found in your emoji list",
+                    shortcode
+                )));
                 return;
             }
         } else {
@@ -129,14 +141,22 @@ pub fn ReactionDefaultsModal(props: ReactionDefaultsModalProps) -> Element {
                     PreferredReaction::Custom { shortcode, url }
                 } else {
                     // URL not found anywhere, show error to user
-                    log::warn!("Custom emoji URL not found in user's emoji stores: {}", trimmed);
-                    error_msg.set(Some("Custom emoji not found in your emoji list. Try adding it first.".to_string()));
+                    log::warn!(
+                        "Custom emoji URL not found in user's emoji stores: {}",
+                        trimmed
+                    );
+                    error_msg.set(Some(
+                        "Custom emoji not found in your emoji list. Try adding it first."
+                            .to_string(),
+                    ));
                     return;
                 }
             }
         } else {
             // Standard unicode emoji
-            PreferredReaction::Standard { emoji: trimmed.to_string() }
+            PreferredReaction::Standard {
+                emoji: trimmed.to_string(),
+            }
         };
 
         // Check for duplicates

@@ -53,7 +53,10 @@ pub fn BadgesHome() -> Element {
 
     // Load data when tab changes
     use_effect(use_reactive(
-        (&*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()),
+        (
+            &*active_tab.read(),
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+        ),
         move |(tab, client_initialized)| {
             if !client_initialized {
                 return;
@@ -73,9 +76,10 @@ pub fn BadgesHome() -> Element {
                                     // Fetch badge definitions for each entry
                                     let mut badges = Vec::new();
                                     for entry in entries {
-                                        if let Ok(badge) =
-                                            nip58::fetch_badge_by_coordinate(&entry.definition_coordinate)
-                                                .await
+                                        if let Ok(badge) = nip58::fetch_badge_by_coordinate(
+                                            &entry.definition_coordinate,
+                                        )
+                                        .await
                                         {
                                             badges.push(badge);
                                         }
@@ -96,13 +100,12 @@ pub fn BadgesHome() -> Element {
                             match nip58::fetch_pending_badge_awards(pk).await {
                                 Ok(awards) => {
                                     // Get accepted badge coordinates
-                                    let accepted: Vec<String> =
-                                        nip58::fetch_profile_badges(pk)
-                                            .await
-                                            .unwrap_or_default()
-                                            .iter()
-                                            .map(|e| e.definition_coordinate.clone())
-                                            .collect();
+                                    let accepted: Vec<String> = nip58::fetch_profile_badges(pk)
+                                        .await
+                                        .unwrap_or_default()
+                                        .iter()
+                                        .map(|e| e.definition_coordinate.clone())
+                                        .collect();
 
                                     // Filter out already accepted, fetch definitions
                                     let mut pending = Vec::new();

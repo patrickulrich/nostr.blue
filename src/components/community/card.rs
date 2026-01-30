@@ -2,17 +2,17 @@
 //! Displays a community in a card format for listing pages
 //! With membership badges, join buttons, and pin functionality
 
-use dioxus::prelude::*;
-use crate::stores::community_store::{
-    Community, MembershipStatus, CommunityWithMembership,
-    membership_status_to_role, submit_join_request,
-};
-use crate::stores::pinned_communities::{is_community_pinned, pin_community, unpin_community};
-use crate::stores::auth_store;
-use crate::routes::Route;
-use crate::utils::validation::is_valid_http_url;
 use super::post_card::UserRoleBadge;
 use crate::components::icons::PinIcon;
+use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::community_store::{
+    membership_status_to_role, submit_join_request, Community, CommunityWithMembership,
+    MembershipStatus,
+};
+use crate::stores::pinned_communities::{is_community_pinned, pin_community, unpin_community};
+use crate::utils::validation::is_valid_http_url;
+use dioxus::prelude::*;
 
 // ============================================================================
 // JoinButton Component
@@ -20,10 +20,7 @@ use crate::components::icons::PinIcon;
 
 /// Join button with multiple states based on membership status
 #[component]
-pub fn JoinButton(
-    community: Community,
-    membership_status: MembershipStatus,
-) -> Element {
+pub fn JoinButton(community: Community, membership_status: MembershipStatus) -> Element {
     let mut is_loading = use_signal(|| false);
     let mut error_msg = use_signal(|| Option::<String>::None);
     let has_signer = *crate::stores::nostr_client::HAS_SIGNER.read();
@@ -56,41 +53,31 @@ pub fn JoinButton(
 
     // Determine button state and appearance
     let (button_class, button_text, is_disabled) = match &membership_status {
-        MembershipStatus::Owner => (
-            "bg-purple-500 cursor-default opacity-75",
-            "Owner",
-            true,
-        ),
-        MembershipStatus::Moderator => (
-            "bg-blue-500 cursor-default opacity-75",
-            "Moderator",
-            true,
-        ),
-        MembershipStatus::Member => (
-            "bg-green-500 cursor-default opacity-75",
-            "Member",
-            true,
-        ),
-        MembershipStatus::Pending { .. } => (
-            "bg-orange-500 cursor-default opacity-75",
-            "Pending",
-            true,
-        ),
-        MembershipStatus::Declined { .. } => (
-            "bg-red-500 cursor-default opacity-75",
-            "Declined",
-            true,
-        ),
-        MembershipStatus::Banned { .. } => (
-            "bg-red-700 cursor-not-allowed opacity-50",
-            "Banned",
-            true,
-        ),
+        MembershipStatus::Owner => ("bg-purple-500 cursor-default opacity-75", "Owner", true),
+        MembershipStatus::Moderator => ("bg-blue-500 cursor-default opacity-75", "Moderator", true),
+        MembershipStatus::Member => ("bg-green-500 cursor-default opacity-75", "Member", true),
+        MembershipStatus::Pending { .. } => {
+            ("bg-orange-500 cursor-default opacity-75", "Pending", true)
+        }
+        MembershipStatus::Declined { .. } => {
+            ("bg-red-500 cursor-default opacity-75", "Declined", true)
+        }
+        MembershipStatus::Banned { .. } => {
+            ("bg-red-700 cursor-not-allowed opacity-50", "Banned", true)
+        }
         MembershipStatus::None => {
             if !is_logged_in {
-                ("bg-gray-400 cursor-not-allowed opacity-50", "Log in to join", true)
+                (
+                    "bg-gray-400 cursor-not-allowed opacity-50",
+                    "Log in to join",
+                    true,
+                )
             } else if !has_signer {
-                ("bg-gray-400 cursor-not-allowed opacity-50", "No signer", true)
+                (
+                    "bg-gray-400 cursor-not-allowed opacity-50",
+                    "No signer",
+                    true,
+                )
             } else if *is_loading.read() {
                 ("bg-green-500 opacity-75", "Joining...", true)
             } else {
@@ -222,9 +209,7 @@ fn AdminBadge(count: u32) -> Element {
 
 /// Community card with membership display for grid/list display
 #[component]
-pub fn CommunityCardWithMembership(
-    data: CommunityWithMembership,
-) -> Element {
+pub fn CommunityCardWithMembership(data: CommunityWithMembership) -> Element {
     let community = &data.community;
     let membership_status = &data.membership_status;
     let _is_pinned = data.is_pinned; // Used for future enhancements

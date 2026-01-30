@@ -153,10 +153,7 @@ pub fn batch_proofs_for_mint(mint_url: &str, proofs: Vec<ProofData>) -> Vec<Vec<
 }
 
 /// Batch proofs with adaptive sizing (async)
-pub async fn batch_proofs_adaptive(
-    mint_url: &str,
-    proofs: Vec<ProofData>,
-) -> Vec<Vec<ProofData>> {
+pub async fn batch_proofs_adaptive(mint_url: &str, proofs: Vec<ProofData>) -> Vec<Vec<ProofData>> {
     let batch_size = get_optimal_batch_size(mint_url).await;
     batch_proofs(proofs, batch_size)
 }
@@ -173,7 +170,10 @@ pub async fn batch_amount(mint_url: &str, total_amount: u64) -> Vec<u64> {
 
     // Guard against misconfigured mint with zero limit
     if max_amount == 0 {
-        log::warn!("Mint {} has zero max_mint_amount, using full amount", mint_url);
+        log::warn!(
+            "Mint {} has zero max_mint_amount, using full amount",
+            mint_url
+        );
         return vec![total_amount];
     }
 

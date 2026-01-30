@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
-use crate::components::{PollCard, ClientInitializing};
+use crate::components::{ClientInitializing, PollCard};
 use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -128,7 +128,8 @@ pub fn Polls() -> Element {
                         current.iter().map(|e| e.id).collect()
                     };
 
-                    let unique_new: Vec<_> = new_events.into_iter()
+                    let unique_new: Vec<_> = new_events
+                        .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
@@ -169,11 +170,7 @@ pub fn Polls() -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
 
     rsx! {
         div {
@@ -339,7 +336,10 @@ pub fn Polls() -> Element {
 }
 
 /// Load polls from followed users
-async fn load_following_polls(until: Option<u64>, _last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
+async fn load_following_polls(
+    until: Option<u64>,
+    _last_event_id: Option<nostr_sdk::EventId>,
+) -> Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey()
         .ok_or("Not authenticated. Please sign in to view your following feed.")?;
 
@@ -357,10 +357,7 @@ async fn load_following_polls(until: Option<u64>, _last_event_id: Option<nostr_s
     }
 
     // Create filter for polls
-    let mut filter = Filter::new()
-        .kind(Kind::Poll)
-        .authors(authors)
-        .limit(50);
+    let mut filter = Filter::new().kind(Kind::Poll).authors(authors).limit(50);
 
     if let Some(until_ts) = until {
         // Keep boundary inclusive
@@ -368,7 +365,8 @@ async fn load_following_polls(until: Option<u64>, _last_event_id: Option<nostr_s
     }
 
     // Fetch events from database and relays
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch polls: {}", e))?;
 
     // Convert to vector and sort by timestamp (newest first)
@@ -380,11 +378,12 @@ async fn load_following_polls(until: Option<u64>, _last_event_id: Option<nostr_s
 }
 
 /// Load polls from everyone (global feed)
-async fn load_global_polls(until: Option<u64>, _last_event_id: Option<nostr_sdk::EventId>) -> Result<Vec<Event>, String> {
+async fn load_global_polls(
+    until: Option<u64>,
+    _last_event_id: Option<nostr_sdk::EventId>,
+) -> Result<Vec<Event>, String> {
     // Create filter for polls
-    let mut filter = Filter::new()
-        .kind(Kind::Poll)
-        .limit(50);
+    let mut filter = Filter::new().kind(Kind::Poll).limit(50);
 
     if let Some(until_ts) = until {
         // Keep boundary inclusive
@@ -392,7 +391,8 @@ async fn load_global_polls(until: Option<u64>, _last_event_id: Option<nostr_sdk:
     }
 
     // Fetch events from database and relays
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch polls: {}", e))?;
 
     // Convert to vector and sort by timestamp (newest first)

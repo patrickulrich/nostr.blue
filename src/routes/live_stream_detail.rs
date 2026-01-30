@@ -1,12 +1,12 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Filter, Kind, PublicKey, FromBech32};
-use crate::components::{LiveStreamPlayer, LiveChat, StreamStatus, ZapModal, LiveStreamShareModal};
+use crate::components::icons::{ArrowLeftIcon, ShareIcon, ZapIcon};
 use crate::components::live::stream_card::{parse_live_stream_event, LiveStreamMeta};
-use crate::components::icons::{ArrowLeftIcon, ZapIcon, ShareIcon};
+use crate::components::{LiveChat, LiveStreamPlayer, LiveStreamShareModal, StreamStatus, ZapModal};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::{Filter, FromBech32, Kind, PublicKey};
 use std::time::Duration;
 
 #[component]
@@ -69,7 +69,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                     .author(pubkey)
                     .custom_tag(
                         nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
-                        &dtag
+                        &dtag,
                     )
                     .limit(1);
 
@@ -80,7 +80,9 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                             // Parse stream metadata
                             if let Some(meta) = parse_live_stream_event(event) {
                                 // Fetch host profile (use p tag if available, otherwise publisher)
-                                let profile_to_fetch = meta.host_pubkey.clone()
+                                let profile_to_fetch = meta
+                                    .host_pubkey
+                                    .clone()
                                     .unwrap_or_else(|| author_pk.clone());
 
                                 stream_meta.set(Some(meta));
@@ -104,7 +106,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                     }
                 }
             });
-        }
+        },
     ));
 
     // Handle refresh
@@ -121,7 +123,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                     .author(pubkey)
                     .custom_tag(
                         nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::D),
-                        &dtag
+                        &dtag,
                     )
                     .limit(1);
 
@@ -487,7 +489,9 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
 /// Parse naddr format - supports both NIP-19 bech32 and "30311:pubkey:dtag" formats
 fn parse_naddr(note_id: &str) -> (String, String) {
     // First try to decode as NIP-19 bech32 naddr
-    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) = nostr_sdk::nips::nip19::Nip19::from_bech32(note_id) {
+    if let Ok(nostr_sdk::nips::nip19::Nip19::Coordinate(coord)) =
+        nostr_sdk::nips::nip19::Nip19::from_bech32(note_id)
+    {
         return (coord.public_key.to_hex(), coord.identifier.clone());
     }
 
@@ -558,4 +562,3 @@ fn render_no_stream_placeholder(status: &StreamStatus) -> Element {
         }
     }
 }
-

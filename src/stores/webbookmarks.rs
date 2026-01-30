@@ -1,8 +1,8 @@
+use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, Filter, Kind, EventBuilder, PublicKey, Timestamp};
-use nostr::prelude::{WebBookmark, TagStandard, TagKind};
-use crate::stores::{auth_store, nostr_client};
+use nostr::prelude::{TagKind, TagStandard, WebBookmark};
+use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 
 /// Global signal to track web bookmarks (kind 39701)
@@ -12,7 +12,8 @@ pub struct WebBookmarksStore {
     pub data: Vec<Event>,
 }
 
-pub static WEB_BOOKMARKS: GlobalSignal<Store<WebBookmarksStore>> = Signal::global(|| Store::new(WebBookmarksStore::default()));
+pub static WEB_BOOKMARKS: GlobalSignal<Store<WebBookmarksStore>> =
+    Signal::global(|| Store::new(WebBookmarksStore::default()));
 
 /// Add a new web bookmark
 ///
@@ -31,8 +32,11 @@ pub async fn add_webbookmark(
     published_at: Option<u64>,
     hashtags: Vec<String>,
 ) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -47,10 +51,8 @@ pub async fn add_webbookmark(
     log::info!("Creating web bookmark for URL: {}", url_without_scheme);
 
     // Build the WebBookmark using the SDK builder
-    let mut bookmark = WebBookmark::new(
-        description.unwrap_or_default(),
-        url_without_scheme.clone()
-    );
+    let mut bookmark =
+        WebBookmark::new(description.unwrap_or_default(), url_without_scheme.clone());
 
     // Add optional fields
     if let Some(t) = title {
@@ -72,10 +74,7 @@ pub async fn add_webbookmark(
     // Add custom image tag if provided (not part of standard NIP-B0 but useful)
     if let Some(img) = image_url {
         use nostr_sdk::Tag;
-        builder = builder.tag(Tag::custom(
-            nostr_sdk::TagKind::custom("image"),
-            vec![img]
-        ));
+        builder = builder.tag(Tag::custom(nostr_sdk::TagKind::custom("image"), vec![img]));
     }
 
     // Publish the event
@@ -109,8 +108,11 @@ pub async fn update_webbookmark(
 
 /// Delete a web bookmark by publishing a deletion event
 pub async fn delete_webbookmark(event: &Event) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -147,7 +149,11 @@ pub async fn toggle_favorite(event: &Event, is_favorite: bool) -> Result<(), Str
     // Extract current metadata
     let url = get_url(event).ok_or("Bookmark missing URL")?;
     let title = get_title(event);
-    let description = if event.content.is_empty() { None } else { Some(event.content.clone()) };
+    let description = if event.content.is_empty() {
+        None
+    } else {
+        Some(event.content.clone())
+    };
     let image_url = get_image(event);
     let published_at = get_published_at(event).map(|ts| ts.as_secs());
 
@@ -162,14 +168,7 @@ pub async fn toggle_favorite(event: &Event, is_favorite: bool) -> Result<(), Str
     }
 
     // Update the bookmark with new hashtags
-    update_webbookmark(
-        url,
-        title,
-        description,
-        image_url,
-        published_at,
-        hashtags
-    ).await
+    update_webbookmark(url, title, description, image_url, published_at, hashtags).await
 }
 
 /// Toggle archived status for a web bookmark
@@ -179,7 +178,11 @@ pub async fn toggle_archived(event: &Event, is_archived: bool) -> Result<(), Str
     // Extract current metadata
     let url = get_url(event).ok_or("Bookmark missing URL")?;
     let title = get_title(event);
-    let description = if event.content.is_empty() { None } else { Some(event.content.clone()) };
+    let description = if event.content.is_empty() {
+        None
+    } else {
+        Some(event.content.clone())
+    };
     let image_url = get_image(event);
     let published_at = get_published_at(event).map(|ts| ts.as_secs());
 
@@ -194,14 +197,7 @@ pub async fn toggle_archived(event: &Event, is_archived: bool) -> Result<(), Str
     }
 
     // Update the bookmark with new hashtags
-    update_webbookmark(
-        url,
-        title,
-        description,
-        image_url,
-        published_at,
-        hashtags
-    ).await
+    update_webbookmark(url, title, description, image_url, published_at, hashtags).await
 }
 
 /// Check if a bookmark is favorited
@@ -221,7 +217,8 @@ pub fn get_url(event: &Event) -> Option<String> {
 
 /// Get title from web bookmark event
 pub fn get_title(event: &Event) -> Option<String> {
-    event.tags
+    event
+        .tags
         .find_standardized(TagKind::Title)
         .and_then(|tag| match tag {
             TagStandard::Title(t) => Some(t.to_string()),
@@ -231,7 +228,8 @@ pub fn get_title(event: &Event) -> Option<String> {
 
 /// Get published_at timestamp from web bookmark event
 pub fn get_published_at(event: &Event) -> Option<Timestamp> {
-    event.tags
+    event
+        .tags
         .find_standardized(TagKind::PublishedAt)
         .and_then(|tag| match tag {
             TagStandard::PublishedAt(ts) => Some(*ts),
@@ -241,9 +239,7 @@ pub fn get_published_at(event: &Event) -> Option<Timestamp> {
 
 /// Get hashtags from web bookmark event (excluding special tags like 'favorite' and 'archived')
 pub fn get_hashtags(event: &Event) -> Vec<String> {
-    event.tags.hashtags()
-        .map(|s| s.to_string())
-        .collect()
+    event.tags.hashtags().map(|s| s.to_string()).collect()
 }
 
 /// Get hashtags for display (excluding special system tags)
@@ -256,7 +252,9 @@ pub fn get_display_hashtags(event: &Event) -> Vec<String> {
 
 /// Get image URL from custom image tag
 pub fn get_image(event: &Event) -> Option<String> {
-    event.tags.iter()
+    event
+        .tags
+        .iter()
         .find(|tag| tag.kind() == nostr_sdk::TagKind::custom("image"))
         .and_then(|tag| tag.content().map(|s| s.to_string()))
 }
@@ -277,9 +275,11 @@ pub fn get_domain(url: &str) -> String {
 }
 
 /// Load web bookmarks from followed users with pagination
-pub async fn load_following_webbookmarks(until: Option<u64>, limit: usize) -> Result<Vec<Event>, String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+pub async fn load_following_webbookmarks(
+    until: Option<u64>,
+    limit: usize,
+) -> Result<Vec<Event>, String> {
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
     log::info!("Loading following web bookmarks (until: {:?})", until);
 
@@ -323,7 +323,10 @@ pub async fn load_following_webbookmarks(until: Option<u64>, limit: usize) -> Re
         filter = filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
 
-    log::info!("Fetching web bookmarks from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    log::info!(
+        "Fetching web bookmarks from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
+    );
 
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
@@ -341,12 +344,13 @@ pub async fn load_following_webbookmarks(until: Option<u64>, limit: usize) -> Re
 }
 
 /// Load global web bookmarks with pagination
-pub async fn load_global_webbookmarks(until: Option<u64>, limit: usize) -> Result<Vec<Event>, String> {
+pub async fn load_global_webbookmarks(
+    until: Option<u64>,
+    limit: usize,
+) -> Result<Vec<Event>, String> {
     log::info!("Loading global web bookmarks (until: {:?})", until);
 
-    let mut filter = Filter::new()
-        .kind(Kind::WebBookmark)
-        .limit(limit);
+    let mut filter = Filter::new().kind(Kind::WebBookmark).limit(limit);
 
     if let Some(until_ts) = until {
         // Subtract 1 to make the boundary exclusive and avoid duplicates

@@ -1,26 +1,24 @@
 //! Citation Editor Modal
 //! Create and edit NKBIP-03 citations (kinds 30-33)
 
-use dioxus::prelude::*;
-use crate::stores::citation_store::{
-    CachedCitation,
-    publish_internal_citation, publish_external_citation,
-    publish_hardcopy_citation, publish_prompt_citation,
-    fetch_citations_by_author,
-};
+use crate::components::icons::{BookOpenIcon, GlobeIcon, Link2Icon, SettingsIcon, XIcon};
 use crate::stores::auth_store;
-use crate::utils::nkbip03::Citation;
+use crate::stores::citation_store::{
+    fetch_citations_by_author, publish_external_citation, publish_hardcopy_citation,
+    publish_internal_citation, publish_prompt_citation, CachedCitation,
+};
 use crate::utils::is_valid_http_url;
-use crate::components::icons::{XIcon, BookOpenIcon, GlobeIcon, Link2Icon, SettingsIcon};
+use crate::utils::nkbip03::Citation;
+use dioxus::prelude::*;
 
 /// Tab for citation type selection
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum CitationEditorTab {
     #[default]
-    Internal,   // Kind 30 - Nostr reference
-    External,   // Kind 31 - Web URL
-    Hardcopy,   // Kind 32 - Book/journal
-    Prompt,     // Kind 33 - AI/LLM
+    Internal, // Kind 30 - Nostr reference
+    External, // Kind 31 - Web URL
+    Hardcopy, // Kind 32 - Book/journal
+    Prompt,   // Kind 33 - AI/LLM
 }
 
 impl CitationEditorTab {
@@ -89,7 +87,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
 
     // Extract editing state before closures (avoids borrow issues)
     let is_editing = props.citation_to_edit.is_some();
-    let existing_d_tag = props.citation_to_edit.as_ref()
+    let existing_d_tag = props
+        .citation_to_edit
+        .as_ref()
         .and_then(|c| c.event.tags.identifier().map(|s| s.to_string()));
 
     // Load existing citation if editing
@@ -156,16 +156,13 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     ));
 
     // Increment session token when modal opens to invalidate old async operations
-    use_effect(use_reactive(
-        &*props.show.read(),
-        move |is_shown| {
-            if is_shown {
-                let new_token = *session_token.peek() + 1;
-                session_token.set(new_token);
-                saving.set(false); // Reset saving state on open
-            }
-        },
-    ));
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
+            let new_token = *session_token.peek() + 1;
+            session_token.set(new_token);
+            saving.set(false); // Reset saving state on open
+        }
+    }));
 
     // Close modal
     let close_modal = move |_| {
@@ -176,9 +173,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     let is_valid = use_memo(move || {
         let has_cited_text = !cited_text.read().trim().is_empty();
         match *active_tab.read() {
-            CitationEditorTab::Internal => {
-                has_cited_text && !coordinate.read().trim().is_empty()
-            }
+            CitationEditorTab::Internal => has_cited_text && !coordinate.read().trim().is_empty(),
             CitationEditorTab::External => {
                 // Validate URL is a proper HTTP(S) URL for security
                 has_cited_text && is_valid_http_url(url.read().trim())
@@ -190,8 +185,8 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             }
             CitationEditorTab::Prompt => {
                 let prompt_url_str = prompt_url.read();
-                let prompt_url_valid = prompt_url_str.trim().is_empty()
-                    || is_valid_http_url(prompt_url_str.trim());
+                let prompt_url_valid =
+                    prompt_url_str.trim().is_empty() || is_valid_http_url(prompt_url_str.trim());
                 has_cited_text && !llm.read().trim().is_empty() && prompt_url_valid
             }
         }
@@ -230,41 +225,89 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                     publish_internal_citation(
                         &coordinate_val,
                         &cited_text_val,
-                        if title_val.is_empty() { None } else { Some(&title_val) },
-                        if author_val.is_empty() { None } else { Some(&author_val) },
+                        if title_val.is_empty() {
+                            None
+                        } else {
+                            Some(&title_val)
+                        },
+                        if author_val.is_empty() {
+                            None
+                        } else {
+                            Some(&author_val)
+                        },
                         existing_d_tag.as_deref(),
-                    ).await
+                    )
+                    .await
                 }
                 CitationEditorTab::External => {
                     publish_external_citation(
                         &url_val,
                         &cited_text_val,
-                        if title_val.is_empty() { None } else { Some(&title_val) },
-                        if author_val.is_empty() { None } else { Some(&author_val) },
+                        if title_val.is_empty() {
+                            None
+                        } else {
+                            Some(&title_val)
+                        },
+                        if author_val.is_empty() {
+                            None
+                        } else {
+                            Some(&author_val)
+                        },
                         existing_d_tag.as_deref(),
-                    ).await
+                    )
+                    .await
                 }
                 CitationEditorTab::Hardcopy => {
                     publish_hardcopy_citation(
                         &title_val,
                         &author_val,
                         &cited_text_val,
-                        if page_range_val.is_empty() { None } else { Some(&page_range_val) },
-                        if publisher_val.is_empty() { None } else { Some(&publisher_val) },
-                        if doi_val.is_empty() { None } else { Some(&doi_val) },
+                        if page_range_val.is_empty() {
+                            None
+                        } else {
+                            Some(&page_range_val)
+                        },
+                        if publisher_val.is_empty() {
+                            None
+                        } else {
+                            Some(&publisher_val)
+                        },
+                        if doi_val.is_empty() {
+                            None
+                        } else {
+                            Some(&doi_val)
+                        },
                         existing_d_tag.as_deref(),
-                    ).await
+                    )
+                    .await
                 }
                 CitationEditorTab::Prompt => {
                     publish_prompt_citation(
                         &llm_val,
                         &cited_text_val,
-                        if summary_val.is_empty() { None } else { Some(&summary_val) },
-                        if prompt_url_val.is_empty() { None } else { Some(&prompt_url_val) },
-                        if title_val.is_empty() { None } else { Some(&title_val) },
-                        if author_val.is_empty() { None } else { Some(&author_val) },
+                        if summary_val.is_empty() {
+                            None
+                        } else {
+                            Some(&summary_val)
+                        },
+                        if prompt_url_val.is_empty() {
+                            None
+                        } else {
+                            Some(&prompt_url_val)
+                        },
+                        if title_val.is_empty() {
+                            None
+                        } else {
+                            Some(&title_val)
+                        },
+                        if author_val.is_empty() {
+                            None
+                        } else {
+                            Some(&author_val)
+                        },
                         existing_d_tag.as_deref(),
-                    ).await
+                    )
+                    .await
                 }
             };
 

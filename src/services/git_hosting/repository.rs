@@ -23,8 +23,8 @@ pub async fn fetch_repository(naddr: &str) -> Result<Repository, String> {
     }
 
     // Decode naddr to coordinate
-    let (coordinate, _relay_hints) = decode_repo_naddr(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let (coordinate, _relay_hints) =
+        decode_repo_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     // Build filter
     let filter = Filter::new()
@@ -49,7 +49,10 @@ pub async fn fetch_repository(naddr: &str) -> Result<Repository, String> {
 }
 
 /// Fetch repositories by author pubkey
-pub async fn fetch_user_repositories(pubkey: &PublicKey, limit: usize) -> Result<Vec<Repository>, String> {
+pub async fn fetch_user_repositories(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<Repository>, String> {
     let filter = Filter::new()
         .kind(Kind::GitRepoAnnouncement)
         .author(*pubkey)
@@ -61,17 +64,12 @@ pub async fn fetch_user_repositories(pubkey: &PublicKey, limit: usize) -> Result
 
     cache_repo_events(&events);
 
-    Ok(events
-        .iter()
-        .filter_map(Repository::from_event)
-        .collect())
+    Ok(events.iter().filter_map(Repository::from_event).collect())
 }
 
 /// Fetch recent/trending repositories
 pub async fn fetch_recent_repositories(limit: usize) -> Result<Vec<Repository>, String> {
-    let filter = Filter::new()
-        .kind(Kind::GitRepoAnnouncement)
-        .limit(limit);
+    let filter = Filter::new().kind(Kind::GitRepoAnnouncement).limit(limit);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -79,10 +77,7 @@ pub async fn fetch_recent_repositories(limit: usize) -> Result<Vec<Repository>, 
 
     cache_repo_events(&events);
 
-    Ok(events
-        .iter()
-        .filter_map(Repository::from_event)
-        .collect())
+    Ok(events.iter().filter_map(Repository::from_event).collect())
 }
 
 /// Search repositories by text
@@ -98,10 +93,7 @@ pub async fn search_repositories(query: &str, limit: usize) -> Result<Vec<Reposi
 
     cache_repo_events(&events);
 
-    Ok(events
-        .iter()
-        .filter_map(Repository::from_event)
-        .collect())
+    Ok(events.iter().filter_map(Repository::from_event).collect())
 }
 
 /// Publish a new repository announcement
@@ -156,7 +148,9 @@ pub async fn publish_repository(
         .map_err(|e| format!("Failed to build event: {}", e))?;
 
     // Sign and publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
 
     let event_id = *output.id();
@@ -182,7 +176,9 @@ pub async fn delete_repository(coordinate: &Coordinate) -> Result<(), String> {
     let request = EventDeletionRequest::new().reason("Repository deleted");
     let builder = EventBuilder::delete(request);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
 
     // Remove from cache

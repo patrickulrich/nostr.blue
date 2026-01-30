@@ -1,14 +1,13 @@
-use dioxus::prelude::*;
-use nostr_sdk::{
-    Event as NostrEvent, EventId, Filter, Kind, Timestamp, PublicKey,
-    nips::nip88::{Poll, PollResponse, PollType},
-    TagStandard,
-};
+use crate::components::PollTimer;
 use crate::routes::Route;
 use crate::stores::nostr_client;
-use crate::components::PollTimer;
 use crate::utils::format::format_relative_time_or;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::{
+    nips::nip88::{Poll, PollResponse, PollType},
+    Event as NostrEvent, EventId, Filter, Kind, PublicKey, TagStandard, Timestamp,
+};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -41,7 +40,9 @@ pub fn PollCard(event: NostrEvent) -> Element {
             match PublicKey::parse(&pubkey_str) {
                 Ok(pk) => {
                     if let Some(client) = nostr_client::get_client() {
-                        if let Ok(Some(metadata)) = client.fetch_metadata(pk, Duration::from_secs(5)).await {
+                        if let Ok(Some(metadata)) =
+                            client.fetch_metadata(pk, Duration::from_secs(5)).await
+                        {
                             author_metadata.set(Some(metadata));
                         }
                     }
@@ -70,7 +71,9 @@ pub fn PollCard(event: NostrEvent) -> Element {
         let poll = poll_data.read().clone();
         async move {
             loading_votes.set(true);
-            let (ends_at, poll_relays) = poll.map(|p| (p.ends_at, p.relays)).unwrap_or((None, Vec::new()));
+            let (ends_at, poll_relays) = poll
+                .map(|p| (p.ends_at, p.relays))
+                .unwrap_or((None, Vec::new()));
             match fetch_poll_votes(poll_id, ends_at, poll_relays).await {
                 Ok(vote_events) => {
                     votes.set(vote_events.clone());
@@ -78,8 +81,10 @@ pub fn PollCard(event: NostrEvent) -> Element {
                     // Check if current user has voted
                     if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                         let user_pubkey_str = user_pubkey.to_string();
-                        if let Some(user_vote_event) = vote_events.iter()
-                            .find(|v| v.pubkey.to_string() == user_pubkey_str) {
+                        if let Some(user_vote_event) = vote_events
+                            .iter()
+                            .find(|v| v.pubkey.to_string() == user_pubkey_str)
+                        {
                             user_vote.set(Some(user_vote_event.clone()));
                             show_results.set(true);
                         }
@@ -149,8 +154,10 @@ pub fn PollCard(event: NostrEvent) -> Element {
                             // Update user vote state - find the user's vote in the refreshed list
                             if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                                 let user_pubkey_str = user_pubkey.to_string();
-                                if let Some(user_vote_event) = vote_events.iter()
-                                    .find(|v| v.pubkey.to_string() == user_pubkey_str) {
+                                if let Some(user_vote_event) = vote_events
+                                    .iter()
+                                    .find(|v| v.pubkey.to_string() == user_pubkey_str)
+                                {
                                     user_vote.set(Some(user_vote_event.clone()));
                                 }
                             }
@@ -177,11 +184,16 @@ pub fn PollCard(event: NostrEvent) -> Element {
     // Get display data
     let poll = poll_data.read().clone();
     let poll_title = poll.as_ref().map(|p| p.title.clone()).unwrap_or_default();
-    let poll_type = poll.as_ref().map(|p| p.r#type).unwrap_or(PollType::SingleChoice);
+    let poll_type = poll
+        .as_ref()
+        .map(|p| p.r#type)
+        .unwrap_or(PollType::SingleChoice);
     let poll_options = poll.as_ref().map(|p| p.options.clone()).unwrap_or_default();
     let poll_ends_at = poll.as_ref().and_then(|p| p.ends_at);
 
-    let author_name = author_metadata.read().as_ref()
+    let author_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey_for_display));
 
@@ -345,9 +357,7 @@ async fn fetch_poll_votes(
 ) -> Result<Vec<NostrEvent>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
 
-    let mut filter = Filter::new()
-        .kind(Kind::PollResponse)
-        .event(poll_id);
+    let mut filter = Filter::new().kind(Kind::PollResponse).event(poll_id);
 
     if let Some(until) = ends_at {
         filter = filter.until(until);
@@ -369,7 +379,8 @@ async fn fetch_poll_votes(
         nostr_client::ensure_relays_ready(&client).await;
 
         // Fetch from poll-specified relays
-        let relay_urls: Vec<nostr_sdk::Url> = poll_relays.iter()
+        let relay_urls: Vec<nostr_sdk::Url> = poll_relays
+            .iter()
             .filter_map(|r| nostr_sdk::Url::parse(r.as_str()).ok())
             .collect();
 
@@ -441,4 +452,3 @@ fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<
 
     counts
 }
-

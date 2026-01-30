@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::hooks::{use_user_lists, UserList};
 use crate::stores::profiles;
-use crate::utils::list_kinds::NAMED_PEOPLE;
 use crate::utils::list_encryption::add_person_to_list;
+use crate::utils::list_kinds::NAMED_PEOPLE;
 
 /// Global counter for generating unique modal IDs
 static MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -56,7 +56,8 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
 
     // Filter to only people lists
     let people_lists = use_memo(move || {
-        all_lists.read()
+        all_lists
+            .read()
             .iter()
             .filter(|list| list.kind == NAMED_PEOPLE)
             .cloned()
@@ -81,11 +82,16 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
 
     let person_pubkey_for_display = props.person_pubkey.clone();
     let person_name = use_memo(move || {
-        person_metadata.read().as_ref()
+        person_metadata
+            .read()
+            .as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| {
                 if person_pubkey_for_display.chars().count() >= 12 {
-                    person_pubkey_for_display.chars().take(12).collect::<String>()
+                    person_pubkey_for_display
+                        .chars()
+                        .take(12)
+                        .collect::<String>()
                 } else {
                     person_pubkey_for_display.clone()
                 }
@@ -164,7 +170,13 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
 
             spawn(async move {
                 // First create the list
-                match crate::utils::list_encryption::create_people_list(name.clone(), None, is_private).await {
+                match crate::utils::list_encryption::create_people_list(
+                    name.clone(),
+                    None,
+                    is_private,
+                )
+                .await
+                {
                     Ok(event) => {
                         log::debug!("Created new people list");
 

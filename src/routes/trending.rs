@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use crate::services::trending::{get_trending_notes, TrendingNote};
 use crate::components::{NoteCard, NoteCardSkeleton};
-use crate::stores::nostr_client;
 use crate::hooks::use_mute_block_cache;
-use nostr_sdk::{Event as NostrEvent, EventId, PublicKey, Timestamp, Kind, Tag};
+use crate::services::trending::{get_trending_notes, TrendingNote};
+use crate::stores::nostr_client;
+use dioxus::prelude::*;
 use nostr::secp256k1::schnorr::Signature;
+use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Tag, Timestamp};
 
 #[component]
 pub fn Trending() -> Element {
@@ -155,18 +155,20 @@ pub fn Trending() -> Element {
 
 /// Convert a TrendingNote to a nostr_sdk::Event
 fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> {
-    let event_id = EventId::from_hex(&note.event.id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::from_hex(&note.event.id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
-    let pubkey = PublicKey::from_hex(&note.event.pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey =
+        PublicKey::from_hex(&note.event.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let created_at = Timestamp::from(note.event.created_at);
 
     let kind = Kind::from(note.event.kind);
 
     // Convert tags
-    let tags: Vec<Tag> = note.event.tags
+    let tags: Vec<Tag> = note
+        .event
+        .tags
         .iter()
         .filter_map(|tag_vec| {
             if tag_vec.is_empty() {
@@ -177,10 +179,9 @@ fn convert_trending_to_event(note: &TrendingNote) -> Result<NostrEvent, String> 
         .collect();
 
     // Decode signature from hex
-    let sig_bytes = hex::decode(&note.event.sig)
-        .map_err(|e| format!("Invalid signature hex: {}", e))?;
-    let sig = Signature::from_slice(&sig_bytes)
-        .map_err(|e| format!("Invalid signature: {}", e))?;
+    let sig_bytes =
+        hex::decode(&note.event.sig).map_err(|e| format!("Invalid signature hex: {}", e))?;
+    let sig = Signature::from_slice(&sig_bytes).map_err(|e| format!("Invalid signature: {}", e))?;
 
     // Build the event
     Ok(NostrEvent::new(

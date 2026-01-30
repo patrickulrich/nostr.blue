@@ -14,29 +14,30 @@ use dioxus::prelude::*;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
 // CDK NUT-18 types
-use cdk::nuts::{
-    CurrencyUnit, PaymentRequest, PaymentRequestPayload as CdkPaymentRequestPayload,
-    Transport, TransportType,
-};
 use cdk::mint_url::MintUrl;
+use cdk::nuts::{
+    CurrencyUnit, PaymentRequest, PaymentRequestPayload as CdkPaymentRequestPayload, Transport,
+    TransportType,
+};
 use cdk::Amount;
 
-use crate::utils::shorten_url;
 use super::events::queue_event_for_retry;
-use super::types::PendingEventType;
 use super::internal::create_ephemeral_wallet;
 use super::mint_mgmt::{get_mint_balance, get_mints};
-use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
-use super::signals::{
-    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS,
-    WALLET_TOKENS,
+use super::proofs::{
+    cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map,
 };
+use super::signals::{
+    try_acquire_mint_lock, PAYMENT_REQUEST_PROGRESS, PENDING_PAYMENT_REQUESTS, WALLET_TOKENS,
+};
+use super::types::PendingEventType;
 use super::types::{
-    ExtendedCashuProof, ExtendedTokenEvent, NostrPaymentWaitInfo,
-    PaymentRequestProgress, ProofData, TokenData, WalletTokensStoreStoreExt,
+    ExtendedCashuProof, ExtendedTokenEvent, NostrPaymentWaitInfo, PaymentRequestProgress,
+    ProofData, TokenData, WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url};
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::shorten_url;
 
 /// Create a payment request (NUT-18)
 ///
@@ -82,8 +83,7 @@ pub async fn create_payment_request(
                 .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
                 .collect();
 
-            let nprofile =
-                nostr_sdk::nips::nip19::Nip19Profile::new(keys.public_key(), relay_urls);
+            let nprofile = nostr_sdk::nips::nip19::Nip19Profile::new(keys.public_key(), relay_urls);
 
             let nprofile_str = nprofile
                 .to_bech32()
@@ -186,7 +186,9 @@ pub async fn pay_payment_request(
     let amount: u64 = match (request.amount, custom_amount) {
         (Some(amt), _) => u64::from(amt),
         (None, Some(amt)) => amt,
-        (None, None) => return Err("Amount required but not specified in request or provided".to_string()),
+        (None, None) => {
+            return Err("Amount required but not specified in request or provided".to_string())
+        }
     };
 
     if amount == 0 {
@@ -284,8 +286,8 @@ pub async fn pay_payment_request(
         .map_err(|e| format!("Failed to extract proofs from token: {}", e))?;
 
     // Build payload using CDK's PaymentRequestPayload
-    let mint_url_parsed = MintUrl::from_str(&mint_url)
-        .map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url_parsed =
+        MintUrl::from_str(&mint_url).map_err(|e| format!("Invalid mint URL: {}", e))?;
 
     let payload = CdkPaymentRequestPayload {
         id: request.payment_id.clone(),
@@ -339,8 +341,9 @@ pub async fn pay_payment_request(
                 let payload_json = serde_json::to_string(&payload)
                     .map_err(|e| format!("Failed to serialize payload: {}", e))?;
 
-                let rumor = nostr_sdk::EventBuilder::new(nostr_sdk::Kind::from_u16(14), payload_json)
-                    .build(nprofile.public_key);
+                let rumor =
+                    nostr_sdk::EventBuilder::new(nostr_sdk::Kind::from_u16(14), payload_json)
+                        .build(nprofile.public_key);
 
                 // Send gift wrap
                 let result = client
@@ -395,7 +398,9 @@ pub async fn pay_payment_request(
     } else {
         // No transport - revert proofs to spendable
         super::proofs::revert_proofs_to_spendable(&token_proof_secrets);
-        return Err("No transport available in payment request. Cannot deliver payment.".to_string());
+        return Err(
+            "No transport available in payment request. Cannot deliver payment.".to_string(),
+        );
     }
 
     // Transport succeeded - mark proofs as spent
@@ -410,8 +415,7 @@ pub async fn pay_payment_request(
         .as_nostr_signer();
 
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey =
-        PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -457,7 +461,8 @@ pub async fn pay_payment_request(
                         PendingEventType::TokenEvent,
                         Some(pending_id.clone()),
                         Some(mint_url.clone()),
-                    ).await;
+                    )
+                    .await;
                     pending_id
                 } else {
                     event_output.id().to_hex()
@@ -471,7 +476,8 @@ pub async fn pay_payment_request(
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(mint_url.clone()),
-                ).await;
+                )
+                .await;
                 pending_id
             }
         });
@@ -491,12 +497,14 @@ pub async fn pay_payment_request(
                 Ok(output) => {
                     if output.success.is_empty() {
                         log::warn!("No relays accepted deletion event, queuing for retry");
-                        queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                        queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
+                            .await;
                     }
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event: {}", e);
-                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None).await;
+                    queue_event_for_retry(builder, PendingEventType::DeletionEvent, None, None)
+                        .await;
                 }
             }
         }
@@ -616,15 +624,12 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    notifications.recv(),
-                )
-                .await
+                match tokio::time::timeout(std::time::Duration::from_secs(5), notifications.recv())
+                    .await
                 {
                     Ok(Ok(n)) => Some(n),
-                    Ok(Err(_)) => break,  // Channel closed
-                    Err(_) => continue,   // Timeout, check again
+                    Ok(Err(_)) => break, // Channel closed
+                    Err(_) => continue,  // Timeout, check again
                 }
             }
         };
@@ -642,17 +647,16 @@ pub async fn wait_for_nostr_payment(request_id: String, timeout_secs: u64) -> Re
 
                             // Calculate amount with overflow protection
                             // CDK's Proof.amount is Amount type, convert via u64::from()
-                            let amount: u64 = payload.proofs
+                            let amount: u64 = payload
+                                .proofs
                                 .iter()
                                 .map(|p| u64::from(p.amount))
                                 .try_fold(0u64, |acc, amt| acc.checked_add(amt))
                                 .unwrap_or(u64::MAX); // Cap at max if overflow
 
                             // Convert CDK proofs to ProofData
-                            let proof_data: Vec<ProofData> = payload.proofs
-                                .iter()
-                                .map(cdk_proof_to_proof_data)
-                                .collect();
+                            let proof_data: Vec<ProofData> =
+                                payload.proofs.iter().map(cdk_proof_to_proof_data).collect();
 
                             // Receive the tokens (mint is MintUrl, convert to string)
                             let mint_str = payload.mint.to_string();
@@ -731,15 +735,14 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
             None, // amount - None means all
             cdk::amount::SplitTarget::default(),
             cdk_proofs.clone(),
-            None,  // spending_conditions
-            true,  // include_fees
+            None, // spending_conditions
+            true, // include_fees
         )
         .await
         .map_err(|e| format!("Failed to swap proofs: {}", e))?;
 
     // Get final proofs - swap(None, ...) returning None means proofs were rejected by mint
-    let final_proofs = swapped
-        .ok_or("Swap validation failed - proofs rejected by mint")?;
+    let final_proofs = swapped.ok_or("Swap validation failed - proofs rejected by mint")?;
 
     // Publish to Nostr
     let signer = crate::stores::signer::get_signer()
@@ -747,8 +750,7 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
         .as_nostr_signer();
 
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey =
-        PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -791,7 +793,8 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(mint_url.to_string()),
-                ).await;
+                )
+                .await;
                 pending_id
             } else {
                 event_output.id().to_hex()
@@ -806,7 +809,8 @@ async fn receive_payment_proofs(mint_url: &str, proofs: Vec<ProofData>) -> Resul
                 PendingEventType::TokenEvent,
                 Some(pending_id.clone()),
                 Some(mint_url.to_string()),
-            ).await;
+            )
+            .await;
             pending_id
         }
     };

@@ -2,12 +2,12 @@
 //!
 //! Create a new NIP-34 Git issue (Kind 1621) for a repository.
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, publish_issue_by_naddr};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 /// New issue page component
 #[component]
@@ -79,7 +79,11 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                     labels_val.split(',').map(|s| s.trim()).collect()
                 };
 
-                let subject = if title_val.is_empty() { None } else { Some(title_val.as_str()) };
+                let subject = if title_val.is_empty() {
+                    None
+                } else {
+                    Some(title_val.as_str())
+                };
 
                 match publish_issue_by_naddr(&naddr, subject, &content_val, &label_list).await {
                     Ok(event_id) => {

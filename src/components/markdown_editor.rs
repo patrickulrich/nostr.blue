@@ -6,11 +6,11 @@
 use dioxus::prelude::*;
 use std::rc::Rc;
 
-use crate::utils::markdown::render_markdown;
 use super::markdown_toolbar::{
     apply_markdown_format, get_textarea_cursor, set_textarea_cursor, MarkdownFormat,
     MarkdownToolbar,
 };
+use crate::utils::markdown::render_markdown;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum EditorMode {
@@ -48,8 +48,14 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
     let mut mode = use_signal(|| EditorMode::Split);
 
     // Generate unique textarea ID if not provided
-    let textarea_id =
-        use_signal(|| Rc::new(props.textarea_id.clone().unwrap_or_else(|| format!("md-editor-{}", uuid::Uuid::new_v4()))));
+    let textarea_id = use_signal(|| {
+        Rc::new(
+            props
+                .textarea_id
+                .clone()
+                .unwrap_or_else(|| format!("md-editor-{}", uuid::Uuid::new_v4())),
+        )
+    });
 
     // Render markdown preview
     let html_content = use_memo(move || render_markdown(&props.content.read()));
@@ -278,11 +284,7 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
 /// Insert text at the current cursor position in the editor
 ///
 /// This is useful for inserting content from external sources (e.g., image upload, mention dialog)
-pub fn insert_at_cursor(
-    content: &mut Signal<String>,
-    textarea_id: &str,
-    text_to_insert: &str,
-) {
+pub fn insert_at_cursor(content: &mut Signal<String>, textarea_id: &str, text_to_insert: &str) {
     let current_content = content.read().clone();
     let (cursor_start, _cursor_end) = get_textarea_cursor(textarea_id, &current_content);
 

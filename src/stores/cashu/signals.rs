@@ -41,18 +41,15 @@ pub static TERMS_ACCEPTED: GlobalSignal<Option<bool>> = Signal::global(|| None);
 
 /// Operation lock to prevent concurrent wallet operations on the same mint
 /// Uses GlobalSignal with HashSet to track mints currently being operated on
-pub static MINT_OPERATION_LOCK: GlobalSignal<HashSet<String>> =
-    Signal::global(HashSet::new);
+pub static MINT_OPERATION_LOCK: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 
 /// Proof-to-EventId mapping for fast lookup of which Nostr event contains each proof
 /// Key: proof secret, Value: event_id of the token event containing this proof
 /// This enables correct deletion events when spending proofs
-pub static PROOF_EVENT_MAP: GlobalSignal<HashMap<String, String>> =
-    Signal::global(HashMap::new);
+pub static PROOF_EVENT_MAP: GlobalSignal<HashMap<String, String>> = Signal::global(HashMap::new);
 
 /// Global signal for active transactions (local-only tracking)
-pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> =
-    Signal::global(Vec::new);
+pub static ACTIVE_TRANSACTIONS: GlobalSignal<Vec<ActiveTransaction>> = Signal::global(Vec::new);
 
 /// Proof secrets that the mint has reported as PENDING state
 /// Different from local pending (is_pending flag) - this tracks proofs
@@ -77,8 +74,7 @@ pub static IN_FLIGHT_MELT_REQUESTS: GlobalSignal<Vec<InFlightMeltRequest>> =
 ///
 /// Used to prevent timeout recovery from interfering with active operations.
 /// Operations must register here before starting and unregister when done.
-pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> =
-    Signal::global(HashSet::new);
+pub static ACTIVE_OPERATIONS: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 
 /// In-flight send/swap requests for proof recovery protection
 ///
@@ -114,7 +110,9 @@ pub fn add_in_flight_melt_request(request: InFlightMeltRequest) {
 
 /// Remove an in-flight melt request from tracking
 pub fn remove_in_flight_melt_request(transaction_id: &str) {
-    IN_FLIGHT_MELT_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    IN_FLIGHT_MELT_REQUESTS
+        .write()
+        .retain(|r| r.transaction_id != transaction_id);
     ACTIVE_OPERATIONS.write().remove(transaction_id);
     log::debug!("Removed in-flight melt request: {}", transaction_id);
 }
@@ -162,7 +160,9 @@ pub fn add_in_flight_send_request(request: super::types::InFlightSendRequest) {
 /// SAFETY: Must be called AFTER the send/swap operation completes (success or error)
 /// to allow proofs to be recovered if needed.
 pub fn remove_in_flight_send_request(transaction_id: &str) {
-    IN_FLIGHT_SEND_REQUESTS.write().retain(|r| r.transaction_id != transaction_id);
+    IN_FLIGHT_SEND_REQUESTS
+        .write()
+        .retain(|r| r.transaction_id != transaction_id);
     ACTIVE_OPERATIONS.write().remove(transaction_id);
     log::debug!("Removed in-flight send request: {}", transaction_id);
 }
@@ -187,7 +187,10 @@ pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to persist in-flight melt requests: {}", e))?;
 
-    log::debug!("Persisted {} in-flight melt requests to IndexedDB", requests.len());
+    log::debug!(
+        "Persisted {} in-flight melt requests to IndexedDB",
+        requests.len()
+    );
     Ok(())
 }
 
@@ -197,14 +200,22 @@ pub async fn persist_in_flight_melt_requests() -> Result<(), String> {
 /// then persist to IndexedDB. This prevents race conditions in the load-append-save
 /// pattern by making the in-memory signal the source of truth during execution.
 /// On crash/reload, IndexedDB provides the persistent copy for recovery.
-pub async fn persist_single_in_flight_request(request: &super::types::InFlightMeltRequest) -> Result<(), String> {
+pub async fn persist_single_in_flight_request(
+    request: &super::types::InFlightMeltRequest,
+) -> Result<(), String> {
     // 1. Check for duplicate and update in-memory signal atomically
     {
         let mut requests = IN_FLIGHT_MELT_REQUESTS.write();
 
         // Dedupe: skip if transaction_id already exists
-        if requests.iter().any(|r| r.transaction_id == request.transaction_id) {
-            log::debug!("In-flight request {} already exists, skipping", request.transaction_id);
+        if requests
+            .iter()
+            .any(|r| r.transaction_id == request.transaction_id)
+        {
+            log::debug!(
+                "In-flight request {} already exists, skipping",
+                request.transaction_id
+            );
             return Ok(());
         }
 
@@ -212,10 +223,14 @@ pub async fn persist_single_in_flight_request(request: &super::types::InFlightMe
     }
 
     // 2. Update ACTIVE_OPERATIONS in same synchronous section
-    ACTIVE_OPERATIONS.write().insert(request.transaction_id.clone());
+    ACTIVE_OPERATIONS
+        .write()
+        .insert(request.transaction_id.clone());
 
     // 3. Then persist to IndexedDB (async, for crash recovery)
-    let localstore = SHARED_LOCALSTORE.read().as_ref()
+    let localstore = SHARED_LOCALSTORE
+        .read()
+        .as_ref()
         .ok_or("Localstore not initialized")?
         .clone();
 
@@ -228,11 +243,17 @@ pub async fn persist_single_in_flight_request(request: &super::types::InFlightMe
             requests.retain(|r| r.transaction_id != request.transaction_id);
         }
         ACTIVE_OPERATIONS.write().remove(&request.transaction_id);
-        log::warn!("Rolled back in-memory state after persist failure for {}", request.transaction_id);
+        log::warn!(
+            "Rolled back in-memory state after persist failure for {}",
+            request.transaction_id
+        );
         return Err(format!("Failed to save in-flight request: {}", e));
     }
 
-    log::debug!("Persisted in-flight melt request {}", request.transaction_id);
+    log::debug!(
+        "Persisted in-flight melt request {}",
+        request.transaction_id
+    );
     Ok(())
 }
 
@@ -258,18 +279,19 @@ where
 
     // Compute balance from mutated tokens (CDK pattern)
     // Use normal addition - wallet balances can't realistically overflow u64
-    let (available, pending) = tokens_write
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .fold((0u64, 0u64), |(avail, pend), proof| {
-            if proof.state.is_spendable() {
-                (avail + proof.amount, pend)
-            } else if proof.state.is_pending() {
-                (avail, pend + proof.amount)
-            } else {
-                (avail, pend)
-            }
-        });
+    let (available, pending) =
+        tokens_write
+            .iter()
+            .flat_map(|t| &t.proofs)
+            .fold((0u64, 0u64), |(avail, pend), proof| {
+                if proof.state.is_spendable() {
+                    (avail + proof.amount, pend)
+                } else if proof.state.is_pending() {
+                    (avail, pend + proof.amount)
+                } else {
+                    (avail, pend)
+                }
+            });
 
     // Update single balance signal
     *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
@@ -314,24 +336,29 @@ pub fn update_wallet_balances() {
     let tokens = data.read();
 
     // Use normal addition - wallet balances can't realistically overflow u64
-    let (available, pending) = tokens
-        .iter()
-        .flat_map(|t| &t.proofs)
-        .fold((0u64, 0u64), |(avail, pend), proof| {
-            if proof.state.is_spendable() {
-                (avail + proof.amount, pend)
-            } else if proof.state.is_pending() {
-                (avail, pend + proof.amount)
-            } else {
-                (avail, pend)
-            }
-        });
+    let (available, pending) =
+        tokens
+            .iter()
+            .flat_map(|t| &t.proofs)
+            .fold((0u64, 0u64), |(avail, pend), proof| {
+                if proof.state.is_spendable() {
+                    (avail + proof.amount, pend)
+                } else if proof.state.is_pending() {
+                    (avail, pend + proof.amount)
+                } else {
+                    (avail, pend)
+                }
+            });
 
     let total = available + pending;
 
     // Single signal for all balance data
     *crate::stores::cashu_cdk_bridge::WALLET_BALANCES.write() =
-        crate::stores::cashu_cdk_bridge::WalletBalances { total, available, pending };
+        crate::stores::cashu_cdk_bridge::WalletBalances {
+            total,
+            available,
+            pending,
+        };
 }
 
 /// Load in-flight melt requests from IndexedDB (call on startup)
@@ -349,7 +376,10 @@ pub async fn load_in_flight_melt_requests() {
     match localstore.load_in_flight_melt_requests().await {
         Ok(Some(requests)) => {
             if !requests.is_empty() {
-                log::info!("Loaded {} in-flight melt requests from storage", requests.len());
+                log::info!(
+                    "Loaded {} in-flight melt requests from storage",
+                    requests.len()
+                );
 
                 // Populate ACTIVE_OPERATIONS from loaded requests
                 {
@@ -462,7 +492,11 @@ pub async fn cleanup_expired_pending_secrets() {
     };
 
     if removed_count > 0 {
-        log::info!("Cleaned up {} expired pending secrets ({} remaining)", removed_count, before_count - removed_count);
+        log::info!(
+            "Cleaned up {} expired pending secrets ({} remaining)",
+            removed_count,
+            before_count - removed_count
+        );
         // Persist after cleanup
         persist_pending_secrets_impl().await;
     }
@@ -491,8 +525,7 @@ pub static SHARED_LOCALSTORE: GlobalSignal<
 // =============================================================================
 
 /// Pending Nostr events (offline queue)
-pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> =
-    Signal::global(Vec::new);
+pub static PENDING_NOSTR_EVENTS: GlobalSignal<Vec<PendingNostrEvent>> = Signal::global(Vec::new);
 
 /// Global signal for pending mint quotes (lightning receive)
 pub static PENDING_MINT_QUOTES: GlobalSignal<Store<PendingMintQuotesStore>> =

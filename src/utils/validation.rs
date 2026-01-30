@@ -1,11 +1,11 @@
 //! Validation utilities for common validation patterns across the codebase.
 
+use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::PublicKey;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use url::Url;
-use crate::stores::signer::SIGNER_INFO;
 
 // ============================================================================
 // URL Validation Utilities
@@ -47,9 +47,9 @@ pub fn is_valid_http_url(url_str: &str) -> bool {
 /// * `Some(Url)` - Valid parsed URL with http/https scheme
 /// * `None` - Invalid URL or non-http/https scheme
 pub fn parse_http_url(url_str: &str) -> Option<Url> {
-    Url::parse(url_str).ok().filter(|u| {
-        matches!(u.scheme(), "http" | "https")
-    })
+    Url::parse(url_str)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
 }
 
 /// Result type for signer validation operations
@@ -122,7 +122,8 @@ pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
     if !lower.starts_with("lnbc")  // Mainnet
         && !lower.starts_with("lntb")  // Testnet
         && !lower.starts_with("lnbcrt") // Regtest
-        && !lower.starts_with("lnsb")  // Signet
+        && !lower.starts_with("lnsb")
+    // Signet
     {
         return None;
     }
@@ -228,7 +229,7 @@ pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
     // Must match pattern: number + optional unit
     // Allowed units: px, %, vh, vw, em, rem, pt, vmin, vmax
     if CSS_DIMENSION_PATTERN.is_match(trimmed) {
-        Some(trimmed)  // Return validated trimmed slice
+        Some(trimmed) // Return validated trimmed slice
     } else {
         None
     }

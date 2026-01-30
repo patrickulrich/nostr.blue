@@ -5,10 +5,10 @@
 //! - `subscribe_once` - One-time fetches that close after EOSE
 //! - `subscribe_for_events` - Wait for specific number of events
 
-use std::time::Duration;
-use nostr_sdk::{Client, Filter, SubscriptionId};
-use nostr_relay_pool::relay::{ReqExitPolicy};
+use nostr_relay_pool::relay::ReqExitPolicy;
 use nostr_relay_pool::SubscribeAutoCloseOptions;
+use nostr_sdk::{Client, Filter, SubscriptionId};
+use std::time::Duration;
 
 /// Subscribe for real-time updates with auto-close after inactivity
 ///
@@ -33,7 +33,8 @@ pub async fn subscribe_realtime(
     let auto_close = SubscribeAutoCloseOptions::default()
         .exit_policy(ReqExitPolicy::WaitDurationAfterEOSE(timeout));
 
-    client.subscribe(filter, Some(auto_close))
+    client
+        .subscribe(filter, Some(auto_close))
         .await
         .map(|output| output.val)
         .map_err(|e| format!("Failed to subscribe: {}", e))
@@ -62,7 +63,8 @@ pub async fn subscribe_once(
         .exit_policy(ReqExitPolicy::ExitOnEOSE)
         .timeout(Some(timeout));
 
-    client.subscribe(filter, Some(auto_close))
+    client
+        .subscribe(filter, Some(auto_close))
         .await
         .map(|output| output.val)
         .map_err(|e| format!("Failed to subscribe: {}", e))
@@ -92,7 +94,8 @@ pub async fn subscribe_for_events(
         .exit_policy(ReqExitPolicy::WaitForEventsAfterEOSE(event_count))
         .timeout(Some(timeout));
 
-    client.subscribe(filter, Some(auto_close))
+    client
+        .subscribe(filter, Some(auto_close))
         .await
         .map(|output| output.val)
         .map_err(|e| format!("Failed to subscribe: {}", e))
@@ -117,8 +120,7 @@ pub async fn subscribe_with_options(
     timeout: Option<Duration>,
     idle_timeout: Option<Duration>,
 ) -> Result<SubscriptionId, String> {
-    let mut auto_close = SubscribeAutoCloseOptions::default()
-        .exit_policy(exit_policy);
+    let mut auto_close = SubscribeAutoCloseOptions::default().exit_policy(exit_policy);
 
     if let Some(t) = timeout {
         auto_close = auto_close.timeout(Some(t));
@@ -128,7 +130,8 @@ pub async fn subscribe_with_options(
         auto_close = auto_close.idle_timeout(Some(t));
     }
 
-    client.subscribe(filter, Some(auto_close))
+    client
+        .subscribe(filter, Some(auto_close))
         .await
         .map(|output| output.val)
         .map_err(|e| format!("Failed to subscribe: {}", e))

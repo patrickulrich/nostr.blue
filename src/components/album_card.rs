@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
-use crate::services::wavlake::WavlakeSearchResult;
 use crate::components::icons::DiscIcon;
+use crate::services::wavlake::WavlakeSearchResult;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AlbumCardProps {

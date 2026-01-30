@@ -2,15 +2,15 @@
 //!
 //! Display card for NIP-69 P2P orders in list views
 
+use crate::components::{P2PLayerBadge, P2PStatusBadge, P2PTypeBadge};
+use crate::routes::Route;
+use crate::services::btc_price;
+use crate::utils::duration::format_duration_compact;
+use crate::utils::format::format_sats_with_unit;
+use crate::utils::nip69::P2POrder;
+use crate::utils::time::format_relative_time;
 use dioxus::prelude::*;
 use nostr::Timestamp;
-use crate::routes::Route;
-use crate::utils::nip69::P2POrder;
-use crate::services::btc_price;
-use crate::components::{P2PStatusBadge, P2PTypeBadge, P2PLayerBadge};
-use crate::utils::time::format_relative_time;
-use crate::utils::format::format_sats_with_unit;
-use crate::utils::duration::format_duration_compact;
 
 /// P2P Order Card for list display
 #[component]
@@ -19,7 +19,8 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
     let amount_display = order.fiat_amount.display(&order.currency);
 
     // Format premium display and CSS class together (avoid duplicated sign check)
-    let (premium_display, premium_class) = order.premium
+    let (premium_display, premium_class) = order
+        .premium
         .map(|p| {
             if p >= 0.0 {
                 (format!("+{:.1}%", p), "text-green-600 dark:text-green-400")
@@ -42,7 +43,9 @@ pub fn P2POrderCard(order: P2POrder) -> Element {
     };
 
     // Limit payment methods shown
-    let payment_methods_display: Vec<&str> = order.payment_methods.iter()
+    let payment_methods_display: Vec<&str> = order
+        .payment_methods
+        .iter()
         .take(3)
         .map(|s| s.as_str())
         .collect();
@@ -208,4 +211,3 @@ pub fn P2POrderCardSkeleton() -> Element {
         }
     }
 }
-

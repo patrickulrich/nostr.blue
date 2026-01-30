@@ -2,12 +2,12 @@
 //!
 //! Displays the file tree for a repository at a specific path and ref.
 
-use dioxus::prelude::*;
+use crate::components::{BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton};
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
-use crate::components::{CodeFileTree, FileTreeSkeleton, FilePathBreadcrumb, BranchSelector};
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 #[component]
 pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
@@ -73,7 +73,10 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                     .unwrap_or_else(|_| path.clone());
 
                 // List files
-                match git_service().list_files(&repo, &decoded_path, Some(&git_ref)).await {
+                match git_service()
+                    .list_files(&repo, &decoded_path, Some(&git_ref))
+                    .await
+                {
                     Ok(entries) => {
                         files.set(entries);
                     }

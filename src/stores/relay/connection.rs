@@ -26,7 +26,9 @@ pub async fn ensure_relays_ready(client: &Client) {
 
     // First, check if any relay is already connected
     let relays = client.relays().await;
-    let any_connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+    let any_connected = relays
+        .values()
+        .any(|r| r.status() == PoolRelayStatus::Connected);
 
     if any_connected {
         log::debug!("At least one relay is already connected, proceeding with fetch");
@@ -54,7 +56,9 @@ pub async fn ensure_relays_ready(client: &Client) {
 
         loop {
             let relays_now = client.relays().await;
-            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+            let connected = relays_now
+                .values()
+                .any(|r| r.status() == PoolRelayStatus::Connected);
 
             if connected {
                 log::info!("Relay connected after {}ms", start.elapsed().as_millis());
@@ -80,7 +84,9 @@ pub async fn ensure_relays_ready(client: &Client) {
 
         loop {
             let relays_now = client.relays().await;
-            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+            let connected = relays_now
+                .values()
+                .any(|r| r.status() == PoolRelayStatus::Connected);
 
             if connected {
                 log::info!("Relay connected after {:?}", start.elapsed());
@@ -101,11 +107,17 @@ pub async fn ensure_relays_ready(client: &Client) {
 
     // Final status check
     let relays_after = client.relays().await;
-    let connected_count = relays_after.values().filter(|r| r.status() == PoolRelayStatus::Connected).count();
+    let connected_count = relays_after
+        .values()
+        .filter(|r| r.status() == PoolRelayStatus::Connected)
+        .count();
     if connected_count == 0 {
         log::warn!("After timeout: no relays connected - fetches may fail or use cached data");
     } else {
-        log::info!("After connection attempt: {} relay(s) connected", connected_count);
+        log::info!(
+            "After connection attempt: {} relay(s) connected",
+            connected_count
+        );
         // Signal relay connection for reactive retry triggers (one-time)
         if !*RELAY_CONNECTED.peek() {
             *RELAY_CONNECTED.write() = true;
@@ -163,10 +175,15 @@ pub async fn reconnect(client: &Client) -> bool {
 
         loop {
             let relays = client.relays().await;
-            let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+            let connected = relays
+                .values()
+                .any(|r| r.status() == PoolRelayStatus::Connected);
 
             if connected {
-                log::info!("Reconnected to relays successfully after {}ms", start.elapsed().as_millis());
+                log::info!(
+                    "Reconnected to relays successfully after {}ms",
+                    start.elapsed().as_millis()
+                );
                 if !*RELAY_CONNECTED.peek() {
                     *RELAY_CONNECTED.write() = true;
                 }
@@ -188,10 +205,15 @@ pub async fn reconnect(client: &Client) -> bool {
 
         loop {
             let relays = client.relays().await;
-            let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+            let connected = relays
+                .values()
+                .any(|r| r.status() == PoolRelayStatus::Connected);
 
             if connected {
-                log::info!("Reconnected to relays successfully after {:?}", start.elapsed());
+                log::info!(
+                    "Reconnected to relays successfully after {:?}",
+                    start.elapsed()
+                );
                 if !*RELAY_CONNECTED.peek() {
                     *RELAY_CONNECTED.write() = true;
                 }
@@ -208,7 +230,9 @@ pub async fn reconnect(client: &Client) -> bool {
 
     // Final status check
     let relays = client.relays().await;
-    let connected = relays.values().any(|r| r.status() == PoolRelayStatus::Connected);
+    let connected = relays
+        .values()
+        .any(|r| r.status() == PoolRelayStatus::Connected);
     if connected {
         log::info!("Reconnected to relays successfully");
         if !*RELAY_CONNECTED.peek() {
@@ -253,11 +277,17 @@ pub async fn fetch_events_from_relays(
         return Err("No valid relay URLs provided for targeted fetch".to_string());
     }
 
-    log::info!("Fetching events from {} specific relays: {:?}", urls.len(), urls);
+    log::info!(
+        "Fetching events from {} specific relays: {:?}",
+        urls.len(),
+        urls
+    );
 
     // SDK's fetch_events_from(urls, filters, timeout) - fetches only from specified relays
     // Internally uses ReqExitPolicy::ExitOnEOSE
-    client.fetch_events_from(urls, filter, timeout).await
+    client
+        .fetch_events_from(urls, filter, timeout)
+        .await
         .map(|events| {
             let events: Vec<_> = events.into_iter().collect();
             log::info!("Received {} events from targeted relay fetch", events.len());
@@ -304,14 +334,21 @@ pub async fn fetch_event_by_coordinate_with_relays(
         }
     }
 
-    log::info!("Fetching event kind {} from relay: {}:{}", kind, pubkey, identifier);
+    log::info!(
+        "Fetching event kind {} from relay: {}:{}",
+        kind,
+        pubkey,
+        identifier
+    );
 
     // PHASE 2: Fetch from relays with hints
     if !relay_hints.is_empty() {
         let added = super::specialty::add_relays_from_strings(client, &relay_hints).await;
 
         // Try fetching with shorter timeout
-        let fetch_result = client.fetch_events(filter.clone(), Duration::from_secs(5)).await;
+        let fetch_result = client
+            .fetch_events(filter.clone(), Duration::from_secs(5))
+            .await;
 
         // Clean up temporary hint relays to avoid polluting the relay pool
         if !added.is_empty() {

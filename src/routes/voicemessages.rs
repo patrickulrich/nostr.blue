@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
-use crate::components::{VoiceMessageCard, ClientInitializing};
+use crate::components::{ClientInitializing, VoiceMessageCard};
 use crate::hooks::use_infinite_scroll;
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -59,7 +59,9 @@ pub fn VoiceMessages() -> Element {
         let refresh_changed = refresh != last_refresh;
 
         if has_data && !feed_type_changed && !refresh_changed {
-            log::debug!("Skipping voice messages re-load: data already present, no intentional change");
+            log::debug!(
+                "Skipping voice messages re-load: data already present, no intentional change"
+            );
             return;
         }
 
@@ -170,11 +172,7 @@ pub fn VoiceMessages() -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
 
     rsx! {
         div {
@@ -342,7 +340,8 @@ async fn load_following_voice_messages(until: Option<u64>) -> Result<Vec<Event>,
     }
 
     // Fetch events from database and relays
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
 
     // Convert to vector and sort by timestamp (newest first)
@@ -364,7 +363,8 @@ async fn load_global_voice_messages(until: Option<u64>) -> Result<Vec<Event>, St
     }
 
     // Fetch events from database and relays
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch voice messages: {}", e))?;
 
     // Convert to vector and sort by timestamp (newest first)

@@ -27,9 +27,8 @@ use dioxus::prelude::*;
 
 // Re-export CDK's auth types for use by other modules
 pub use cdk_common::{
-    AuthRequired, AuthToken, BlindAuthToken, AuthProof,
-    Method as HttpMethod, RoutePath, ProtectedEndpoint,
-    ClearAuthSettings, BlindAuthSettings,
+    AuthProof, AuthRequired, AuthToken, BlindAuthSettings, BlindAuthToken, ClearAuthSettings,
+    Method as HttpMethod, ProtectedEndpoint, RoutePath,
 };
 
 // =============================================================================
@@ -54,7 +53,8 @@ pub fn set_mint_auth_state(mint_url: &str, mut state: MintAuthState) {
 
 /// Check if a mint is known to require authentication
 pub fn mint_requires_auth(mint_url: &str) -> bool {
-    MINT_AUTH_STATES.read()
+    MINT_AUTH_STATES
+        .read()
         .get(mint_url)
         .map(|s| s.requires_auth())
         .unwrap_or(false)
@@ -64,7 +64,6 @@ pub fn mint_requires_auth(mint_url: &str) -> bool {
 pub fn clear_mint_auth_state(mint_url: &str) {
     MINT_AUTH_STATES.write().remove(mint_url);
 }
-
 
 // =============================================================================
 // Auth State Management
@@ -91,8 +90,14 @@ impl std::fmt::Debug for MintAuthState {
         f.debug_struct("MintAuthState")
             .field("clear_auth", &self.clear_auth)
             .field("blind_auth", &self.blind_auth)
-            .field("clear_token", &self.clear_token.as_ref().map(|_| "<redacted>"))
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<redacted>"))
+            .field(
+                "clear_token",
+                &self.clear_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
             .field("protected_map", &self.protected_map)
             .finish()
     }
@@ -233,10 +238,16 @@ pub fn is_auth_required_error(status: u16, body: &str) -> Option<AuthRequired> {
     // NUT-21/22 error codes
     if status == 401 || status == 403 {
         // CDK error codes: 30001=ClearAuth, 31001=BlindAuth
-        if body.contains("30001") || body.contains("clear_auth_required") || body.contains("Clear-auth") {
+        if body.contains("30001")
+            || body.contains("clear_auth_required")
+            || body.contains("Clear-auth")
+        {
             return Some(AuthRequired::Clear);
         }
-        if body.contains("31001") || body.contains("blind_auth_required") || body.contains("Blind-auth") {
+        if body.contains("31001")
+            || body.contains("blind_auth_required")
+            || body.contains("Blind-auth")
+        {
             return Some(AuthRequired::Blind);
         }
         // Ambiguous 401/403 without explicit NUT-21/22 markers - don't assume auth type
@@ -380,8 +391,7 @@ pub async fn ensure_auth_available(
 
     match auth_required {
         Some(AuthRequired::Clear) => {
-            let state = get_mint_auth_state(mint_url)
-                .ok_or("Auth state not found")?;
+            let state = get_mint_auth_state(mint_url).ok_or("Auth state not found")?;
             if state.clear_token.is_none() {
                 return Err("This mint requires Clear Auth (NUT-21). Please authenticate with the mint's OAuth provider.".to_string());
             }

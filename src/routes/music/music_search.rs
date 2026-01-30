@@ -1,12 +1,15 @@
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::services::wavlake::{WavlakeAPI, WavlakeSearchResult, WavlakeTrack, WavlakePlaylist};
-use crate::services::podcast_index;
-use crate::components::{TrackCard, ArtistCard, ArtistCardSkeleton, AlbumCard, AlbumCardSkeleton, UnifiedTrackCard, UnifiedTrackCardSkeleton};
 use crate::components::icons::ArrowLeftIcon;
+use crate::components::{
+    AlbumCard, AlbumCardSkeleton, ArtistCard, ArtistCardSkeleton, TrackCard, UnifiedTrackCard,
+    UnifiedTrackCardSkeleton,
+};
+use crate::routes::Route;
+use crate::services::podcast_index;
+use crate::services::wavlake::{WavlakeAPI, WavlakePlaylist, WavlakeSearchResult, WavlakeTrack};
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music;
 use crate::stores::profiles;
+use dioxus::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum MusicSearchTab {
@@ -112,22 +115,34 @@ pub fn MusicSearch(q: String) -> Element {
                         }
                     }
 
-                    log::info!("Found {} Wavlake tracks, {} artists, {} albums", tracks.len(), artists.len(), albums.len());
+                    log::info!(
+                        "Found {} Wavlake tracks, {} artists, {} albums",
+                        tracks.len(),
+                        artists.len(),
+                        albums.len()
+                    );
 
                     // Fetch full track details for playability (in parallel)
                     let api = std::sync::Arc::new(WavlakeAPI::new());
-                    let track_futures: Vec<_> = tracks.into_iter().map(|track_result| {
-                        let api = api.clone();
-                        async move {
-                            match api.get_track(&track_result.id).await {
-                                Ok(track) => Some(track),
-                                Err(e) => {
-                                    log::warn!("Failed to fetch track {}: {}", track_result.id, e);
-                                    None
+                    let track_futures: Vec<_> = tracks
+                        .into_iter()
+                        .map(|track_result| {
+                            let api = api.clone();
+                            async move {
+                                match api.get_track(&track_result.id).await {
+                                    Ok(track) => Some(track),
+                                    Err(e) => {
+                                        log::warn!(
+                                            "Failed to fetch track {}: {}",
+                                            track_result.id,
+                                            e
+                                        );
+                                        None
+                                    }
                                 }
                             }
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     let full_tracks: Vec<WavlakeTrack> = futures::future::join_all(track_futures)
                         .await
@@ -136,9 +151,8 @@ pub fn MusicSearch(q: String) -> Element {
                         .collect();
 
                     // Convert to MusicTrack and set directly (no merge needed with separate signals)
-                    let wavlake_music_tracks: Vec<MusicTrack> = full_tracks.into_iter()
-                        .map(|t| t.into())
-                        .collect();
+                    let wavlake_music_tracks: Vec<MusicTrack> =
+                        full_tracks.into_iter().map(|t| t.into()).collect();
                     wavlake_tracks.set(wavlake_music_tracks);
 
                     artist_results.set(artists);
@@ -169,9 +183,8 @@ pub fn MusicSearch(q: String) -> Element {
                     log::info!("Found {} nostr tracks", tracks.len());
 
                     // Convert to MusicTrack and set directly (no merge needed with separate signals)
-                    let nostr_music_tracks: Vec<MusicTrack> = tracks.into_iter()
-                        .map(|t| t.into())
-                        .collect();
+                    let nostr_music_tracks: Vec<MusicTrack> =
+                        tracks.into_iter().map(|t| t.into()).collect();
                     nostr_tracks.set(nostr_music_tracks);
 
                     nostr_loading.set(false);
@@ -218,7 +231,9 @@ pub fn MusicSearch(q: String) -> Element {
                     // Fetch tracks from each album and convert to MusicTrack
                     let mut tracks = Vec::new();
                     for album in albums.iter().take(10) {
-                        if let Ok(episodes) = podcast_index::get_episodes_by_feed_id(album.id, Some(3)).await {
+                        if let Ok(episodes) =
+                            podcast_index::get_episodes_by_feed_id(album.id, Some(3)).await
+                        {
                             for ep in &episodes {
                                 tracks.push(MusicTrack::from_rss_music_track(ep, album));
                             }
@@ -574,8 +589,12 @@ pub fn MusicSearch(q: String) -> Element {
 #[component]
 fn NostrArtistCard(pubkey: String, profile: profiles::Profile) -> Element {
     let artist_name = profile.get_display_name();
-    let artist_image = profile.picture.clone()
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));
+    let artist_image = profile.picture.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+            &pubkey
+        )
+    });
 
     rsx! {
         Link {

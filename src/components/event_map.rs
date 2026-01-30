@@ -4,14 +4,14 @@
 
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
+use wasm_bindgen::prelude::*;
 
-use crate::stores::calendar_store::UnifiedEvent;
 use crate::services::geocoding::{geocode, geohash_to_coords, GeoLocation};
+use crate::stores::calendar_store::UnifiedEvent;
 use crate::utils::validation::validate_css_dimension;
 
 /// Global counter for unique EventMap container IDs
@@ -175,7 +175,14 @@ extern "C" {
 
     fn initMap(container_id: &str, lat: f64, lng: f64, zoom: u32) -> bool;
     #[allow(dead_code)]
-    fn addMarker(container_id: &str, lat: f64, lng: f64, title: &str, popup_html: &str, event_id: &str) -> Option<u32>;
+    fn addMarker(
+        container_id: &str,
+        lat: f64,
+        lng: f64,
+        title: &str,
+        popup_html: &str,
+        event_id: &str,
+    ) -> Option<u32>;
     fn addMarkersAndFit(container_id: &str, markers_json: &str);
     fn clearMarkers(container_id: &str);
     fn destroyMap(container_id: &str);
@@ -283,7 +290,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     return;
                 }
                 log::error!("Failed to load Leaflet: {:?}", e);
-                leaflet_error.set(Some("Failed to load map. Please refresh the page.".to_string()));
+                leaflet_error.set(Some(
+                    "Failed to load map. Please refresh the page.".to_string(),
+                ));
                 leaflet_loading.set(false);
                 return;
             }
@@ -318,7 +327,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 log::info!("Map initialized: {}", id);
             } else {
                 log::error!("Failed to initialize map container: {}", id);
-                leaflet_error.set(Some("Failed to initialize map. Please refresh the page.".to_string()));
+                leaflet_error.set(Some(
+                    "Failed to initialize map. Please refresh the page.".to_string(),
+                ));
             }
         });
     });
@@ -613,8 +624,9 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
     }
 
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    let month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let month_names = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
 
     let month = date.get_month() as usize;
     let day = date.get_date();
@@ -626,9 +638,18 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
         let hours = date.get_hours();
         let minutes = date.get_minutes();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
-        let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+        let hour_12 = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
 
-        format!("{} {} at {}:{:02} {}", month_str, day, hour_12, minutes, am_pm)
+        format!(
+            "{} {} at {}:{:02} {}",
+            month_str, day, hour_12, minutes, am_pm
+        )
     }
 }
 

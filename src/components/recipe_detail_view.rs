@@ -1,16 +1,16 @@
 //! Recipe Detail View Component
 //! Displays a full recipe with all sections, engagement, and actions
 
-use dioxus::prelude::*;
-use crate::hooks::use_author_metadata;
-use crate::routes::Route;
-use crate::stores::nostr_client::HAS_SIGNER;
-use crate::stores::auth_store;
-use crate::stores::recipe_store::CachedRecipe;
 use crate::components::recipe_tag_chip::RecipeTagChip;
 use crate::components::AddToCookbookModal;
+use crate::hooks::use_author_metadata;
+use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::recipe_store::CachedRecipe;
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 /// Full recipe detail view
 #[component]
@@ -64,19 +64,31 @@ pub fn RecipeDetailView(recipe: CachedRecipe) -> Element {
     let prep_time = parsed.as_ref().and_then(|p| p.details.prep_time.clone());
     let cook_time = parsed.as_ref().and_then(|p| p.details.cook_time.clone());
     let servings = parsed.as_ref().and_then(|p| p.details.servings.clone());
-    let ingredients = parsed.as_ref().map(|p| p.ingredients.clone()).unwrap_or_default();
-    let directions = parsed.as_ref().map(|p| p.directions.clone()).unwrap_or_default();
+    let ingredients = parsed
+        .as_ref()
+        .map(|p| p.ingredients.clone())
+        .unwrap_or_default();
+    let directions = parsed
+        .as_ref()
+        .map(|p| p.directions.clone())
+        .unwrap_or_default();
     let additional_resources = parsed.as_ref().and_then(|p| p.additional_resources.clone());
 
     // Author display
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();

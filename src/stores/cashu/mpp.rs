@@ -10,19 +10,19 @@
 //! - Mint MPP support detection with caching
 
 use dioxus::prelude::*;
-use std::collections::HashMap;
 use nostr_sdk::signer::NostrSigner;
-use nostr_sdk::{Kind, PublicKey, EventId};
+use nostr_sdk::{EventId, Kind, PublicKey};
+use std::collections::HashMap;
 
-use crate::stores::cashu_cdk_bridge::{MULTI_WALLET, sync_wallet_state};
-use super::signals::WALLET_TOKENS;
-use super::types::{
-    TokenData, ProofData, ExtendedCashuProof, ExtendedTokenEvent,
-    PendingEventType, WalletTokensStoreStoreExt,
-};
-use super::proofs::cdk_proof_to_proof_data;
 use super::events::queue_event_for_retry;
 use super::lightning::create_history_event_with_type;
+use super::proofs::cdk_proof_to_proof_data;
+use super::signals::WALLET_TOKENS;
+use super::types::{
+    ExtendedCashuProof, ExtendedTokenEvent, PendingEventType, ProofData, TokenData,
+    WalletTokensStoreStoreExt,
+};
+use crate::stores::cashu_cdk_bridge::{sync_wallet_state, MULTI_WALLET};
 use crate::stores::{auth_store, nostr_client};
 
 // =============================================================================
@@ -31,7 +31,8 @@ use crate::stores::{auth_store, nostr_client};
 
 /// Cache for mint MPP support: mint_url -> (timestamp_ms, supports_mpp)
 /// TTL is 5 minutes (300,000 ms)
-pub static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = Signal::global(HashMap::new);
+pub static MINT_MPP_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> =
+    Signal::global(HashMap::new);
 pub const MINT_INFO_CACHE_TTL_MS: f64 = 300_000.0; // 5 minutes
 
 // =============================================================================
@@ -79,15 +80,19 @@ pub struct MppMeltResult {
 
 /// Get balance breakdown per mint
 pub async fn get_balances_per_mint() -> Result<Vec<MintBalance>, String> {
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
-    let balances = multi_wallet.get_balances().await
+    let balances = multi_wallet
+        .get_balances()
+        .await
         .map_err(|e| format!("Failed to get balances: {}", e))?;
 
-    Ok(balances.iter()
+    Ok(balances
+        .iter()
         .map(|(url, amount)| MintBalance {
             mint_url: url.to_string(),
             balance: u64::from(*amount),
@@ -111,7 +116,8 @@ pub async fn calculate_mpp_split(
     let balances = get_balances_per_mint().await?;
 
     // Filter to only included mints (if specified)
-    let available: Vec<_> = balances.into_iter()
+    let available: Vec<_> = balances
+        .into_iter()
         .filter(|b| {
             if let Some(ref included) = include_mints {
                 included.contains(&b.mint_url)
@@ -127,7 +133,8 @@ pub async fn calculate_mpp_split(
     }
 
     // Calculate total available with checked arithmetic
-    let total_available: u64 = available.iter()
+    let total_available: u64 = available
+        .iter()
         .map(|b| b.balance)
         .try_fold(0u64, |acc, v| acc.checked_add(v))
         .ok_or("Balance sum overflow in MPP split calculation")?;
@@ -176,29 +183,35 @@ pub async fn create_mpp_melt_quotes(
     bolt11: String,
     mint_amounts: Vec<(String, u64)>,
 ) -> Result<MppQuoteInfo, String> {
-    use cdk::Amount;
     use cdk::mint_url::MintUrl;
+    use cdk::Amount;
 
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
     // Convert to CDK types
-    let mint_amounts_cdk: Vec<(MintUrl, Amount)> = mint_amounts.iter()
+    let mint_amounts_cdk: Vec<(MintUrl, Amount)> = mint_amounts
+        .iter()
         .map(|(url, amount)| {
-            let mint_url: MintUrl = url.parse()
+            let mint_url: MintUrl = url
+                .parse()
                 .map_err(|e| format!("Invalid mint URL {}: {}", url, e))?;
             Ok((mint_url, Amount::from(*amount)))
         })
         .collect::<Result<Vec<_>, String>>()?;
 
     // Create quotes in parallel using CDK's MPP function
-    let quotes = multi_wallet.mpp_melt_quote(bolt11, mint_amounts_cdk).await
+    let quotes = multi_wallet
+        .mpp_melt_quote(bolt11, mint_amounts_cdk)
+        .await
         .map_err(|e| format!("Failed to create MPP quotes: {}", e))?;
 
     // Convert to our types
-    let contributions: Vec<MppQuoteContribution> = quotes.iter()
+    let contributions: Vec<MppQuoteContribution> = quotes
+        .iter()
         .map(|(url, quote)| MppQuoteContribution {
             mint_url: url.to_string(),
             quote_id: quote.id.clone(),
@@ -207,11 +220,13 @@ pub async fn create_mpp_melt_quotes(
         })
         .collect();
 
-    let total_amount = contributions.iter()
+    let total_amount = contributions
+        .iter()
         .map(|c| c.amount)
         .try_fold(0u64, |acc, v| acc.checked_add(v))
         .ok_or("MPP quote total amount overflow")?;
-    let total_fee_reserve = contributions.iter()
+    let total_fee_reserve = contributions
+        .iter()
         .map(|c| c.fee_reserve)
         .try_fold(0u64, |acc, v| acc.checked_add(v))
         .ok_or("MPP quote fee reserve overflow")?;
@@ -241,13 +256,15 @@ pub async fn execute_mpp_melt(
 ) -> Result<MppMeltResult, String> {
     use cdk::mint_url::MintUrl;
 
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
     // STEP 1: Collect event IDs to delete for each affected mint BEFORE melt
-    let affected_mints: Vec<String> = quote_contributions.iter()
+    let affected_mints: Vec<String> = quote_contributions
+        .iter()
         .map(|c| c.mint_url.clone())
         .collect();
 
@@ -258,7 +275,8 @@ pub async fn execute_mpp_melt(
 
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         for mint_url in &affected_mints {
-            let event_ids: Vec<String> = tokens.iter()
+            let event_ids: Vec<String> = tokens
+                .iter()
                 .filter(|t| &t.mint == mint_url)
                 .map(|t| t.event_id.clone())
                 .collect();
@@ -270,16 +288,21 @@ pub async fn execute_mpp_melt(
     };
 
     // Convert to CDK format: (MintUrl, quote_id)
-    let quotes: Vec<(MintUrl, String)> = quote_contributions.iter()
+    let quotes: Vec<(MintUrl, String)> = quote_contributions
+        .iter()
         .map(|c| {
-            let mint_url: MintUrl = c.mint_url.parse()
+            let mint_url: MintUrl = c
+                .mint_url
+                .parse()
                 .map_err(|e| format!("Invalid mint URL {}: {}", c.mint_url, e))?;
             Ok((mint_url, c.quote_id.clone()))
         })
         .collect::<Result<Vec<_>, String>>()?;
 
     // STEP 2: Execute MPP melts in parallel using CDK
-    let results = multi_wallet.mpp_melt(quotes).await
+    let results = multi_wallet
+        .mpp_melt(quotes)
+        .await
         .map_err(|e| format!("MPP melt failed: {}", e))?;
 
     // Aggregate results
@@ -289,8 +312,12 @@ pub async fn execute_mpp_melt(
     let mut all_paid = true;
 
     for (url, melted) in &results {
-        log::info!("MPP contribution from {}: paid={}, fee={}",
-            url, u64::from(melted.amount), u64::from(melted.fee_paid));
+        log::info!(
+            "MPP contribution from {}: paid={}, fee={}",
+            url,
+            u64::from(melted.amount),
+            u64::from(melted.fee_paid)
+        );
 
         total_paid = total_paid
             .checked_add(u64::from(melted.amount))
@@ -313,7 +340,9 @@ pub async fn execute_mpp_melt(
     // Only proceed with Nostr publishing if payment was successful
     if all_paid {
         // STEP 3: Get remaining proofs per mint from MultiMintWallet
-        let remaining_proofs = multi_wallet.list_proofs().await
+        let remaining_proofs = multi_wallet
+            .list_proofs()
+            .await
             .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
 
         // Prepare for Nostr publishing
@@ -321,13 +350,14 @@ pub async fn execute_mpp_melt(
             .ok_or("No signer available")?
             .as_nostr_signer();
 
-        let pubkey_str = auth_store::get_pubkey()
-            .ok_or("Not authenticated")?;
-        let pubkey = PublicKey::parse(&pubkey_str)
-            .map_err(|e| format!("Invalid pubkey: {}", e))?;
+        let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+        let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
-        let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-            .ok_or("Client not initialized")?.clone();
+        let client = nostr_client::NOSTR_CLIENT
+            .read()
+            .as_ref()
+            .ok_or("Client not initialized")?
+            .clone();
 
         // Track new event IDs for history and all event IDs to delete
         let mut new_event_ids: Vec<String> = Vec::new();
@@ -342,7 +372,8 @@ pub async fn execute_mpp_melt(
         // The retry queue ensures eventual consistency with relays.
         let mut publish_failures = 0;
         for mint_url in &affected_mints {
-            let mint_url_parsed: MintUrl = mint_url.parse()
+            let mint_url_parsed: MintUrl = mint_url
+                .parse()
                 .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
             // Get event IDs to delete for this mint
@@ -353,17 +384,16 @@ pub async fn execute_mpp_melt(
             // Get remaining proofs for this mint
             if let Some(proofs) = remaining_proofs.get(&mint_url_parsed) {
                 if !proofs.is_empty() {
-                    let proof_data: Vec<ProofData> = proofs.iter()
-                        .map(cdk_proof_to_proof_data)
-                        .collect();
+                    let proof_data: Vec<ProofData> =
+                        proofs.iter().map(cdk_proof_to_proof_data).collect();
 
-                    let extended_proofs: Vec<ExtendedCashuProof> = proof_data.iter()
+                    let extended_proofs: Vec<ExtendedCashuProof> = proof_data
+                        .iter()
                         .map(|p| ExtendedCashuProof::from(p.clone()))
                         .collect();
 
-                    let event_ids_for_mint = event_ids_by_mint.get(mint_url)
-                        .cloned()
-                        .unwrap_or_default();
+                    let event_ids_for_mint =
+                        event_ids_by_mint.get(mint_url).cloned().unwrap_or_default();
 
                     // Filter out pending_* IDs from del list - only valid NIP-60 hex event IDs
                     // (Same pattern as line 455-457)
@@ -382,10 +412,13 @@ pub async fn execute_mpp_melt(
                     let json_content = serde_json::to_string(&token_event_data)
                         .map_err(|e| format!("Failed to serialize token event: {}", e))?;
 
-                    let encrypted = signer.nip44_encrypt(&pubkey, &json_content).await
+                    let encrypted = signer
+                        .nip44_encrypt(&pubkey, &json_content)
+                        .await
                         .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
 
-                    let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
+                    let builder =
+                        nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
 
                     // Publish immediately to get real event ID
                     match client.send_event_builder(builder.clone()).await {
@@ -404,7 +437,11 @@ pub async fn execute_mpp_melt(
                             });
                         }
                         Err(e) => {
-                            log::warn!("Failed to publish MPP token event for {}, queuing for retry: {}", mint_url, e);
+                            log::warn!(
+                                "Failed to publish MPP token event for {}, queuing for retry: {}",
+                                mint_url,
+                                e
+                            );
                             // Generate pending ID for retry tracking
                             let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
                             queue_event_for_retry(
@@ -412,7 +449,8 @@ pub async fn execute_mpp_melt(
                                 PendingEventType::TokenEvent,
                                 Some(pending_id.clone()),
                                 Some(mint_url.clone()),
-                            ).await;
+                            )
+                            .await;
 
                             // CRITICAL: Persist proofs with pending_id to prevent token loss
                             // When background retry succeeds, update_token_event_id will fix the event_id
@@ -449,53 +487,71 @@ pub async fn execute_mpp_melt(
 
             // Update balance from proof state
             super::signals::update_wallet_balances();
-            let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES.read().available;
+            let new_balance = crate::stores::cashu_cdk_bridge::WALLET_BALANCES
+                .read()
+                .available;
 
-            log::info!("MPP melt: local state updated. New balance: {} sats", new_balance);
+            log::info!(
+                "MPP melt: local state updated. New balance: {} sats",
+                new_balance
+            );
             if publish_failures > 0 {
-                log::warn!("MPP melt: {} token event(s) queued for retry", publish_failures);
+                log::warn!(
+                    "MPP melt: {} token event(s) queued for retry",
+                    publish_failures
+                );
             }
         }
 
         // STEP 6: Publish deletion events for old token events (NIP-60 compliant)
         if !all_event_ids_to_delete.is_empty() {
-            let valid_event_ids: Vec<_> = all_event_ids_to_delete.iter()
+            let valid_event_ids: Vec<_> = all_event_ids_to_delete
+                .iter()
                 .filter(|id| EventId::from_hex(id).is_ok())
                 .collect();
 
             if !valid_event_ids.is_empty() {
                 let mut tags = Vec::new();
                 for event_id in &valid_event_ids {
-                    tags.push(nostr_sdk::Tag::event(
-                        EventId::from_hex(event_id).unwrap()
-                    ));
+                    tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
                 }
 
                 // Add NIP-60 required tag
                 tags.push(nostr_sdk::Tag::custom(
                     nostr_sdk::TagKind::custom("k"),
-                    ["7375"]
+                    ["7375"],
                 ));
 
-                let deletion_builder = nostr_sdk::EventBuilder::new(
-                    Kind::from(5),
-                    "MPP melted tokens"
-                ).tags(tags);
+                let deletion_builder =
+                    nostr_sdk::EventBuilder::new(Kind::from(5), "MPP melted tokens").tags(tags);
 
                 match client.send_event_builder(deletion_builder.clone()).await {
                     Ok(_) => {
-                        log::info!("Published MPP deletion events for {} token events", valid_event_ids.len());
+                        log::info!(
+                            "Published MPP deletion events for {} token events",
+                            valid_event_ids.len()
+                        );
                     }
                     Err(e) => {
-                        log::warn!("Failed to publish MPP deletion event, will queue for retry: {}", e);
-                        queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
+                        log::warn!(
+                            "Failed to publish MPP deletion event, will queue for retry: {}",
+                            e
+                        );
+                        queue_event_for_retry(
+                            deletion_builder,
+                            PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
                     }
                 }
             }
         }
 
         // STEP 7: Create history event
-        let valid_destroyed: Vec<String> = all_event_ids_to_delete.iter()
+        let valid_destroyed: Vec<String> = all_event_ids_to_delete
+            .iter()
             .filter(|id| EventId::from_hex(id).is_ok())
             .cloned()
             .collect();
@@ -507,7 +563,9 @@ pub async fn execute_mpp_melt(
             valid_destroyed,
             Some("mpp_lightning_melt"),
             None, // MPP doesn't have a single invoice to reference
-        ).await {
+        )
+        .await
+        {
             log::warn!("Failed to create MPP history event: {}", e);
         }
     }
@@ -551,7 +609,9 @@ pub async fn mint_supports_mpp(mint_url: &str) -> bool {
     let supports = fetch_mint_mpp_support(mint_url).await;
 
     // Update cache
-    MINT_MPP_CACHE.write().insert(mint_url.to_string(), (now, supports));
+    MINT_MPP_CACHE
+        .write()
+        .insert(mint_url.to_string(), (now, supports));
 
     supports
 }

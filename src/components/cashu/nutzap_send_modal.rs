@@ -2,10 +2,10 @@
 //!
 //! UI for sending nutzaps (NIP-61 P2PK-locked ecash via Nostr events).
 
-use dioxus::prelude::*;
-use dioxus::hooks::use_reactive;
 use crate::stores::cashu;
-use crate::utils::{shorten_url, format::truncate_pubkey};
+use crate::utils::{format::truncate_pubkey, shorten_url};
+use dioxus::hooks::use_reactive;
+use dioxus::prelude::*;
 
 #[component]
 pub fn NutzapSendModal(
@@ -40,7 +40,10 @@ pub fn NutzapSendModal(
     // Also depend on CLIENT_INITIALIZED to avoid fetching before client is ready
     let recipient_pubkey_for_effect = recipient_pubkey.clone();
     let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
-    use_effect(use_reactive!(|(recipient_pubkey_for_effect, client_initialized)| {
+    use_effect(use_reactive!(|(
+        recipient_pubkey_for_effect,
+        client_initialized,
+    )| {
         // Early return if client not ready
         if !client_initialized {
             log::debug!("Waiting for client initialization before fetching nutzap info");

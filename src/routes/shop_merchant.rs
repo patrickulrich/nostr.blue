@@ -1,14 +1,13 @@
 //! Shop Merchant - Seller dashboard
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::utils::nip99::{Product, ProductCollection};
-use crate::stores::shop_store::{
-    fetch_my_products, delete_product,
-    fetch_my_collections, delete_collection, get_shop_stats,
-    get_active_order_count, get_seller_active_order_count,
-};
 use crate::components::shop::ProductCardSkeleton;
+use crate::routes::Route;
+use crate::stores::shop_store::{
+    delete_collection, delete_product, fetch_my_collections, fetch_my_products,
+    get_active_order_count, get_seller_active_order_count, get_shop_stats,
+};
+use crate::utils::nip99::{Product, ProductCollection};
+use dioxus::prelude::*;
 
 /// Merchant dashboard tabs
 #[derive(Clone, Copy, PartialEq)]

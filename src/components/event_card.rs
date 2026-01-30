@@ -2,19 +2,21 @@
 //!
 //! Display card for NIP-52 calendar events and NIP-53 live activities
 
+use crate::routes::Route;
+use crate::stores::calendar_store::{get_rsvp_count, UnifiedEvent};
+use crate::utils::nip52::is_online_location;
+use crate::utils::time::format_relative_time;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr::Timestamp;
-use crate::routes::Route;
-use crate::stores::calendar_store::{UnifiedEvent, get_rsvp_count};
-use crate::utils::time::format_relative_time;
-use crate::utils::nip52::is_online_location;
-use crate::utils::validation::is_valid_http_url;
 
 // ============================================================================
 // Module-level Constants
 // ============================================================================
 
-const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTH_NAMES: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /// Build route based on event type
@@ -23,9 +25,14 @@ const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat
 /// - Meeting rooms (30313) go to /calendar/:naddr
 fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
     if event.is_livestream() {
-        Route::LiveStreamDetail { note_id: event.naddr().to_string() }
+        Route::LiveStreamDetail {
+            note_id: event.naddr().to_string(),
+        }
     } else {
-        Route::CalendarEventDetail { naddr: event.naddr().to_string(), from }
+        Route::CalendarEventDetail {
+            naddr: event.naddr().to_string(),
+            from,
+        }
     }
 }
 
@@ -489,10 +496,19 @@ fn format_event_time(event: &UnifiedEvent) -> String {
         let minutes = date.get_minutes();
 
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
-        let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+        let hour_12 = if hours == 0 {
+            12
+        } else if hours > 12 {
+            hours - 12
+        } else {
+            hours
+        };
 
         let month_name = MONTH_NAMES.get(month).unwrap_or(&"");
-        format!("{} {} at {}:{:02} {}", month_name, day, hour_12, minutes, am_pm)
+        format!(
+            "{} {} at {}:{:02} {}",
+            month_name, day, hour_12, minutes, am_pm
+        )
     }
 }
 

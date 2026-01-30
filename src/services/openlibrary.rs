@@ -157,7 +157,12 @@ impl CoverSize {
 /// This is a direct URL construction - no API call needed.
 /// Returns a URL that may return a 1x1 pixel image if cover doesn't exist.
 pub fn get_cover_url(isbn: &str, size: CoverSize) -> String {
-    format!("{}/isbn/{}-{}.jpg", COVERS_BASE_URL, clean_isbn(isbn), size.as_str())
+    format!(
+        "{}/isbn/{}-{}.jpg",
+        COVERS_BASE_URL,
+        clean_isbn(isbn),
+        size.as_str()
+    )
 }
 
 // ============================================================================
@@ -179,7 +184,11 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
         .map_err(|e| format!("Request failed: {}", e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+        return Err(format!(
+            "HTTP {}: {}",
+            response.status(),
+            response.status_text()
+        ));
     }
 
     let data: HashMap<String, BookApiData> = response
@@ -188,7 +197,8 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     // Get the book data for our ISBN key
-    let book_data = data.get(&bibkey)
+    let book_data = data
+        .get(&bibkey)
         .ok_or_else(|| format!("Book not found for ISBN: {}", isbn))?;
 
     Ok(convert_book_data(book_data, &clean))
@@ -200,9 +210,7 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
 
 /// Clean an ISBN (remove hyphens and spaces)
 pub fn clean_isbn(isbn: &str) -> String {
-    isbn.chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect()
+    isbn.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
 }
 
 // ============================================================================
@@ -212,9 +220,12 @@ pub fn clean_isbn(isbn: &str) -> String {
 fn convert_book_data(data: &BookApiData, isbn: &str) -> Book {
     Book {
         title: data.title.clone(),
-        authors: data.authors.as_ref()
+        authors: data
+            .authors
+            .as_ref()
             .map(|authors| {
-                authors.iter()
+                authors
+                    .iter()
                     .map(|a| Author {
                         name: a.name.clone(),
                         url: a.url.clone(),
@@ -222,12 +233,13 @@ fn convert_book_data(data: &BookApiData, isbn: &str) -> Book {
                     .collect()
             })
             .unwrap_or_default(),
-        publishers: data.publishers.as_ref()
-            .map(|pubs| {
-                pubs.iter()
-                    .map(|p| Publisher { name: p.name.clone() })
-                    .collect()
-            }),
+        publishers: data.publishers.as_ref().map(|pubs| {
+            pubs.iter()
+                .map(|p| Publisher {
+                    name: p.name.clone(),
+                })
+                .collect()
+        }),
         publish_date: data.publish_date.clone(),
         number_of_pages: data.number_of_pages,
         cover: data.cover.as_ref().map(|c| CoverUrls {

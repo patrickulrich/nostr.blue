@@ -1,13 +1,11 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::ws as cashu_ws;
 use crate::utils::shorten_url;
-use qrcode::{QrCode, render::svg};
+use dioxus::prelude::*;
+use qrcode::{render::svg, QrCode};
 
 #[component]
-pub fn CashuReceiveLightningModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
     let mut amount = use_signal(String::new);
     let mints = cashu::get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
@@ -57,7 +55,8 @@ pub fn CashuReceiveLightningModal(
                         mint_url.clone(),
                         quote_id.clone(),
                         cashu_ws::SubscriptionKind::Bolt11MintQuote,
-                    ).await;
+                    )
+                    .await;
 
                     match ws_result {
                         Ok(mut rx) => {
@@ -77,7 +76,9 @@ pub fn CashuReceiveLightningModal(
 
                                 // Check timeout
                                 if start.elapsed().as_secs() > timeout_secs {
-                                    error_message.set(Some("Invoice expired. Please try again.".to_string()));
+                                    error_message.set(Some(
+                                        "Invoice expired. Please try again.".to_string(),
+                                    ));
                                     is_polling.set(false);
                                     quote_info.set(None);
                                     break;
@@ -211,7 +212,9 @@ pub fn CashuReceiveLightningModal(
                                 }
 
                                 if attempts >= max_attempts {
-                                    error_message.set(Some("Invoice expired. Please try again.".to_string()));
+                                    error_message.set(Some(
+                                        "Invoice expired. Please try again.".to_string(),
+                                    ));
                                     is_polling.set(false);
                                     mint_status.set(None);
                                     quote_info.set(None);
@@ -225,42 +228,59 @@ pub fn CashuReceiveLightningModal(
 
                                 match cashu::check_mint_quote_status(
                                     mint_url.clone(),
-                                    quote_id.clone()
-                                ).await {
-                                    Ok(cashu::MintQuoteState::Paid) | Ok(cashu::MintQuoteState::Issued) => {
-                                        log::info!("Payment detected, waiting 2 seconds before minting...");
-                                        mint_status.set(Some("Payment detected! Minting...".to_string()));
+                                    quote_id.clone(),
+                                )
+                                .await
+                                {
+                                    Ok(cashu::MintQuoteState::Paid)
+                                    | Ok(cashu::MintQuoteState::Issued) => {
+                                        log::info!(
+                                            "Payment detected, waiting 2 seconds before minting..."
+                                        );
+                                        mint_status
+                                            .set(Some("Payment detected! Minting...".to_string()));
                                         gloo_timers::future::TimeoutFuture::new(2000).await;
 
-                                        if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                                        if !*is_polling_clone.read()
+                                            || quote_info_clone.read().is_none()
+                                        {
                                             log::info!("Polling cancelled before minting");
                                             break;
                                         }
 
                                         match cashu::mint_tokens_from_quote(
                                             mint_url.clone(),
-                                            quote_id.clone()
-                                        ).await {
+                                            quote_id.clone(),
+                                        )
+                                        .await
+                                        {
                                             Ok(amount) => {
-                                                if !*is_polling_clone.read() || quote_info_clone.read().is_none() {
+                                                if !*is_polling_clone.read()
+                                                    || quote_info_clone.read().is_none()
+                                                {
                                                     log::info!("Polling cancelled after minting, not updating state");
                                                     break;
                                                 }
 
                                                 success_message.set(Some(format!(
-                                                    "Successfully received {} sats!", amount
+                                                    "Successfully received {} sats!",
+                                                    amount
                                                 )));
                                                 quote_info.set(None);
                                                 is_polling.set(false);
                                                 mint_status.set(None);
 
                                                 spawn(async move {
-                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    gloo_timers::future::TimeoutFuture::new(2000)
+                                                        .await;
                                                     on_close.call(());
                                                 });
                                             }
                                             Err(e) => {
-                                                error_message.set(Some(format!("Failed to mint tokens: {}", e)));
+                                                error_message.set(Some(format!(
+                                                    "Failed to mint tokens: {}",
+                                                    e
+                                                )));
                                                 is_polling.set(false);
                                                 mint_status.set(None);
                                                 quote_info.set(None);
@@ -562,15 +582,14 @@ pub fn CashuReceiveLightningModal(
 fn generate_qr_svg(data: &str) -> String {
     match QrCode::new(data) {
         Ok(code) => {
-            let svg = code.render::<svg::Color>()
+            let svg = code
+                .render::<svg::Color>()
                 .min_dimensions(200, 200)
                 .dark_color(svg::Color("#000000"))
                 .light_color(svg::Color("#ffffff"))
                 .build();
             svg
         }
-        Err(_) => {
-            "<div>Failed to generate QR code</div>".to_string()
-        }
+        Err(_) => "<div>Failed to generate QR code</div>".to_string(),
     }
 }

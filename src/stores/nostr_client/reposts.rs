@@ -30,8 +30,8 @@ pub async fn publish_repost_tracked(
     // nostr-sdk pattern: EventId::parse() handles all formats
     // (hex, note1..., nostr:note1..., nevent1...)
     use nostr::{EventId, RelayUrl};
-    let target_event_id = EventId::parse(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch the original event from database to get full event data
     // This is required for EventBuilder::repost() to serialize the event properly
@@ -45,15 +45,18 @@ pub async fn publish_repost_tracked(
             let events = fetch_events_from_relays(filter, std::time::Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Failed to fetch event {} from relays: {}", event_id, e))?;
-            events.into_iter().next()
+            events
+                .into_iter()
+                .next()
                 .ok_or_else(|| format!("Event not found locally or on relays: {}", event_id))?
         }
     };
 
     // nostr-sdk pattern: Propagate relay URL errors explicitly (no silent .ok())
     let relay = match relay_url {
-        Some(url) => Some(RelayUrl::parse(&url)
-            .map_err(|e| format!("Invalid relay URL '{}': {}", url, e))?),
+        Some(url) => {
+            Some(RelayUrl::parse(&url).map_err(|e| format!("Invalid relay URL '{}': {}", url, e))?)
+        }
         None => None,
     };
 
@@ -66,7 +69,9 @@ pub async fn publish_repost_tracked(
     let builder = nostr::EventBuilder::repost(&event, relay);
 
     // Publish using gossip - automatic relay routing
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish repost: {}", e))?;
 
     let result = PublishResult::from_output(output);
@@ -113,17 +118,21 @@ pub async fn delete_repost(repost_event_id: String) -> std::result::Result<(), S
     log::info!("Deleting repost: {}", repost_event_id);
 
     // nostr-sdk pattern: EventId::parse() handles all formats (hex, note1, nevent1, etc.)
-    let event_id = nostr::EventId::parse(&repost_event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        nostr::EventId::parse(&repost_event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Create deletion event (kind 5) using NIP-9
     // Include k-tag per NIP-9 recommendation for better relay interoperability
     use nostr::nips::nip09::EventDeletionRequest;
     let request = EventDeletionRequest::new().id(event_id);
-    let builder = nostr::EventBuilder::delete(request)
-        .tag(nostr::Tag::custom(nostr::TagKind::k(), vec![nostr::Kind::Repost.as_u16().to_string()]));
+    let builder = nostr::EventBuilder::delete(request).tag(nostr::Tag::custom(
+        nostr::TagKind::k(),
+        vec![nostr::Kind::Repost.as_u16().to_string()],
+    ));
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
 
     log::info!("Repost deleted successfully");

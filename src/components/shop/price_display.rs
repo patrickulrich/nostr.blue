@@ -1,7 +1,7 @@
 //! PriceDisplay component - shows price in sats with optional fiat conversion
 
-use dioxus::prelude::*;
 use crate::utils::format::format_sats_with_separator;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PriceDisplayProps {

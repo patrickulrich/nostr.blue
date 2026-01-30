@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::utils::generate_option_id;
+use dioxus::prelude::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PollOptionData {
@@ -27,7 +27,8 @@ pub fn PollOptionList(
     // Handler to remove an option
     let remove_option = move |index: usize| {
         let mut current = options.read().clone();
-        if current.len() > 2 {  // Min 2 options
+        if current.len() > 2 {
+            // Min 2 options
             current.remove(index);
             on_change.call(current);
         }

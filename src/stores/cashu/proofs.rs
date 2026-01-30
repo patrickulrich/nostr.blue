@@ -89,7 +89,10 @@ pub fn rebuild_proof_event_map() {
     // Readers see either complete old map OR complete new map, never empty
     *PROOF_EVENT_MAP.write() = new_map;
 
-    log::debug!("Rebuilt proof-event map with {} entries", PROOF_EVENT_MAP.read().len());
+    log::debug!(
+        "Rebuilt proof-event map with {} entries",
+        PROOF_EVENT_MAP.read().len()
+    );
 }
 
 // =============================================================================
@@ -257,7 +260,10 @@ pub fn remove_from_pending_at_mint(proof_secrets: &[String]) {
             pending.remove(secret);
         }
     }
-    log::debug!("Removed {} proofs from pending at mint", proof_secrets.len());
+    log::debug!(
+        "Removed {} proofs from pending at mint",
+        proof_secrets.len()
+    );
     // Persist to IndexedDB asynchronously
     super::signals::schedule_persist_pending_secrets();
 }
@@ -293,15 +299,17 @@ pub fn cleanup_old_pending_at_mint() {
     let now = now_secs();
     let before_count = PENDING_BY_MINT_SECRETS.read().len();
 
-    PENDING_BY_MINT_SECRETS.write().retain(|_secret, timestamp| {
-        let age = now.saturating_sub(*timestamp);
-        if age > MAX_PENDING_AGE_SECS {
-            log::debug!("Cleaning up stale pending proof (age={}s)", age);
-            false
-        } else {
-            true
-        }
-    });
+    PENDING_BY_MINT_SECRETS
+        .write()
+        .retain(|_secret, timestamp| {
+            let age = now.saturating_sub(*timestamp);
+            if age > MAX_PENDING_AGE_SECS {
+                log::debug!("Cleaning up stale pending proof (age={}s)", age);
+                false
+            } else {
+                true
+            }
+        });
 
     let after_count = PENDING_BY_MINT_SECRETS.read().len();
     if before_count != after_count {
@@ -393,9 +401,7 @@ pub fn get_pending_transactions() -> Vec<ActiveTransaction> {
         .filter(|t| {
             matches!(
                 t.status,
-                TransactionStatus::Draft
-                    | TransactionStatus::Prepared
-                    | TransactionStatus::Pending
+                TransactionStatus::Draft | TransactionStatus::Prepared | TransactionStatus::Pending
             )
         })
         .cloned()
@@ -427,17 +433,13 @@ pub fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, Str
     let keyset_id = cdk::nuts::Id::from_str(&data.id)
         .map_err(|e| format!("Invalid keyset ID '{}': {}", data.id, e))?;
 
-    let secret = Secret::from_str(&data.secret)
-        .map_err(|e| format!("Invalid secret: {}", e))?;
+    let secret = Secret::from_str(&data.secret).map_err(|e| format!("Invalid secret: {}", e))?;
 
     let c = PublicKey::from_hex(&data.c).map_err(|e| format!("Invalid C point: {}", e))?;
 
     // Handle witness (P2PK)
     let witness = if let Some(ref w) = data.witness {
-        Some(
-            serde_json::from_str(w)
-                .map_err(|e| format!("Invalid witness JSON: {}", e))?,
-        )
+        Some(serde_json::from_str(w).map_err(|e| format!("Invalid witness JSON: {}", e))?)
     } else {
         None
     };
@@ -466,16 +468,17 @@ pub fn proof_data_to_cdk_proof(data: &ProofData) -> Result<cdk::nuts::Proof, Str
 /// Convert CDK Proof to ProofData
 pub fn cdk_proof_to_proof_data(proof: &cdk::nuts::Proof) -> ProofData {
     // Serialize witness if present
-    let witness = proof.witness.as_ref()
+    let witness = proof
+        .witness
+        .as_ref()
         .and_then(|w| serde_json::to_string(w).ok());
 
     // Convert DLEQ if present - serialize as strings
-    let dleq = proof.dleq.as_ref()
-        .map(|d| DleqData {
-            e: d.e.to_string(),
-            s: d.s.to_string(),
-            r: d.r.to_string(),
-        });
+    let dleq = proof.dleq.as_ref().map(|d| DleqData {
+        e: d.e.to_string(),
+        s: d.s.to_string(),
+        r: d.r.to_string(),
+    });
 
     ProofData {
         id: proof.keyset_id.to_string(),
@@ -514,7 +517,8 @@ pub fn select_proofs_for_amount(
 
     // Calculate total available with overflow protection
     // CDK best practice: Use checked arithmetic for financial calculations
-    let total_available: u64 = proofs.iter()
+    let total_available: u64 = proofs
+        .iter()
         .filter(|p| p.state.is_spendable())
         .map(|p| p.amount)
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
@@ -528,7 +532,8 @@ pub fn select_proofs_for_amount(
     }
 
     // Sort proofs by amount (descending) for greedy selection
-    let mut sorted_proofs: Vec<ProofData> = proofs.iter()
+    let mut sorted_proofs: Vec<ProofData> = proofs
+        .iter()
         .filter(|p| p.state.is_spendable())
         .cloned()
         .collect();
@@ -602,12 +607,14 @@ pub fn select_proofs_prefer_inactive(
     active_keyset_ids: &[String],
 ) -> Result<Vec<ProofData>, String> {
     // Separate into inactive and active keyset proofs
-    let mut inactive_proofs: Vec<ProofData> = proofs.iter()
+    let mut inactive_proofs: Vec<ProofData> = proofs
+        .iter()
         .filter(|p| p.state.is_spendable() && !active_keyset_ids.contains(&p.id))
         .cloned()
         .collect();
 
-    let mut active_proofs: Vec<ProofData> = proofs.iter()
+    let mut active_proofs: Vec<ProofData> = proofs
+        .iter()
         .filter(|p| p.state.is_spendable() && active_keyset_ids.contains(&p.id))
         .cloned()
         .collect();

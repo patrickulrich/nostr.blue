@@ -1,12 +1,14 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
-use crate::stores::signer::SIGNER_INFO;
-use crate::components::{ThreadedComment, CommentComposer, ClientInitializing, ShareModal, icons::MessageCircleIcon};
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use crate::components::{
+    icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+};
 use crate::stores::pending_comments::get_pending_comments;
-use crate::utils::format_sats_compact;
+use crate::stores::signer::SIGNER_INFO;
+use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
-use nostr_sdk::{Event, Filter, Kind, EventId, Timestamp, PublicKey};
+use crate::utils::format_sats_compact;
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlVideoElement;
@@ -152,17 +154,22 @@ fn LandscapePlayer(event: Event) -> Element {
 
             let mut all_comments = Vec::new();
 
-            if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
+            if let Ok(upper_comments) =
+                nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await
+            {
                 all_comments.extend(upper_comments.into_iter());
             }
 
-            if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
+            if let Ok(lower_comments) =
+                nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await
+            {
                 all_comments.extend(lower_comments.into_iter());
             }
 
             // Deduplicate
             let mut seen_ids = std::collections::HashSet::new();
-            let unique_comments: Vec<Event> = all_comments.into_iter()
+            let unique_comments: Vec<Event> = all_comments
+                .into_iter()
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
 
@@ -423,7 +430,11 @@ fn LandscapePlayer(event: Event) -> Element {
 }
 
 #[component]
-fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Option<Event>) -> Element {
+fn ShortsPlayer(
+    initial_video_id: String,
+    feed_type: FeedType,
+    initial_event: Option<Event>,
+) -> Element {
     let mut events = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut current_video_index = use_signal(|| 0usize);
@@ -455,7 +466,10 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Op
                         // Insert the initial event at position 0
                         video_events.insert(0, evt);
 
-                        log::info!("Inserted initial video at position 0, total videos: {}", video_events.len());
+                        log::info!(
+                            "Inserted initial video at position 0, total videos: {}",
+                            video_events.len()
+                        );
                     }
 
                     if let Some(last_event) = video_events.last() {
@@ -468,7 +482,8 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Op
                     let initial_index = if has_initial {
                         0
                     } else {
-                        video_events.iter()
+                        video_events
+                            .iter()
                             .position(|e| e.id.to_hex() == id)
                             .unwrap_or(0)
                     };
@@ -512,7 +527,8 @@ fn ShortsPlayer(initial_video_id: String, feed_type: FeedType, initial_event: Op
                             current.iter().map(|e| e.id).collect()
                         };
 
-                        let unique_events: Vec<_> = new_events.into_iter()
+                        let unique_events: Vec<_> = new_events
+                            .into_iter()
                             .filter(|e| !existing_ids.contains(&e.id))
                             .collect();
 
@@ -726,7 +742,7 @@ fn VideoInfo(
     is_muted: bool,
     on_mute_toggle: EventHandler<()>,
 ) -> Element {
-    use nostr_sdk::{PublicKey, FromBech32};
+    use nostr_sdk::{FromBech32, PublicKey};
 
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_for_fetch = author_pubkey.clone();
@@ -770,8 +786,14 @@ fn VideoInfo(
                 .event(event_id_parsed)
                 .limit(2000);
 
-            if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            if let Ok(events) = client
+                .fetch_events(combined_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
 
                 let mut replies = 0;
                 let mut likes = 0;
@@ -788,19 +810,29 @@ fn VideoInfo(
                                     user_has_liked = true;
                                 }
                             }
-                        },
+                        }
                         Kind::ZapReceipt => {
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
                                 if tag_vec.first()?.as_str() == "description" {
                                     let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                        if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
                                             for tag_array in tags {
                                                 if let Some(tag_vals) = tag_array.as_array() {
-                                                    if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
+                                                    {
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
+                                                            {
                                                                 return Some(millisats / 1000);
                                                             }
                                                         }
@@ -831,19 +863,21 @@ fn VideoInfo(
     use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
         spawn(async move {
             let pubkey = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
+                .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+            {
                 Ok(pk) => pk,
                 Err(_) => return,
             };
 
-            let filter = Filter::new()
-                .author(pubkey)
-                .kind(Kind::Metadata)
-                .limit(1);
+            let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
 
-            if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+            if let Ok(events) =
+                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+            {
                 if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
+                    if let Ok(metadata) =
+                        serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                    {
                         author_metadata.set(Some(metadata));
                     }
                 }
@@ -884,17 +918,22 @@ fn VideoInfo(
             // Fetch both filters and combine results
             let mut all_comments = Vec::new();
 
-            if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
+            if let Ok(upper_comments) =
+                nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await
+            {
                 all_comments.extend(upper_comments.into_iter());
             }
 
-            if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
+            if let Ok(lower_comments) =
+                nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await
+            {
                 all_comments.extend(lower_comments.into_iter());
             }
 
             // Deduplicate by event ID
             let mut seen_ids = std::collections::HashSet::new();
-            let unique_comments: Vec<Event> = all_comments.into_iter()
+            let unique_comments: Vec<Event> = all_comments
+                .into_iter()
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
 
@@ -907,14 +946,18 @@ fn VideoInfo(
         });
     }));
 
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
             truncate_pubkey(&pk)
         });
 
-    let profile_image = author_metadata.read().as_ref()
+    let profile_image = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     rsx! {
@@ -1290,8 +1333,14 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                 .event(event_id_parsed)
                 .limit(2000);
 
-            if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            if let Ok(events) = client
+                .fetch_events(combined_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
 
                 let mut replies = 0;
                 let mut likes = 0;
@@ -1308,19 +1357,29 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
                                     user_has_liked = true;
                                 }
                             }
-                        },
+                        }
                         Kind::ZapReceipt => {
                             if let Some(amount) = event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
                                 if tag_vec.first()?.as_str() == "description" {
                                     let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                        if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
                                             for tag_array in tags {
                                                 if let Some(tag_vals) = tag_array.as_array() {
-                                                    if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
+                                                    {
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
+                                                            {
                                                                 return Some(millisats / 1000);
                                                             }
                                                         }
@@ -1436,7 +1495,7 @@ fn VideoInteractions(event: Event, is_muted: bool, on_mute_toggle: EventHandler<
 
 #[component]
 fn AuthorInfo(pubkey: String) -> Element {
-    use nostr_sdk::{PublicKey, FromBech32};
+    use nostr_sdk::{FromBech32, PublicKey};
 
     let pubkey_clone = pubkey.clone();
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
@@ -1446,7 +1505,8 @@ fn AuthorInfo(pubkey: String) -> Element {
 
         spawn(async move {
             let pubkey_parsed = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
+                .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+            {
                 Ok(pk) => pk,
                 Err(_) => return,
             };
@@ -1456,9 +1516,13 @@ fn AuthorInfo(pubkey: String) -> Element {
                 .kind(Kind::Metadata)
                 .limit(1);
 
-            if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+            if let Ok(events) =
+                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+            {
                 if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
+                    if let Ok(metadata) =
+                        serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                    {
                         author_metadata.set(Some(metadata));
                     }
                 }
@@ -1466,13 +1530,15 @@ fn AuthorInfo(pubkey: String) -> Element {
         });
     });
 
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
-        .unwrap_or_else(|| {
-            truncate_pubkey(&pubkey)
-        });
+        .unwrap_or_else(|| truncate_pubkey(&pubkey));
 
-    let profile_image = author_metadata.read().as_ref()
+    let profile_image = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     rsx! {
@@ -1553,7 +1619,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-
 // Format count with k/M suffixes
 fn format_count(count: usize) -> String {
     if count >= 1_000_000 {
@@ -1583,8 +1648,7 @@ fn parse_video_id_and_feed(video_id: &str) -> (String, FeedType) {
 async fn load_video_by_id(video_id: &str) -> Result<Event, String> {
     log::info!("Loading video by ID: {}", video_id);
 
-    let event_id = EventId::parse(video_id)
-        .map_err(|e| format!("Invalid video ID: {}", e))?;
+    let event_id = EventId::parse(video_id).map_err(|e| format!("Invalid video ID: {}", e))?;
 
     let filter = Filter::new()
         .id(event_id)
@@ -1602,8 +1666,7 @@ async fn load_video_by_id(video_id: &str) -> Result<Event, String> {
 
 // Load shorts from following feed
 async fn load_shorts_following(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
@@ -1657,9 +1720,7 @@ async fn load_shorts_following(until: Option<u64>) -> Result<Vec<Event>, String>
 
 // Load shorts from global feed
 async fn load_shorts_global(until: Option<u64>) -> Result<Vec<Event>, String> {
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(22))
-        .limit(50);
+    let mut filter = Filter::new().kind(Kind::Custom(22)).limit(50);
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));

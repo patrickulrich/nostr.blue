@@ -1,8 +1,8 @@
 //! CartItemCard component - displays an item in the shopping cart
 
-use dioxus::prelude::*;
-use crate::utils::nip99::CartItem;
 use super::{PriceDisplay, QuantitySelector};
+use crate::utils::nip99::CartItem;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct CartItemCardProps {

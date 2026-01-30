@@ -21,11 +21,9 @@ pub struct PublishResult {
 impl PublishResult {
     /// Create from SDK Output
     pub fn from_output(output: nostr_relay_pool::Output<nostr::EventId>) -> Self {
-        let successful: Vec<String> = output.success
-            .iter()
-            .map(|url| url.to_string())
-            .collect();
-        let failed: Vec<(String, String)> = output.failed
+        let successful: Vec<String> = output.success.iter().map(|url| url.to_string()).collect();
+        let failed: Vec<(String, String)> = output
+            .failed
             .iter()
             .map(|(url, reason)| (url.to_string(), reason.clone()))
             .collect();
@@ -76,11 +74,11 @@ impl PublishResult {
 /// Used to reduce code duplication in mute/unmute/block/unblock operations
 #[derive(Default)]
 pub(crate) struct MuteListTags {
-    pub event_ids: Vec<nostr::EventId>,   // Muted posts (e tags)
-    pub pubkeys: Vec<nostr::PublicKey>,   // Blocked users (p tags)
-    pub hashtags: Vec<String>,            // Muted hashtags (t tags)
-    pub words: Vec<String>,               // Muted words (word tags)
-    pub other_tags: Vec<nostr::Tag>,      // Preserve unknown tags
+    pub event_ids: Vec<nostr::EventId>, // Muted posts (e tags)
+    pub pubkeys: Vec<nostr::PublicKey>, // Blocked users (p tags)
+    pub hashtags: Vec<String>,          // Muted hashtags (t tags)
+    pub words: Vec<String>,             // Muted words (word tags)
+    pub other_tags: Vec<nostr::Tag>,    // Preserve unknown tags
 }
 
 /// Extract categorized tags from a kind 10000 mute list event
@@ -140,7 +138,10 @@ pub(crate) fn rebuild_mute_list_tags(tags: &MuteListTags) -> Vec<nostr::Tag> {
 
     // Add word tags
     for word in &tags.words {
-        all_tags.push(nostr::Tag::custom(nostr::TagKind::Custom("word".into()), vec![word.clone()]));
+        all_tags.push(nostr::Tag::custom(
+            nostr::TagKind::Custom("word".into()),
+            vec![word.clone()],
+        ));
     }
 
     // Re-attach preserved tags
@@ -188,34 +189,43 @@ pub fn convert_raw_tags(tags: Vec<Vec<String>>) -> Vec<nostr::Tag> {
                     } else {
                         // Unknown marker (e.g., "mention") - preserve full tag using Tag::custom
                         // This follows nostr-sdk pattern where Tag::custom preserves raw data
-                        Some(nostr::Tag::custom(nostr::TagKind::e(), tag_vec[1..].to_vec()))
+                        Some(nostr::Tag::custom(
+                            nostr::TagKind::e(),
+                            tag_vec[1..].to_vec(),
+                        ))
                     }
                 }
                 "e" if tag_vec.len() >= 2 => {
                     // Simple e-tag - preserve trailing fields if present
                     if tag_vec.len() > 2 {
-                        Some(nostr::Tag::custom(nostr::TagKind::e(), tag_vec[1..].to_vec()))
+                        Some(nostr::Tag::custom(
+                            nostr::TagKind::e(),
+                            tag_vec[1..].to_vec(),
+                        ))
                     } else {
-                        nostr::EventId::from_hex(&tag_vec[1]).ok()
+                        nostr::EventId::from_hex(&tag_vec[1])
+                            .ok()
                             .map(nostr::Tag::event)
                     }
                 }
                 "p" if tag_vec.len() >= 2 => {
                     // P-tag - preserve trailing fields if present
                     if tag_vec.len() > 2 {
-                        Some(nostr::Tag::custom(nostr::TagKind::p(), tag_vec[1..].to_vec()))
+                        Some(nostr::Tag::custom(
+                            nostr::TagKind::p(),
+                            tag_vec[1..].to_vec(),
+                        ))
                     } else {
-                        nostr::PublicKey::from_hex(&tag_vec[1]).ok()
+                        nostr::PublicKey::from_hex(&tag_vec[1])
+                            .ok()
                             .map(nostr::Tag::public_key)
                     }
                 }
-                "t" if tag_vec.len() >= 2 => {
-                    Some(nostr::Tag::hashtag(&tag_vec[1]))
-                }
+                "t" if tag_vec.len() >= 2 => Some(nostr::Tag::hashtag(&tag_vec[1])),
                 _ => Some(nostr::Tag::custom(
                     nostr::TagKind::Custom(std::borrow::Cow::Owned(tag_vec[0].clone())),
                     tag_vec[1..].to_vec(),
-                ))
+                )),
             }
         })
         .collect()
@@ -232,8 +242,10 @@ pub(crate) fn detect_mime_type(url: &str) -> Option<String> {
 
     // Extract extension from URL (handles query params and fragments)
     let path = url_lower
-        .split('?').next()?  // Remove query string
-        .split('#').next()?; // Remove fragment
+        .split('?')
+        .next()? // Remove query string
+        .split('#')
+        .next()?; // Remove fragment
     let extension = path.split('.').next_back()?;
 
     match extension {
@@ -268,8 +280,10 @@ pub(crate) fn detect_video_mime_type(url: &str) -> Option<String> {
 
     // Extract extension from URL (handles query params and fragments)
     let path = url_lower
-        .split('?').next()?  // Remove query string
-        .split('#').next()?; // Remove fragment
+        .split('?')
+        .next()? // Remove query string
+        .split('#')
+        .next()?; // Remove fragment
     let extension = path.split('.').next_back()?;
 
     match extension {

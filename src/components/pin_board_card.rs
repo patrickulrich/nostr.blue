@@ -4,15 +4,14 @@
 
 use dioxus::prelude::*;
 
+use crate::components::icons::PinIcon;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
+use crate::stores::auth_store;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::pin_boards_store::{
-    Pinboard,
-    has_user_reacted_to_pinboard, toggle_pinboard_reaction, fetch_pinboard_reaction_count,
+    fetch_pinboard_reaction_count, has_user_reacted_to_pinboard, toggle_pinboard_reaction, Pinboard,
 };
-use crate::stores::auth_store;
-use crate::components::icons::PinIcon;
 use crate::utils::truncate_pubkey;
 
 // ============================================================================
@@ -53,22 +52,32 @@ pub fn PinBoardCard(
     let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Get display name from metadata or fallback (using UTF-8 safe truncation)
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     // Avatar fallback
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
 
     // Pin count text
     let pin_text = pin_count.map(|c| {
-        if c == 1 { "1 pin".to_string() } else { format!("{} pins", c) }
+        if c == 1 {
+            "1 pin".to_string()
+        } else {
+            format!("{} pins", c)
+        }
     });
 
     // Check if current user owns this board
@@ -250,22 +259,36 @@ pub fn PinBoardCardMosaic(
     }));
 
     // Get display name from metadata or fallback (using UTF-8 safe truncation)
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     // Avatar fallback
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
 
     // Reaction state for button styling
-    let heart_fill_class = if *has_reacted.read() { "fill-red-500 text-red-500" } else { "" };
-    let heart_button_class = if *has_reacted.read() { "text-red-500" } else { "text-gray-600 hover:text-red-500" };
+    let heart_fill_class = if *has_reacted.read() {
+        "fill-red-500 text-red-500"
+    } else {
+        ""
+    };
+    let heart_button_class = if *has_reacted.read() {
+        "text-red-500"
+    } else {
+        "text-gray-600 hover:text-red-500"
+    };
 
     // Determine placeholder height based on size variant for visual variety
     let placeholder_height = match size_variant.as_deref() {
@@ -472,15 +495,12 @@ const SIZE_VARIANTS: [&str; 3] = ["small", "medium", "large"];
 #[component]
 pub fn PinBoardMosaicGrid(
     boards: Vec<Pinboard>,
-    #[props(default)]
-    on_board_click: Option<EventHandler<Pinboard>>,
+    #[props(default)] on_board_click: Option<EventHandler<Pinboard>>,
     /// Handler for zap button clicks - parent should open ZapModal
     #[props(default)]
     on_zap_request: Option<EventHandler<Pinboard>>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 8)]
-    skeleton_count: usize,
+    #[props(default = false)] loading: bool,
+    #[props(default = 8)] skeleton_count: usize,
     /// Callback when more items should be loaded
     #[props(default)]
     on_load_more: Option<EventHandler<()>>,
@@ -558,17 +578,17 @@ pub fn PinBoardMosaicGrid(
 
 /// Compact pinboard card for smaller displays or sidebars
 #[component]
-pub fn PinBoardCardCompact(
-    board: Pinboard,
-    #[props(default)]
-    pin_count: Option<usize>,
-) -> Element {
+pub fn PinBoardCardCompact(board: Pinboard, #[props(default)] pin_count: Option<usize>) -> Element {
     let title = board.title.clone();
     let cover_image = board.image.clone();
     let naddr = board.naddr.clone();
 
     let pin_text = pin_count.map(|c| {
-        if c == 1 { "1 pin".to_string() } else { format!("{} pins", c) }
+        if c == 1 {
+            "1 pin".to_string()
+        } else {
+            format!("{} pins", c)
+        }
     });
 
     rsx! {
@@ -698,10 +718,8 @@ pub fn PinBoardCardCompactSkeleton() -> Element {
 #[component]
 pub fn PinBoardGrid(
     boards: Vec<Pinboard>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 4)]
-    skeleton_count: usize,
+    #[props(default = false)] loading: bool,
+    #[props(default = 4)] skeleton_count: usize,
 ) -> Element {
     rsx! {
         div {

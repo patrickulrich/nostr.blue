@@ -8,8 +8,8 @@
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
 
-use dioxus::prelude::*;
 use cdk::nuts::State;
+use dioxus::prelude::*;
 
 use super::errors::CashuResult;
 use super::proofs::{
@@ -19,7 +19,7 @@ use super::proofs::{
     update_transaction_status,
 };
 use super::signals::MAX_SYNC_INPUT_SIZE;
-use super::types::{*, InFlightMeltRequest};
+use super::types::{InFlightMeltRequest, *};
 
 use super::events::fetch_tokens;
 use super::history::fetch_history;
@@ -58,7 +58,8 @@ fn get_unit_for_proofs(mint_url: &str, proofs: &[ProofData]) -> String {
     // Pattern: CDK unwrap_or_default() for missing unit
     log::debug!(
         "Keyset {} not in cache for {}, defaulting to sat",
-        keyset_id, mint_url
+        keyset_id,
+        mint_url
     );
     "sat".to_string()
 }
@@ -104,7 +105,9 @@ pub async fn sync_proofs_with_mints() -> Result<SyncResult, String> {
 pub async fn cleanup_spent_proofs(mint_url: String) -> Result<(usize, u64), String> {
     // Sync state with mint to detect spent proofs
     // Lock is acquired internally by sync_state_with_mint
-    let result = sync_state_with_mint(&mint_url).await.map_err(|e| e.to_string())?;
+    let result = sync_state_with_mint(&mint_url)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok((result.proofs_cleaned, result.sats_cleaned))
 }
@@ -146,7 +149,10 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                         let delay_ms = 100 * 2_u32.pow(attempt); // 100ms, 200ms, 400ms
                         log::debug!(
                             "Lock busy for {}, retrying in {}ms (attempt {}/{})",
-                            mint_url, delay_ms, attempt + 1, MAX_RETRIES
+                            mint_url,
+                            delay_ms,
+                            attempt + 1,
+                            MAX_RETRIES
                         );
                         gloo_timers::future::TimeoutFuture::new(delay_ms).await;
                     }
@@ -159,7 +165,8 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
             None => {
                 log::debug!(
                     "Could not acquire lock for {} after {} attempts, skipping sync",
-                    mint_url, MAX_RETRIES
+                    mint_url,
+                    MAX_RETRIES
                 );
                 return Ok(SyncResult::default());
             }
@@ -189,12 +196,12 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
     );
 
     // Get wallet for this mint
-    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
-        .await
-        .map_err(|e| super::errors::CashuWalletError::MintConnection {
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url).await.map_err(|e| {
+        super::errors::CashuWalletError::MintConnection {
             mint_url: mint_url.to_string(),
             message: e,
-        })?;
+        }
+    })?;
 
     // CDK best practice: Query mint info for batch size limits (NUT-06)
     // Use mint's reported limit if available, otherwise fall back to our default
@@ -203,17 +210,27 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
         Ok(Some(info)) => {
             // Check if NUT-07 is supported by this mint
             if info.nuts.nut07.supported {
-                log::debug!("Mint {} supports NUT-07, using default batch size", mint_url);
+                log::debug!(
+                    "Mint {} supports NUT-07, using default batch size",
+                    mint_url
+                );
             }
             // Most mints don't expose max_inputs limit, use our safe default
             MAX_SYNC_INPUT_SIZE
         }
         Ok(None) => {
-            log::debug!("No mint info available for {}, using default batch size", mint_url);
+            log::debug!(
+                "No mint info available for {}, using default batch size",
+                mint_url
+            );
             MAX_SYNC_INPUT_SIZE
         }
         Err(e) => {
-            log::debug!("Could not fetch mint info for {}: {}, using default batch size", mint_url, e);
+            log::debug!(
+                "Could not fetch mint info for {}: {}, using default batch size",
+                mint_url,
+                e
+            );
             MAX_SYNC_INPUT_SIZE
         }
     };
@@ -243,7 +260,11 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
         let states = match wallet.check_proofs_spent(cdk_proofs.clone()).await {
             Ok(s) => s,
             Err(e) => {
-                log::warn!("Batch {} check failed: {}, trying individual proofs", batch_idx, e);
+                log::warn!(
+                    "Batch {} check failed: {}, trying individual proofs",
+                    batch_idx,
+                    e
+                );
 
                 // Fallback: check proofs individually to salvage what we can
                 let mut individual_states = Vec::new();
@@ -271,7 +292,8 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                 if individual_states.is_empty() {
                     log::warn!(
                         "Batch {}: all {} proofs failed individual check, skipping",
-                        batch_idx, failed_proofs
+                        batch_idx,
+                        failed_proofs
                     );
                     continue; // Try next batch
                 }
@@ -310,7 +332,11 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                         remove_from_pending_at_mint(std::slice::from_ref(&proof.secret));
                     }
 
-                    log::debug!("Proof {} marked as spent ({} sats)", &proof.secret[..8], proof.amount);
+                    log::debug!(
+                        "Proof {} marked as spent ({} sats)",
+                        &proof.secret[..8],
+                        proof.amount
+                    );
                 }
                 State::Pending => {
                     // Proof is pending at mint (lightning in-flight)
@@ -365,7 +391,10 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                     result.pending_found += 1;
                     if !is_proof_pending_at_mint(&proof.secret) {
                         register_proofs_pending_at_mint(std::slice::from_ref(&proof.secret));
-                        log::debug!("Proof {} registered as pending (PendingSpent)", &proof.secret[..8]);
+                        log::debug!(
+                            "Proof {} registered as pending (PendingSpent)",
+                            &proof.secret[..8]
+                        );
                     }
                 }
             }
@@ -453,7 +482,10 @@ pub async fn recover_pending_operations() -> CashuResult<()> {
         return Ok(());
     }
 
-    log::info!("Found {} pending transactions to recover", pending_txs.len());
+    log::info!(
+        "Found {} pending transactions to recover",
+        pending_txs.len()
+    );
 
     for tx in pending_txs {
         match tx.tx_type {
@@ -510,10 +542,7 @@ pub async fn recover_pending_operations() -> CashuResult<()> {
                 match sync_state_with_mint(&tx.mint_url).await {
                     Ok(result) => {
                         if result.spent_found > 0 {
-                            log::info!(
-                                "Send tx {} completed (proofs spent at mint)",
-                                tx.id
-                            );
+                            log::info!("Send tx {} completed (proofs spent at mint)", tx.id);
                             update_transaction_status(
                                 tx.id,
                                 TransactionStatus::Completed,
@@ -565,10 +594,10 @@ const IN_FLIGHT_MAX_AGE_SECS: u64 = 24 * 60 * 60;
 ///
 /// CRITICAL SAFETY: Never publishes proofs without mint verification.
 pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult> {
-    use crate::stores::cashu_cdk_bridge;
-    use cdk::dhke::hash_to_curve;
     use super::proofs::cdk_proof_to_proof_data;
     use super::signals::WALLET_TOKENS;
+    use crate::stores::cashu_cdk_bridge;
+    use cdk::dhke::hash_to_curve;
     use std::collections::HashSet;
 
     log::info!("Checking for orphaned CDK proofs not in NIP-60...");
@@ -650,7 +679,7 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
         // CDK best practice: Verify with mint before assuming orphaned (NUT-07)
         // Process in batches of ORPHAN_SYNC_BATCH_SIZE
         let mut confirmed_orphaned = Vec::new();
-        let mut per_mint_errors = 0;  // Track errors per-mint, not global
+        let mut per_mint_errors = 0; // Track errors per-mint, not global
 
         for chunk in potentially_orphaned.chunks(ORPHAN_SYNC_BATCH_SIZE) {
             match wallet.check_proofs_spent(chunk.to_vec()).await {
@@ -660,7 +689,9 @@ pub async fn sync_orphaned_cdk_proofs_to_nostr() -> CashuResult<OrphanSyncResult
                     if states.len() != chunk.len() {
                         log::warn!(
                             "Mint {} returned {} states for {} proofs - using per-proof fallback",
-                            mint_url, states.len(), chunk.len()
+                            mint_url,
+                            states.len(),
+                            chunk.len()
                         );
                         // Fallback: check each proof individually to avoid silent truncation
                         for proof in chunk {
@@ -797,20 +828,19 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
 
     log::info!("Recovering mint quote {} from {}", quote_id, mint_url);
 
-    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
-        .await
-        .map_err(|e| super::errors::CashuWalletError::MintConnection {
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url).await.map_err(|e| {
+        super::errors::CashuWalletError::MintConnection {
             mint_url: mint_url.to_string(),
             message: e,
-        })?;
+        }
+    })?;
 
     // Check quote state at mint
-    let quote_state = wallet
-        .mint_quote_state(quote_id)
-        .await
-        .map_err(|e| super::errors::CashuWalletError::QuoteFailed {
+    let quote_state = wallet.mint_quote_state(quote_id).await.map_err(|e| {
+        super::errors::CashuWalletError::QuoteFailed {
             message: format!("Failed to check quote state: {}", e),
-        })?;
+        }
+    })?;
 
     #[allow(unreachable_patterns)] // Forward compatibility for future CDK states
     match quote_state.state {
@@ -839,7 +869,10 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
         MintQuoteState::Issued => {
             // Already issued - might have proofs we don't know about
             // Try to recover any unrecorded proofs from CDK database
-            log::info!("Quote {} already issued, checking for unrecorded proofs...", quote_id);
+            log::info!(
+                "Quote {} already issued, checking for unrecorded proofs...",
+                quote_id
+            );
             recover_unrecorded_proofs(mint_url).await
         }
         MintQuoteState::Unpaid => {
@@ -858,7 +891,11 @@ pub async fn recover_mint_quote(mint_url: &str, quote_id: &str) -> CashuResult<R
             Ok(RecoveryResult::none())
         }
         _ => {
-            log::debug!("Quote {} in state {:?}, nothing to recover", quote_id, quote_state.state);
+            log::debug!(
+                "Quote {} in state {:?}, nothing to recover",
+                quote_id,
+                quote_state.state
+            );
             Ok(RecoveryResult::none())
         }
     }
@@ -874,28 +911,34 @@ pub async fn recover_melt_quote_change(
     use crate::stores::cashu_cdk_bridge;
     use cdk::nuts::MeltQuoteState;
 
-    log::info!("Recovering melt quote change {} from {}", quote_id, mint_url);
+    log::info!(
+        "Recovering melt quote change {} from {}",
+        quote_id,
+        mint_url
+    );
 
-    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
-        .await
-        .map_err(|e| super::errors::CashuWalletError::MintConnection {
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url).await.map_err(|e| {
+        super::errors::CashuWalletError::MintConnection {
             mint_url: mint_url.to_string(),
             message: e,
-        })?;
+        }
+    })?;
 
     // Check quote state at mint
-    let quote_status = wallet
-        .melt_quote_status(quote_id)
-        .await
-        .map_err(|e| super::errors::CashuWalletError::QuoteFailed {
+    let quote_status = wallet.melt_quote_status(quote_id).await.map_err(|e| {
+        super::errors::CashuWalletError::QuoteFailed {
             message: format!("Failed to check melt quote state: {}", e),
-        })?;
+        }
+    })?;
 
     #[allow(unreachable_patterns)] // Forward compatibility for future CDK states
     match quote_status.state {
         MeltQuoteState::Paid => {
             // Payment completed - check for unrecorded change proofs
-            log::info!("Melt quote {} paid, checking for change proofs...", quote_id);
+            log::info!(
+                "Melt quote {} paid, checking for change proofs...",
+                quote_id
+            );
             recover_unrecorded_proofs(mint_url).await
         }
         MeltQuoteState::Pending => {
@@ -921,12 +964,12 @@ pub async fn recover_melt_quote_change(
 async fn recover_unrecorded_proofs(mint_url: &str) -> CashuResult<RecoveryResult> {
     use crate::stores::cashu_cdk_bridge;
 
-    let wallet = cashu_cdk_bridge::get_wallet(mint_url)
-        .await
-        .map_err(|e| super::errors::CashuWalletError::MintConnection {
+    let wallet = cashu_cdk_bridge::get_wallet(mint_url).await.map_err(|e| {
+        super::errors::CashuWalletError::MintConnection {
             mint_url: mint_url.to_string(),
             message: e,
-        })?;
+        }
+    })?;
 
     // Get all unspent proofs from CDK database
     let cdk_proofs = wallet
@@ -989,12 +1032,11 @@ async fn recover_unrecorded_proofs(mint_url: &str) -> CashuResult<RecoveryResult
 /// melt operations. The in-flight melt requests contain the exact proofs used
 /// and quote IDs needed for recovery.
 pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult> {
+    use super::signals::{
+        persist_in_flight_melt_requests, remove_in_flight_melt_request, IN_FLIGHT_MELT_REQUESTS,
+    };
     use crate::stores::cashu_cdk_bridge;
     use cdk::nuts::MeltQuoteState;
-    use super::signals::{
-        IN_FLIGHT_MELT_REQUESTS, remove_in_flight_melt_request,
-        persist_in_flight_melt_requests,
-    };
 
     log::info!("Recovering in-flight melt requests...");
 
@@ -1006,7 +1048,10 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
         return Ok(MeltRecoveryResult::default());
     }
 
-    log::info!("Found {} in-flight melt requests to recover", in_flight.len());
+    log::info!(
+        "Found {} in-flight melt requests to recover",
+        in_flight.len()
+    );
 
     let mut result = MeltRecoveryResult::default();
 
@@ -1027,7 +1072,10 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                 Ok(w) => w,
                 Err(_) => {
                     // Mint unreachable - remove tracking, orphan sync will handle proofs
-                    log::warn!("Mint {} unreachable for expired request, removing tracking", request.mint_url);
+                    log::warn!(
+                        "Mint {} unreachable for expired request, removing tracking",
+                        request.mint_url
+                    );
                     remove_in_flight_melt_request(&request.transaction_id);
                     continue;
                 }
@@ -1035,12 +1083,15 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
 
             // Final proof state check using paired approach to maintain alignment
             // between original ProofData and CDK proofs
-            let valid_pairs: Vec<(&ProofData, cdk::nuts::Proof)> = request.proofs_used.iter()
+            let valid_pairs: Vec<(&ProofData, cdk::nuts::Proof)> = request
+                .proofs_used
+                .iter()
                 .filter_map(|p| proof_data_to_cdk_proof(p).ok().map(|cdk_p| (p, cdk_p)))
                 .collect();
 
             if !valid_pairs.is_empty() {
-                let cdk_proofs: Vec<_> = valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
+                let cdk_proofs: Vec<_> =
+                    valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
 
                 if let Ok(states) = wallet.check_proofs_spent(cdk_proofs.clone()).await {
                     // Validate lengths match before zip (defensive best practice per nostr-sdk)
@@ -1051,7 +1102,8 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                         );
                     } else {
                         // Mark spent proofs using original proof secrets for correct alignment
-                        let spent_secrets: Vec<_> = valid_pairs.iter()
+                        let spent_secrets: Vec<_> = valid_pairs
+                            .iter()
                             .zip(states.iter())
                             .filter(|(_, s)| s.state == State::Spent)
                             .map(|((original, _), _)| original.secret.clone())
@@ -1077,8 +1129,14 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
             Some(g) => g,
             None => {
                 // Mint is busy - skip this request, will retry next startup
-                log::warn!("Mint {} busy, skipping recovery for quote {}", request.mint_url, request.quote_id);
-                result.errors.push(format!("Mint {} busy, skipping", request.mint_url));
+                log::warn!(
+                    "Mint {} busy, skipping recovery for quote {}",
+                    request.mint_url,
+                    request.quote_id
+                );
+                result
+                    .errors
+                    .push(format!("Mint {} busy, skipping", request.mint_url));
                 continue;
             }
         };
@@ -1088,7 +1146,9 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
             Ok(w) => w,
             Err(e) => {
                 log::warn!("Failed to get wallet for {}: {}", request.mint_url, e);
-                result.errors.push(format!("Wallet error for {}: {}", request.mint_url, e));
+                result
+                    .errors
+                    .push(format!("Wallet error for {}: {}", request.mint_url, e));
                 continue;
             }
         };
@@ -1098,42 +1158,65 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
             Ok(status) => status,
             Err(e) => {
                 log::warn!("Failed to check quote {} status: {}", request.quote_id, e);
-                result.errors.push(format!("Quote {} check failed: {}", request.quote_id, e));
+                result
+                    .errors
+                    .push(format!("Quote {} check failed: {}", request.quote_id, e));
                 // Keep tracking - don't remove from in-flight
                 continue;
             }
         };
 
-        log::info!("Quote {} status: {:?}", request.quote_id, quote_status.state);
+        log::info!(
+            "Quote {} status: {:?}",
+            request.quote_id,
+            quote_status.state
+        );
 
         #[allow(unreachable_patterns)] // Forward compatibility for future CDK states
         match quote_status.state {
             MeltQuoteState::Paid => {
                 // Payment succeeded - recover change proofs from mint
                 // SAFETY: Deduplicate change proofs before adding (Risk 6)
-                log::info!("Melt quote {} was paid, recovering change proofs...", request.quote_id);
+                log::info!(
+                    "Melt quote {} was paid, recovering change proofs...",
+                    request.quote_id
+                );
 
                 match recover_melt_change_deduplicated(&wallet, &request).await {
                     Ok(change_amount) => {
                         result.change_recovered += change_amount;
                         result.quotes_paid += 1;
                         result.quotes_checked += 1;
-                        log::info!("Recovered {} sats change from quote {}", change_amount, request.quote_id);
+                        log::info!(
+                            "Recovered {} sats change from quote {}",
+                            change_amount,
+                            request.quote_id
+                        );
                         // Only remove from in-flight on success
                         remove_in_flight_melt_request(&request.transaction_id);
                     }
                     Err(e) => {
                         // Keep in-flight for retry on next restart
                         result.quotes_checked += 1;
-                        log::warn!("Failed to recover change for quote {}, keeping for retry: {}", request.quote_id, e);
-                        result.errors.push(format!("Change recovery failed for {}: {}", request.quote_id, e));
+                        log::warn!(
+                            "Failed to recover change for quote {}, keeping for retry: {}",
+                            request.quote_id,
+                            e
+                        );
+                        result.errors.push(format!(
+                            "Change recovery failed for {}: {}",
+                            request.quote_id, e
+                        ));
                     }
                 }
             }
             MeltQuoteState::Pending => {
                 // Lightning still in-flight, keep tracking (don't revert proofs!)
                 // CDK saga pattern: Pending can transition to Paid, Unpaid, or Failed
-                log::info!("Melt quote {} still pending, keeping in tracking", request.quote_id);
+                log::info!(
+                    "Melt quote {} still pending, keeping in tracking",
+                    request.quote_id
+                );
                 result.quotes_checked += 1;
                 // DO NOT remove from in-flight - must keep tracking
             }
@@ -1143,11 +1226,14 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                 // MUST verify with mint (NUT-07) before any revert.
                 log::info!(
                     "Melt quote {} is {:?}, verifying proof states with mint...",
-                    request.quote_id, quote_status.state
+                    request.quote_id,
+                    quote_status.state
                 );
 
                 // Step 1: Convert proofs for NUT-07 check, keeping pairs aligned
-                let valid_pairs: Vec<(&ProofData, cdk::nuts::Proof)> = request.proofs_used.iter()
+                let valid_pairs: Vec<(&ProofData, cdk::nuts::Proof)> = request
+                    .proofs_used
+                    .iter()
                     .filter_map(|p| proof_data_to_cdk_proof(p).ok().map(|cdk_p| (p, cdk_p)))
                     .collect();
 
@@ -1157,7 +1243,8 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     continue;
                 }
 
-                let cdk_proofs: Vec<_> = valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
+                let cdk_proofs: Vec<_> =
+                    valid_pairs.iter().map(|(_, cdk_p)| cdk_p.clone()).collect();
 
                 // Step 2: Check actual proof states at mint (NUT-07)
                 let proof_states = match wallet.check_proofs_spent(cdk_proofs).await {
@@ -1165,7 +1252,10 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     Err(e) => {
                         // Network error - DO NOT revert, keep tracking for next startup
                         log::warn!("NUT-07 check failed for {}: {}", request.mint_url, e);
-                        result.errors.push(format!("NUT-07 check failed for {}: {}", request.mint_url, e));
+                        result.errors.push(format!(
+                            "NUT-07 check failed for {}: {}",
+                            request.mint_url, e
+                        ));
                         continue;
                     }
                 };
@@ -1178,7 +1268,9 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                     );
                     result.errors.push(format!(
                         "State count mismatch for {}: {} states vs {} proofs",
-                        request.mint_url, proof_states.len(), valid_pairs.len()
+                        request.mint_url,
+                        proof_states.len(),
+                        valid_pairs.len()
                     ));
                     continue;
                 }
@@ -1188,7 +1280,8 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
                 let mut spent_secrets = Vec::new();
                 let mut pending_count = 0;
 
-                for ((original_proof, _), state_info) in valid_pairs.iter().zip(proof_states.iter()) {
+                for ((original_proof, _), state_info) in valid_pairs.iter().zip(proof_states.iter())
+                {
                     match state_info.state {
                         State::Unspent => unspent_secrets.push(original_proof.secret.clone()),
                         State::Spent => spent_secrets.push(original_proof.secret.clone()),
@@ -1199,14 +1292,20 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
 
                 // Step 4: Mark spent proofs as spent locally and clear pending tracking
                 if !spent_secrets.is_empty() {
-                    log::info!("Marking {} proofs as spent (confirmed by mint)", spent_secrets.len());
+                    log::info!(
+                        "Marking {} proofs as spent (confirmed by mint)",
+                        spent_secrets.len()
+                    );
                     move_proofs_to_spent(&spent_secrets);
                     remove_from_pending_at_mint(&spent_secrets);
                 }
 
                 // Step 5: Revert unspent proofs and clear pending tracking
                 if !unspent_secrets.is_empty() {
-                    log::info!("Reverting {} proofs to spendable (confirmed unspent by mint)", unspent_secrets.len());
+                    log::info!(
+                        "Reverting {} proofs to spendable (confirmed unspent by mint)",
+                        unspent_secrets.len()
+                    );
                     revert_proofs_to_spendable(&unspent_secrets);
                     remove_from_pending_at_mint(&unspent_secrets);
                 }
@@ -1222,7 +1321,11 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
             }
             _ => {
                 // Unknown state - keep tracking for safety
-                log::debug!("Melt quote {} in unknown state {:?}", request.quote_id, quote_status.state);
+                log::debug!(
+                    "Melt quote {} in unknown state {:?}",
+                    request.quote_id,
+                    quote_status.state
+                );
                 result.quotes_checked += 1;
             }
         }
@@ -1230,7 +1333,10 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
 
     // Persist the updated in-flight requests
     if let Err(e) = persist_in_flight_melt_requests().await {
-        log::warn!("Failed to persist in-flight melt requests after recovery: {}", e);
+        log::warn!(
+            "Failed to persist in-flight melt requests after recovery: {}",
+            e
+        );
     }
 
     // Sync wallet state to update UI
@@ -1242,7 +1348,10 @@ pub async fn recover_all_pending_melt_quotes() -> CashuResult<MeltRecoveryResult
 
     log::info!(
         "In-flight melt recovery complete: {} checked, {} paid, {} sats recovered, {} errors",
-        result.quotes_checked, result.quotes_paid, result.change_recovered, result.errors.len()
+        result.quotes_checked,
+        result.quotes_paid,
+        result.change_recovered,
+        result.errors.len()
     );
 
     Ok(result)
@@ -1256,8 +1365,8 @@ async fn recover_melt_change_deduplicated(
     wallet: &cdk::Wallet,
     request: &InFlightMeltRequest,
 ) -> Result<u64, String> {
-    use cdk::dhke::hash_to_curve;
     use super::signals::WALLET_TOKENS;
+    use cdk::dhke::hash_to_curve;
     use std::collections::HashSet;
 
     // Get all unspent proofs from CDK (these include any change from the melt)
@@ -1330,7 +1439,8 @@ async fn recover_melt_change_deduplicated(
     // Note: publish_orphaned_proofs_event now internally adds tokens to WALLET_TOKENS
     // using the saga pattern (persist before publish), so we don't need to add them here
     let unit = get_unit_for_proofs(&request.mint_url, &proof_data);
-    match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data, &unit).await {
+    match super::events::publish_orphaned_proofs_event(&request.mint_url, &proof_data, &unit).await
+    {
         Ok(event_id) => {
             log::info!("Published recovered change proofs to Nostr: {}", event_id);
 
@@ -1429,7 +1539,11 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
     let recovered = match recover_unrecorded_proofs_internal(mint_url).await {
         Ok(v) => v,
         Err(e) => {
-            log::error!("Failed to recover unrecorded proofs for {}: {}", mint_url, e);
+            log::error!(
+                "Failed to recover unrecorded proofs for {}: {}",
+                mint_url,
+                e
+            );
             return Err(format!("Recovery failed: {}", e));
         }
     };
@@ -1448,8 +1562,8 @@ async fn check_melt_quotes_for_mint(mint_url: &str) -> Result<MeltMintResult, St
 /// Finds proofs in CDK that aren't in WALLET_TOKENS and publishes them to Nostr.
 /// This ensures change proofs from melt operations are properly synced.
 async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, String> {
-    use crate::stores::cashu_cdk_bridge;
     use super::proofs::cdk_proof_to_proof_data;
+    use crate::stores::cashu_cdk_bridge;
 
     let wallet = cashu_cdk_bridge::get_wallet(mint_url)
         .await
@@ -1502,16 +1616,16 @@ async fn recover_unrecorded_proofs_internal(mint_url: &str) -> Result<u64, Strin
         .fold(0u64, |acc, amt| acc.saturating_add(amt));
 
     // Publish missing proofs to Nostr
-    let proof_data: Vec<ProofData> = missing.iter()
-        .map(|p| cdk_proof_to_proof_data(p))
-        .collect();
+    let proof_data: Vec<ProofData> = missing.iter().map(|p| cdk_proof_to_proof_data(p)).collect();
 
     let unit = get_unit_for_proofs(mint_url, &proof_data);
     match super::events::publish_orphaned_proofs_event(mint_url, &proof_data, &unit).await {
         Ok(event_id) => {
             log::info!(
                 "Published {} recovered proofs ({} sats) to Nostr: {}",
-                missing.len(), recovered_amount, event_id
+                missing.len(),
+                recovered_amount,
+                event_id
             );
 
             // Token insertion handled by publish_orphaned_proofs_event
@@ -1563,10 +1677,7 @@ async fn recover_operations_for_mint(mint_url: &str) -> Result<u64, String> {
                     }
                 }
                 Err(e) => {
-                    log::warn!(
-                        "Failed to recover melt quote {}: {}",
-                        quote.id, e
-                    );
+                    log::warn!("Failed to recover melt quote {}: {}", quote.id, e);
                 }
             }
         }
@@ -1751,7 +1862,10 @@ pub async fn recover_from_seed() -> Result<RecoverySummary, String> {
 
     let message = if errors.is_empty() {
         if total_recovered > 0 {
-            format!("Recovered {} sats from {} mints", total_recovered, mints_checked)
+            format!(
+                "Recovered {} sats from {} mints",
+                total_recovered, mints_checked
+            )
         } else {
             format!("Checked {} mints - no proofs to recover", mints_checked)
         }
@@ -2111,7 +2225,9 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
     // Call check_all_mint_quotes to process any paid quotes
     // Then check each quote's state individually to correctly track which were paid
     // NOTE: CDK's check_all_mint_quotes() actually MINTS tokens for paid quotes, not just checks status
-    let (paid, total_minted) = if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
+    let (paid, total_minted) = if let Some(multi_wallet) =
+        cashu_cdk_bridge::MULTI_WALLET.read().as_ref()
+    {
         // First, let CDK process all paid quotes and mint them
         // Track whether batch mint succeeded to handle Paid quotes correctly
         let (minted, batch_mint_succeeded) = match multi_wallet.check_all_mint_quotes(None).await {
@@ -2131,7 +2247,8 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
         // Now check each quote's state individually to update our tracking
         // This ensures we only remove quotes that are actually paid
         let mut paid_count = 0;
-        let non_expired_quotes: Vec<_> = quotes.iter()
+        let non_expired_quotes: Vec<_> = quotes
+            .iter()
             .filter(|q| !expired_ids.contains(&q.quote_id))
             .cloned()
             .collect();
@@ -2146,14 +2263,20 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
                 }
             };
 
-            match multi_wallet.check_mint_quote(&mint_url, &quote.quote_id).await {
+            match multi_wallet
+                .check_mint_quote(&mint_url, &quote.quote_id)
+                .await
+            {
                 Ok(cdk_quote) => {
                     // CDK MintQuoteState has only: Unpaid, Paid, Issued (no Unknown)
                     use cdk::nuts::MintQuoteState;
                     match cdk_quote.state {
                         MintQuoteState::Issued => {
                             // Tokens already issued - always safe to remove
-                            log::debug!("Quote {} is Issued, removing from pending", quote.quote_id);
+                            log::debug!(
+                                "Quote {} is Issued, removing from pending",
+                                quote.quote_id
+                            );
                             remove_paid_mint_quote(&quote.quote_id);
                             paid_count += 1;
                         }
@@ -2164,7 +2287,10 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
                                 remove_paid_mint_quote(&quote.quote_id);
                                 paid_count += 1;
                             } else {
-                                log::warn!("Quote {} paid but batch mint failed, keeping pending", quote.quote_id);
+                                log::warn!(
+                                    "Quote {} paid but batch mint failed, keeping pending",
+                                    quote.quote_id
+                                );
                             }
                         }
                         MintQuoteState::Unpaid => {
@@ -2286,7 +2412,9 @@ pub async fn check_all_pending_proofs() -> Result<(usize, usize, usize), String>
 
     log::info!(
         "Checked {} proofs: {} spent, {} pending",
-        total_checked, total_spent, total_pending
+        total_checked,
+        total_spent,
+        total_pending
     );
 
     Ok((total_checked, total_spent, total_pending))
@@ -2404,10 +2532,16 @@ impl WalletHealthReport {
             ));
         }
         if self.melt_quotes_expired > 0 {
-            parts.push(format!("{} expired quotes removed", self.melt_quotes_expired));
+            parts.push(format!(
+                "{} expired quotes removed",
+                self.melt_quotes_expired
+            ));
         }
         if self.change_recovered_sats > 0 {
-            parts.push(format!("{} sats change recovered", self.change_recovered_sats));
+            parts.push(format!(
+                "{} sats change recovered",
+                self.change_recovered_sats
+            ));
         }
 
         if parts.is_empty() {
@@ -2439,7 +2573,11 @@ pub fn start_quote_processor() {
             match process_pending_mint_quotes().await {
                 Ok((_checked, paid, amount)) => {
                     if paid > 0 {
-                        log::info!("Quote processor: minted {} sats from {} quotes", amount, paid);
+                        log::info!(
+                            "Quote processor: minted {} sats from {} quotes",
+                            amount,
+                            paid
+                        );
                     }
                 }
                 Err(e) => {
@@ -2451,7 +2589,10 @@ pub fn start_quote_processor() {
             match process_pending_melt_quotes().await {
                 Ok((_, _, expired)) => {
                     if expired > 0 {
-                        log::debug!("Quote processor: cleaned up {} expired melt quotes", expired);
+                        log::debug!(
+                            "Quote processor: cleaned up {} expired melt quotes",
+                            expired
+                        );
                     }
                 }
                 Err(e) => {

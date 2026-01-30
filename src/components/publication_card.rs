@@ -1,13 +1,13 @@
 //! Publication Card Component
 //! Display card for publications (NKBIP-01 Kind 30040)
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::stores::publication_store::{PublicationIndex, PublicationType};
-use crate::stores::profiles;
-use crate::components::icons::{BookOpenIcon, FileVideoIcon};
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
+use crate::components::icons::{BookOpenIcon, FileVideoIcon};
+use crate::routes::Route;
+use crate::stores::profiles;
+use crate::stores::publication_store::{PublicationIndex, PublicationType};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 /// Publication card for feed display
 #[component]
@@ -26,7 +26,9 @@ pub fn PublicationCard(publication: PublicationIndex) -> Element {
 
     let naddr = publication.naddr.clone();
     let card_click = move |_| {
-        nav.push(Route::PublicationDetail { naddr: naddr.clone() });
+        nav.push(Route::PublicationDetail {
+            naddr: naddr.clone(),
+        });
     };
 
     let section_count = publication.section_addresses.len();
@@ -135,7 +137,9 @@ pub fn PublicationCardCompact(publication: PublicationIndex) -> Element {
 
     let naddr = publication.naddr.clone();
     let card_click = move |_| {
-        nav.push(Route::PublicationDetail { naddr: naddr.clone() });
+        nav.push(Route::PublicationDetail {
+            naddr: naddr.clone(),
+        });
     };
 
     let section_count = publication.section_addresses.len();
@@ -214,8 +218,7 @@ pub fn PublicationCardSkeleton() -> Element {
 #[component]
 pub fn PublicationGrid(
     publications: Vec<PublicationIndex>,
-    #[props(default = false)]
-    loading: bool,
+    #[props(default = false)] loading: bool,
 ) -> Element {
     rsx! {
         div {

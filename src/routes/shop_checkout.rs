@@ -1,16 +1,19 @@
 //! Shop Checkout - Checkout flow with payment
 
-use dioxus::prelude::*;
-use std::collections::HashMap;
 use crate::routes::Route;
-use crate::stores::shop_store::{CART_ITEMS, CART_TOTAL_SATS, clear_cart, get_cart_count, create_shop_order, fetch_shipping_options, set_cart_item_shipping};
-use crate::utils::nip99::{CartItem, ShippingOption};
-use crate::stores::cashu::{send_tokens_p2pk, get_balances_per_mint};
+use crate::services::lnurl;
+use crate::stores::cashu::{get_balances_per_mint, send_tokens_p2pk};
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::stores::nwc_store;
 use crate::stores::profiles;
-use crate::services::lnurl;
+use crate::stores::shop_store::{
+    clear_cart, create_shop_order, fetch_shipping_options, get_cart_count, set_cart_item_shipping,
+    CART_ITEMS, CART_TOTAL_SATS,
+};
 use crate::utils::format::{format_sats_with_separator, truncate_pubkey};
+use crate::utils::nip99::{CartItem, ShippingOption};
+use dioxus::prelude::*;
+use std::collections::HashMap;
 
 /// Checkout steps
 #[derive(Clone, Copy, PartialEq)]
@@ -53,14 +56,13 @@ fn group_items_by_merchant(items: &[CartItem]) -> Vec<(String, Vec<CartItem>, u6
             0 // Non-sats pricing not fully supported
         };
 
-        let entry = groups
-            .entry(pubkey)
-            .or_insert_with(|| (Vec::new(), 0));
+        let entry = groups.entry(pubkey).or_insert_with(|| (Vec::new(), 0));
         entry.0.push(item.clone());
         entry.1 += item_sats;
     }
 
-    groups.into_iter()
+    groups
+        .into_iter()
         .map(|(pk, (items, total))| (pk, items, total))
         .collect()
 }
@@ -96,7 +98,8 @@ pub fn ShopCheckout() -> Element {
 
     // Get all unique merchant pubkeys from cart
     let merchant_pubkeys: Vec<String> = {
-        let mut pks: Vec<String> = cart_items.iter()
+        let mut pks: Vec<String> = cart_items
+            .iter()
             .map(|i| i.product.pubkey.clone())
             .collect();
         pks.sort();
@@ -130,8 +133,7 @@ pub fn ShopCheckout() -> Element {
                 let profile_result = profiles::fetch_profile(pk.clone()).await;
 
                 if let Ok(profile) = profile_result {
-                    let name = profile.name.clone()
-                        .unwrap_or_else(|| truncate_pubkey(&pk));
+                    let name = profile.name.clone().unwrap_or_else(|| truncate_pubkey(&pk));
 
                     if let Some(ref lud16) = profile.lud16 {
                         if first_lud16.is_none() {
@@ -171,7 +173,9 @@ pub fn ShopCheckout() -> Element {
     });
 
     // Check if any items require shipping
-    let has_physical_items = cart_items.iter().any(|item| item.product.requires_shipping());
+    let has_physical_items = cart_items
+        .iter()
+        .any(|item| item.product.requires_shipping());
 
     // Format total
     let total_formatted = format_sats_with_separator(total_sats);
@@ -1364,7 +1368,8 @@ fn ShippingStep(
     on_continue: EventHandler<()>,
 ) -> Element {
     // Get physical items that need shipping selection
-    let physical_items: Vec<CartItem> = cart_items.iter()
+    let physical_items: Vec<CartItem> = cart_items
+        .iter()
         .filter(|item| item.product.requires_shipping())
         .cloned()
         .collect();
@@ -1395,10 +1400,12 @@ fn ShippingStep(
     });
 
     // Calculate total shipping cost
-    let shipping_total: u64 = physical_items.iter()
+    let shipping_total: u64 = physical_items
+        .iter()
         .filter_map(|item| {
             item.selected_shipping.as_ref().and_then(|selected_naddr| {
-                shipping_options_map.read()
+                shipping_options_map
+                    .read()
                     .get(&item.product.naddr)
                     .and_then(|opts| opts.iter().find(|o| &o.naddr == selected_naddr))
                     .map(|opt| opt.base_price as u64)
@@ -1408,7 +1415,8 @@ fn ShippingStep(
 
     // Check if all physical items have shipping selected (or don't need it)
     let all_shipping_selected = physical_items.iter().all(|item| {
-        let has_options = shipping_options_map.read()
+        let has_options = shipping_options_map
+            .read()
             .get(&item.product.naddr)
             .map(|opts| !opts.is_empty())
             .unwrap_or(false);

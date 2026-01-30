@@ -2,7 +2,6 @@
 //!
 //! Import repositories from GitHub, GitLab, etc. into NIP-34.
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{
@@ -10,6 +9,7 @@ use crate::services::git_hosting::{
     publish_repository,
 };
 use crate::stores::auth_store;
+use dioxus::prelude::*;
 
 /// Import wizard steps
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -121,8 +121,16 @@ pub fn CodeImport() -> Element {
                     "wss://relay.snort.social",
                 ];
 
-                let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };
-                let desc_opt = if description.is_empty() { None } else { Some(description.as_str()) };
+                let name_opt = if name.is_empty() {
+                    None
+                } else {
+                    Some(name.as_str())
+                };
+                let desc_opt = if description.is_empty() {
+                    None
+                } else {
+                    Some(description.as_str())
+                };
 
                 match publish_repository(
                     &id,
@@ -132,7 +140,9 @@ pub fn CodeImport() -> Element {
                     &web_urls,
                     &relays,
                     &[],
-                ).await {
+                )
+                .await
+                {
                     Ok(event_id) => {
                         // Generate naddr for navigation
                         // For now, store the event ID hex

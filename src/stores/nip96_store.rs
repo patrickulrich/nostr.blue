@@ -77,13 +77,13 @@ pub struct Nip94EventData {
 #[derive(Clone, Debug, Default)]
 pub struct UploadedFileMetadata {
     pub url: String,
-    pub original_hash: Option<String>,  // ox tag
-    pub transformed_hash: Option<String>,  // x tag
-    pub mime_type: Option<String>,  // m tag
-    pub size: Option<usize>,  // size tag
-    pub dimensions: Option<(u32, u32)>,  // dim tag (width x height)
-    pub blurhash: Option<String>,  // blurhash tag
-    pub thumbnail: Option<String>,  // thumb tag
+    pub original_hash: Option<String>,    // ox tag
+    pub transformed_hash: Option<String>, // x tag
+    pub mime_type: Option<String>,        // m tag
+    pub size: Option<usize>,              // size tag
+    pub dimensions: Option<(u32, u32)>,   // dim tag (width x height)
+    pub blurhash: Option<String>,         // blurhash tag
+    pub thumbnail: Option<String>,        // thumb tag
 }
 
 impl UploadedFileMetadata {
@@ -140,13 +140,17 @@ pub async fn upload_to_nip96(
     caption: String,
     alt: String,
 ) -> Result<UploadedFileMetadata, String> {
-    log::info!("Starting NIP-96 upload: {} bytes, type: {}", file_data.len(), mime_type);
+    log::info!(
+        "Starting NIP-96 upload: {} bytes, type: {}",
+        file_data.len(),
+        mime_type
+    );
 
     // Reset progress
     *NIP96_UPLOAD_PROGRESS.write() = Some(0.0);
 
     // Calculate SHA-256 hash of file
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(&file_data);
     let file_hash = hasher.finalize();
@@ -162,7 +166,9 @@ pub async fn upload_to_nip96(
         NOSTR_BUILD_API_URL,
         nip98::HttpMethod::POST,
         payload_hash,
-    ).await {
+    )
+    .await
+    {
         Ok(auth) => auth,
         Err(e) => {
             *NIP96_UPLOAD_PROGRESS.write() = None;
@@ -182,7 +188,9 @@ pub async fn upload_to_nip96(
         alt,
         auth_result.header,
         &auth_result.signed_url,
-    ).await {
+    )
+    .await
+    {
         Ok(m) => m,
         Err(e) => {
             *NIP96_UPLOAD_PROGRESS.write() = None;
@@ -237,17 +245,22 @@ async fn upload_with_fetch(
 
     // Append file to FormData
     // Note: nostr.build ignores the client-provided filename and generates its own
-    form_data.append_with_blob_and_filename("file", &blob, "upload.gif")
+    form_data
+        .append_with_blob_and_filename("file", &blob, "upload.gif")
         .map_err(|e| format!("Failed to append file: {:?}", e))?;
 
     // Append other form fields
-    form_data.append_with_str("caption", &caption)
+    form_data
+        .append_with_str("caption", &caption)
         .map_err(|e| format!("Failed to append caption: {:?}", e))?;
-    form_data.append_with_str("alt", &alt)
+    form_data
+        .append_with_str("alt", &alt)
         .map_err(|e| format!("Failed to append alt: {:?}", e))?;
-    form_data.append_with_str("content_type", &mime_type)
+    form_data
+        .append_with_str("content_type", &mime_type)
         .map_err(|e| format!("Failed to append content_type: {:?}", e))?;
-    form_data.append_with_str("no_transform", "true")
+    form_data
+        .append_with_str("no_transform", "true")
         .map_err(|e| format!("Failed to append no_transform: {:?}", e))?;
 
     *NIP96_UPLOAD_PROGRESS.write() = Some(50.0);
@@ -262,7 +275,9 @@ async fn upload_with_fetch(
     let request = Request::new_with_str_and_init(upload_url, &opts)
         .map_err(|e| format!("Failed to create request: {:?}", e))?;
 
-    request.headers().set("Authorization", &authorization)
+    request
+        .headers()
+        .set("Authorization", &authorization)
         .map_err(|e| format!("Failed to set Authorization header: {:?}", e))?;
 
     *NIP96_UPLOAD_PROGRESS.write() = Some(60.0);
@@ -272,7 +287,8 @@ async fn upload_with_fetch(
         .await
         .map_err(|e| format!("Fetch failed: {:?}", e))?;
 
-    let response: Response = resp_value.dyn_into()
+    let response: Response = resp_value
+        .dyn_into()
         .map_err(|_| "Response is not a Response object")?;
 
     *NIP96_UPLOAD_PROGRESS.write() = Some(80.0);
@@ -286,7 +302,10 @@ async fn upload_with_fetch(
             if let Ok(body_js) = JsFuture::from(text_promise).await {
                 if let Some(body) = body_js.as_string() {
                     log::error!("Upload failed: {} {} - body: {}", status, status_text, body);
-                    return Err(format!("Upload failed: {} {} - {}", status, status_text, body));
+                    return Err(format!(
+                        "Upload failed: {} {} - {}",
+                        status, status_text, body
+                    ));
                 }
             }
         }
@@ -294,9 +313,13 @@ async fn upload_with_fetch(
     }
 
     // Parse JSON response
-    let json_value = JsFuture::from(response.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?)
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let json_value = JsFuture::from(
+        response
+            .json()
+            .map_err(|e| format!("Failed to get JSON: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
     let upload_response: Nip96UploadResponse = serde_wasm_bindgen::from_value(json_value)
         .map_err(|e| format!("Failed to deserialize response: {}", e))?;
@@ -305,12 +328,15 @@ async fn upload_with_fetch(
 
     // Check response status
     if upload_response.status != "success" {
-        let msg = upload_response.message.unwrap_or_else(|| "Unknown error".to_string());
+        let msg = upload_response
+            .message
+            .unwrap_or_else(|| "Unknown error".to_string());
         return Err(format!("Upload failed: {}", msg));
     }
 
     // Extract metadata from nip94_event
-    let nip94_event = upload_response.nip94_event
+    let nip94_event = upload_response
+        .nip94_event
         .ok_or("No nip94_event in response")?;
 
     let metadata = UploadedFileMetadata::from_tags(&nip94_event.tags)
@@ -322,9 +348,7 @@ async fn upload_with_fetch(
 /// Get the list of available upload servers
 #[allow(dead_code)]
 pub fn get_upload_servers() -> Vec<(String, String)> {
-    let mut servers = vec![
-        ("nostr.build".to_string(), NOSTR_BUILD_API_URL.to_string()),
-    ];
+    let mut servers = vec![("nostr.build".to_string(), NOSTR_BUILD_API_URL.to_string())];
 
     // Add user's Blossom server if configured
     let blossom_server = crate::stores::blossom_store::get_primary_server();

@@ -8,9 +8,9 @@
 //! - Toggle auto-redemption
 //! - Publish/update kind:10019 event
 
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::utils::shorten_url;
+use dioxus::prelude::*;
 
 #[component]
 pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
@@ -75,11 +75,15 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         let mints: Vec<cashu::NutzapMint> = selected_mints
             .read()
             .iter()
-            .map(|url| cashu::normalize_mint_url(url))  // Normalize first
-            .filter(|normalized_url| seen_mints.insert(normalized_url.clone()))  // Deduplicate
-            .filter(|normalized_url| current_wallet_mints.iter().any(|m| cashu::mint_matches(m, normalized_url)))
+            .map(|url| cashu::normalize_mint_url(url)) // Normalize first
+            .filter(|normalized_url| seen_mints.insert(normalized_url.clone())) // Deduplicate
+            .filter(|normalized_url| {
+                current_wallet_mints
+                    .iter()
+                    .any(|m| cashu::mint_matches(m, normalized_url))
+            })
             .map(|normalized_url| cashu::NutzapMint {
-                url: normalized_url,  // Store normalized URL
+                url: normalized_url, // Store normalized URL
                 unit: "sat".to_string(),
             })
             .collect();
@@ -111,7 +115,9 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             .collect();
 
         if relays.is_empty() {
-            error_message.set(Some("Please enter at least one valid relay URL (wss:// or ws://)".to_string()));
+            error_message.set(Some(
+                "Please enter at least one valid relay URL (wss:// or ws://)".to_string(),
+            ));
             return;
         }
 

@@ -20,7 +20,10 @@
 //! This module only compiles on wasm32 targets. A stub type is provided for
 //! native targets to allow type checking.
 
-#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code, unused_imports, unused_variables))]
+#![cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(dead_code, unused_imports, unused_variables)
+)]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
@@ -111,63 +114,122 @@ mod native_stub {
         }
 
         pub async fn new() -> Result<Self, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn get_feed_item(&self, _event_id: &str) -> Result<Option<CachedFeedItem>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn get_feed_item(
+            &self,
+            _event_id: &str,
+        ) -> Result<Option<CachedFeedItem>, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn put_feed_item(&self, _event_id: &str, _item: &CachedFeedItem) -> Result<(), String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn put_feed_item(
+            &self,
+            _event_id: &str,
+            _item: &CachedFeedItem,
+        ) -> Result<(), String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
         pub async fn delete_feed_item(&self, _event_id: &str) -> Result<(), String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn get_feed_metadata(&self, _feed_key: &str) -> Result<Option<FeedCacheMetadata>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn get_feed_metadata(
+            &self,
+            _feed_key: &str,
+        ) -> Result<Option<FeedCacheMetadata>, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn put_feed_metadata(&self, _feed_key: &str, _metadata: &FeedCacheMetadata) -> Result<(), String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn put_feed_metadata(
+            &self,
+            _feed_key: &str,
+            _metadata: &FeedCacheMetadata,
+        ) -> Result<(), String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
         pub async fn get_lru_entry(&self, _event_id: &str) -> Result<Option<LruEntry>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn put_lru_entry(&self, _event_id: &str, _entry: &LruEntry) -> Result<(), String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn put_lru_entry(
+            &self,
+            _event_id: &str,
+            _entry: &LruEntry,
+        ) -> Result<(), String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
         pub async fn delete_lru_entry(&self, _event_id: &str) -> Result<(), String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
         pub async fn get_all_lru_entries(&self) -> Result<Vec<(String, LruEntry)>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
         pub async fn count_feed_items(&self) -> Result<u32, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn get_feed_items_by_ids(&self, _event_ids: &[String]) -> Result<BulkReadResult<CachedFeedItem>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn get_feed_items_by_ids(
+            &self,
+            _event_ids: &[String],
+        ) -> Result<BulkReadResult<CachedFeedItem>, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn get_all_feed_metadata_bulk(&self) -> Result<BulkReadResult<(String, FeedCacheMetadata)>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn get_all_feed_metadata_bulk(
+            &self,
+        ) -> Result<BulkReadResult<(String, FeedCacheMetadata)>, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn get_all_lru_entries_bulk(&self) -> Result<BulkReadResult<(String, LruEntry)>, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn get_all_lru_entries_bulk(
+            &self,
+        ) -> Result<BulkReadResult<(String, LruEntry)>, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
 
-        pub async fn delete_bad_entries(&self, _keys: &[String], _store_name: &str) -> Result<usize, String> {
-            Err(Self::make_error("FeedCacheDb is only available on wasm32 targets".to_string()))
+        pub async fn delete_bad_entries(
+            &self,
+            _keys: &[String],
+            _store_name: &str,
+        ) -> Result<usize, String> {
+            Err(Self::make_error(
+                "FeedCacheDb is only available on wasm32 targets".to_string(),
+            ))
         }
     }
 }
@@ -233,7 +295,9 @@ mod wasm_impl {
             }));
 
             // Wait for database to open
-            let db: IdbDatabase = db_req.into_future().await
+            let db: IdbDatabase = db_req
+                .into_future()
+                .await
                 .map_err(|e| format!("Failed to open feed cache database: {:?}", e))?;
 
             log::info!("Feed cache IndexedDB initialized successfully");
@@ -341,12 +405,19 @@ mod wasm_impl {
         // ====================================================================
 
         /// Get a cached feed item by event ID
-        pub async fn get_feed_item(&self, event_id: &str) -> Result<Option<CachedFeedItem>, String> {
+        pub async fn get_feed_item(
+            &self,
+            event_id: &str,
+        ) -> Result<Option<CachedFeedItem>, String> {
             self.get_value(STORE_FEED_ITEMS, event_id).await
         }
 
         /// Store a cached feed item
-        pub async fn put_feed_item(&self, event_id: &str, item: &CachedFeedItem) -> Result<(), String> {
+        pub async fn put_feed_item(
+            &self,
+            event_id: &str,
+            item: &CachedFeedItem,
+        ) -> Result<(), String> {
             self.put_value(STORE_FEED_ITEMS, event_id, item).await
         }
 
@@ -356,7 +427,10 @@ mod wasm_impl {
         }
 
         /// Get multiple feed items by their IDs, tracking deserialization failures
-        pub async fn get_feed_items_by_ids(&self, event_ids: &[String]) -> Result<BulkReadResult<CachedFeedItem>, String> {
+        pub async fn get_feed_items_by_ids(
+            &self,
+            event_ids: &[String],
+        ) -> Result<BulkReadResult<CachedFeedItem>, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_FEED_ITEMS, IdbTransactionMode::Readonly)
@@ -427,17 +501,27 @@ mod wasm_impl {
         // ====================================================================
 
         /// Get feed metadata by feed key
-        pub async fn get_feed_metadata(&self, feed_key: &str) -> Result<Option<FeedCacheMetadata>, String> {
+        pub async fn get_feed_metadata(
+            &self,
+            feed_key: &str,
+        ) -> Result<Option<FeedCacheMetadata>, String> {
             self.get_value(STORE_FEED_METADATA, feed_key).await
         }
 
         /// Store feed metadata
-        pub async fn put_feed_metadata(&self, feed_key: &str, metadata: &FeedCacheMetadata) -> Result<(), String> {
-            self.put_value(STORE_FEED_METADATA, feed_key, metadata).await
+        pub async fn put_feed_metadata(
+            &self,
+            feed_key: &str,
+            metadata: &FeedCacheMetadata,
+        ) -> Result<(), String> {
+            self.put_value(STORE_FEED_METADATA, feed_key, metadata)
+                .await
         }
 
         /// Get all feed metadata entries (for eviction cleanup)
-        pub async fn get_all_feed_metadata(&self) -> Result<Vec<(String, FeedCacheMetadata)>, String> {
+        pub async fn get_all_feed_metadata(
+            &self,
+        ) -> Result<Vec<(String, FeedCacheMetadata)>, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_FEED_METADATA, IdbTransactionMode::Readonly)
@@ -459,14 +543,17 @@ mod wasm_impl {
                 loop {
                     if let Some(key_js) = cursor.key() {
                         let value_js = cursor.value();
-                        if let (Some(key_str), Some(value_str)) = (
-                            key_js.as_string(),
-                            value_js.as_string(),
-                        ) {
+                        if let (Some(key_str), Some(value_str)) =
+                            (key_js.as_string(), value_js.as_string())
+                        {
                             match serde_json::from_str::<FeedCacheMetadata>(&value_str) {
                                 Ok(metadata) => entries.push((key_str, metadata)),
                                 Err(e) => {
-                                    log::warn!("Failed to deserialize feed metadata {}: {}", key_str, e);
+                                    log::warn!(
+                                        "Failed to deserialize feed metadata {}: {}",
+                                        key_str,
+                                        e
+                                    );
                                 }
                             }
                         }
@@ -531,14 +618,17 @@ mod wasm_impl {
                     // key() returns Option<JsValue>, value() returns JsValue
                     if let Some(key_js) = cursor.key() {
                         let value_js = cursor.value();
-                        if let (Some(key_str), Some(value_str)) = (
-                            key_js.as_string(),
-                            value_js.as_string(),
-                        ) {
+                        if let (Some(key_str), Some(value_str)) =
+                            (key_js.as_string(), value_js.as_string())
+                        {
                             match serde_json::from_str::<LruEntry>(&value_str) {
                                 Ok(entry) => entries.push((key_str, entry)),
                                 Err(e) => {
-                                    log::warn!("Failed to deserialize LRU entry {}: {}", key_str, e);
+                                    log::warn!(
+                                        "Failed to deserialize LRU entry {}: {}",
+                                        key_str,
+                                        e
+                                    );
                                 }
                             }
                         }
@@ -561,7 +651,9 @@ mod wasm_impl {
         }
 
         /// Get all feed metadata entries with failure tracking (for eviction cleanup)
-        pub async fn get_all_feed_metadata_bulk(&self) -> Result<BulkReadResult<(String, FeedCacheMetadata)>, String> {
+        pub async fn get_all_feed_metadata_bulk(
+            &self,
+        ) -> Result<BulkReadResult<(String, FeedCacheMetadata)>, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_FEED_METADATA, IdbTransactionMode::Readonly)
@@ -584,10 +676,9 @@ mod wasm_impl {
                 loop {
                     if let Some(key_js) = cursor.key() {
                         let value_js = cursor.value();
-                        if let (Some(key_str), Some(value_str)) = (
-                            key_js.as_string(),
-                            value_js.as_string(),
-                        ) {
+                        if let (Some(key_str), Some(value_str)) =
+                            (key_js.as_string(), value_js.as_string())
+                        {
                             match serde_json::from_str::<FeedCacheMetadata>(&value_str) {
                                 Ok(metadata) => items.push((key_str, metadata)),
                                 Err(e) => {
@@ -623,7 +714,9 @@ mod wasm_impl {
         }
 
         /// Get all LRU entries with failure tracking (for eviction processing)
-        pub async fn get_all_lru_entries_bulk(&self) -> Result<BulkReadResult<(String, LruEntry)>, String> {
+        pub async fn get_all_lru_entries_bulk(
+            &self,
+        ) -> Result<BulkReadResult<(String, LruEntry)>, String> {
             let tx = self
                 .db
                 .transaction_on_one_with_mode(STORE_LRU_ORDER, IdbTransactionMode::Readonly)
@@ -646,10 +739,9 @@ mod wasm_impl {
                 loop {
                     if let Some(key_js) = cursor.key() {
                         let value_js = cursor.value();
-                        if let (Some(key_str), Some(value_str)) = (
-                            key_js.as_string(),
-                            value_js.as_string(),
-                        ) {
+                        if let (Some(key_str), Some(value_str)) =
+                            (key_js.as_string(), value_js.as_string())
+                        {
                             match serde_json::from_str::<LruEntry>(&value_str) {
                                 Ok(entry) => items.push((key_str, entry)),
                                 Err(e) => {
@@ -685,7 +777,11 @@ mod wasm_impl {
         }
 
         /// Delete corrupted cache entries by their keys
-        pub async fn delete_bad_entries(&self, keys: &[String], store_name: &str) -> Result<usize, String> {
+        pub async fn delete_bad_entries(
+            &self,
+            keys: &[String],
+            store_name: &str,
+        ) -> Result<usize, String> {
             if keys.is_empty() {
                 return Ok(0);
             }
@@ -711,7 +807,11 @@ mod wasm_impl {
                 .into_result()
                 .map_err(|e| format!("Transaction commit error: {:?}", e))?;
 
-            log::info!("Cleaned up {} corrupted cache entries from {}", deleted, store_name);
+            log::info!(
+                "Cleaned up {} corrupted cache entries from {}",
+                deleted,
+                store_name
+            );
             Ok(deleted)
         }
     }

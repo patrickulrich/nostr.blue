@@ -1,10 +1,17 @@
 use dioxus::prelude::*;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Type alias for the IntersectionObserver handles (observer + closure)
 #[cfg(target_family = "wasm")]
-type ObserverHandles = Rc<RefCell<Option<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>>>;
+type ObserverHandles = Rc<
+    RefCell<
+        Option<(
+            web_sys::IntersectionObserver,
+            wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
+        )>,
+    >,
+>;
 
 /// Infinite scroll hook that automatically triggers loading when sentinel element enters viewport
 ///
@@ -27,11 +34,7 @@ type ObserverHandles = Rc<RefCell<Option<(web_sys::IntersectionObserver, wasm_bi
 /// // In your rsx:
 /// div { id: "{sentinel_id}", class: "h-4" }
 /// ```
-pub fn use_infinite_scroll<F>(
-    callback: F,
-    has_more: Signal<bool>,
-    loading: Signal<bool>
-) -> String
+pub fn use_infinite_scroll<F>(callback: F, has_more: Signal<bool>, loading: Signal<bool>) -> String
 where
     F: FnMut() + 'static,
 {
@@ -56,7 +59,10 @@ where
     use_effect(move || {
         let trigger_value = *trigger.read();
 
-        log::info!("[InfiniteScroll] Trigger effect running - trigger value: {}", trigger_value);
+        log::info!(
+            "[InfiniteScroll] Trigger effect running - trigger value: {}",
+            trigger_value
+        );
 
         // Skip first render (trigger is 0)
         if trigger_value == 0 {
@@ -70,7 +76,11 @@ where
         let is_loading = *loading.peek();
         let has_more_items = *has_more.peek();
 
-        log::info!("[InfiniteScroll] Guard check - is_loading: {}, has_more: {}", is_loading, has_more_items);
+        log::info!(
+            "[InfiniteScroll] Guard check - is_loading: {}, has_more: {}",
+            is_loading,
+            has_more_items
+        );
 
         if is_loading {
             log::info!("[InfiniteScroll] Trigger ignored - already loading");
@@ -117,15 +127,18 @@ where
         }
 
         let observer_handles = use_hook(|| {
-            Rc::new(RefCell::new(None::<(web_sys::IntersectionObserver, wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>)>))
+            Rc::new(RefCell::new(
+                None::<(
+                    web_sys::IntersectionObserver,
+                    wasm_bindgen::closure::Closure<dyn FnMut(js_sys::Array)>,
+                )>,
+            ))
         });
 
         // Store cleanup handler in hook so it lives for component lifetime
-        use_hook(|| {
-            ObserverCleanup {
-                handles: observer_handles.clone(),
-                cleaned: Rc::new(RefCell::new(false)),
-            }
+        use_hook(|| ObserverCleanup {
+            handles: observer_handles.clone(),
+            cleaned: Rc::new(RefCell::new(false)),
         });
 
         // Track if observer is already set up to avoid duplicate setup
@@ -199,17 +212,26 @@ where
                     gloo_timers::future::TimeoutFuture::new(attempt * 50).await;
 
                     if let Some(el) = document.get_element_by_id(&id) {
-                        log::info!("[InfiniteScroll] Found sentinel element on attempt {}", attempt);
+                        log::info!(
+                            "[InfiniteScroll] Found sentinel element on attempt {}",
+                            attempt
+                        );
                         element = Some(el);
                         break;
                     }
-                    log::debug!("[InfiniteScroll] Sentinel not found on attempt {}, retrying...", attempt);
+                    log::debug!(
+                        "[InfiniteScroll] Sentinel not found on attempt {}, retrying...",
+                        attempt
+                    );
                 }
 
                 let element = match element {
                     Some(e) => e,
                     None => {
-                        log::warn!("[InfiniteScroll] Sentinel element never found after 20 attempts: {}", id);
+                        log::warn!(
+                            "[InfiniteScroll] Sentinel element never found after 20 attempts: {}",
+                            id
+                        );
                         observer_setup_done_for_reset.set(false);
                         return;
                     }
@@ -217,19 +239,34 @@ where
 
                 // Create IntersectionObserver callback
                 let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
-                    log::debug!("[InfiniteScroll] IntersectionObserver callback fired, checking {} entries", entries.length());
+                    log::debug!(
+                        "[InfiniteScroll] IntersectionObserver callback fired, checking {} entries",
+                        entries.length()
+                    );
                     // Check if any entry is intersecting
                     for i in 0..entries.length() {
-                        if let Ok(entry) = entries.get(i).dyn_into::<web_sys::IntersectionObserverEntry>() {
+                        if let Ok(entry) = entries
+                            .get(i)
+                            .dyn_into::<web_sys::IntersectionObserverEntry>()
+                        {
                             let is_intersecting = entry.is_intersecting();
-                            log::debug!("[InfiniteScroll] Entry {} intersecting: {}", i, is_intersecting);
+                            log::debug!(
+                                "[InfiniteScroll] Entry {} intersecting: {}",
+                                i,
+                                is_intersecting
+                            );
 
                             if is_intersecting {
                                 // Debounce - only trigger once per second
                                 let now = js_sys::Date::now() as u64;
                                 let last = *last_check_for_callback.peek();
 
-                                log::debug!("[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}", now, last, now - last);
+                                log::debug!(
+                                    "[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}",
+                                    now,
+                                    last,
+                                    now - last
+                                );
 
                                 if now - last > 1000 {
                                     last_check_for_callback.set(now);
@@ -254,14 +291,17 @@ where
 
                 let observer = match web_sys::IntersectionObserver::new_with_options(
                     callback.as_ref().unchecked_ref(),
-                    &options
+                    &options,
                 ) {
                     Ok(obs) => {
                         log::info!("[InfiniteScroll] IntersectionObserver created successfully");
                         obs
-                    },
+                    }
                     Err(e) => {
-                        log::error!("[InfiniteScroll] Failed to create IntersectionObserver: {:?}", e);
+                        log::error!(
+                            "[InfiniteScroll] Failed to create IntersectionObserver: {:?}",
+                            e
+                        );
                         observer_setup_done_for_reset.set(false);
                         return;
                     }

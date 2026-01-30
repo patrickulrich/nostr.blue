@@ -2,23 +2,22 @@
 //! View a pin board with its pins, engagement, and actions
 //! Uses two-stage loading: board metadata first, then pins
 
-use std::collections::HashMap;
-use dioxus::prelude::*;
-use crate::stores::pin_boards_store::{
-    self, Pinboard, Pin, PinMetadata, delete_pinboard,
-    fetch_pinboard_reaction_count, fetch_pinboard_zap_total,
-    has_user_reacted_to_pinboard, toggle_pinboard_reaction,
-    fetch_pins_for_board_filtered, enrich_pins_metadata,
-};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::auth_store;
-use crate::components::{
-    ZapModal, ShareModal, ConfirmModal, HashtagBadge,
-    PinCardMosaicSkeleton, PinMosaicGrid, PinToBoardRequest,
-};
 use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::components::{
+    ConfirmModal, HashtagBadge, PinCardMosaicSkeleton, PinMosaicGrid, PinToBoardRequest,
+    ShareModal, ZapModal,
+};
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{
+    self, delete_pinboard, enrich_pins_metadata, fetch_pinboard_reaction_count,
+    fetch_pinboard_zap_total, fetch_pins_for_board_filtered, has_user_reacted_to_pinboard,
+    toggle_pinboard_reaction, Pin, PinMetadata, Pinboard,
+};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use std::collections::HashMap;
 
 #[component]
 pub fn PinBoardDetail(naddr: String) -> Element {

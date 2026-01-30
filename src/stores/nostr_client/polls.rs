@@ -5,10 +5,10 @@
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 
-use crate::stores::relay;
-use super::fetching::{get_client, ensure_relays_ready};
+use super::fetching::{ensure_relays_ready, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
+use crate::stores::relay;
 
 // =============================================================================
 // Pubkey Helpers
@@ -22,10 +22,8 @@ use super::types::PublishResult;
 ///
 /// Use this when you just need the pubkey, not for signing operations.
 pub fn get_cached_pubkey() -> std::result::Result<PublicKey, String> {
-    let pubkey_str = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
-    PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid cached pubkey: {}", e))
+    let pubkey_str = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
+    PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid cached pubkey: {}", e))
 }
 
 // =============================================================================
@@ -48,8 +46,12 @@ pub async fn publish_poll_vote_tracked(
 
     // Validate that the poll_id matches the poll referenced in the PollResponse
     let referenced_poll_id = match &response {
-        nostr::nips::nip88::PollResponse::SingleChoice { poll_id: ref_id, .. } => ref_id,
-        nostr::nips::nip88::PollResponse::MultipleChoice { poll_id: ref_id, .. } => ref_id,
+        nostr::nips::nip88::PollResponse::SingleChoice {
+            poll_id: ref_id, ..
+        } => ref_id,
+        nostr::nips::nip88::PollResponse::MultipleChoice {
+            poll_id: ref_id, ..
+        } => ref_id,
     };
 
     if *referenced_poll_id != poll_id {
@@ -77,14 +79,22 @@ pub async fn publish_poll_vote_tracked(
         let connected_poll_relays = relay::get_connected(&client, &poll_relays).await;
 
         if connected_poll_relays.is_empty() {
-            log::warn!("None of the {} poll relays are connected, falling back to default relays", poll_relays.len());
+            log::warn!(
+                "None of the {} poll relays are connected, falling back to default relays",
+                poll_relays.len()
+            );
         } else {
-            log::debug!("{}/{} poll relays connected", connected_poll_relays.len(), poll_relays.len());
+            log::debug!(
+                "{}/{} poll relays connected",
+                connected_poll_relays.len(),
+                poll_relays.len()
+            );
         }
 
         // Build from connected relays, not all poll relays (use only those actually connected)
         let relay_urls: Vec<nostr::Url> = if !connected_poll_relays.is_empty() {
-            connected_poll_relays.iter()
+            connected_poll_relays
+                .iter()
                 .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
                 .collect()
         } else {
@@ -93,12 +103,19 @@ pub async fn publish_poll_vote_tracked(
         };
 
         let result = if !relay_urls.is_empty() {
-            log::info!("Publishing vote to {} connected poll relays", relay_urls.len());
-            client.send_event_builder_to(relay_urls, builder).await
+            log::info!(
+                "Publishing vote to {} connected poll relays",
+                relay_urls.len()
+            );
+            client
+                .send_event_builder_to(relay_urls, builder)
+                .await
                 .map_err(|e| format!("Failed to publish poll vote to poll relays: {}", e))
         } else {
             // No connected poll relays - use default relays
-            client.send_event_builder(builder).await
+            client
+                .send_event_builder(builder)
+                .await
                 .map_err(|e| format!("Failed to publish poll vote: {}", e))
         };
 
@@ -108,7 +125,9 @@ pub async fn publish_poll_vote_tracked(
         result?
     } else {
         // No poll relays specified, use default relays
-        client.send_event_builder(builder).await
+        client
+            .send_event_builder(builder)
+            .await
             .map_err(|e| format!("Failed to publish poll vote: {}", e))?
     };
 
@@ -180,13 +199,11 @@ pub async fn publish_poll_tracked(
     // Parse relay URLs with validation logging
     let relay_urls: Vec<nostr::RelayUrl> = relays
         .into_iter()
-        .filter_map(|r| {
-            match nostr::RelayUrl::parse(&r) {
-                Ok(url) => Some(url),
-                Err(e) => {
-                    log::warn!("Invalid relay URL skipped: {} ({})", r, e);
-                    None
-                }
+        .filter_map(|r| match nostr::RelayUrl::parse(&r) {
+            Ok(url) => Some(url),
+            Err(e) => {
+                log::warn!("Invalid relay URL skipped: {} ({})", r, e);
+                None
             }
         })
         .collect();
@@ -219,22 +236,34 @@ pub async fn publish_poll_tracked(
         let connected_poll_relays = relay::get_connected(&client, &relay_urls).await;
 
         if connected_poll_relays.is_empty() {
-            log::warn!("None of the {} poll relays are connected, falling back to default relays", relay_urls.len());
+            log::warn!(
+                "None of the {} poll relays are connected, falling back to default relays",
+                relay_urls.len()
+            );
         } else {
-            log::debug!("{}/{} poll relays connected", connected_poll_relays.len(), relay_urls.len());
+            log::debug!(
+                "{}/{} poll relays connected",
+                connected_poll_relays.len(),
+                relay_urls.len()
+            );
         }
 
         // Publish to connected poll relays if available
         let result = if !connected_poll_relays.is_empty() {
-            let urls: Vec<nostr::Url> = connected_poll_relays.iter()
+            let urls: Vec<nostr::Url> = connected_poll_relays
+                .iter()
                 .filter_map(|r| nostr::Url::parse(r.as_str()).ok())
                 .collect();
             log::info!("Publishing poll to {} connected poll relays", urls.len());
-            client.send_event_builder_to(urls, builder).await
+            client
+                .send_event_builder_to(urls, builder)
+                .await
                 .map_err(|e| format!("Failed to publish poll to specified relays: {}", e))
         } else {
             // No connected poll relays - use default relays
-            client.send_event_builder(builder).await
+            client
+                .send_event_builder(builder)
+                .await
                 .map_err(|e| format!("Failed to publish poll: {}", e))
         };
 
@@ -244,7 +273,9 @@ pub async fn publish_poll_tracked(
         result?
     } else {
         // No poll relays specified, use default relays
-        client.send_event_builder(builder).await
+        client
+            .send_event_builder(builder)
+            .await
             .map_err(|e| format!("Failed to publish poll: {}", e))?
     };
 

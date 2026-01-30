@@ -1,17 +1,15 @@
 //! Create Cookbook Modal
 //! Modal for creating a new cookbook (pinboard tagged with "cookbook")
 
-use dioxus::prelude::*;
-use crate::stores::pin_boards_store::{self, PinboardInput};
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::stores::pin_boards_store::{self, PinboardInput};
 use crate::utils::validation::is_valid_http_url;
+use dioxus::prelude::*;
 
 /// Modal for creating a new cookbook
 #[component]
-pub fn CreateCookbookModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CreateCookbookModal(on_close: EventHandler<()>) -> Element {
     let navigator = use_navigator();
 
     let mut title = use_signal(String::new);
@@ -59,7 +57,8 @@ pub fn CreateCookbookModal(
         let mut seen = std::collections::HashSet::new();
         let mut tags: Vec<String> = vec!["cookbook".to_string()];
         seen.insert("cookbook".to_string());
-        for tag in additional_tags.read()
+        for tag in additional_tags
+            .read()
             .split(',')
             .map(|t| t.trim().to_lowercase())
             .filter(|t| !t.is_empty())
@@ -81,7 +80,7 @@ pub fn CreateCookbookModal(
             match pin_boards_store::publish_pinboard(input, None).await {
                 Ok(naddr) => {
                     is_submitting.set(false); // Clear before navigation
-                    // Navigate to the new cookbook
+                                              // Navigate to the new cookbook
                     navigator.push(Route::PinBoardDetail { naddr });
                 }
                 Err(e) => {

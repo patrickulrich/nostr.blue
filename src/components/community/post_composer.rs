@@ -1,13 +1,11 @@
 //! Community Post Composer Component
 //! Modal for creating new posts or replies in a community
 
-use dioxus::prelude::*;
-use crate::stores::community_store::{
-    Community, CommunityPost, post_to_community, reply_to_post,
-};
-use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::RichContent;
+use crate::stores::community_store::{post_to_community, reply_to_post, Community, CommunityPost};
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::validation::is_valid_http_url;
+use dioxus::prelude::*;
 
 /// Post composer modal for communities
 #[component]
@@ -79,7 +77,10 @@ pub fn CommunityPostComposer(
         let has_content = !content.read().trim().is_empty();
         if has_content {
             let confirmed = web_sys::window()
-                .and_then(|w| w.confirm_with_message("You have unsaved content. Discard it?").ok())
+                .and_then(|w| {
+                    w.confirm_with_message("You have unsaved content. Discard it?")
+                        .ok()
+                })
                 .unwrap_or(false);
             if confirmed {
                 handler.call(());

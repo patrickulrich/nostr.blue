@@ -1,12 +1,10 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::PaymentRequestProgress;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
+use dioxus::prelude::*;
 
 #[component]
-pub fn CashuCreateRequestModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     let mut amount_input = use_signal(String::new);
     let mut description_input = use_signal(String::new);
     let mut use_nostr_transport = use_signal(|| true);
@@ -48,7 +46,11 @@ pub fn CashuCreateRequestModal(
             }
         };
 
-        let desc = if description.is_empty() { None } else { Some(description) };
+        let desc = if description.is_empty() {
+            None
+        } else {
+            Some(description)
+        };
 
         error_message.set(None);
         is_creating.set(true);
@@ -98,9 +100,9 @@ pub fn CashuCreateRequestModal(
             spawn(async move {
                 if let Some(window) = web_sys::window() {
                     let clipboard = window.navigator().clipboard();
-                    match wasm_bindgen_futures::JsFuture::from(
-                        clipboard.write_text(&req_clone)
-                    ).await {
+                    match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&req_clone))
+                        .await
+                    {
                         Ok(_) => {
                             copied.set(true);
                             // Reset copied state after 2 seconds

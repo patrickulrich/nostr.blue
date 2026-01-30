@@ -1,11 +1,11 @@
 //! Wiki Home Route
 //! Browse and search NIP-54 wiki pages (Kind 30818)
 
-use dioxus::prelude::*;
-use crate::components::{WikiCardSkeleton, WikiGrid, WikiCardSearchResult};
-use crate::components::icons::{BookOpenIcon, SearchIcon, PenSquareIcon, RefreshIcon};
-use crate::stores::{wiki_store, nostr_client};
+use crate::components::icons::{BookOpenIcon, PenSquareIcon, RefreshIcon, SearchIcon};
+use crate::components::{WikiCardSearchResult, WikiCardSkeleton, WikiGrid};
 use crate::stores::wiki_store::CachedWikiPage;
+use crate::stores::{nostr_client, wiki_store};
+use dioxus::prelude::*;
 
 /// Wiki home page
 #[component]

@@ -1,12 +1,10 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::ConsolidationResult;
 use crate::utils::shorten_url;
+use dioxus::prelude::*;
 
 #[component]
-pub fn CashuOptimizeModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuOptimizeModal(on_close: EventHandler<()>) -> Element {
     let mut is_optimizing = use_signal(|| false);
     let mut results = use_signal(Vec::<(String, ConsolidationResult)>::new);
     let mut error_message = use_signal(|| Option::<String>::None);
@@ -15,7 +13,8 @@ pub fn CashuOptimizeModal(
     let mints = cashu::get_mints();
 
     // Get proof counts per mint
-    let mint_proof_counts: Vec<(String, usize)> = mints.iter()
+    let mint_proof_counts: Vec<(String, usize)> = mints
+        .iter()
         .map(|m| (m.clone(), cashu::get_mint_proof_count(m)))
         .collect();
 

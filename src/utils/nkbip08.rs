@@ -148,10 +148,7 @@ impl BookReference {
 
         // Version in parentheses
         if let Some(ref version) = self.version {
-            parts.push(format!(
-                "({})",
-                version.to_uppercase().replace('-', " ")
-            ));
+            parts.push(format!("({})", version.to_uppercase().replace('-', " ")));
         }
 
         parts.join(" ")
@@ -210,26 +207,17 @@ impl BookReference {
 
         // Add collection filter if specified
         if let Some(ref collection) = self.collection {
-            filter = filter.custom_tag(
-                SingleLetterTag::uppercase(Alphabet::C),
-                collection.clone(),
-            );
+            filter = filter.custom_tag(SingleLetterTag::uppercase(Alphabet::C), collection.clone());
         }
 
         // Add chapter filter if specified
         if let Some(ref chapter) = self.chapter {
-            filter = filter.custom_tag(
-                SingleLetterTag::lowercase(Alphabet::C),
-                chapter.clone(),
-            );
+            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::C), chapter.clone());
         }
 
         // Add version filter if specified
         if let Some(ref version) = self.version {
-            filter = filter.custom_tag(
-                SingleLetterTag::lowercase(Alphabet::V),
-                version.clone(),
-            );
+            filter = filter.custom_tag(SingleLetterTag::lowercase(Alphabet::V), version.clone());
         }
 
         // Add author filter if specified
@@ -288,10 +276,9 @@ fn parse_section_range(input: &str) -> Vec<String> {
         if part.contains('-') {
             let range_parts: Vec<&str> = part.split('-').collect();
             if range_parts.len() == 2 {
-                if let (Ok(start), Ok(end)) = (
-                    range_parts[0].parse::<u32>(),
-                    range_parts[1].parse::<u32>(),
-                ) {
+                if let (Ok(start), Ok(end)) =
+                    (range_parts[0].parse::<u32>(), range_parts[1].parse::<u32>())
+                {
                     for i in start..=end {
                         sections.push(i.to_string());
                     }
@@ -494,10 +481,7 @@ mod tests {
         let reference = parse_book_wikilink("book::genesis 2:4-9").unwrap();
         assert_eq!(reference.title, "genesis");
         assert_eq!(reference.chapter, Some("2".to_string()));
-        assert_eq!(
-            reference.sections,
-            vec!["4", "5", "6", "7", "8", "9"]
-        );
+        assert_eq!(reference.sections, vec!["4", "5", "6", "7", "8", "9"]);
     }
 
     #[test]
@@ -506,10 +490,7 @@ mod tests {
         assert_eq!(reference.collection, Some("bible".to_string()));
         assert_eq!(reference.title, "genesis");
         assert_eq!(reference.chapter, Some("2".to_string()));
-        assert_eq!(
-            reference.sections,
-            vec!["4", "5", "6", "7", "8", "9"]
-        );
+        assert_eq!(reference.sections, vec!["4", "5", "6", "7", "8", "9"]);
         assert_eq!(reference.version, Some("kjv".to_string()));
     }
 
@@ -529,10 +510,7 @@ mod tests {
             vec!["4", "5", "6", "7", "8", "9"]
         );
         assert_eq!(parse_section_range("1,3,5"), vec!["1", "3", "5"]);
-        assert_eq!(
-            parse_section_range("1-3,7"),
-            vec!["1", "2", "3", "7"]
-        );
+        assert_eq!(parse_section_range("1-3,7"), vec!["1", "2", "3", "7"]);
     }
 
     #[test]
@@ -541,7 +519,10 @@ mod tests {
             .with_chapter("21")
             .with_section("8")
             .with_version("penguin-classics");
-        assert_eq!(reference.display_text(), "Jane Eyre 21:8 (PENGUIN CLASSICS)");
+        assert_eq!(
+            reference.display_text(),
+            "Jane Eyre 21:8 (PENGUIN CLASSICS)"
+        );
     }
 
     #[test]
@@ -556,10 +537,7 @@ mod tests {
             .with_section("8")
             .with_section("9")
             .with_version("kjv");
-        assert_eq!(
-            reference.display_text(),
-            "Genesis 2:4,5,6,7,8,9 (KJV)"
-        );
+        assert_eq!(reference.display_text(), "Genesis 2:4,5,6,7,8,9 (KJV)");
     }
 
     #[test]

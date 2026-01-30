@@ -88,7 +88,11 @@ pub fn safe_duration_millis(seconds: f64) -> u32 {
 /// - `format_relative_time(ts, false, false)` returns "5m", "2h", "3d" or "Jan 15"
 /// - `format_relative_time(ts, true, true)` returns "5m ago", "2h ago", "3mo ago", "2y ago"
 /// - Future timestamps return "in Xm", "in Xh", "in Xd", etc.
-pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long_format: bool) -> String {
+pub fn format_relative_time_ex(
+    timestamp: Timestamp,
+    include_ago: bool,
+    use_long_format: bool,
+) -> String {
     let now = Utc::now().timestamp() as u64;
     let ts = timestamp.as_secs();
 
@@ -129,8 +133,7 @@ pub fn format_relative_time_ex(timestamp: Timestamp, include_ago: bool, use_long
         }
         _ => {
             // For older than 7 days, show the date
-            let dt = DateTime::from_timestamp(ts as i64, 0)
-                .unwrap_or_else(Utc::now);
+            let dt = DateTime::from_timestamp(ts as i64, 0).unwrap_or_else(Utc::now);
             dt.format("%b %d").to_string()
         }
     }
@@ -174,8 +177,7 @@ pub fn format_relative_time(timestamp: Timestamp) -> String {
 /// Format a timestamp as a human-readable date and time
 #[allow(dead_code)]
 pub fn format_datetime(timestamp: Timestamp) -> String {
-    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
-        .unwrap_or_else(Utc::now);
+    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0).unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 

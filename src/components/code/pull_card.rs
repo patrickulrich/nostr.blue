@@ -2,19 +2,18 @@
 //!
 //! Displays NIP-34 Git patches/PRs in cards.
 
-use dioxus::prelude::*;
-use crate::utils::nip34::PullRequest;
-use crate::utils::format::truncate_commit;
+use super::status_badge::{status_color_class, BadgeSize, CodeStatusBadge};
 use crate::routes::Route;
-use super::status_badge::{CodeStatusBadge, BadgeSize, status_color_class};
+use crate::utils::format::truncate_commit;
+use crate::utils::nip34::PullRequest;
+use dioxus::prelude::*;
 
 /// Pull request card component for lists
 #[component]
-pub fn CodePullCard(
-    pr: PullRequest,
-) -> Element {
+pub fn CodePullCard(pr: PullRequest) -> Element {
     // Extract title from content - skip empty lines to find actual content
-    let title = pr.content
+    let title = pr
+        .content
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("Untitled patch")
@@ -91,7 +90,8 @@ pub fn CodePullCard(
 #[component]
 pub fn CodePullRow(pr: PullRequest) -> Element {
     // Extract title from content - skip empty lines to find actual content
-    let title = pr.content
+    let title = pr
+        .content
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("Untitled patch")

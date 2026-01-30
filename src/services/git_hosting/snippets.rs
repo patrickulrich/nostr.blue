@@ -24,13 +24,11 @@ pub async fn fetch_snippet(event_ref: &str) -> Result<DisplaySnippet, String> {
     }
 
     // Decode event reference
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
 
     // Build filter
-    let filter = Filter::new()
-        .id(event_id)
-        .kind(Kind::CodeSnippet);
+    let filter = Filter::new().id(event_id).kind(Kind::CodeSnippet);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -39,8 +37,7 @@ pub async fn fetch_snippet(event_ref: &str) -> Result<DisplaySnippet, String> {
     // Parse and cache
     cache_snippet_events(&events);
 
-    get_cached_snippet(&event_id.to_hex())
-        .ok_or_else(|| "Snippet not found".to_string())
+    get_cached_snippet(&event_id.to_hex()).ok_or_else(|| "Snippet not found".to_string())
 }
 
 /// Alias for fetch_snippet - fetch by event ID
@@ -49,7 +46,10 @@ pub async fn fetch_snippet_by_id(event_ref: &str) -> Result<DisplaySnippet, Stri
 }
 
 /// Fetch snippets by author
-pub async fn fetch_user_snippets(pubkey: &PublicKey, limit: usize) -> Result<Vec<DisplaySnippet>, String> {
+pub async fn fetch_user_snippets(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<DisplaySnippet>, String> {
     let filter = Filter::new()
         .kind(Kind::CodeSnippet)
         .author(*pubkey)
@@ -69,9 +69,7 @@ pub async fn fetch_user_snippets(pubkey: &PublicKey, limit: usize) -> Result<Vec
 
 /// Fetch recent snippets
 pub async fn fetch_recent_snippets(limit: usize) -> Result<Vec<DisplaySnippet>, String> {
-    let filter = Filter::new()
-        .kind(Kind::CodeSnippet)
-        .limit(limit);
+    let filter = Filter::new().kind(Kind::CodeSnippet).limit(limit);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -86,7 +84,10 @@ pub async fn fetch_recent_snippets(limit: usize) -> Result<Vec<DisplaySnippet>, 
 }
 
 /// Fetch snippets by language
-pub async fn fetch_snippets_by_language(language: &str, limit: usize) -> Result<Vec<DisplaySnippet>, String> {
+pub async fn fetch_snippets_by_language(
+    language: &str,
+    limit: usize,
+) -> Result<Vec<DisplaySnippet>, String> {
     let filter = Filter::new()
         .kind(Kind::CodeSnippet)
         .custom_tag(SingleLetterTag::lowercase(Alphabet::L), language)
@@ -175,7 +176,9 @@ pub async fn publish_snippet(
     // Build and publish using EventBuilder's public method
     let builder = EventBuilder::code_snippet(snippet);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
 
     let event_id = *output.id();
@@ -198,10 +201,14 @@ pub async fn delete_snippet(event_id: EventId) -> Result<(), String> {
     }
 
     use nostr::nips::nip09::EventDeletionRequest;
-    let request = EventDeletionRequest::new().id(event_id).reason("Snippet deleted");
+    let request = EventDeletionRequest::new()
+        .id(event_id)
+        .reason("Snippet deleted");
     let builder = EventBuilder::delete(request);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
 
     // Remove from cache

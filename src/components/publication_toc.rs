@@ -1,11 +1,14 @@
 //! Publication Table of Contents Component
 //! Tree-based navigation for publication sections (NKBIP-01 Kind 30040/30041)
 
+use crate::components::icons::{ArrowLeftIcon, ChevronDownIcon};
+use crate::stores::nostr_client;
+use crate::stores::publication_store::{
+    parse_publication_section, sections_by_addresses_filter, PublicationSection, PublicationTree,
+    SectionReference,
+};
 use dioxus::prelude::*;
 use std::time::Duration;
-use crate::stores::publication_store::{PublicationTree, PublicationSection, sections_by_addresses_filter, parse_publication_section, SectionReference};
-use crate::stores::nostr_client;
-use crate::components::icons::{ChevronDownIcon, ArrowLeftIcon};
 
 /// Dynamic Table of Contents that updates based on current navigation level
 /// Uses tree's parent relationships instead of manual breadcrumb tracking
@@ -25,13 +28,22 @@ pub fn PublicationTocDynamic(
     // Determine what items to show in the TOC
     let items_to_show: Vec<String> = if let Some(ref parent) = current_parent {
         // Show children of current parent
-        parent.child_addresses.iter().map(|a| a.address.clone()).collect()
+        parent
+            .child_addresses
+            .iter()
+            .map(|a| a.address.clone())
+            .collect()
     } else {
         // Show root level items
-        tree.root.section_addresses.iter().map(|a| a.address.clone()).collect()
+        tree.root
+            .section_addresses
+            .iter()
+            .map(|a| a.address.clone())
+            .collect()
     };
 
-    let current_title = current_parent.as_ref()
+    let current_title = current_parent
+        .as_ref()
         .map(|p| p.title.clone())
         .unwrap_or_else(|| tree.root.title.clone());
 
@@ -112,7 +124,8 @@ fn DynamicTocList(
             loading.set(true);
 
             // Build section references for fetching
-            let refs: Vec<SectionReference> = addrs.iter()
+            let refs: Vec<SectionReference> = addrs
+                .iter()
                 .map(|a| SectionReference {
                     address: a.clone(),
                     relay_hint: None,
@@ -124,10 +137,9 @@ fn DynamicTocList(
 
             let filters = sections_by_addresses_filter(&refs);
             for filter in filters {
-                if let Ok(events) = nostr_client::fetch_events_aggregated(
-                    filter,
-                    Duration::from_secs(10),
-                ).await {
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                {
                     for event in events {
                         if let Some(section) = parse_publication_section(&event) {
                             found_sections.push(section);
@@ -146,11 +158,13 @@ fn DynamicTocList(
             found_sections.retain(|s| seen.insert(s.a_tag.clone()));
 
             // Sort by the order in addresses
-            let address_order: std::collections::HashMap<_, _> = addrs.iter()
+            let address_order: std::collections::HashMap<_, _> = addrs
+                .iter()
                 .enumerate()
                 .map(|(i, a)| (a.clone(), i))
                 .collect();
-            found_sections.sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
+            found_sections
+                .sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
 
             sections.set(found_sections);
             loading.set(false);
@@ -232,9 +246,14 @@ pub fn PublicationTocHorizontal(
     on_select: EventHandler<String>,
 ) -> Element {
     // Flatten to just top-level sections for horizontal view
-    let sections: Vec<_> = tree.root.section_addresses.iter()
+    let sections: Vec<_> = tree
+        .root
+        .section_addresses
+        .iter()
         .filter_map(|s| {
-            tree.sections.get(&s.address).map(|sec| (s.address.clone(), sec.clone()))
+            tree.sections
+                .get(&s.address)
+                .map(|sec| (s.address.clone(), sec.clone()))
         })
         .collect();
 
@@ -265,14 +284,14 @@ pub fn PublicationTocHorizontal(
 
 /// Progress indicator showing reading position
 #[component]
-pub fn PublicationProgress(
-    tree: PublicationTree,
-    current_section: Option<String>,
-) -> Element {
+pub fn PublicationProgress(tree: PublicationTree, current_section: Option<String>) -> Element {
     let total = tree.sections.len();
 
     // Build all section addresses (root + nested children)
-    let all_sections: Vec<String> = tree.root.section_addresses.iter()
+    let all_sections: Vec<String> = tree
+        .root
+        .section_addresses
+        .iter()
         .map(|s| s.address.clone())
         .chain(tree.nodes.values().flat_map(|n| n.children.iter().cloned()))
         .collect();

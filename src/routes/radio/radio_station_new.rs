@@ -1,11 +1,11 @@
 // Radio Station Creation Form
 // Auth-gated form for creating new Kind 31237 radio station events
-use dioxus::prelude::*;
-use crate::routes::Route;
 use crate::components::icons;
+use crate::routes::Route;
 use crate::stores::auth_store;
 use crate::stores::nostr_client;
-use nostr_sdk::prelude::{EventBuilder, Kind, Tag, TagKind, Coordinate, ToBech32};
+use dioxus::prelude::*;
+use nostr_sdk::prelude::{Coordinate, EventBuilder, Kind, Tag, TagKind, ToBech32};
 
 /// A stream entry in the form
 #[derive(Clone, Default)]
@@ -105,7 +105,8 @@ pub fn RadioStationNew() -> Element {
             return;
         }
 
-        let valid_streams: Vec<_> = streams_val.iter()
+        let valid_streams: Vec<_> = streams_val
+            .iter()
             .filter(|s| !s.url.trim().is_empty())
             .collect();
 
@@ -474,7 +475,8 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
     } = form;
 
     // Generate d-tag from name
-    let d_tag = name.to_lowercase()
+    let d_tag = name
+        .to_lowercase()
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == ' ')
         .collect::<String>()
@@ -482,7 +484,12 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
 
     // Add high-entropy suffix for uniqueness (millisecond timestamp + UUID fragment)
     let timestamp_ms = js_sys::Date::now() as u64;
-    let random_component = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("").to_string();
+    let random_component = uuid::Uuid::new_v4()
+        .to_string()
+        .split('-')
+        .next()
+        .unwrap_or("")
+        .to_string();
     let d_tag = format!("{}-{}-{}", d_tag, timestamp_ms, random_component);
 
     // Build tags using wavefunc-compatible format
@@ -494,7 +501,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
 
     if !description.trim().is_empty() {
         // wavefunc uses "description" tag
-        tags.push(Tag::custom(TagKind::custom("description"), vec![description]));
+        tags.push(Tag::custom(
+            TagKind::custom("description"),
+            vec![description],
+        ));
     }
 
     if !thumbnail.trim().is_empty() {
@@ -512,7 +522,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
 
     if !country_code.trim().is_empty() {
         // wavefunc uses "country" tag
-        tags.push(Tag::custom(TagKind::custom("country"), vec![country_code.to_uppercase()]));
+        tags.push(Tag::custom(
+            TagKind::custom("country"),
+            vec![country_code.to_uppercase()],
+        ));
     }
 
     // Parse and add genres as category tags: ["c", "genre-name", "genre"]
@@ -520,7 +533,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
     for genre in genres.split(',') {
         let genre = genre.trim().to_lowercase();
         if !genre.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("c"), vec![genre, "genre".to_string()]));
+            tags.push(Tag::custom(
+                TagKind::custom("c"),
+                vec![genre, "genre".to_string()],
+            ));
         }
     }
 
@@ -562,7 +578,11 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
 
         let mut stream_values = vec![
             stream.url.trim().to_string(),
-            if !stream.format.is_empty() { stream.format.clone() } else { "audio/mpeg".to_string() },
+            if !stream.format.is_empty() {
+                stream.format.clone()
+            } else {
+                "audio/mpeg".to_string()
+            },
             quality_json,
         ];
 
@@ -574,16 +594,19 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
     }
 
     // Client tag for attribution
-    tags.push(Tag::custom(TagKind::custom("client"), vec!["nostr.blue".to_string()]));
+    tags.push(Tag::custom(
+        TagKind::custom("client"),
+        vec!["nostr.blue".to_string()],
+    ));
 
     // Build and publish event
-    let event_builder = EventBuilder::new(Kind::from(31237), "")
-        .tags(tags);
+    let event_builder = EventBuilder::new(Kind::from(31237), "").tags(tags);
 
-    let client = nostr_client::get_client()
-        .ok_or_else(|| "Failed to get client".to_string())?;
+    let client = nostr_client::get_client().ok_or_else(|| "Failed to get client".to_string())?;
 
-    let output = client.send_event_builder(event_builder).await
+    let output = client
+        .send_event_builder(event_builder)
+        .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
 
     let event_id = output.id().to_string();
@@ -591,10 +614,10 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
     // Build naddr (use cached pubkey - no signer call needed)
     let pubkey = nostr_client::get_cached_pubkey()?;
 
-    let coordinate = Coordinate::new(Kind::from(31237), pubkey)
-        .identifier(d_tag);
+    let coordinate = Coordinate::new(Kind::from(31237), pubkey).identifier(d_tag);
 
-    let naddr = coordinate.to_bech32()
+    let naddr = coordinate
+        .to_bech32()
         .map_err(|e| format!("Failed to encode naddr: {}", e))?;
 
     log::info!("Published radio station: {} ({})", event_id, naddr);

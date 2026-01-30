@@ -1,10 +1,10 @@
 //! Wiki Backlinks Component
 //! Shows pages that link to the current wiki page (NIP-54)
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::stores::wiki_store::{CachedWikiPage, fetch_wiki_backlinks};
 use crate::components::icons::{ArrowLeftIcon, Link2Icon};
+use crate::routes::Route;
+use crate::stores::wiki_store::{fetch_wiki_backlinks, CachedWikiPage};
+use dioxus::prelude::*;
 
 /// Backlinks panel for wiki pages
 #[component]
@@ -96,7 +96,9 @@ fn BacklinkItem(page: CachedWikiPage) -> Element {
 
     let identifier = page.article.identifier.clone();
     let item_click = move |_| {
-        nav.push(Route::WikiDetail { identifier: identifier.clone() });
+        nav.push(Route::WikiDetail {
+            identifier: identifier.clone(),
+        });
     };
 
     rsx! {
@@ -138,10 +140,8 @@ fn BacklinkItem(page: CachedWikiPage) -> Element {
 #[component]
 pub fn WikiBacklinksCompact(
     identifier: String,
-    #[props(default = 5)]
-    limit: usize,
-    #[props(default = String::new())]
-    class: String,
+    #[props(default = 5)] limit: usize,
+    #[props(default = String::new())] class: String,
 ) -> Element {
     let mut loading = use_signal(|| true);
     let mut pages = use_signal(Vec::<CachedWikiPage>::new);
@@ -199,8 +199,7 @@ pub fn WikiBacklinksGraph(
     forward_links: Vec<String>,
     /// Backward links to center page
     backward_links: Vec<String>,
-    #[props(default = String::new())]
-    class: String,
+    #[props(default = String::new())] class: String,
 ) -> Element {
     // Simple visualization showing connections
     rsx! {

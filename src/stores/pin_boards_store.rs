@@ -7,8 +7,8 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -215,7 +215,9 @@ impl PinReference {
                         .map(|c| c.kind.as_u16() as u32)
                 } else {
                     // Parse coordinate format "kind:pubkey:d-tag"
-                    address.split(':').next()
+                    address
+                        .split(':')
+                        .next()
                         .and_then(|s| s.parse::<u32>().ok())
                 };
 
@@ -266,7 +268,7 @@ pub struct Pin {
 
     // Metadata
     pub title: Option<String>,
-    pub content: String, // Optional note/comment
+    pub content: String,   // Optional note/comment
     pub tags: Vec<String>, // hashtags
 
     // Original event
@@ -334,7 +336,7 @@ pub struct PinInput {
     pub board_addresses: Vec<String>, // Can be empty for profile pins
     pub reference: PinReference,
     pub title: Option<String>,
-    pub image: Option<String>,        // Custom image URL for the pin
+    pub image: Option<String>, // Custom image URL for the pin
     pub content: String,
     pub tags: Vec<String>,
 }
@@ -450,10 +452,10 @@ pub fn remove_pin_from_cache(event_id: &str) {
 
 /// Check if URL is an image
 fn is_image_url(url: &str) -> bool {
-    let extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico"];
-    extensions.iter().any(|ext| url.ends_with(ext))
-        || url.contains("image")
-        || url.contains("/i/")
+    let extensions = [
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico",
+    ];
+    extensions.iter().any(|ext| url.ends_with(ext)) || url.contains("image") || url.contains("/i/")
 }
 
 /// Check if URL is a video
@@ -535,9 +537,10 @@ pub fn parse_pinboard_event(
     let tags = extract_all_tag_values(&event.tags, "t");
 
     // Check for collaborative flag (presence-only tag: ["collaborative"])
-    let collaborative = event.tags.iter().any(|t| {
-        t.as_slice().first().map(|s| s.as_str()) == Some("collaborative")
-    });
+    let collaborative = event
+        .tags
+        .iter()
+        .any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("collaborative"));
 
     // Determine ownership
     let pubkey_hex = event.pubkey.to_hex();
@@ -675,10 +678,16 @@ pub async fn fetch_pin_content_type(pin: &Pin) -> PinContentType {
                     .identifier(&coord.identifier)
                     .limit(1);
 
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+                {
                     if let Some(event) = events.first() {
                         // Check if it has the nostrcooking hashtag (making it a recipe)
-                        if event.tags.hashtags().any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX) {
+                        if event
+                            .tags
+                            .hashtags()
+                            .any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX)
+                        {
                             return PinContentType::Recipe;
                         }
                         // It's a regular article
@@ -700,7 +709,8 @@ pub async fn enrich_pins_content_types(pins: &[Pin]) -> Vec<(String, PinContentT
 
     // Collect pins that need enrichment (Kind 30023 references)
     // Supports both coordinate format ("30023:pubkey:d-tag") and naddr format
-    let futures: Vec<_> = pins.iter()
+    let futures: Vec<_> = pins
+        .iter()
         .filter(|pin| {
             if let PinReference::Coordinate { address, .. } = &pin.reference {
                 // Check if this is a Kind 30023 reference in either format
@@ -766,7 +776,9 @@ pub async fn fetch_pin_metadata(pin: &Pin) -> PinMetadata {
                     .identifier(&coord.identifier)
                     .limit(1);
 
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+                {
                     if let Some(event) = events.first() {
                         return extract_event_metadata(event, coord.kind.as_u16());
                     }
@@ -777,11 +789,11 @@ pub async fn fetch_pin_metadata(pin: &Pin) -> PinMetadata {
         PinReference::Event { id, .. } => {
             // Fetch regular event by ID
             if let Ok(event_id) = EventId::from_hex(id) {
-                let filter = Filter::new()
-                    .id(event_id)
-                    .limit(1);
+                let filter = Filter::new().id(event_id).limit(1);
 
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+                {
                     if let Some(event) = events.first() {
                         return extract_event_metadata(event, event.kind.as_u16());
                     }
@@ -809,7 +821,10 @@ fn extract_event_metadata(event: &NostrEvent, kind: u16) -> PinMetadata {
     let content_type = match kind {
         30023 => {
             // Check if it's a recipe (has nostrcooking hashtag)
-            if tags.hashtags().any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX) {
+            if tags
+                .hashtags()
+                .any(|tag| tag == crate::utils::recipe::RECIPE_TAG_PREFIX)
+            {
                 Some(PinContentType::Recipe)
             } else {
                 Some(PinContentType::Article)
@@ -844,7 +859,8 @@ pub async fn enrich_pins_metadata(pins: &[Pin]) -> std::collections::HashMap<Str
     use std::collections::HashMap;
 
     // Only enrich pins that reference Nostr events (not external content)
-    let futures: Vec<_> = pins.iter()
+    let futures: Vec<_> = pins
+        .iter()
         .filter(|pin| !matches!(pin.reference, PinReference::External { .. }))
         .map(|pin| {
             let event_id = pin.event_id.clone();
@@ -858,8 +874,11 @@ pub async fn enrich_pins_metadata(pins: &[Pin]) -> std::collections::HashMap<Str
     let results = join_all(futures).await;
 
     // Filter out empty results and collect into HashMap
-    results.into_iter()
-        .filter(|(_, meta)| meta.title.is_some() || meta.image.is_some() || meta.content_type.is_some())
+    results
+        .into_iter()
+        .filter(|(_, meta)| {
+            meta.title.is_some() || meta.image.is_some() || meta.content_type.is_some()
+        })
         .collect::<HashMap<_, _>>()
 }
 
@@ -971,7 +990,11 @@ pub async fn fetch_pinboards(limit: usize) -> std::result::Result<Vec<Pinboard>,
     let filter = pinboards_filter(limit);
     let current_user = crate::stores::auth_store::get_pubkey();
 
-    log::info!("Discover: Fetching pinboards with filter kind={}, limit={}", KIND_PINBOARD, limit);
+    log::info!(
+        "Discover: Fetching pinboards with filter kind={}, limit={}",
+        KIND_PINBOARD,
+        limit
+    );
 
     // Use relay-only fetch for discovery to ensure fresh data from network
     let result = nostr_client::fetch_events_from_relays(filter, Duration::from_secs(15)).await;
@@ -983,8 +1006,12 @@ pub async fn fetch_pinboards(limit: usize) -> std::result::Result<Vec<Pinboard>,
             log::info!("Discover: Got {} raw events from relays", events.len());
 
             // Log unique authors to see if we're getting events from multiple users
-            let unique_authors: std::collections::HashSet<_> = events.iter().map(|e| e.pubkey.to_hex()).collect();
-            log::info!("Discover: Events from {} unique authors", unique_authors.len());
+            let unique_authors: std::collections::HashSet<_> =
+                events.iter().map(|e| e.pubkey.to_hex()).collect();
+            log::info!(
+                "Discover: Events from {} unique authors",
+                unique_authors.len()
+            );
 
             let boards: Vec<Pinboard> = events
                 .iter()
@@ -1050,8 +1077,7 @@ pub async fn fetch_cookbooks(limit: usize) -> std::result::Result<Vec<Pinboard>,
 
 /// Fetch the current user's cookbooks (pinboards tagged with "cookbook")
 pub async fn fetch_user_cookbooks() -> std::result::Result<Vec<Pinboard>, String> {
-    let current_user = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_user = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     let pubkey = nostr_sdk::PublicKey::from_hex(&current_user)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
@@ -1084,8 +1110,7 @@ pub async fn fetch_pinboard_by_naddr(naddr: &str) -> std::result::Result<Option<
     }
 
     // Parse naddr to get coordinate
-    let coord =
-        Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let filter = pinboard_by_coord_filter(coord.public_key, &coord.identifier);
     let current_user = crate::stores::auth_store::get_pubkey();
@@ -1520,8 +1545,8 @@ pub async fn delete_pinboard(board: &Pinboard) -> std::result::Result<String, St
     }
 
     // Build deletion event using coordinate
-    let coord = Coordinate::new(Kind::Custom(KIND_PINBOARD), board.event.pubkey)
-        .identifier(&board.d_tag);
+    let coord =
+        Coordinate::new(Kind::Custom(KIND_PINBOARD), board.event.pubkey).identifier(&board.d_tag);
 
     let deletion_request = EventDeletionRequest::new().coordinate(coord);
 
@@ -1876,7 +1901,7 @@ pub static PIN_BOARDS_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| fal
 /// Get a shareable naddr with relay hints for a pinboard
 /// Per NIP-19, relay hints help other clients locate the event
 pub async fn get_shareable_naddr(board: &Pinboard) -> std::result::Result<String, String> {
-    let pubkey = nostr::PublicKey::from_hex(&board.pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey =
+        nostr::PublicKey::from_hex(&board.pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
     nostr_client::make_naddr_with_hints(KIND_PINBOARD, &pubkey, &board.d_tag).await
 }

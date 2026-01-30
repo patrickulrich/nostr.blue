@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 
-use crate::stores::{auth_store, bookmarks, nostr_client};
-use crate::components::{NoteCard, ClientInitializing};
+use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll::use_infinite_scroll, use_mute_block_cache};
+use crate::stores::{auth_store, bookmarks, nostr_client};
 
 #[component]
 pub fn Bookmarks() -> Element {
@@ -54,7 +54,11 @@ pub fn Bookmarks() -> Element {
 
                             // Check if there are more bookmarks to load
                             has_more.set(fetched_count < total_bookmarks);
-                            log::info!("Loaded initial batch: {} / {} bookmarks", fetched_count, total_bookmarks);
+                            log::info!(
+                                "Loaded initial batch: {} / {} bookmarks",
+                                fetched_count,
+                                total_bookmarks
+                            );
                         }
                         Err(e) => {
                             error.set(Some(e));
@@ -81,18 +85,24 @@ pub fn Bookmarks() -> Element {
             let current_loaded = *loaded_count.read();
             let total_bookmarks = bookmarks::get_bookmarks_count();
 
-            log::info!("Loading more bookmarks: skip={}, limit={}", current_loaded, BATCH_SIZE);
+            log::info!(
+                "Loading more bookmarks: skip={}, limit={}",
+                current_loaded,
+                BATCH_SIZE
+            );
 
-            match bookmarks::fetch_bookmarked_events_paginated(current_loaded, Some(BATCH_SIZE)).await {
+            match bookmarks::fetch_bookmarked_events_paginated(current_loaded, Some(BATCH_SIZE))
+                .await
+            {
                 Ok(new_events) => {
                     if !new_events.is_empty() {
                         // Append new events to existing ones (deduplicated by event ID)
                         let mut current_events = bookmarked_events.read().clone();
-                        let existing_ids: std::collections::HashSet<_> = current_events.iter()
-                            .map(|e| e.id.to_hex())
-                            .collect();
+                        let existing_ids: std::collections::HashSet<_> =
+                            current_events.iter().map(|e| e.id.to_hex()).collect();
                         // Only add events that aren't already in the list
-                        let unique_new: Vec<_> = new_events.iter()
+                        let unique_new: Vec<_> = new_events
+                            .iter()
                             .filter(|e| !existing_ids.contains(&e.id.to_hex()))
                             .cloned()
                             .collect();
@@ -107,7 +117,12 @@ pub fn Bookmarks() -> Element {
 
                         // Check if there are more bookmarks to load
                         has_more.set(new_loaded_count < total_bookmarks);
-                        log::info!("Loaded more bookmarks: {} / {} total ({} unique added)", new_loaded_count, total_bookmarks, unique_count);
+                        log::info!(
+                            "Loaded more bookmarks: {} / {} total ({} unique added)",
+                            new_loaded_count,
+                            total_bookmarks,
+                            unique_count
+                        );
                     } else {
                         has_more.set(false);
                     }
@@ -115,7 +130,8 @@ pub fn Bookmarks() -> Element {
                 Err(e) => {
                     log::error!("Failed to load more bookmarks: {}", e);
                     has_more.set(false); // Stop infinite scroll retries
-                    error.set(Some(format!("Failed to load more bookmarks: {}", e))); // Show error to user
+                    error.set(Some(format!("Failed to load more bookmarks: {}", e)));
+                    // Show error to user
                 }
             }
             loading.set(false);
@@ -123,11 +139,7 @@ pub fn Bookmarks() -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
 
     rsx! {
         div {

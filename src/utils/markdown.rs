@@ -1,5 +1,5 @@
 /// Markdown rendering utilities for NIP-23 long-form content
-use pulldown_cmark::{Parser, Options, html};
+use pulldown_cmark::{html, Options, Parser};
 
 /// Render markdown to safe HTML
 /// Uses pulldown-cmark for parsing and ammonia for sanitization
@@ -30,17 +30,39 @@ pub fn sanitize_html(html: &str) -> String {
     Builder::default()
         // Allow common HTML tags
         .tags(hashset![
-            "h1", "h2", "h3", "h4", "h5", "h6",
-            "p", "br", "hr",
-            "strong", "em", "u", "s", "del", "ins",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "br",
+            "hr",
+            "strong",
+            "em",
+            "u",
+            "s",
+            "del",
+            "ins",
             "a",
-            "ul", "ol", "li",
+            "ul",
+            "ol",
+            "li",
             "blockquote",
-            "code", "pre",
-            "table", "thead", "tbody", "tr", "th", "td",
+            "code",
+            "pre",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
             "img",
-            "div", "span",
-            "sup", "sub",
+            "div",
+            "span",
+            "sup",
+            "sub",
         ])
         // Allow specific attributes on specific tags
         // Note: "rel" is NOT in the "a" attributes because link_rel() handles it automatically

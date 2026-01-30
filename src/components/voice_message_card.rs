@@ -1,19 +1,19 @@
-use dioxus::prelude::*;
-use dioxus::events::{MediaData, MouseData};
-use dioxus::web::WebEventExt;
-use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, EventId};
-use crate::routes::Route;
-use crate::stores::{nostr_client, voice_messages_store};
-use crate::hooks::use_reaction;
-use crate::stores::nostr_client::get_client;
-use crate::stores::signer::SIGNER_INFO;
-use crate::components::{ZapModal, VoiceReplyComposer, ReactionButton};
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
+use crate::components::{ReactionButton, VoiceReplyComposer, ZapModal};
+use crate::hooks::use_reaction;
+use crate::routes::Route;
+use crate::stores::nostr_client::get_client;
 use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::signer::SIGNER_INFO;
+use crate::stores::{nostr_client, voice_messages_store};
 use crate::utils::truncate_pubkey;
-use wasm_bindgen::JsCast;
-use std::time::Duration;
+use dioxus::events::{MediaData, MouseData};
+use dioxus::prelude::*;
+use dioxus::web::WebEventExt;
 use js_sys;
+use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
+use std::time::Duration;
+use wasm_bindgen::JsCast;
 
 #[component]
 pub fn VoiceMessageCard(event: NostrEvent) -> Element {
@@ -55,7 +55,9 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     // Parse imeta tags for duration per NIP-92/NIP-94
     // Expected format: ["imeta", "url <value>", "m <mime-type>", "duration <seconds>", ...]
     // Each field is a key-value pair separated by space or follows "key value" format
-    let imeta_duration = event.tags.iter()
+    let imeta_duration = event
+        .tags
+        .iter()
         .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
         .and_then(|tag| {
             // Validate and parse imeta tag structure
@@ -69,10 +71,12 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 let field_str = field.as_str();
                 // Check for "duration <value>" or "duration=<value>" format
                 if field_str.starts_with("duration ") {
-                    field_str.strip_prefix("duration ")
+                    field_str
+                        .strip_prefix("duration ")
                         .and_then(|d| d.parse::<f64>().ok())
                 } else if field_str.starts_with("duration=") {
-                    field_str.strip_prefix("duration=")
+                    field_str
+                        .strip_prefix("duration=")
                         .and_then(|d| d.parse::<f64>().ok())
                 } else {
                     None
@@ -81,27 +85,32 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         });
 
     // Fetch author profile - reactive to both pubkey and client initialization
-    use_effect(use_reactive((&author_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey, client_ready)| {
-        // Only fetch if client is ready
-        if !client_ready {
-            return;
-        }
+    use_effect(use_reactive(
+        (&author_pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pubkey, client_ready)| {
+            // Only fetch if client is ready
+            if !client_ready {
+                return;
+            }
 
-        spawn(async move {
-            match PublicKey::parse(&pubkey) {
-                Ok(pk) => {
-                    if let Some(client) = nostr_client::get_client() {
-                        if let Ok(Some(metadata)) = client.fetch_metadata(pk, Duration::from_secs(5)).await {
-                            author_metadata.set(Some(metadata));
+            spawn(async move {
+                match PublicKey::parse(&pubkey) {
+                    Ok(pk) => {
+                        if let Some(client) = nostr_client::get_client() {
+                            if let Ok(Some(metadata)) =
+                                client.fetch_metadata(pk, Duration::from_secs(5)).await
+                            {
+                                author_metadata.set(Some(metadata));
+                            }
                         }
                     }
+                    Err(e) => {
+                        log::error!("Failed to parse author_pubkey '{}': {}", pubkey, e);
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to parse author_pubkey '{}': {}", pubkey, e);
-                }
-            }
-        });
-    }));
+            });
+        },
+    ));
 
     // Fetch reaction counts
     use_effect(use_reactive(&event_id_str, move |event_id_for_counts| {
@@ -122,7 +131,10 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(replies) = client.fetch_events(reply_filter, Duration::from_secs(5)).await {
+            if let Ok(replies) = client
+                .fetch_events(reply_filter, Duration::from_secs(5))
+                .await
+            {
                 reply_count.set(replies.len());
             }
 
@@ -134,8 +146,14 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(reposts) = client.fetch_events(repost_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            if let Ok(reposts) = client
+                .fetch_events(repost_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
                 let mut user_has_reposted = false;
 
                 if let Some(ref user_pk) = current_user_pubkey {
@@ -157,42 +175,61 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            if let Ok(zaps) = client
+                .fetch_events(zap_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
                 let mut user_has_zapped = false;
 
-                let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
-                    // Check if this zap is from the current user
-                    if let Some(ref user_pk) = current_user_pubkey {
-                        let zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                Some(tag_vec.get(1)?.as_str().to_string())
-                            } else {
-                                None
-                            }
-                        });
+                let total_sats: u64 = zaps
+                    .iter()
+                    .filter_map(|zap_event| {
+                        // Check if this zap is from the current user
+                        if let Some(ref user_pk) = current_user_pubkey {
+                            let zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                    Some(tag_vec.get(1)?.as_str().to_string())
+                                } else {
+                                    None
+                                }
+                            });
 
-                        if let Some(zap_sender) = zap_sender_pubkey {
-                            if zap_sender == *user_pk {
-                                user_has_zapped = true;
+                            if let Some(zap_sender) = zap_sender_pubkey {
+                                if zap_sender == *user_pk {
+                                    user_has_zapped = true;
+                                }
                             }
                         }
-                    }
 
-                    // Parse zap amount from description tag
-                    zap_event.tags.iter().find_map(|tag| {
-                        let tag_vec = tag.clone().to_vec();
-                        if tag_vec.first()?.as_str() == "description" {
-                            let zap_request_json = tag_vec.get(1)?.as_str();
-                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
-                                    for tag_array in tags {
-                                        if let Some(tag_vals) = tag_array.as_array() {
-                                            if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                        return Some(millisats / 1000);
+                        // Parse zap amount from description tag
+                        zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "description" {
+                                let zap_request_json = tag_vec.get(1)?.as_str();
+                                if let Ok(zap_request) =
+                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                {
+                                    if let Some(tags) =
+                                        zap_request.get("tags").and_then(|t| t.as_array())
+                                    {
+                                        for tag_array in tags {
+                                            if let Some(tag_vals) = tag_array.as_array() {
+                                                if tag_vals.first().and_then(|v| v.as_str())
+                                                    == Some("amount")
+                                                {
+                                                    if let Some(amount_str) =
+                                                        tag_vals.get(1).and_then(|v| v.as_str())
+                                                    {
+                                                        if let Ok(millisats) =
+                                                            amount_str.parse::<u64>()
+                                                        {
+                                                            return Some(millisats / 1000);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -200,10 +237,10 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
                                     }
                                 }
                             }
-                        }
-                        None
+                            None
+                        })
                     })
-                }).sum();
+                    .sum();
 
                 zap_amount_sats.set(total_sats);
                 is_zapped.set(user_has_zapped);
@@ -345,15 +382,21 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
     };
 
     // Get author display info
-    let author_name = author_metadata.read().as_ref()
+    let author_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let author_username = author_metadata.read().as_ref()
+    let author_username = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.name.clone())
         .unwrap_or_default();
 
-    let author_avatar = author_metadata.read().as_ref()
+    let author_avatar = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone())
         .unwrap_or_default();
 
@@ -405,7 +448,10 @@ pub fn VoiceMessageCard(event: NostrEvent) -> Element {
         }
 
         // Navigate to note detail page with from_voice hint for immediate header
-        navigator.push(Route::Note { note_id: voice_id_for_nav.clone(), from_voice: Some("true".to_string()) });
+        navigator.push(Route::Note {
+            note_id: voice_id_for_nav.clone(),
+            from_voice: Some("true".to_string()),
+        });
     };
 
     rsx! {

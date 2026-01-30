@@ -86,19 +86,13 @@ pub fn get_token_info(token_str: &str) -> Result<TokenInfo, String> {
     }
 
     // Parse with CDK to get full info
-    let token = Token::from_str(trimmed)
-        .map_err(|e| format!("Failed to parse token: {}", e))?;
+    let token = Token::from_str(trimmed).map_err(|e| format!("Failed to parse token: {}", e))?;
 
-    let mint_url = token.mint_url()
-        .ok()
-        .map(|u| u.to_string());
+    let mint_url = token.mint_url().ok().map(|u| u.to_string());
 
-    let value = token.value()
-        .ok()
-        .map(u64::from);
+    let value = token.value().ok().map(u64::from);
 
-    let unit = token.unit()
-        .map(|u| u.to_string());
+    let unit = token.unit().map(|u| u.to_string());
 
     let memo = token.memo().clone();
 
@@ -127,23 +121,17 @@ pub fn create_token(
     proofs: Vec<cdk::nuts::Proof>,
     memo: Option<String>,
 ) -> Result<String, String> {
-    use cdk::nuts::{CurrencyUnit, Token};
     use cdk::mint_url::MintUrl;
+    use cdk::nuts::{CurrencyUnit, Token};
 
     if proofs.is_empty() {
         return Err("Cannot create token with no proofs".to_string());
     }
 
-    let mint_url = MintUrl::from_str(mint_url)
-        .map_err(|e| format!("Invalid mint URL: {}", e))?;
+    let mint_url = MintUrl::from_str(mint_url).map_err(|e| format!("Invalid mint URL: {}", e))?;
 
     // CDK's Token::new() creates V4 format by default
-    let token = Token::new(
-        mint_url,
-        proofs,
-        memo,
-        CurrencyUnit::Sat,
-    );
+    let token = Token::new(mint_url, proofs, memo, CurrencyUnit::Sat);
 
     Ok(token.to_string())
 }
@@ -164,12 +152,16 @@ pub fn convert_to_v4(token_str: &str) -> Result<String, String> {
     }
 
     // Parse as V3 token
-    let token_v3 = TokenV3::from_str(trimmed)
-        .map_err(|e| format!("Failed to parse V3 token: {}", e))?;
+    let token_v3 =
+        TokenV3::from_str(trimmed).map_err(|e| format!("Failed to parse V3 token: {}", e))?;
 
     // Convert to V4 using CDK's TryFrom (fails for multi-mint tokens)
-    let token_v4 = TokenV4::try_from(token_v3)
-        .map_err(|e| format!("Cannot convert to V4 format: {} (multi-mint tokens not supported in V4)", e))?;
+    let token_v4 = TokenV4::try_from(token_v3).map_err(|e| {
+        format!(
+            "Cannot convert to V4 format: {} (multi-mint tokens not supported in V4)",
+            e
+        )
+    })?;
 
     // Return V4 token string (cashuB prefix with CBOR encoding)
     Ok(token_v4.to_string())
@@ -195,8 +187,7 @@ pub fn validate_token(token_str: &str) -> Result<(), String> {
     }
 
     // Try to parse
-    Token::from_str(trimmed)
-        .map_err(|e| format!("Invalid token: {}", e))?;
+    Token::from_str(trimmed).map_err(|e| format!("Invalid token: {}", e))?;
 
     Ok(())
 }
@@ -204,8 +195,7 @@ pub fn validate_token(token_str: &str) -> Result<(), String> {
 /// Check if a string looks like a valid Cashu token
 pub fn is_token(s: &str) -> bool {
     let trimmed = s.trim();
-    (trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB"))
-        && trimmed.len() > 10
+    (trimmed.starts_with("cashuA") || trimmed.starts_with("cashuB")) && trimmed.len() > 10
 }
 
 // =============================================================================

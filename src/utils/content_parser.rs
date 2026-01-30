@@ -1,7 +1,7 @@
+use ::url::Url;
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use ::url::Url;
 
 // Validation constants
 /// Minimum length for npub identifiers to be considered valid for display
@@ -12,9 +12,8 @@ const MIN_NADDR_LENGTH: usize = 10;
 const YOUTUBE_VIDEO_ID_LENGTH: usize = 11;
 
 // Precompiled regexes for content parsing - compiled once at startup
-static URL_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex")
-});
+static URL_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"https?://[^\s]+").expect("Failed to compile URL regex"));
 
 /// Clean trailing punctuation from URLs that may have been captured by regex
 fn clean_url_trailing_punctuation(url: &str) -> &str {
@@ -27,33 +26,28 @@ static NOSTR_URI_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)nostr:(npub1|nprofile1|note1|nevent1|naddr1)[a-zA-Z0-9]+")
         .expect("Failed to compile nostr URI regex")
 });
-static HASHTAG_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
-});
+static HASHTAG_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex"));
 // Cashu tokens are base64-encoded strings starting with cashuA (V3) or cashuB (V4)
 // This regex is intentionally permissive to capture most token formats.
 // Invalid tokens are handled gracefully by CashuTokenCard which displays
 // a fallback UI when parsing fails. This avoids false negatives from
 // strict regex validation while keeping detection simple.
-static CASHU_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex")
-});
+static CASHU_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"cashu[AB][A-Za-z0-9_=-]+").expect("Failed to compile cashu regex"));
 
 // NIP-73 External Content ID patterns
 // ISBN: isbn:9780765382030 (10 or 13 digit ISBNs, with or without dashes)
-static ISBN_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"isbn:[\dXx-]{10,17}").expect("Failed to compile ISBN regex")
-});
+static ISBN_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"isbn:[\dXx-]{10,17}").expect("Failed to compile ISBN regex"));
 
 // DOI: doi:10.1000/182 (starts with 10., followed by registrant/suffix)
-static DOI_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"doi:10\.[^\s]+").expect("Failed to compile DOI regex")
-});
+static DOI_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"doi:10\.[^\s]+").expect("Failed to compile DOI regex"));
 
 // ISAN: isan:0000-0000-401A-0000-7 (optionally hyphenated 16-24 hex chars + check)
-static ISAN_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"isan:[0-9A-Fa-f-]{16,32}").expect("Failed to compile ISAN regex")
-});
+static ISAN_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"isan:[0-9A-Fa-f-]{16,32}").expect("Failed to compile ISAN regex"));
 
 // Podcast feed GUID: podcast:guid:... (UUID or URL-safe string)
 static PODCAST_FEED_PATTERN: Lazy<Regex> = Lazy::new(|| {
@@ -62,7 +56,8 @@ static PODCAST_FEED_PATTERN: Lazy<Regex> = Lazy::new(|| {
 
 // Podcast episode GUID: podcast:item:guid:...
 static PODCAST_EPISODE_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"podcast:item:guid:[A-Za-z0-9_-]+").expect("Failed to compile podcast episode regex")
+    Regex::new(r"podcast:item:guid:[A-Za-z0-9_-]+")
+        .expect("Failed to compile podcast episode regex")
 });
 
 // Bitcoin transaction: bitcoin:tx:a1075db... (64 hex chars)
@@ -78,9 +73,8 @@ static BITCOIN_ADDRESS_PATTERN: Lazy<Regex> = Lazy::new(|| {
 });
 
 // Geohash: geo:u4pruydqqvj (base32-encoded location, 1-12 chars)
-static GEOHASH_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"geo:[0-9a-z]{1,12}").expect("Failed to compile geohash regex")
-});
+static GEOHASH_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"geo:[0-9a-z]{1,12}").expect("Failed to compile geohash regex"));
 
 /// Represents different types of content tokens that can appear in a note
 #[derive(Debug, Clone, PartialEq)]
@@ -95,49 +89,49 @@ pub enum ContentToken {
     WavlakeArtist(String),   // Artist ID from wavlake.com/artist/{id}
     WavlakePlaylist(String), // Playlist ID from wavlake.com/playlist/{id}
     // Twitter/X
-    TwitterTweet(String),    // Tweet ID from twitter.com/*/status/{id}
+    TwitterTweet(String), // Tweet ID from twitter.com/*/status/{id}
     // Twitch
-    TwitchStream(String),    // Channel name from twitch.tv/{channel}
-    TwitchClip(String),      // Clip slug from clips.twitch.tv/{slug}
-    TwitchVod(String),       // Video ID from twitch.tv/videos/{id}
+    TwitchStream(String), // Channel name from twitch.tv/{channel}
+    TwitchClip(String),   // Clip slug from clips.twitch.tv/{slug}
+    TwitchVod(String),    // Video ID from twitch.tv/videos/{id}
     // Nostr references
-    Mention(String),         // npub/nprofile
-    EventMention(String),    // note/nevent
+    Mention(String),      // npub/nprofile
+    EventMention(String), // note/nevent
     Hashtag(String),
     // YouTube - separate from generic video for iframe embed
-    YouTube(String),         // Video ID
+    YouTube(String), // Video ID
     // Spotify
     SpotifyTrack(String),    // Track ID
     SpotifyAlbum(String),    // Album ID
     SpotifyPlaylist(String), // Playlist ID
     SpotifyEpisode(String),  // Podcast episode ID
     // SoundCloud
-    SoundCloud(String),      // Full URL for widget
+    SoundCloud(String), // Full URL for widget
     // Apple Music
-    AppleMusicAlbum(String), // Album path (region/album/name/id)
+    AppleMusicAlbum(String),    // Album path (region/album/name/id)
     AppleMusicPlaylist(String), // Playlist path
-    AppleMusicSong(String),  // Song with ?i= parameter
+    AppleMusicSong(String),     // Song with ?i= parameter
     // MixCloud
     MixCloud(String, String), // (username, mix_name)
     // Rumble
-    Rumble(String),          // Embed URL
+    Rumble(String), // Embed URL
     // Tidal
-    Tidal(String),           // Embed URL
+    Tidal(String), // Embed URL
     // Zap.stream - Nostr live streaming
-    ZapStream(String),       // naddr from zap.stream URL
+    ZapStream(String), // naddr from zap.stream URL
     // Zap.cooking - Nostr recipe sharing
     ZapCookingRecipe(String), // naddr from zap.cooking/recipe/naddr1...
     // Cashu ecash tokens
-    CashuToken(String),      // cashuA.../cashuB... token string
+    CashuToken(String), // cashuA.../cashuB... token string
     // NIP-73 External Content IDs
-    Isbn(String),            // isbn:9780765382030
-    Doi(String),             // doi:10.1000/182
-    Isan(String),            // isan:0000-0000-401A-0000-7
-    PodcastFeed(String),     // podcast:guid:...
-    PodcastEpisode(String),  // podcast:item:guid:...
-    BitcoinTx(String),       // bitcoin:tx:a1075db55d416d3ca...
-    BitcoinAddress(String),  // bitcoin:address:1HQ3Go3ggs8pF...
-    Geohash(String),         // geo:u4pruydqqvj
+    Isbn(String),           // isbn:9780765382030
+    Doi(String),            // doi:10.1000/182
+    Isan(String),           // isan:0000-0000-401A-0000-7
+    PodcastFeed(String),    // podcast:guid:...
+    PodcastEpisode(String), // podcast:item:guid:...
+    BitcoinTx(String),      // bitcoin:tx:a1075db55d416d3ca...
+    BitcoinAddress(String), // bitcoin:address:1HQ3Go3ggs8pF...
+    Geohash(String),        // geo:u4pruydqqvj
     // nostr.blue internal links - comprehensive content types
     NostrBlueLiveStream(String),     // naddr from /videos/live/{naddr}
     NostrBlueVideo(String),          // note_id from /videos/{video_id}
@@ -241,8 +235,12 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
         // Try to validate with rust-nostr SDK for proper bech32 validation
         let content_token = if let Ok(nip19) = Nip19::from_bech32(&identifier_lower) {
             match nip19 {
-                Nip19::Pubkey(_) | Nip19::Profile(_) => Some(ContentToken::Mention(uri.to_string())),
-                Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => Some(ContentToken::EventMention(uri.to_string())),
+                Nip19::Pubkey(_) | Nip19::Profile(_) => {
+                    Some(ContentToken::Mention(uri.to_string()))
+                }
+                Nip19::EventId(_) | Nip19::Event(_) | Nip19::Coordinate(_) => {
+                    Some(ContentToken::EventMention(uri.to_string()))
+                }
                 Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None, // Don't render secret keys as mentions
             }
         } else {
@@ -252,7 +250,10 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
             // Use identifier_lower for case-insensitive comparison
             if identifier_lower.starts_with("npub1") || identifier_lower.starts_with("nprofile1") {
                 Some(ContentToken::Mention(uri.to_string()))
-            } else if identifier_lower.starts_with("note1") || identifier_lower.starts_with("nevent1") || identifier_lower.starts_with("naddr1") {
+            } else if identifier_lower.starts_with("note1")
+                || identifier_lower.starts_with("nevent1")
+                || identifier_lower.starts_with("naddr1")
+            {
                 Some(ContentToken::EventMention(uri.to_string()))
             } else {
                 None
@@ -279,49 +280,85 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
     // Find all NIP-73 External Content IDs
     // ISBN references
     for mat in ISBN_PATTERN.find_iter(content) {
-        let isbn = mat.as_str().strip_prefix("isbn:").unwrap_or(mat.as_str()).to_string();
+        let isbn = mat
+            .as_str()
+            .strip_prefix("isbn:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Isbn(isbn)));
     }
 
     // DOI references
     for mat in DOI_PATTERN.find_iter(content) {
-        let doi = mat.as_str().strip_prefix("doi:").unwrap_or(mat.as_str()).to_string();
+        let doi = mat
+            .as_str()
+            .strip_prefix("doi:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Doi(doi)));
     }
 
     // ISAN references (movies)
     for mat in ISAN_PATTERN.find_iter(content) {
-        let isan = mat.as_str().strip_prefix("isan:").unwrap_or(mat.as_str()).to_string();
+        let isan = mat
+            .as_str()
+            .strip_prefix("isan:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Isan(isan)));
     }
 
     // Podcast feed GUIDs
     for mat in PODCAST_FEED_PATTERN.find_iter(content) {
-        let guid = mat.as_str().strip_prefix("podcast:guid:").unwrap_or(mat.as_str()).to_string();
+        let guid = mat
+            .as_str()
+            .strip_prefix("podcast:guid:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::PodcastFeed(guid)));
     }
 
     // Podcast episode GUIDs
     for mat in PODCAST_EPISODE_PATTERN.find_iter(content) {
-        let guid = mat.as_str().strip_prefix("podcast:item:guid:").unwrap_or(mat.as_str()).to_string();
+        let guid = mat
+            .as_str()
+            .strip_prefix("podcast:item:guid:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::PodcastEpisode(guid)));
     }
 
     // Bitcoin transactions
     for mat in BITCOIN_TX_PATTERN.find_iter(content) {
-        let txid = mat.as_str().strip_prefix("bitcoin:tx:").unwrap_or(mat.as_str()).to_string();
+        let txid = mat
+            .as_str()
+            .strip_prefix("bitcoin:tx:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::BitcoinTx(txid)));
     }
 
     // Bitcoin addresses
     for mat in BITCOIN_ADDRESS_PATTERN.find_iter(content) {
-        let address = mat.as_str().strip_prefix("bitcoin:address:").unwrap_or(mat.as_str()).to_string();
-        matches.push((mat.start(), mat.end(), ContentToken::BitcoinAddress(address)));
+        let address = mat
+            .as_str()
+            .strip_prefix("bitcoin:address:")
+            .unwrap_or(mat.as_str())
+            .to_string();
+        matches.push((
+            mat.start(),
+            mat.end(),
+            ContentToken::BitcoinAddress(address),
+        ));
     }
 
     // Geohash locations
     for mat in GEOHASH_PATTERN.find_iter(content) {
-        let geohash = mat.as_str().strip_prefix("geo:").unwrap_or(mat.as_str()).to_string();
+        let geohash = mat
+            .as_str()
+            .strip_prefix("geo:")
+            .unwrap_or(mat.as_str())
+            .to_string();
         matches.push((mat.start(), mat.end(), ContentToken::Geohash(geohash)));
     }
 
@@ -370,15 +407,15 @@ fn is_image_url(url: &str) -> bool {
     // Remove query parameters to check extension
     let path = lower.split('?').next().unwrap_or(&lower);
 
-    path.ends_with(".jpg") ||
-    path.ends_with(".jpeg") ||
-    path.ends_with(".png") ||
-    path.ends_with(".gif") ||
-    path.ends_with(".webp") ||
-    path.ends_with(".svg") ||
-    path.ends_with(".bmp") ||
-    lower.contains("/image/") ||
-    lower.contains("image")
+    path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".png")
+        || path.ends_with(".gif")
+        || path.ends_with(".webp")
+        || path.ends_with(".svg")
+        || path.ends_with(".bmp")
+        || lower.contains("/image/")
+        || lower.contains("image")
 }
 
 /// Extract track ID from Wavlake URLs
@@ -391,7 +428,8 @@ fn extract_wavlake_track_id(url: &str) -> Option<String> {
         if let Some(track_part) = url.split("/track/").nth(1) {
             // Extract just the ID (remove query params or trailing slashes)
             let track_id = track_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(track_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -412,7 +450,8 @@ fn extract_wavlake_album_id(url: &str) -> Option<String> {
     if lower.contains("wavlake.com/album/") {
         if let Some(album_part) = url.split("/album/").nth(1) {
             let album_id = album_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(album_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -433,7 +472,8 @@ fn extract_wavlake_artist_id(url: &str) -> Option<String> {
     if lower.contains("wavlake.com/artist/") {
         if let Some(artist_part) = url.split("/artist/").nth(1) {
             let artist_id = artist_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(artist_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -454,7 +494,8 @@ fn extract_wavlake_playlist_id(url: &str) -> Option<String> {
     if lower.contains("wavlake.com/playlist/") {
         if let Some(playlist_part) = url.split("/playlist/").nth(1) {
             let playlist_id = playlist_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(playlist_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -479,14 +520,14 @@ fn is_video_url(url: &str) -> bool {
     // Remove query parameters to check extension
     let path = lower.split('?').next().unwrap_or(&lower);
 
-    path.ends_with(".mp4") ||
-    path.ends_with(".webm") ||
-    path.ends_with(".mov") ||
-    path.ends_with(".avi") ||
-    path.ends_with(".mkv") ||
-    path.ends_with(".ogg") ||
-    path.ends_with(".3gp") ||
-    path.ends_with(".3gpp")
+    path.ends_with(".mp4")
+        || path.ends_with(".webm")
+        || path.ends_with(".mov")
+        || path.ends_with(".avi")
+        || path.ends_with(".mkv")
+        || path.ends_with(".ogg")
+        || path.ends_with(".3gp")
+        || path.ends_with(".3gpp")
 }
 
 /// Extract profile name from mention string
@@ -496,7 +537,7 @@ pub fn extract_mention_name(mention: &str, _tags: &[Tag]) -> Option<String> {
     if let Some(npub) = mention.strip_prefix("nostr:") {
         // For now, return shortened version
         if npub.len() > MIN_NPUB_LENGTH {
-            return Some(format!("@{}...{}", &npub[0..8], &npub[npub.len()-4..]));
+            return Some(format!("@{}...{}", &npub[0..8], &npub[npub.len() - 4..]));
         }
     }
 
@@ -514,9 +555,11 @@ fn extract_twitter_tweet_id(url: &str) -> Option<String> {
         if let Some(status_part) = url.split("/status/").nth(1) {
             // Extract just the ID (remove query params, trailing slashes, and additional path segments)
             let tweet_id = status_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(status_part)
-                .split('/').next()
+                .split('/')
+                .next()
                 .unwrap_or(status_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -535,23 +578,27 @@ fn extract_twitch_channel(url: &str) -> Option<String> {
     let lower = url.to_lowercase();
 
     // Match twitch.tv/{channel} but not /videos/, /clip/, or other paths
-    if lower.contains("twitch.tv/") &&
-       !lower.contains("/videos/") &&
-       !lower.contains("/clip/") &&
-       !lower.contains("clips.twitch.tv") {
+    if lower.contains("twitch.tv/")
+        && !lower.contains("/videos/")
+        && !lower.contains("/clip/")
+        && !lower.contains("clips.twitch.tv")
+    {
         if let Some(channel_part) = url.split("twitch.tv/").nth(1) {
             let channel = channel_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(channel_part)
-                .split('/').next()
+                .split('/')
+                .next()
                 .unwrap_or(channel_part)
                 .trim_end_matches('/')
                 .to_string();
             // Channel names should be alphanumeric + underscores, 4-25 chars
-            if !channel.is_empty() &&
-               channel.len() >= 4 &&
-               channel.len() <= 25 &&
-               channel.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !channel.is_empty()
+                && channel.len() >= 4
+                && channel.len() <= 25
+                && channel.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
                 return Some(channel);
             }
         }
@@ -569,9 +616,11 @@ fn extract_twitch_clip(url: &str) -> Option<String> {
     if lower.contains("clips.twitch.tv/") {
         if let Some(clip_part) = url.split("clips.twitch.tv/").nth(1) {
             let clip_slug = clip_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(clip_part)
-                .split('/').next()
+                .split('/')
+                .next()
                 .unwrap_or(clip_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -585,9 +634,11 @@ fn extract_twitch_clip(url: &str) -> Option<String> {
     if lower.contains("twitch.tv/") && lower.contains("/clip/") {
         if let Some(clip_part) = url.split("/clip/").nth(1) {
             let clip_slug = clip_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(clip_part)
-                .split('/').next()
+                .split('/')
+                .next()
                 .unwrap_or(clip_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -608,9 +659,11 @@ fn extract_twitch_vod(url: &str) -> Option<String> {
     if lower.contains("twitch.tv/videos/") {
         if let Some(vod_part) = url.split("/videos/").nth(1) {
             let vod_id = vod_part
-                .split('?').next()
+                .split('?')
+                .next()
                 .unwrap_or(vod_part)
-                .split('/').next()
+                .split('/')
+                .next()
                 .unwrap_or(vod_part)
                 .trim_end_matches('/')
                 .to_string();
@@ -762,14 +815,24 @@ fn extract_spotify(url: &str) -> Option<ContentToken> {
         }
     } else if lower.contains("/playlist/") {
         if let Some(playlist_part) = url.split("/playlist/").nth(1) {
-            let id = playlist_part.split('?').next()?.split('/').next()?.to_string();
+            let id = playlist_part
+                .split('?')
+                .next()?
+                .split('/')
+                .next()?
+                .to_string();
             if !id.is_empty() {
                 return Some(ContentToken::SpotifyPlaylist(id));
             }
         }
     } else if lower.contains("/episode/") {
         if let Some(episode_part) = url.split("/episode/").nth(1) {
-            let id = episode_part.split('?').next()?.split('/').next()?.to_string();
+            let id = episode_part
+                .split('?')
+                .next()?
+                .split('/')
+                .next()?
+                .to_string();
             if !id.is_empty() {
                 return Some(ContentToken::SpotifyEpisode(id));
             }
@@ -905,7 +968,13 @@ fn extract_zapstream(url: &str) -> Option<String> {
     if let Some(naddr_start) = url.find("naddr1") {
         let naddr = &url[naddr_start..];
         // Extract just the naddr (stop at query params or hash)
-        let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
+        let naddr = naddr
+            .split('?')
+            .next()?
+            .split('#')
+            .next()?
+            .split('/')
+            .next()?;
         // Validate the extracted string still starts with naddr1 and has reasonable length
         if naddr.starts_with("naddr1") && naddr.len() > MIN_NADDR_LENGTH {
             return Some(naddr.to_string());
@@ -942,7 +1011,13 @@ fn extract_zapcooking(url: &str) -> Option<String> {
     if let Some(naddr_start) = url.find("naddr1") {
         let naddr = &url[naddr_start..];
         // Extract just the naddr (stop at query params or hash)
-        let naddr = naddr.split('?').next()?.split('#').next()?.split('/').next()?;
+        let naddr = naddr
+            .split('?')
+            .next()?
+            .split('#')
+            .next()?
+            .split('/')
+            .next()?;
         // Validate the extracted string still starts with naddr1 and has reasonable length
         if naddr.starts_with("naddr1") && naddr.len() > MIN_NADDR_LENGTH {
             return Some(naddr.to_string());
@@ -958,10 +1033,7 @@ fn is_nostr_blue_host(url_str: &str) -> bool {
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_lowercase()))
         .map(|h| {
-            h == "nostr.blue"
-                || h.ends_with(".nostr.blue")
-                || h == "localhost"
-                || h == "127.0.0.1"
+            h == "nostr.blue" || h.ends_with(".nostr.blue") || h == "localhost" || h == "127.0.0.1"
         })
         .unwrap_or(false)
 }
@@ -978,8 +1050,7 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
     // Order matters: more specific paths first
     // Livestreams
     if path.starts_with("/videos/live/") {
-        return extract_id_from_path(path, "/videos/live/")
-            .map(ContentToken::NostrBlueLiveStream);
+        return extract_id_from_path(path, "/videos/live/").map(ContentToken::NostrBlueLiveStream);
     }
     // Videos (non-live)
     if path.starts_with("/videos/")
@@ -1003,8 +1074,14 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
             let parts: Vec<&str> = remainder.split('/').collect();
             if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                 let podcast_id = parts[0].to_string();
-                let episode_id = parts[1].split(['?', '#']).next().unwrap_or(parts[1]).to_string();
-                return Some(ContentToken::NostrBlueRssPodcastEpisode(podcast_id, episode_id));
+                let episode_id = parts[1]
+                    .split(['?', '#'])
+                    .next()
+                    .unwrap_or(parts[1])
+                    .to_string();
+                return Some(ContentToken::NostrBlueRssPodcastEpisode(
+                    podcast_id, episode_id,
+                ));
             }
         }
     }
@@ -1080,8 +1157,7 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
         && !path.starts_with("/pinboards/pins")
         && !path.contains("/edit")
     {
-        return extract_id_from_path(path, "/pinboards/")
-            .map(ContentToken::NostrBluePinboard);
+        return extract_id_from_path(path, "/pinboards/").map(ContentToken::NostrBluePinboard);
     }
     // Badges
     if path.starts_with("/badges/") && !path.starts_with("/badges/new") {
@@ -1160,7 +1236,7 @@ mod tests {
     fn test_parse_image_with_query_params() {
         let tokens = parse_content(
             "Check out https://example.com/photo.jpeg?timestamp=123456",
-            &[]
+            &[],
         );
         assert!(tokens.iter().any(|t| matches!(t, ContentToken::Image(_))));
     }
@@ -1172,7 +1248,10 @@ mod tests {
             https://example.com/cat2.jpg?5678\n\
             https://example.com/cat3.png?9012";
         let tokens = parse_content(content, &[]);
-        let image_count = tokens.iter().filter(|t| matches!(t, ContentToken::Image(_))).count();
+        let image_count = tokens
+            .iter()
+            .filter(|t| matches!(t, ContentToken::Image(_)))
+            .count();
         assert_eq!(image_count, 3);
     }
 
@@ -1194,7 +1273,10 @@ mod tests {
 
     #[test]
     fn test_parse_cashu_token_in_content() {
-        let tokens = parse_content("Check this token cashuAeyJwYXlsb2FkIjp7fX0= for payment", &[]);
+        let tokens = parse_content(
+            "Check this token cashuAeyJwYXlsb2FkIjp7fX0= for payment",
+            &[],
+        );
         assert_eq!(tokens.len(), 3); // Text, CashuToken, Text
         assert!(matches!(&tokens[0], ContentToken::Text(_)));
         assert!(matches!(&tokens[1], ContentToken::CashuToken(_)));
@@ -1205,19 +1287,25 @@ mod tests {
     #[test]
     fn test_parse_isbn() {
         let tokens = parse_content("Check out isbn:9780765382030 for details", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isbn(isbn) if isbn == "9780765382030")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::Isbn(isbn) if isbn == "9780765382030")));
     }
 
     #[test]
     fn test_parse_isbn_with_dashes() {
         let tokens = parse_content("isbn:978-0-7653-8203-0", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Isbn(isbn) if isbn == "978-0-7653-8203-0")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::Isbn(isbn) if isbn == "978-0-7653-8203-0")));
     }
 
     #[test]
     fn test_parse_doi() {
         let tokens = parse_content("Read the paper at doi:10.1000/182", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Doi(doi) if doi == "10.1000/182")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::Doi(doi) if doi == "10.1000/182")));
     }
 
     #[test]
@@ -1229,13 +1317,17 @@ mod tests {
     #[test]
     fn test_parse_podcast_feed() {
         let tokens = parse_content("Listen to podcast:guid:abc123-def456", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::PodcastFeed(guid) if guid == "abc123-def456")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::PodcastFeed(guid) if guid == "abc123-def456")));
     }
 
     #[test]
     fn test_parse_podcast_episode() {
         let tokens = parse_content("podcast:item:guid:ep-001-intro", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::PodcastEpisode(guid) if guid == "ep-001-intro")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::PodcastEpisode(guid) if guid == "ep-001-intro")));
     }
 
     #[test]
@@ -1243,25 +1335,39 @@ mod tests {
         let txid = "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d";
         let content = format!("Check tx bitcoin:tx:{}", txid);
         let tokens = parse_content(&content, &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinTx(id) if id == txid)));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::BitcoinTx(id) if id == txid)));
     }
 
     #[test]
     fn test_parse_bitcoin_address_legacy() {
-        let tokens = parse_content("Send to bitcoin:address:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
+        let tokens = parse_content(
+            "Send to bitcoin:address:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+            &[],
+        );
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
     }
 
     #[test]
     fn test_parse_bitcoin_address_segwit() {
-        let tokens = parse_content("bitcoin:address:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
+        let tokens = parse_content(
+            "bitcoin:address:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+            &[],
+        );
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::BitcoinAddress(_))));
     }
 
     #[test]
     fn test_parse_geohash() {
         let tokens = parse_content("Meet at geo:u4pruydqqvj", &[]);
-        assert!(tokens.iter().any(|t| matches!(t, ContentToken::Geohash(hash) if hash == "u4pruydqqvj")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, ContentToken::Geohash(hash) if hash == "u4pruydqqvj")));
     }
 
     #[test]

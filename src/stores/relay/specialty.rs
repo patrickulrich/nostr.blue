@@ -56,7 +56,8 @@ pub async fn add_relays(client: &Client, relay_urls: &[RelayUrl]) -> Vec<RelayUr
 
 /// Add relays from string URLs, returning which ones were newly added.
 pub async fn add_relays_from_strings(client: &Client, urls: &[String]) -> Vec<RelayUrl> {
-    let relay_urls: Vec<RelayUrl> = urls.iter()
+    let relay_urls: Vec<RelayUrl> = urls
+        .iter()
         .filter_map(|u| RelayUrl::parse(u).ok())
         .collect();
     add_relays(client, &relay_urls).await
@@ -75,9 +76,11 @@ pub async fn remove_relays(client: &Client, relays: &[RelayUrl]) {
 #[allow(dead_code)]
 pub async fn get_connected(client: &Client, relay_urls: &[RelayUrl]) -> Vec<RelayUrl> {
     let relays = client.relays().await;
-    relay_urls.iter()
+    relay_urls
+        .iter()
         .filter(|r| {
-            relays.get(*r)
+            relays
+                .get(*r)
                 .map(|relay| relay.is_connected())
                 .unwrap_or(false)
         })
@@ -100,7 +103,10 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
             return true;
         }
         // Relay exists but not connected - try to connect
-        log::info!("Specialty relay exists but not connected, connecting: {}", relay_url);
+        log::info!(
+            "Specialty relay exists but not connected, connecting: {}",
+            relay_url
+        );
     } else {
         // Add with specialty options
         let opts = specialty_relay_options();
@@ -136,7 +142,7 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
     }
 
     log::warn!("Specialty relay connection timeout: {}", relay_url);
-    false  // Relay not confirmed connected
+    false // Relay not confirmed connected
 }
 
 // === Convenience functions for well-known relays ===
@@ -169,7 +175,12 @@ pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
     if connected.is_empty() {
         log::error!("No DM relays could be connected!");
     } else {
-        log::info!("DM relays connected: {}/{} - {:?}", connected.len(), dm_relays.len(), connected);
+        log::info!(
+            "DM relays connected: {}/{} - {:?}",
+            connected.len(),
+            dm_relays.len(),
+            connected
+        );
     }
 
     connected
@@ -204,7 +215,12 @@ pub async fn ensure_search_relays_connected(client: &Client) -> Vec<String> {
     if connected.is_empty() {
         log::error!("No search relays could be connected!");
     } else {
-        log::info!("Search relays connected: {}/{} - {:?}", connected.len(), search_relays.len(), connected);
+        log::info!(
+            "Search relays connected: {}/{} - {:?}",
+            connected.len(),
+            search_relays.len(),
+            connected
+        );
     }
 
     connected

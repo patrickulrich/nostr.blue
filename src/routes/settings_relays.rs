@@ -8,9 +8,9 @@
 //! 5. Local Relays (browser storage only)
 //! 6. Connected Relays (read-only live stats)
 
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client, relay};
 use crate::routes::Route;
+use crate::stores::{auth_store, nostr_client, relay};
+use dioxus::prelude::*;
 use std::collections::HashMap;
 
 #[component]
@@ -20,12 +20,16 @@ pub fn SettingsRelays() -> Element {
     // === STATE SIGNALS ===
     // Use peek() during init to avoid reactive tracking (nostr.blue pattern)
     let mut general_relays = use_signal(|| {
-        relay::USER_RELAY_METADATA.peek().as_ref()
+        relay::USER_RELAY_METADATA
+            .peek()
+            .as_ref()
             .map(|m| m.relays.clone())
             .unwrap_or_else(relay::default_relays)
     });
     let mut dm_relays = use_signal(|| {
-        relay::USER_RELAY_METADATA.peek().as_ref()
+        relay::USER_RELAY_METADATA
+            .peek()
+            .as_ref()
             .map(|m| m.dm_relays.clone())
             .unwrap_or_else(relay::default_dm_relays)
     });
@@ -83,11 +87,15 @@ pub fn SettingsRelays() -> Element {
 
     // Build stats lookup map for inline display
     let stats_map = use_memo(move || {
-        connection_info.read()
+        connection_info
+            .read()
             .as_ref()
-            .map(|infos| infos.iter()
-                .map(|info| (info.url.clone(), info.clone()))
-                .collect::<HashMap<_, _>>())
+            .map(|infos| {
+                infos
+                    .iter()
+                    .map(|info| (info.url.clone(), info.clone()))
+                    .collect::<HashMap<_, _>>()
+            })
             .unwrap_or_default()
     });
 
@@ -151,17 +159,17 @@ pub fn SettingsRelays() -> Element {
             false
         }
 
-        let is_local = lower.contains("127.0.0.1") ||
-            lower.contains("localhost") ||
-            lower.contains("192.168.") ||
-            lower.starts_with("10.") ||
-            is_private_172(&lower) ||
-            lower.contains("[::1]") ||
-            lower.contains("::1:") ||
-            lower.ends_with(".local") ||
-            lower.contains(".local:") ||
-            lower.contains(".local/") ||
-            lower.contains("umbrel:");
+        let is_local = lower.contains("127.0.0.1")
+            || lower.contains("localhost")
+            || lower.contains("192.168.")
+            || lower.starts_with("10.")
+            || is_private_172(&lower)
+            || lower.contains("[::1]")
+            || lower.contains("::1:")
+            || lower.ends_with(".local")
+            || lower.contains(".local:")
+            || lower.contains(".local/")
+            || lower.contains("umbrel:");
 
         let scheme = if is_local { "ws://" } else { "wss://" };
         Ok(format!("{}{}", scheme, trimmed))
@@ -369,7 +377,7 @@ pub fn SettingsRelays() -> Element {
                 Some(c) => c,
                 None => {
                     save_status.set(Some("Client not initialized".to_string()));
-                    publishing.set(false);  // Clear guard on early return
+                    publishing.set(false); // Clear guard on early return
                     return;
                 }
             };
@@ -377,28 +385,28 @@ pub fn SettingsRelays() -> Element {
             // Publish kind 10002 (general relays)
             if let Err(e) = relay::publish_relay_list(general.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish general relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+                publishing.set(false); // Clear guard on error
                 return;
             }
 
             // Publish kind 10050 (DM relays)
             if let Err(e) = relay::publish_dm_relay_list(dm.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish DM relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+                publishing.set(false); // Clear guard on error
                 return;
             }
 
             // Publish kind 10007 (search relays)
             if let Err(e) = relay::publish_search_relays(search.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish search relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+                publishing.set(false); // Clear guard on error
                 return;
             }
 
             // Publish kind 10006 (blocked relays)
             if let Err(e) = relay::publish_blocked_relays(blocked.clone(), client.clone()).await {
                 save_status.set(Some(format!("Failed to publish blocked relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+                publishing.set(false); // Clear guard on error
                 return;
             }
 
@@ -433,7 +441,7 @@ pub fn SettingsRelays() -> Element {
             // Clear message after 3 seconds
             gloo_timers::future::TimeoutFuture::new(3000).await;
             save_status.set(None);
-            publishing.set(false);  // Clear guard on completion
+            publishing.set(false); // Clear guard on completion
         });
     };
 

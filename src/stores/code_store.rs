@@ -5,15 +5,15 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
-use crate::stores::grasp_servers;
 use crate::services::git_worker::GitWorkerManager;
+use crate::stores::grasp_servers;
+use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
 
 // ============================================================================
 // Cache sizes
@@ -481,22 +481,18 @@ pub fn repo_filter_by_coordinate(pubkey: PublicKey, identifier: &str) -> Filter 
 
 /// Build filter for fetching issues for a repository
 pub fn issues_filter_by_repo(coordinate: &Coordinate) -> Filter {
-    Filter::new()
-        .kind(Kind::GitIssue)
-        .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
-            coordinate.to_string(),
-        )
+    Filter::new().kind(Kind::GitIssue).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::A),
+        coordinate.to_string(),
+    )
 }
 
 /// Build filter for fetching PRs for a repository
 pub fn prs_filter_by_repo(coordinate: &Coordinate) -> Filter {
-    Filter::new()
-        .kind(Kind::GitPatch)
-        .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
-            coordinate.to_string(),
-        )
+    Filter::new().kind(Kind::GitPatch).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::A),
+        coordinate.to_string(),
+    )
 }
 
 /// Build filter for fetching status events for an issue/PR
@@ -526,12 +522,10 @@ pub fn recent_snippets_filter(limit: usize) -> Filter {
 
 /// Build filter for stars (reactions) on a repository
 pub fn stars_filter_for_repo(coordinate: &Coordinate) -> Filter {
-    Filter::new()
-        .kind(Kind::Reaction)
-        .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
-            coordinate.to_string(),
-        )
+    Filter::new().kind(Kind::Reaction).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::A),
+        coordinate.to_string(),
+    )
 }
 
 // ============================================================================
@@ -549,7 +543,10 @@ pub async fn initialize_for_user(pubkey: &PublicKey) {
 
     // Fetch user's repositories
     let repo_filter = repo_filter_by_author(*pubkey, 50);
-    if let Ok(events) = crate::stores::nostr_client::fetch_events_aggregated(repo_filter, Duration::from_secs(10)).await {
+    if let Ok(events) =
+        crate::stores::nostr_client::fetch_events_aggregated(repo_filter, Duration::from_secs(10))
+            .await
+    {
         cache_repo_events(&events);
 
         // Update user repos list
@@ -572,7 +569,11 @@ pub async fn initialize_for_user(pubkey: &PublicKey) {
 
     // Fetch user's snippets
     let snippet_filter = snippets_filter_by_author(*pubkey, 50);
-    if let Ok(events) = crate::stores::nostr_client::fetch_events_aggregated(snippet_filter, Duration::from_secs(10)).await
+    if let Ok(events) = crate::stores::nostr_client::fetch_events_aggregated(
+        snippet_filter,
+        Duration::from_secs(10),
+    )
+    .await
     {
         cache_snippet_events(&events);
 

@@ -323,7 +323,8 @@ impl P2POrder {
 
     /// Get time remaining until expiration (in seconds)
     pub fn time_remaining(&self) -> Option<u64> {
-        self.expires_at.map(|expires| expires.saturating_sub(now_secs()))
+        self.expires_at
+            .map(|expires| expires.saturating_sub(now_secs()))
     }
 
     /// Calculate satoshis at current rate (for premium-based orders)
@@ -390,7 +391,8 @@ pub fn parse_p2p_order(event: &Event) -> Result<P2POrder, String> {
         .unwrap_or(0);
 
     // Fiat amount (fa tag) - can be single value or range
-    let fiat_amount = parse_fiat_amount(event).ok_or("Missing or invalid 'fa' tag (fiat amount)")?;
+    let fiat_amount =
+        parse_fiat_amount(event).ok_or("Missing or invalid 'fa' tag (fiat amount)")?;
 
     // Premium percentage
     let premium = get_tag_value(event, "premium").and_then(|s| s.parse::<f64>().ok());

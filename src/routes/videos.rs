@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, feed_cache, nostr_client};
-use crate::stores::feed_cache::FeedCacheKey;
-use crate::utils::FeedItem;
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use crate::utils::FeedItem;
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
@@ -118,7 +118,9 @@ pub fn Videos() -> Element {
         let refresh_changed = refresh != last_refresh;
 
         if has_data && !feed_type_changed && !refresh_changed {
-            log::debug!("Skipping videos feed re-load: data already present, no intentional change");
+            log::debug!(
+                "Skipping videos feed re-load: data already present, no intentional change"
+            );
             return;
         }
 
@@ -161,13 +163,17 @@ pub fn Videos() -> Element {
 
             // Check staleness after cache load
             if *request_id.peek() != current_id {
-                log::debug!("Discarding stale videos feed request {} after cache load", current_id);
+                log::debug!(
+                    "Discarding stale videos feed request {} after cache load",
+                    current_id
+                );
                 return;
             }
 
             if !cached_items.is_empty() {
                 log::info!("Loaded {} videos from cache", cached_items.len());
-                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+                let cached_events: Vec<Event> =
+                    cached_items.iter().map(|i| i.event().clone()).collect();
 
                 // Seed pagination from cache to enable proper pagination on cached data
                 if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
@@ -185,7 +191,10 @@ pub fn Videos() -> Element {
 
             // Check staleness after network load
             if *request_id.peek() != current_id {
-                log::debug!("Discarding stale videos feed request {} after network load", current_id);
+                log::debug!(
+                    "Discarding stale videos feed request {} after network load",
+                    current_id
+                );
                 return;
             }
 
@@ -205,12 +214,14 @@ pub fn Videos() -> Element {
                     }
 
                     // STEP 3: Store to cache using effective key
-                    let feed_items: Vec<FeedItem> = video_events.iter()
+                    let feed_items: Vec<FeedItem> = video_events
+                        .iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
                     let cache_key_for_store = effective_cache_key;
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
+                        let _ =
+                            feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
 
@@ -263,7 +274,8 @@ pub fn Videos() -> Element {
                         current.iter().map(|e| e.id).collect()
                     };
 
-                    let unique_events: Vec<_> = new_events.into_iter()
+                    let unique_events: Vec<_> = new_events
+                        .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
@@ -568,14 +580,15 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     use_effect(use_reactive(&author_pubkey, move |pubkey_str| {
         spawn(async move {
             if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
-                let filter = Filter::new()
-                    .author(pubkey)
-                    .kind(Kind::Metadata)
-                    .limit(1);
+                let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
 
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+                {
                     if let Some(event) = events.into_iter().next() {
-                        if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
+                        if let Ok(metadata) =
+                            serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                        {
                             author_metadata.set(Some(metadata));
                         }
                     }
@@ -605,7 +618,9 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
         });
     }));
 
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
@@ -827,7 +842,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
     meta
 }
 
-
 // Load featured landscape videos (3 landscape videos from Following, fallback to Global)
 async fn load_featured_content() -> Result<Vec<Event>, String> {
     log::info!("Loading featured landscape videos...");
@@ -850,9 +864,10 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         .authors(authors)
                         .limit(20);
 
-                    let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
-                        .await
-                        .unwrap_or_default();
+                    let all_events =
+                        nostr_client::fetch_video_events(filter, Duration::from_secs(10))
+                            .await
+                            .unwrap_or_default();
 
                     let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
                     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -873,9 +888,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
     log::info!("Falling back to global feed for featured landscape videos");
 
     // Fetch only landscape videos (Kind 21)
-    let filter = Filter::new()
-        .kinds([Kind::Custom(21)])
-        .limit(20);
+    let filter = Filter::new().kinds([Kind::Custom(21)]).limit(20);
 
     let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
         .await
@@ -895,8 +908,7 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
     log::info!("Loading recent verts videos from Following feed...");
 
     // Only fetch from Following feed
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
     match nostr_client::fetch_contacts(pubkey_str).await {
         Ok(contacts) if !contacts.is_empty() => {
@@ -945,16 +957,22 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
 /// - has_more is true if either query hit its limit
 /// - did_fallback is true if we fell back to global feed
 async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, bool), String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading following videos feed for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following videos feed for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     // Fetch contacts
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let (events, has_more) = load_global_videos(until).await?;
             return Ok((events, has_more, true));
         }
@@ -1009,8 +1027,14 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, 
 
     // Fetch both concurrently using fast fetch (bypasses gossip)
     let (video_result, stream_result) = tokio::join!(
-        nostr_client::fetch_video_events_from_connected_relays(video_filter, Duration::from_secs(10)),
-        nostr_client::fetch_video_events_from_connected_relays(stream_filter, Duration::from_secs(10))
+        nostr_client::fetch_video_events_from_connected_relays(
+            video_filter,
+            Duration::from_secs(10)
+        ),
+        nostr_client::fetch_video_events_from_connected_relays(
+            stream_filter,
+            Duration::from_secs(10)
+        )
     );
 
     let mut all_events = Vec::new();
@@ -1073,9 +1097,7 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
     }
 
     // Fetch livestreams (Kind 30311) separately
-    let mut stream_filter = Filter::new()
-        .kind(Kind::Custom(30311))
-        .limit(10);
+    let mut stream_filter = Filter::new().kind(Kind::Custom(30311)).limit(10);
 
     // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {

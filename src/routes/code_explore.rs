@@ -2,14 +2,12 @@
 //!
 //! Discover repositories and code snippets across Nostr.
 
-use dioxus::prelude::*;
-use crate::components::{CodeRepoCard, CodeSnippetCard, icons};
+use crate::components::{icons, CodeRepoCard, CodeSnippetCard};
 use crate::routes::Route;
-use crate::services::git_hosting::{
-    fetch_recent_repositories, fetch_recent_snippets,
-};
+use crate::services::git_hosting::{fetch_recent_repositories, fetch_recent_snippets};
 use crate::stores::nostr_client;
-use crate::utils::nip34::{Repository, DisplaySnippet};
+use crate::utils::nip34::{DisplaySnippet, Repository};
+use dioxus::prelude::*;
 
 /// Code explore page component
 #[component]
@@ -168,10 +166,8 @@ fn AllContent() -> Element {
         }
 
         spawn(async move {
-            let (repos_res, snippets_res) = futures::join!(
-                fetch_recent_repositories(10),
-                fetch_recent_snippets(10)
-            );
+            let (repos_res, snippets_res) =
+                futures::join!(fetch_recent_repositories(10), fetch_recent_snippets(10));
             repos.set(Some(repos_res));
             snippets.set(Some(snippets_res));
         });

@@ -6,14 +6,13 @@
 //! - V4V payment support
 //! - Follow/subscribe functionality
 
-use dioxus::prelude::*;
 use crate::components::{
-    PodcastEpisodeList, DisplayEpisode, icons,
-    ContentShareModal, ContentType,
+    icons, ContentShareModal, ContentType, DisplayEpisode, PodcastEpisodeList,
 };
 use crate::routes::Route;
-use crate::stores::{nostr_client, auth_store, podcast_subscription};
+use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::podcast::{self, PodcastMetadata};
+use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
 
@@ -28,7 +27,8 @@ pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
     let naddr = props.naddr.clone();
 
     // State for podcast data
-    let mut podcast_data = use_signal(|| None::<Result<(PodcastMetadata, Vec<DisplayEpisode>), String>>);
+    let mut podcast_data =
+        use_signal(|| None::<Result<(PodcastMetadata, Vec<DisplayEpisode>), String>>);
     let mut loading = use_signal(|| true);
 
     // Fetch podcast when client is initialized (signer not needed for public content)
@@ -117,8 +117,12 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
     let mut show_share_modal = use_signal(|| false);
 
     // Image URL with fallback
-    let image_url = metadata.image.clone()
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", metadata.title));
+    let image_url = metadata.image.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            metadata.title
+        )
+    });
 
     // Check if V4V is available
     let has_v4v = metadata.value.is_some();
@@ -127,9 +131,7 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
     let coordinate = format!("30078:{}:{}", metadata.pubkey, metadata.d_tag);
     // Check subscription reactively using use_memo so UI updates when SUBSCRIPTIONS changes
     let coordinate_for_memo = coordinate.clone();
-    let is_subscribed = use_memo(move || {
-        podcast_subscription::is_subscribed(&coordinate_for_memo)
-    });
+    let is_subscribed = use_memo(move || podcast_subscription::is_subscribed(&coordinate_for_memo));
     let mut subscribing = use_signal(|| false);
 
     rsx! {
@@ -417,7 +419,9 @@ fn PodcastDetailSkeleton() -> Element {
 // ============================================================================
 
 /// Fetch Nostr podcast by naddr/coordinate
-async fn fetch_nostr_podcast(naddr: &str) -> std::result::Result<(PodcastMetadata, Vec<DisplayEpisode>), String> {
+async fn fetch_nostr_podcast(
+    naddr: &str,
+) -> std::result::Result<(PodcastMetadata, Vec<DisplayEpisode>), String> {
     // Parse the coordinate (format: "30078:pubkey:d-tag" or naddr)
     let (pubkey, d_tag) = parse_coordinate(naddr)?;
 
@@ -425,16 +429,14 @@ async fn fetch_nostr_podcast(naddr: &str) -> std::result::Result<(PodcastMetadat
     let metadata_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
-        .custom_tag(
-            SingleLetterTag::from_char('d').unwrap(),
-            d_tag.clone()
-        )
+        .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag.clone())
         .limit(1);
 
-    let metadata_events = nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(10))
-        .await?;
+    let metadata_events =
+        nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(10)).await?;
 
-    let metadata_event = metadata_events.first()
+    let metadata_event = metadata_events
+        .first()
         .ok_or_else(|| "Podcast not found".to_string())?;
 
     let metadata = podcast::parse_podcast_metadata(metadata_event)?;
@@ -445,8 +447,8 @@ async fn fetch_nostr_podcast(naddr: &str) -> std::result::Result<(PodcastMetadat
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
         .limit(100);
 
-    let episode_events = nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10))
-        .await?;
+    let episode_events =
+        nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10)).await?;
 
     let mut episodes = Vec::new();
     for event in episode_events.iter() {
@@ -472,8 +474,7 @@ fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
 
     // Handle naddr format
     if coord.starts_with("naddr") {
-        let nip19 = Nip19::from_bech32(coord)
-            .map_err(|e| format!("Invalid naddr: {}", e))?;
+        let nip19 = Nip19::from_bech32(coord).map_err(|e| format!("Invalid naddr: {}", e))?;
 
         match nip19 {
             Nip19::Coordinate(nip19_coord) => {
@@ -481,7 +482,7 @@ fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
                 let d_tag = nip19_coord.coordinate.identifier;
                 Ok((pubkey, d_tag))
             }
-            _ => Err("Expected naddr coordinate".to_string())
+            _ => Err("Expected naddr coordinate".to_string()),
         }
     } else {
         // Handle coordinate format: "KIND:PUBKEY:D-TAG" (splitn to handle identifiers with colons)

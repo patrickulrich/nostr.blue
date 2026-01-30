@@ -3,9 +3,9 @@
 //! Modal for entering password to decrypt encrypted private keys or
 //! to set a password for migrating unencrypted keys.
 
+use crate::components::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
+use crate::stores::auth_store::{cancel_password_prompt, restore_with_password, PASSWORD_PROMPT};
 use dioxus::prelude::*;
-use crate::components::dialog::{DialogRoot, DialogContent, DialogTitle, DialogDescription};
-use crate::stores::auth_store::{PASSWORD_PROMPT, restore_with_password, cancel_password_prompt};
 
 /// Password entry modal for NIP-49 encrypted key decryption
 #[component]

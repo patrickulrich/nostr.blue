@@ -2,7 +2,8 @@ use gloo_net::http::Request;
 use regex::Regex;
 
 /// GitHub raw content base URL for NIPs repository
-const GITHUB_NIPS_BASE: &str = "https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master";
+const GITHUB_NIPS_BASE: &str =
+    "https://raw.githubusercontent.com/nostr-protocol/nips/refs/heads/master";
 
 /// Represents an official NIP from the nostr-protocol repository
 #[derive(Debug, Clone, PartialEq)]
@@ -38,10 +39,14 @@ pub async fn fetch_nips_readme() -> Result<String, String> {
         .map_err(|e| format!("Failed to fetch NIPs README: {}", e))?;
 
     if !response.ok() {
-        return Err(format!("Failed to fetch NIPs README: HTTP {}", response.status()));
+        return Err(format!(
+            "Failed to fetch NIPs README: HTTP {}",
+            response.status()
+        ));
     }
 
-    response.text()
+    response
+        .text()
         .await
         .map_err(|e| format!("Failed to read response: {}", e))
 }
@@ -56,10 +61,15 @@ pub async fn fetch_nip_content(number: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to fetch NIP-{}: {}", number, e))?;
 
     if !response.ok() {
-        return Err(format!("NIP-{} not found (HTTP {})", number, response.status()));
+        return Err(format!(
+            "NIP-{} not found (HTTP {})",
+            number,
+            response.status()
+        ));
     }
 
-    response.text()
+    response
+        .text()
         .await
         .map_err(|e| format!("Failed to read NIP-{}: {}", number, e))
 }
@@ -71,14 +81,20 @@ pub fn parse_nips_from_readme(content: &str) -> Vec<OfficialNip> {
     // Match lines like:
     // - [NIP-01: Basic protocol flow description](01.md)
     // - [NIP-04: Encrypted Direct Message](04.md) --- **unrecommended**: deprecated in favor of [NIP-17](17.md)
-    let nip_regex = Regex::new(
-        r"^\s*-\s*\[NIP-([0-9A-Fa-f]{2}):\s*([^\]]+)\]\(([0-9A-Fa-f]{2})\.md\)(.*)$"
-    ).unwrap();
+    let nip_regex =
+        Regex::new(r"^\s*-\s*\[NIP-([0-9A-Fa-f]{2}):\s*([^\]]+)\]\(([0-9A-Fa-f]{2})\.md\)(.*)$")
+            .unwrap();
 
     for line in content.lines() {
         if let Some(caps) = nip_regex.captures(line) {
-            let number = caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
-            let title = caps.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+            let number = caps
+                .get(1)
+                .map(|m| m.as_str().to_uppercase())
+                .unwrap_or_default();
+            let title = caps
+                .get(2)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
             let suffix = caps.get(4).map(|m| m.as_str()).unwrap_or("");
 
             let deprecated = suffix.to_lowercase().contains("deprecated");
@@ -139,10 +155,7 @@ pub fn parse_event_kinds_from_readme(content: &str) -> Vec<EventKindInfo> {
             let parts: Vec<&str> = line.split('|').collect();
             if parts.len() >= 4 {
                 // Extract kind (remove backticks and whitespace)
-                let kind = parts[1]
-                    .trim()
-                    .trim_matches('`')
-                    .to_string();
+                let kind = parts[1].trim().trim_matches('`').to_string();
 
                 // Extract description
                 let description = parts[2].trim().to_string();
@@ -171,7 +184,10 @@ fn extract_nip_number(text: &str) -> String {
     let link_regex = Regex::new(r"\[([0-9A-Fa-f]{2})\]").ok();
     if let Some(regex) = link_regex {
         if let Some(caps) = regex.captures(text) {
-            return caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
+            return caps
+                .get(1)
+                .map(|m| m.as_str().to_uppercase())
+                .unwrap_or_default();
         }
     }
 
@@ -179,7 +195,10 @@ fn extract_nip_number(text: &str) -> String {
     let simple_regex = Regex::new(r"([0-9A-Fa-f]{2})").ok();
     if let Some(regex) = simple_regex {
         if let Some(caps) = regex.captures(text) {
-            return caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
+            return caps
+                .get(1)
+                .map(|m| m.as_str().to_uppercase())
+                .unwrap_or_default();
         }
     }
 

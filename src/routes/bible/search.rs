@@ -1,12 +1,10 @@
 //! Bible Search Page
 //! Client-side search through cached chapters
 
-use dioxus::prelude::*;
 use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
 
-use crate::stores::bible_store::{
-    BibleSearchResult, search_cached_verses, cached_chapter_count,
-};
+use crate::stores::bible_store::{cached_chapter_count, search_cached_verses, BibleSearchResult};
 
 /// Bible Search Page
 #[component]

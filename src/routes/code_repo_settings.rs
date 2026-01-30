@@ -2,12 +2,12 @@
 //!
 //! Manage repository settings for NIP-34 repositories.
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, publish_repository};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 /// Repository settings page component
 #[component]
@@ -64,7 +64,10 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
 
     // Check ownership
     let is_owner = if let Some(Ok(r)) = repo_result.read().as_ref() {
-        auth.pubkey.as_ref().map(|pk| pk == &r.pubkey).unwrap_or(false)
+        auth.pubkey
+            .as_ref()
+            .map(|pk| pk == &r.pubkey)
+            .unwrap_or(false)
     } else {
         false
     };
@@ -117,8 +120,16 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 // Use existing relays
                 let relays: Vec<&str> = repo_data.relays.iter().map(|s| s.as_str()).collect();
 
-                let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };
-                let desc_opt = if description.is_empty() { None } else { Some(description.as_str()) };
+                let name_opt = if name.is_empty() {
+                    None
+                } else {
+                    Some(name.as_str())
+                };
+                let desc_opt = if description.is_empty() {
+                    None
+                } else {
+                    Some(description.as_str())
+                };
 
                 match publish_repository(
                     &repo_data.id,
@@ -128,7 +139,9 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                     &web_urls,
                     &relays,
                     &[],
-                ).await {
+                )
+                .await
+                {
                     Ok(_) => {
                         save_success.set(true);
                     }

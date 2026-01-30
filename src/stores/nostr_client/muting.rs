@@ -2,14 +2,14 @@
 //!
 //! Functions for muting posts, blocking users, and reporting content (NIP-51, NIP-56).
 
-use std::collections::HashSet;
-use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::collections::HashSet;
+use std::time::Duration;
 
-use super::fetching::{get_client, fetch_events_aggregated};
+use super::fetching::{fetch_events_aggregated, get_client};
 use super::signals::HAS_SIGNER;
-use super::types::{MuteListTags, extract_mute_list_tags, rebuild_mute_list_tags};
+use super::types::{extract_mute_list_tags, rebuild_mute_list_tags, MuteListTags};
 
 // =============================================================================
 // Mute List Fetching
@@ -24,14 +24,13 @@ use super::types::{MuteListTags, extract_mute_list_tags, rebuild_mute_list_tags}
 ///   publishing stale state that could overwrite changes from other devices.
 ///   Use `fresh=false` for read-only operations where cache is acceptable.
 async fn fetch_mute_list(fresh: bool) -> std::result::Result<Option<nostr::Event>, String> {
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     // Normalize to hex (handles both hex and bech32 npub formats from NIP-46 signers)
     let pubkey_hex = crate::utils::nip19::normalize_pubkey(&current_pubkey)?;
 
-    let pubkey = nostr::PublicKey::from_hex(&pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey =
+        nostr::PublicKey::from_hex(&pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Note: No .limit(1) - let aggregation collect all versions from multiple relays.
     // Relays may return stale versions; max_by_key(created_at) selects the newest.
@@ -85,9 +84,7 @@ pub async fn get_muted_posts() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list(false).await? {
         Some(event) => {
             // Use SDK's event_ids() method to extract e-tags
-            let muted_posts: Vec<String> = event.tags.event_ids()
-                .map(|id| id.to_hex())
-                .collect();
+            let muted_posts: Vec<String> = event.tags.event_ids().map(|id| id.to_hex()).collect();
             Ok(muted_posts)
         }
         None => Ok(Vec::new()),
@@ -113,13 +110,14 @@ pub struct MuteListData {
 pub async fn get_mute_list_data() -> std::result::Result<MuteListData, String> {
     match fetch_mute_list(false).await {
         Ok(Some(event)) => {
-            let muted_posts: HashSet<String> = event.tags.event_ids()
-                .map(|id| id.to_hex())
-                .collect();
-            let blocked_users: HashSet<String> = event.tags.public_keys()
-                .map(|pk| pk.to_hex())
-                .collect();
-            Ok(MuteListData { muted_posts, blocked_users })
+            let muted_posts: HashSet<String> =
+                event.tags.event_ids().map(|id| id.to_hex()).collect();
+            let blocked_users: HashSet<String> =
+                event.tags.public_keys().map(|pk| pk.to_hex()).collect();
+            Ok(MuteListData {
+                muted_posts,
+                blocked_users,
+            })
         }
         Ok(None) => Ok(MuteListData::default()), // No mute list event = valid empty state
         Err(e) => {
@@ -177,8 +175,8 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     log::info!("Muting post: {}", event_id);
 
     // Use parse() to support both hex and bech32 (note1...) formats
-    let target_event_id = nostr::EventId::parse(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        nostr::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch current mute list fresh from relays (not cached) to avoid overwriting
     // changes made by other devices
@@ -188,7 +186,7 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
             let content = event.content.clone();
             (extract_mute_list_tags(&event), content)
         }
-        None => (MuteListTags::default(), String::new())
+        None => (MuteListTags::default(), String::new()),
     };
 
     // Skip if already muted (idempotent)
@@ -199,9 +197,12 @@ pub async fn mute_post(event_id: String) -> std::result::Result<(), String> {
     tags.event_ids.push(target_event_id);
 
     let all_tags = rebuild_mute_list_tags(&tags);
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+    let builder =
+        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
     super::signals::invalidate_mute_block_cache();
@@ -220,8 +221,8 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     log::info!("Unmuting post: {}", event_id);
 
     // Use parse() to support both hex and bech32 (note1...) formats
-    let target_event_id = nostr::EventId::parse(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        nostr::EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Fetch current mute list fresh from relays (not cached) to avoid overwriting
     // changes made by other devices
@@ -243,9 +244,12 @@ pub async fn unmute_post(event_id: String) -> std::result::Result<(), String> {
     tags.event_ids.retain(|eid| *eid != target_event_id);
 
     let all_tags = rebuild_mute_list_tags(&tags);
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+    let builder =
+        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
     super::signals::invalidate_mute_block_cache();
@@ -262,8 +266,10 @@ pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
     match fetch_mute_list(false).await? {
         Some(event) => {
             // Use SDK's public_keys() method to extract p-tags
-            let blocked_users: Vec<String> = event.tags.public_keys()
-                .map(|pk| pk.to_hex())  // Explicit hex for consistency with normalize_pubkey
+            let blocked_users: Vec<String> = event
+                .tags
+                .public_keys()
+                .map(|pk| pk.to_hex()) // Explicit hex for consistency with normalize_pubkey
                 .collect();
             Ok(blocked_users)
         }
@@ -272,7 +278,10 @@ pub async fn get_blocked_users() -> std::result::Result<Vec<String>, String> {
 }
 
 /// Check if a user is blocked using cached data (synchronous, O(1))
-pub fn is_user_blocked_cached(pubkey: &str, blocked_users: &HashSet<String>) -> Result<bool, String> {
+pub fn is_user_blocked_cached(
+    pubkey: &str,
+    blocked_users: &HashSet<String>,
+) -> Result<bool, String> {
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(pubkey)?;
     Ok(blocked_users.contains(&normalized_pubkey))
 }
@@ -307,7 +316,7 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
             let content = event.content.clone();
             (extract_mute_list_tags(&event), content)
         }
-        None => (MuteListTags::default(), String::new())
+        None => (MuteListTags::default(), String::new()),
     };
 
     // Skip if already blocked (idempotent)
@@ -318,9 +327,12 @@ pub async fn block_user(pubkey: String) -> std::result::Result<(), String> {
     tags.pubkeys.push(target_pubkey);
 
     let all_tags = rebuild_mute_list_tags(&tags);
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+    let builder =
+        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
     super::signals::invalidate_mute_block_cache();
@@ -362,9 +374,12 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
     tags.pubkeys.retain(|pk| *pk != target_pubkey);
 
     let all_tags = rebuild_mute_list_tags(&tags);
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
+    let builder =
+        nostr::EventBuilder::new(nostr::Kind::from(10000), existing_content).tags(all_tags);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish mute list: {}", e))?;
 
     super::signals::invalidate_mute_block_cache();
@@ -379,7 +394,13 @@ pub async fn unblock_user(pubkey: String) -> std::result::Result<(), String> {
 /// NIP-56 report types
 /// See: https://github.com/nostr-protocol/nips/blob/master/56.md
 const NIP56_REPORT_TYPES: &[&str] = &[
-    "nudity", "malware", "profanity", "illegal", "spam", "impersonation", "other"
+    "nudity",
+    "malware",
+    "profanity",
+    "illegal",
+    "spam",
+    "impersonation",
+    "other",
 ];
 
 /// Report a post (publish kind 1984 event)
@@ -412,15 +433,15 @@ pub async fn report_post(
 
     // Parse event ID and pubkey
     // Use parse() to support both hex and bech32 (note1...) formats
-    use nostr::{EventId, PublicKey, Tag};
     use nostr::nips::nip56::Report;
+    use nostr::{EventId, PublicKey, Tag};
     use std::str::FromStr;
 
-    let target_event_id = EventId::parse(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        EventId::parse(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
     // Use parse() to support both hex and bech32 formats (nostr-sdk pattern)
-    let target_pubkey = PublicKey::parse(&author_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let target_pubkey =
+        PublicKey::parse(&author_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Convert string to Report enum (NIP-56 compliance)
     let report = Report::from_str(&report_type).unwrap_or(Report::Other);

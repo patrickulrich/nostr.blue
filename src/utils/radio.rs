@@ -137,7 +137,12 @@ impl RadioStream {
     }
 
     /// Create a new stream from URL, format, and quality
-    pub fn new(url: String, format_str: Option<&str>, quality: StreamQuality, is_primary: bool) -> Self {
+    pub fn new(
+        url: String,
+        format_str: Option<&str>,
+        quality: StreamQuality,
+        is_primary: bool,
+    ) -> Self {
         let normalized_url = Self::normalize_url(&url);
         let format = format_str
             .map(StreamFormat::from_mime)
@@ -257,12 +262,11 @@ impl RadioStation {
         let pubkey = event.pubkey.to_hex();
 
         // Extract required d-tag
-        let d_tag = get_tag_value(event, "d")
-            .ok_or("Missing required 'd' tag (station ID)")?;
+        let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag (station ID)")?;
 
         // Extract station name
-        let name = get_tag_value(event, "name")
-            .ok_or("Missing required 'name' tag (station name)")?;
+        let name =
+            get_tag_value(event, "name").ok_or("Missing required 'name' tag (station name)")?;
 
         // Build coordinate and naddr
         let coordinate = format!("{}:{}:{}", KIND_RADIO_STATION, pubkey, d_tag);
@@ -281,9 +285,10 @@ impl RadioStation {
                 let is_primary = slice.iter().any(|s| s == "primary");
 
                 // Parse quality as JSON
-                let quality = slice.get(3).and_then(|quality_str| {
-                    serde_json::from_str::<StreamQuality>(quality_str).ok()
-                }).unwrap_or_default();
+                let quality = slice
+                    .get(3)
+                    .and_then(|quality_str| serde_json::from_str::<StreamQuality>(quality_str).ok())
+                    .unwrap_or_default();
 
                 Some(RadioStream::new(url, format_str, quality, is_primary))
             })
@@ -295,12 +300,7 @@ impl RadioStation {
                 streams = content
                     .streams
                     .into_iter()
-                    .map(|s| RadioStream::new(
-                        s.url,
-                        Some(s.format.as_str()),
-                        s.quality,
-                        s.primary,
-                    ))
+                    .map(|s| RadioStream::new(s.url, Some(s.format.as_str()), s.quality, s.primary))
                     .collect();
                 log::debug!(
                     "Parsed {} streams from event content for station {}",
@@ -312,10 +312,7 @@ impl RadioStation {
 
         // Log warning if still no streams found
         if streams.is_empty() {
-            log::warn!(
-                "Radio station '{}' has no streams in tags or content",
-                name
-            );
+            log::warn!("Radio station '{}' has no streams in tags or content", name);
         }
 
         // Parse genres from hashtag tags: ["t", "genre-name"]
@@ -415,10 +412,7 @@ pub async fn fetch_station_by_naddr(naddr: &str) -> Result<RadioStation, String>
 ///
 /// Searches station names, descriptions, and tags across relays that support NIP-50.
 /// Falls back to client-side filtering if needed.
-pub async fn search_radio_stations(
-    query: &str,
-    limit: usize,
-) -> Result<Vec<RadioStation>, String> {
+pub async fn search_radio_stations(query: &str, limit: usize) -> Result<Vec<RadioStation>, String> {
     if query.is_empty() {
         return Ok(Vec::new());
     }
@@ -454,7 +448,11 @@ pub async fn search_radio_stations(
                 }
             });
 
-            log::debug!("Search for '{}' returned {} stations", query, stations.len());
+            log::debug!(
+                "Search for '{}' returned {} stations",
+                query,
+                stations.len()
+            );
             Ok(stations)
         }
         Err(e) => {
@@ -465,7 +463,8 @@ pub async fn search_radio_stations(
                 .kind(Kind::Custom(KIND_RADIO_STATION))
                 .limit(200);
 
-            let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+            let events =
+                nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
             let query_lower = query.to_lowercase();
 
             let mut stations: Vec<RadioStation> = events
@@ -518,8 +517,7 @@ pub fn build_station_naddr(pubkey: &str, d_tag: &str) -> Option<String> {
 
 /// Parse a station naddr back to (pubkey, d_tag)
 pub fn parse_station_naddr(naddr: &str) -> Result<(String, String), String> {
-    let nip19 =
-        Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     if nip19.coordinate.kind.as_u16() != KIND_RADIO_STATION {
         return Err(format!(
@@ -547,10 +545,7 @@ pub fn select_best_stream(streams: &[RadioStream]) -> Option<&RadioStream> {
     let non_hls: Vec<_> = streams.iter().filter(|s| !s.format.is_hls()).collect();
 
     if !non_hls.is_empty() {
-        return non_hls
-            .iter()
-            .max_by_key(|s| s.quality.bitrate)
-            .copied();
+        return non_hls.iter().max_by_key(|s| s.quality.bitrate).copied();
     }
 
     // Fallback to first stream (may be HLS)

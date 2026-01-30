@@ -38,14 +38,14 @@
 //! }
 //! ```
 
-#![allow(unused_imports)]  // Re-exports are public API for external consumers
+#![allow(unused_imports)] // Re-exports are public API for external consumers
 
 use dioxus::prelude::*;
 use dioxus_core::spawn_forever;
 use futures::future::join_all;
-use nostr_sdk::Client;
-use nostr_sdk::prelude::*;
 use nostr::Url;
+use nostr_sdk::prelude::*;
+use nostr_sdk::Client;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,9 +53,9 @@ use std::time::Duration;
 #[cfg(target_arch = "wasm32")]
 use nostr_indexeddb::WebDatabase;
 
-use crate::stores::signer::SignerType;
 use crate::stores::pinned_notes;
 use crate::stores::relay;
+use crate::stores::signer::SignerType;
 
 #[cfg(target_arch = "wasm32")]
 use crate::services::admission_policy::NostrBlueAdmissionPolicy;
@@ -64,22 +64,22 @@ use crate::services::admission_policy::NostrBlueAdmissionPolicy;
 // Tier 1: Private Module Declarations
 // =============================================================================
 
-mod error;
-mod types;
-mod signals;
-mod fetching;
-mod streaming;
-mod notes;
-mod reactions;
-mod contacts;
-mod muting;
-mod reposts;
-mod profile;
 mod articles;
-mod media;
-mod polls;
+mod contacts;
 mod custom_nips;
+mod error;
+mod fetching;
+mod media;
+mod muting;
+mod notes;
+mod polls;
+mod profile;
+mod reactions;
 mod relay_publishing;
+mod reposts;
+mod signals;
+mod streaming;
+mod types;
 
 // =============================================================================
 // Tier 2: Public Re-exports (Backward Compatibility)
@@ -94,66 +94,59 @@ pub use types::PublishResult;
 
 // Signals (most important for consumers)
 pub use signals::{
-    NOSTR_CLIENT, CLIENT_INITIALIZED, HAS_SIGNER, CURRENT_SIGNER,
-    invalidate_contacts_cache, MUTE_BLOCK_INVALIDATE, invalidate_mute_block_cache,
+    invalidate_contacts_cache, invalidate_mute_block_cache, CLIENT_INITIALIZED, CURRENT_SIGNER,
+    HAS_SIGNER, MUTE_BLOCK_INVALIDATE, NOSTR_CLIENT,
 };
 
 // Fetching
 pub use fetching::{
-    fetch_events_aggregated, fetch_events_from_relays,
-    fetch_events_aggregated_outbox, fetch_profile_events_db,
-    fetch_profile_events_from_relays, fetch_video_events,
-    fetch_events_from_connected_relays, fetch_video_events_from_connected_relays,
+    fetch_events_aggregated, fetch_events_aggregated_outbox, fetch_events_from_connected_relays,
+    fetch_events_from_relays, fetch_profile_events_db, fetch_profile_events_from_relays,
+    fetch_video_events, fetch_video_events_from_connected_relays,
 };
 
 // Streaming
 pub use streaming::{
-    stream_events_with_callback, stream_events_batched,
-    stream_events_from_connected_relays_batched, stream_events_collected,
+    stream_events_batched, stream_events_collected, stream_events_from_connected_relays_batched,
+    stream_events_with_callback,
 };
 
 // Publishing (notes, reactions, contacts, etc.)
-pub use notes::{publish_note_tracked, publish_note};
-pub use reactions::{publish_reaction_tracked, publish_reaction};
+pub use articles::{
+    fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
+    publish_article, publish_article_tracked,
+};
 pub use contacts::{
-    fetch_contacts, publish_contacts_tracked, publish_contacts,
-    follow_user, unfollow_user, is_following,
+    fetch_contacts, follow_user, is_following, publish_contacts, publish_contacts_tracked,
+    unfollow_user,
 };
 pub use muting::{
-    get_muted_posts, get_blocked_users, get_mute_list_data, MuteListData,
-    is_post_muted, is_post_muted_cached,
-    is_user_blocked, is_user_blocked_cached,
-    mute_post, unmute_post, block_user, unblock_user, report_post,
+    block_user, get_blocked_users, get_mute_list_data, get_muted_posts, is_post_muted,
+    is_post_muted_cached, is_user_blocked, is_user_blocked_cached, mute_post, report_post,
+    unblock_user, unmute_post, MuteListData,
 };
-pub use reposts::{publish_repost_tracked, publish_repost, delete_repost};
+pub use notes::{publish_note, publish_note_tracked};
 pub use profile::{
-    publish_metadata_tracked, publish_metadata,
-    update_profile_picture, update_profile_banner,
+    publish_metadata, publish_metadata_tracked, update_profile_banner, update_profile_picture,
 };
-pub use articles::{
-    fetch_articles, fetch_event_by_coordinate,
-    fetch_event_by_coordinate_with_relays, publish_article_tracked, publish_article,
-};
+pub use reactions::{publish_reaction, publish_reaction_tracked};
+pub use reposts::{delete_repost, publish_repost, publish_repost_tracked};
 // Deprecated: fetch_article_by_coordinate - use fetch_event_by_coordinate(30023, pubkey, id) instead
+pub use custom_nips::{
+    fetch_custom_nip_by_naddr, fetch_custom_nips, generate_custom_nip_naddr, publish_custom_nip,
+    publish_custom_nip_tracked, search_custom_nips, KIND_CUSTOM_NIP,
+};
 pub use media::{
-    publish_picture_tracked, publish_picture,
-    publish_video_tracked, publish_video,
-    publish_voice_message_tracked, publish_voice_message,
-    publish_voice_message_reply_tracked, publish_voice_message_reply,
+    publish_picture, publish_picture_tracked, publish_video, publish_video_tracked,
+    publish_voice_message, publish_voice_message_reply, publish_voice_message_reply_tracked,
+    publish_voice_message_tracked,
 };
 pub use polls::{
-    get_cached_pubkey,
-    publish_poll_vote_tracked, publish_poll_vote,
-    publish_poll_tracked, publish_poll,
-};
-pub use custom_nips::{
-    KIND_CUSTOM_NIP, fetch_custom_nips, fetch_custom_nip_by_naddr,
-    publish_custom_nip_tracked, publish_custom_nip,
-    generate_custom_nip_naddr, search_custom_nips,
+    get_cached_pubkey, publish_poll, publish_poll_tracked, publish_poll_vote,
+    publish_poll_vote_tracked,
 };
 pub use relay_publishing::{
-    publish_note_to_relays, publish_reaction_to_relays,
-    send_presigned_event_to_relays,
+    publish_note_to_relays, publish_reaction_to_relays, send_presigned_event_to_relays,
 };
 
 // =============================================================================
@@ -162,12 +155,12 @@ pub use relay_publishing::{
 
 // Re-export relay types for backward compatibility
 // New code should use crate::stores::relay directly
-pub use crate::stores::relay::{
-    RelayInfo, RelayPoolStoreStoreExt, RelayStatus,
-    RELAY_CONNECTED, RELAY_POOL, USER_RELAYS_APPLIED,
-};
-pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 pub use crate::stores::relay::display::RelayDisplayInfo;
+pub use crate::stores::relay::pool::DEFAULT_RELAYS;
+pub use crate::stores::relay::{
+    RelayInfo, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED, RELAY_POOL,
+    USER_RELAYS_APPLIED,
+};
 
 // =============================================================================
 // Platform Helpers
@@ -217,12 +210,10 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     #[cfg(target_arch = "wasm32")]
     let client = {
         // Open IndexedDB database
-        let database = WebDatabase::open("nostr-blue-db")
-            .await
-            .map_err(|e| {
-                log::error!("Failed to open IndexedDB: {}", e);
-                format!("Failed to open IndexedDB: {}", e)
-            })?;
+        let database = WebDatabase::open("nostr-blue-db").await.map_err(|e| {
+            log::error!("Failed to open IndexedDB: {}", e);
+            format!("Failed to open IndexedDB: {}", e)
+        })?;
 
         log::info!("IndexedDB opened successfully");
 
@@ -230,7 +221,7 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         // NostrGossipMemory is WASM-compatible and provides automatic relay routing
         // Limit to 10,000 entries (conservative; nostr-sdk defaults to 35,000 for events)
         let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
-            NonZeroUsize::new(10_000).expect("10_000 is non-zero")
+            NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
         );
 
         // Configure client options for gossip-discovered relays
@@ -330,10 +321,15 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             platform_sleep_ms(POLL_INTERVAL_MS).await;
 
             let relays_now = client.relays().await;
-            let connected = relays_now.values().any(|r| r.status() == PoolRelayStatus::Connected);
+            let connected = relays_now
+                .values()
+                .any(|r| r.status() == PoolRelayStatus::Connected);
 
             if connected {
-                log::info!("First relay connected after {}ms", start.elapsed().as_millis());
+                log::info!(
+                    "First relay connected after {}ms",
+                    start.elapsed().as_millis()
+                );
                 if !*RELAY_CONNECTED.peek() {
                     *RELAY_CONNECTED.write() = true;
                 }
@@ -341,7 +337,10 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             }
 
             if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
-                log::warn!("Relay connection timeout after {}ms, proceeding anyway", TIMEOUT_MS);
+                log::warn!(
+                    "Relay connection timeout after {}ms, proceeding anyway",
+                    TIMEOUT_MS
+                );
                 // Signal false so downstream watchers know init completed without relay
                 // They can retry via ensure_relays_ready when a relay connects later
                 *RELAY_CONNECTED.write() = false;

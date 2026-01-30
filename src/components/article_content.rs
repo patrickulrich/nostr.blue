@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::utils::markdown::render_markdown;
+use dioxus::prelude::*;
 
 #[component]
 pub fn ArticleContent(content: String) -> Element {

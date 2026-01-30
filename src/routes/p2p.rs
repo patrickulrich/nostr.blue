@@ -5,10 +5,16 @@
 use dioxus::prelude::*;
 use std::time::Duration;
 
+use crate::components::{
+    ClientInitializing, P2PDepthChart, P2PDepthChartSkeleton, P2POrderCard, P2POrderCardSkeleton,
+    P2POrderFilters,
+};
 use crate::services::btc_price;
-use crate::stores::{nostr_client, p2p_store::{self, P2PFilterState, OrderSortBy}};
+use crate::stores::{
+    nostr_client,
+    p2p_store::{self, OrderSortBy, P2PFilterState},
+};
 use crate::utils::nip69::{OrderType, P2POrder};
-use crate::components::{ClientInitializing, P2POrderCard, P2POrderCardSkeleton, P2POrderFilters, P2PDepthChart, P2PDepthChartSkeleton};
 
 /// Order tab selection
 #[derive(Clone, Copy, PartialEq, Debug, Default)]

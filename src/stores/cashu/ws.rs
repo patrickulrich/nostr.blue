@@ -10,25 +10,27 @@
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
 
+use dioxus::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{WebSocket, MessageEvent, CloseEvent, ErrorEvent};
-use tokio::sync::mpsc;
+use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
 /// Global counter for JSON-RPC request IDs
 static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Global signal tracking active WebSocket connections by mint URL
-pub static WS_CONNECTIONS: GlobalSignal<HashMap<String, WsConnectionState>> = GlobalSignal::new(HashMap::new);
+pub static WS_CONNECTIONS: GlobalSignal<HashMap<String, WsConnectionState>> =
+    GlobalSignal::new(HashMap::new);
 
 /// Cache for mint NUT-17 WebSocket support: mint_url -> (timestamp_ms, supports_ws)
 /// TTL is 5 minutes (300,000 ms)
-pub static MINT_WS_SUPPORT_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> = GlobalSignal::new(HashMap::new);
+pub static MINT_WS_SUPPORT_CACHE: GlobalSignal<HashMap<String, (f64, bool)>> =
+    GlobalSignal::new(HashMap::new);
 const MINT_WS_CACHE_TTL_MS: f64 = 300_000.0; // 5 minutes
 
 // Thread-local storage for WebSocket closures (closures aren't Clone, so can't store in GlobalSignal)
@@ -315,13 +317,17 @@ pub async fn subscribe_to_quote(
 
         // Update connection state (ws is stored separately after all closures are set up)
         let mut connections = WS_CONNECTIONS.write();
-        let state = connections.entry(mint_url_for_onopen.clone()).or_insert_with(|| WsConnectionState {
-            connected: false,
-            subscriptions: HashMap::new(),
-            ws: None,
-        });
+        let state = connections
+            .entry(mint_url_for_onopen.clone())
+            .or_insert_with(|| WsConnectionState {
+                connected: false,
+                subscriptions: HashMap::new(),
+                ws: None,
+            });
         state.connected = true;
-        state.subscriptions.insert(sub_id_for_onopen.clone(), quote_id_for_onopen.clone());
+        state
+            .subscriptions
+            .insert(sub_id_for_onopen.clone(), quote_id_for_onopen.clone());
         drop(connections); // Release lock before sending
 
         // Send subscribe request immediately (connection is now open - no timing race!)
@@ -365,7 +371,11 @@ pub async fn subscribe_to_quote(
                         let status = QuoteStatus::from(params.payload.state.as_str());
                         // Log when channel is full (following nostr-sdk pattern)
                         if let Err(e) = tx_for_msg.try_send(status) {
-                            log::warn!("Channel full, dropping quote status update for {}: {:?}", sub_id_for_msg, e);
+                            log::warn!(
+                                "Channel full, dropping quote status update for {}: {:?}",
+                                sub_id_for_msg,
+                                e
+                            );
                         }
                     }
                 }
@@ -387,7 +397,11 @@ pub async fn subscribe_to_quote(
     // Set up onerror handler
     let mint_url_for_error = mint_url.clone();
     let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
-        log::error!("WebSocket error for {}: {:?}", mint_url_for_error, e.message());
+        log::error!(
+            "WebSocket error for {}: {:?}",
+            mint_url_for_error,
+            e.message()
+        );
     }) as Box<dyn FnMut(ErrorEvent)>);
 
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
@@ -396,7 +410,12 @@ pub async fn subscribe_to_quote(
     let mint_url_for_close = mint_url.clone();
     let sub_id_for_close = sub_id.clone();
     let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
-        log::info!("WebSocket closed for {}: code={}, reason={}", mint_url_for_close, e.code(), e.reason());
+        log::info!(
+            "WebSocket closed for {}: code={}, reason={}",
+            mint_url_for_close,
+            e.code(),
+            e.reason()
+        );
 
         // Update connection state
         let mut connections = WS_CONNECTIONS.write();
@@ -413,22 +432,27 @@ pub async fn subscribe_to_quote(
     // Store closures in thread_local to keep them alive (instead of forget())
     // This allows proper cleanup when close_connection is called
     WS_CLOSURES.with(|closures| {
-        closures.borrow_mut().insert(mint_url.clone(), WsClosures {
-            onopen: onopen_callback,
-            onmessage: onmessage_callback,
-            onerror: onerror_callback,
-            onclose: onclose_callback,
-        });
+        closures.borrow_mut().insert(
+            mint_url.clone(),
+            WsClosures {
+                onopen: onopen_callback,
+                onmessage: onmessage_callback,
+                onerror: onerror_callback,
+                onclose: onclose_callback,
+            },
+        );
     });
 
     // Store WebSocket in connection state for explicit cleanup
     {
         let mut connections = WS_CONNECTIONS.write();
-        let state = connections.entry(mint_url.clone()).or_insert_with(|| WsConnectionState {
-            connected: false,
-            subscriptions: HashMap::new(),
-            ws: None,
-        });
+        let state = connections
+            .entry(mint_url.clone())
+            .or_insert_with(|| WsConnectionState {
+                connected: false,
+                subscriptions: HashMap::new(),
+                ws: None,
+            });
         state.ws = Some(ws);
     }
 
@@ -500,9 +524,17 @@ pub async fn poll_quote_status(
     is_mint_quote: bool,
 ) -> Result<QuoteStatus, String> {
     let endpoint = if is_mint_quote {
-        format!("{}/v1/mint/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
+        format!(
+            "{}/v1/mint/quote/bolt11/{}",
+            mint_url.trim_end_matches('/'),
+            quote_id
+        )
     } else {
-        format!("{}/v1/melt/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
+        format!(
+            "{}/v1/melt/quote/bolt11/{}",
+            mint_url.trim_end_matches('/'),
+            quote_id
+        )
     };
 
     let response = gloo_net::http::Request::get(&endpoint)
@@ -520,7 +552,8 @@ pub async fn poll_quote_status(
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     // Extract state from response
-    let state = json.get("state")
+    let state = json
+        .get("state")
         .and_then(|v| v.as_str())
         .unwrap_or("UNKNOWN");
 
@@ -567,17 +600,24 @@ pub async fn subscribe_to_proof_states(
 
     // Set up onopen handler
     let onopen_callback = Closure::wrap(Box::new(move |_: web_sys::Event| {
-        log::info!("WebSocket connected for proof state subscription to {}", mint_url_for_onopen);
+        log::info!(
+            "WebSocket connected for proof state subscription to {}",
+            mint_url_for_onopen
+        );
 
         // Update connection state
         let mut connections = WS_CONNECTIONS.write();
-        let state = connections.entry(mint_url_for_onopen.clone()).or_insert_with(|| WsConnectionState {
-            connected: false,
-            subscriptions: HashMap::new(),
-            ws: None,
-        });
+        let state = connections
+            .entry(mint_url_for_onopen.clone())
+            .or_insert_with(|| WsConnectionState {
+                connected: false,
+                subscriptions: HashMap::new(),
+                ws: None,
+            });
         state.connected = true;
-        state.subscriptions.insert(sub_id_for_onopen.clone(), "proof_states".to_string());
+        state
+            .subscriptions
+            .insert(sub_id_for_onopen.clone(), "proof_states".to_string());
         drop(connections);
 
         // Send subscribe request for proof states
@@ -597,7 +637,10 @@ pub async fn subscribe_to_proof_states(
                 if let Err(e) = ws_for_onopen.send_with_str(&json) {
                     log::error!("Failed to send proof state subscribe request: {:?}", e);
                 } else {
-                    log::debug!("Sent proof state subscribe request for {} proofs", y_values_clone.len());
+                    log::debug!(
+                        "Sent proof state subscribe request for {} proofs",
+                        y_values_clone.len()
+                    );
                 }
             }
             Err(e) => log::error!("Failed to serialize subscribe request: {}", e),
@@ -619,16 +662,24 @@ pub async fn subscribe_to_proof_states(
                 // Check if it's a notification with params
                 if msg.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
                     if let Some(params) = msg.get("params") {
-                        let sub_id_match = params.get("subId")
+                        let sub_id_match = params
+                            .get("subId")
                             .and_then(|v| v.as_str())
                             .map(|s| s == sub_id_for_msg)
                             .unwrap_or(false);
 
                         if sub_id_match {
                             if let Some(payload) = params.get("payload") {
-                                if let Ok(notification) = serde_json::from_value::<ProofStateNotification>(payload.clone()) {
+                                if let Ok(notification) =
+                                    serde_json::from_value::<ProofStateNotification>(
+                                        payload.clone(),
+                                    )
+                                {
                                     if let Err(e) = tx_for_msg.try_send(notification) {
-                                        log::warn!("Channel full, dropping proof state update: {:?}", e);
+                                        log::warn!(
+                                            "Channel full, dropping proof state update: {:?}",
+                                            e
+                                        );
                                     }
                                 }
                             }
@@ -644,7 +695,11 @@ pub async fn subscribe_to_proof_states(
     // Set up onerror handler
     let mint_url_for_error = mint_url.clone();
     let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
-        log::error!("WebSocket error for {}: {:?}", mint_url_for_error, e.message());
+        log::error!(
+            "WebSocket error for {}: {:?}",
+            mint_url_for_error,
+            e.message()
+        );
     }) as Box<dyn FnMut(ErrorEvent)>);
 
     ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
@@ -653,7 +708,12 @@ pub async fn subscribe_to_proof_states(
     let mint_url_for_close = mint_url.clone();
     let sub_id_for_close = sub_id.clone();
     let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
-        log::info!("WebSocket closed for {}: code={}, reason={}", mint_url_for_close, e.code(), e.reason());
+        log::info!(
+            "WebSocket closed for {}: code={}, reason={}",
+            mint_url_for_close,
+            e.code(),
+            e.reason()
+        );
 
         let mut connections = WS_CONNECTIONS.write();
         if let Some(state) = connections.get_mut(&mint_url_for_close) {
@@ -668,22 +728,27 @@ pub async fn subscribe_to_proof_states(
 
     // Store closures
     WS_CLOSURES.with(|closures| {
-        closures.borrow_mut().insert(format!("{}:proof_states", mint_url), WsClosures {
-            onopen: onopen_callback,
-            onmessage: onmessage_callback,
-            onerror: onerror_callback,
-            onclose: onclose_callback,
-        });
+        closures.borrow_mut().insert(
+            format!("{}:proof_states", mint_url),
+            WsClosures {
+                onopen: onopen_callback,
+                onmessage: onmessage_callback,
+                onerror: onerror_callback,
+                onclose: onclose_callback,
+            },
+        );
     });
 
     // Store WebSocket in connection state
     {
         let mut connections = WS_CONNECTIONS.write();
-        let state = connections.entry(mint_url.clone()).or_insert_with(|| WsConnectionState {
-            connected: false,
-            subscriptions: HashMap::new(),
-            ws: None,
-        });
+        let state = connections
+            .entry(mint_url.clone())
+            .or_insert_with(|| WsConnectionState {
+                connected: false,
+                subscriptions: HashMap::new(),
+                ws: None,
+            });
         state.ws = Some(ws);
     }
 
@@ -727,22 +792,26 @@ pub async fn poll_proof_states(
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     // Parse states array from response
-    let states = json.get("states")
+    let states = json
+        .get("states")
         .and_then(|v| v.as_array())
         .ok_or("Invalid response format: missing 'states' array")?;
 
     let mut notifications = Vec::new();
     for state_obj in states {
-        let y = state_obj.get("Y")
+        let y = state_obj
+            .get("Y")
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
 
-        let state_str = state_obj.get("state")
+        let state_str = state_obj
+            .get("state")
             .and_then(|v| v.as_str())
             .unwrap_or("UNKNOWN");
 
-        let witness = state_obj.get("witness")
+        let witness = state_obj
+            .get("witness")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
@@ -822,11 +891,8 @@ pub async fn subscribe_to_melt_quote(
 ///
 /// This spawns a background task that monitors the quote via WebSocket
 /// (with HTTP polling fallback) and calls the handler when state changes.
-pub fn watch_mint_quote<F>(
-    mint_url: String,
-    quote_id: String,
-    on_paid: F,
-) where
+pub fn watch_mint_quote<F>(mint_url: String, quote_id: String, on_paid: F)
+where
     F: Fn(String) + 'static,
 {
     use dioxus::prelude::spawn;
@@ -850,9 +916,14 @@ pub fn watch_mint_quote<F>(
                 }
             }
             Err(e) => {
-                log::warn!("WebSocket subscription failed for quote {}: {}, using polling", quote_id, e);
+                log::warn!(
+                    "WebSocket subscription failed for quote {}: {}, using polling",
+                    quote_id,
+                    e
+                );
                 // Fall back to HTTP polling
-                for _ in 0..60 {  // Poll for up to 10 minutes (10s intervals)
+                for _ in 0..60 {
+                    // Poll for up to 10 minutes (10s intervals)
                     gloo_timers::future::TimeoutFuture::new(10_000).await;
 
                     match poll_quote_status(&mint_url, &quote_id, true).await {
@@ -878,12 +949,9 @@ pub fn watch_mint_quote<F>(
 }
 
 /// Start watching a melt quote and call handler on state changes
-pub fn watch_melt_quote<F>(
-    mint_url: String,
-    quote_id: String,
-    on_completed: F,
-) where
-    F: Fn(String, bool) + 'static,  // (quote_id, success)
+pub fn watch_melt_quote<F>(mint_url: String, quote_id: String, on_completed: F)
+where
+    F: Fn(String, bool) + 'static, // (quote_id, success)
 {
     use dioxus::prelude::spawn;
 
@@ -910,33 +978,39 @@ pub fn watch_melt_quote<F>(
                 }
             }
             Err(e) => {
-                log::warn!("WebSocket subscription failed for melt quote {}: {}, using polling", quote_id, e);
+                log::warn!(
+                    "WebSocket subscription failed for melt quote {}: {}, using polling",
+                    quote_id,
+                    e
+                );
                 // Fall back to HTTP polling - shorter duration since melts complete quickly
-                for _ in 0..6 {  // Poll for up to 1 minute (10s intervals)
+                for _ in 0..6 {
+                    // Poll for up to 1 minute (10s intervals)
                     gloo_timers::future::TimeoutFuture::new(10_000).await;
 
                     match poll_quote_status(&mint_url, &quote_id, false).await {
-                        Ok(status) => {
-                            match status {
-                                QuoteStatus::Paid => {
-                                    log::info!("Melt quote {} paid! (via polling)", quote_id);
-                                    on_completed(quote_id.clone(), true);
-                                    return;
-                                }
-                                QuoteStatus::Expired => {
-                                    log::info!("Melt quote {} expired (via polling)", quote_id);
-                                    on_completed(quote_id.clone(), false);
-                                    return;
-                                }
-                                _ => {}
+                        Ok(status) => match status {
+                            QuoteStatus::Paid => {
+                                log::info!("Melt quote {} paid! (via polling)", quote_id);
+                                on_completed(quote_id.clone(), true);
+                                return;
                             }
-                        }
+                            QuoteStatus::Expired => {
+                                log::info!("Melt quote {} expired (via polling)", quote_id);
+                                on_completed(quote_id.clone(), false);
+                                return;
+                            }
+                            _ => {}
+                        },
                         Err(e) => {
                             log::warn!("Failed to poll melt quote {}: {}", quote_id, e);
                         }
                     }
                 }
-                log::warn!("Polling timeout for melt quote {} without resolution", quote_id);
+                log::warn!(
+                    "Polling timeout for melt quote {} without resolution",
+                    quote_id
+                );
             }
         }
     });
@@ -967,7 +1041,9 @@ pub async fn mint_supports_websocket(mint_url: &str) -> bool {
     let supports = fetch_mint_ws_support(mint_url).await;
 
     // Update cache
-    MINT_WS_SUPPORT_CACHE.write().insert(mint_url.to_string(), (now, supports));
+    MINT_WS_SUPPORT_CACHE
+        .write()
+        .insert(mint_url.to_string(), (now, supports));
 
     supports
 }

@@ -1,21 +1,23 @@
-use dioxus::prelude::*;
-use dioxus::events::MediaData;
-use dioxus::web::WebEventExt;
-use wasm_bindgen::JsCast;
-use crate::utils::{ThreadNode, ThreadNodeSource, event::is_voice_message};
-use crate::stores::pending_comments::{CommentStatus, remove_pending_comment, retry_pending_comment};
-use crate::components::{RichContent, ReplyComposer, ZapModal, ReactionButton};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
+use crate::components::{ReactionButton, ReplyComposer, RichContent, ZapModal};
+use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
-use crate::stores::nostr_client::{publish_repost, HAS_SIGNER, get_client};
-use crate::stores::voice_messages_store;
-use crate::hooks::{use_reaction, use_author_metadata};
 use crate::stores::bookmarks;
+use crate::stores::nostr_client::{get_client, publish_repost, HAS_SIGNER};
+use crate::stores::pending_comments::{
+    remove_pending_comment, retry_pending_comment, CommentStatus,
+};
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon};
-use crate::utils::time::format_relative_time_ex;
+use crate::stores::voice_messages_store;
 use crate::utils::format_sats_compact;
+use crate::utils::time::format_relative_time_ex;
+use crate::utils::{event::is_voice_message, ThreadNode, ThreadNodeSource};
+use dioxus::events::MediaData;
+use dioxus::prelude::*;
+use dioxus::web::WebEventExt;
 use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
+use wasm_bindgen::JsCast;
 
 const MAX_DEPTH: usize = 8; // Limit nesting to prevent excessive indentation
 
@@ -29,9 +31,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     // may have a dummy pubkey from the unsigned event construction
     let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node.source {
         ThreadNodeSource::Confirmed => (false, None, None, event.pubkey),
-        ThreadNodeSource::Pending { local_id, status, author_pubkey } => {
-            (true, Some(local_id.clone()), Some(status.clone()), *author_pubkey)
-        }
+        ThreadNodeSource::Pending {
+            local_id,
+            status,
+            author_pubkey,
+        } => (
+            true,
+            Some(local_id.clone()),
+            Some(status.clone()),
+            *author_pubkey,
+        ),
     };
 
     // Clone values needed for closures
@@ -111,7 +120,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Voice message state
     let is_voice = is_voice_message(event);
-    let audio_url = if is_voice { event.content.clone() } else { String::new() };
+    let audio_url = if is_voice {
+        event.content.clone()
+    } else {
+        String::new()
+    };
     let audio_id = format!("voice-comment-{}", event_id);
     let mut duration = use_signal(|| 0.0f64);
     let mut current_time = use_signal(|| 0.0f64);
@@ -119,7 +132,9 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
 
     // Parse imeta tags for duration per NIP-92/NIP-94
     let imeta_duration: Option<f64> = if is_voice {
-        event.tags.iter()
+        event
+            .tags
+            .iter()
             .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
             .and_then(|tag| {
                 for field in tag.as_slice().iter().skip(1) {
@@ -156,7 +171,10 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(replies) = client.fetch_events(reply_filter, Duration::from_secs(5)).await {
+            if let Ok(replies) = client
+                .fetch_events(reply_filter, Duration::from_secs(5))
+                .await
+            {
                 reply_count.set(replies.len());
             }
 
@@ -168,9 +186,15 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(reposts) = client.fetch_events(repost_filter, Duration::from_secs(5)).await {
+            if let Ok(reposts) = client
+                .fetch_events(repost_filter, Duration::from_secs(5))
+                .await
+            {
                 // Get current user's pubkey to check if they've already reposted
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
                 let mut user_has_reposted = false;
 
                 // Check if current user has reposted
@@ -193,24 +217,40 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
-                let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
-                    // Look for the description tag which contains the zap request
-                    zap_event.tags.iter().find_map(|tag| {
-                        let tag_vec = tag.clone().to_vec();
-                        if tag_vec.first()?.as_str() == "description" {
-                            // Parse the JSON zap request
-                            let zap_request_json = tag_vec.get(1)?.as_str();
-                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                // Find the amount tag in the zap request
-                                if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
-                                    for tag_array in tags {
-                                        if let Some(tag_vals) = tag_array.as_array() {
-                                            if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                    // Amount is in millisats, convert to sats
-                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                        return Some(millisats / 1000);
+            if let Ok(zaps) = client
+                .fetch_events(zap_filter, Duration::from_secs(5))
+                .await
+            {
+                let total_sats: u64 = zaps
+                    .iter()
+                    .filter_map(|zap_event| {
+                        // Look for the description tag which contains the zap request
+                        zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "description" {
+                                // Parse the JSON zap request
+                                let zap_request_json = tag_vec.get(1)?.as_str();
+                                if let Ok(zap_request) =
+                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                {
+                                    // Find the amount tag in the zap request
+                                    if let Some(tags) =
+                                        zap_request.get("tags").and_then(|t| t.as_array())
+                                    {
+                                        for tag_array in tags {
+                                            if let Some(tag_vals) = tag_array.as_array() {
+                                                if tag_vals.first().and_then(|v| v.as_str())
+                                                    == Some("amount")
+                                                {
+                                                    if let Some(amount_str) =
+                                                        tag_vals.get(1).and_then(|v| v.as_str())
+                                                    {
+                                                        // Amount is in millisats, convert to sats
+                                                        if let Ok(millisats) =
+                                                            amount_str.parse::<u64>()
+                                                        {
+                                                            return Some(millisats / 1000);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -218,10 +258,10 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     }
                                 }
                             }
-                        }
-                        None
+                            None
+                        })
                     })
-                }).sum();
+                    .sum();
 
                 zap_amount_sats.set(total_sats);
             }
@@ -796,4 +836,3 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
         }
     }
 }
-

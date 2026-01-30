@@ -1,18 +1,22 @@
+use crate::components::icons::BookmarkIcon;
+use crate::stores::webbookmarks::{
+    delete_webbookmark, get_display_hashtags, get_domain, get_image, get_published_at, get_title,
+    get_url, is_archived, is_favorite, toggle_favorite,
+};
+use crate::utils::format_relative_time_or;
 use dioxus::prelude::*;
 use nostr_sdk::Event as NostrEvent;
-use crate::stores::webbookmarks::{
-    get_url, get_title, get_display_hashtags, get_image, get_published_at,
-    get_domain, is_favorite, is_archived, toggle_favorite, delete_webbookmark
-};
-use crate::components::icons::BookmarkIcon;
-use crate::utils::format_relative_time_or;
 
 #[component]
 pub fn WebBookmarkCard(event: NostrEvent, on_edit: Option<EventHandler<NostrEvent>>) -> Element {
     // Extract bookmark metadata
     let url = get_url(&event);
     let title = get_title(&event);
-    let description = if event.content.is_empty() { None } else { Some(event.content.clone()) };
+    let description = if event.content.is_empty() {
+        None
+    } else {
+        Some(event.content.clone())
+    };
     let image_url = get_image(&event);
     let published_at = get_published_at(&event);
     let hashtags = get_display_hashtags(&event);

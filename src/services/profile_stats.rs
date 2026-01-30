@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
-use std::collections::HashMap;
 
 const NOSTR_BAND_API: &str = "https://api.nostr.band";
 
@@ -53,15 +53,20 @@ pub async fn fetch_profile_stats(pubkey: &str) -> Result<ProfileStats, String> {
     }
 
     // Parse JSON response
-    let json = JsFuture::from(resp.json().map_err(|e| format!("Failed to get JSON: {:?}", e))?)
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let json = JsFuture::from(
+        resp.json()
+            .map_err(|e| format!("Failed to get JSON: {:?}", e))?,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
     let response: NostrBandStatsResponse = serde_wasm_bindgen::from_value(json)
         .map_err(|e| format!("Failed to deserialize: {:?}", e))?;
 
     // Extract stats for this pubkey
-    response.stats.get(pubkey)
+    response
+        .stats
+        .get(pubkey)
         .cloned()
         .ok_or_else(|| format!("No stats found for pubkey: {}", pubkey))
 }

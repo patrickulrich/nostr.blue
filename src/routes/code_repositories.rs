@@ -2,13 +2,13 @@
 //!
 //! User's Git repositories list (NIP-34).
 
-use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
-use crate::components::{CodeRepoCard, icons};
+use crate::components::{icons, CodeRepoCard};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_user_repositories;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
 
 /// Code repositories page component
 #[component]

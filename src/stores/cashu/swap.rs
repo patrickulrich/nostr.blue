@@ -38,9 +38,7 @@ use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
 use super::denomination::DenominationStrategy;
-use super::events::{
-    queue_signed_event_for_retry, update_token_event_id,
-};
+use super::events::{queue_signed_event_for_retry, update_token_event_id};
 use super::internal::get_or_create_wallet;
 use super::proofs::{
     cdk_proof_to_proof_data, get_event_ids_for_proofs, proof_data_to_cdk_proof,
@@ -258,19 +256,16 @@ pub async fn execute_swap_with_nip60(
     }
 
     // Full validation: compare proof secrets to ensure exact match
-    let input_secrets_set: std::collections::HashSet<_> = input_proofs
-        .iter()
-        .map(|p| &p.secret)
-        .collect();
-    let wallet_secrets: std::collections::HashSet<_> = all_spendable
-        .iter()
-        .map(|p| &p.secret)
-        .collect();
+    let input_secrets_set: std::collections::HashSet<_> =
+        input_proofs.iter().map(|p| &p.secret).collect();
+    let wallet_secrets: std::collections::HashSet<_> =
+        all_spendable.iter().map(|p| &p.secret).collect();
 
     if input_secrets_set != wallet_secrets {
         return Err(
             "Proof set mismatch: input proofs don't match wallet's spendable proofs. \
-             Ensure you're passing the complete set from get_proofs_for_mint().".to_string()
+             Ensure you're passing the complete set from get_proofs_for_mint()."
+                .to_string(),
         );
     }
 
@@ -344,7 +339,10 @@ pub async fn execute_swap_with_nip60(
         .collect::<Result<HashSet<_>, _>>()
         .map_err(|e| format!("Failed to compute Y for pre-swap proof: {}", e))?;
 
-    log::debug!("Pre-swap snapshot: {} existing unspent proofs", pre_swap_ys.len());
+    log::debug!(
+        "Pre-swap snapshot: {} existing unspent proofs",
+        pre_swap_ys.len()
+    );
 
     let amount = options.amount.map(cdk::Amount::from);
     let split_target = options.denomination.to_split_target();
@@ -476,19 +474,25 @@ pub async fn execute_swap_with_nip60(
 
     // 7. Attempt Nostr publish (safe to fail - local state already updated)
     // nostr-sdk saves to local database before relay transmission
-    let final_event_id =
-        match publish_swap_events(&mint_url, &output_proofs, &event_ids_to_delete, &pending_event_id).await {
-            Ok(real_id) => {
-                // Update token with real Nostr event ID
-                update_token_event_id(&pending_event_id, &real_id);
-                real_id
-            }
-            Err(e) => {
-                // Event already queued for retry by publish_swap_events
-                log::warn!("Nostr publish failed, queued for retry: {}", e);
-                pending_event_id.clone()
-            }
-        };
+    let final_event_id = match publish_swap_events(
+        &mint_url,
+        &output_proofs,
+        &event_ids_to_delete,
+        &pending_event_id,
+    )
+    .await
+    {
+        Ok(real_id) => {
+            // Update token with real Nostr event ID
+            update_token_event_id(&pending_event_id, &real_id);
+            real_id
+        }
+        Err(e) => {
+            // Event already queued for retry by publish_swap_events
+            log::warn!("Nostr publish failed, queued for retry: {}", e);
+            pending_event_id.clone()
+        }
+    };
 
     // 8. Create history event using nostr-sdk SpendingHistory
     // Use "in" direction - we're receiving new proofs (swap creates new tokens)
@@ -663,9 +667,11 @@ async fn publish_swap_events(
             if output.success.is_empty() {
                 // nostr-sdk pattern: MachineReadablePrefix::Duplicate parses "duplicate:" prefix
                 // Some relays incorrectly return status: false for duplicates, check failed map
-                let all_duplicates = !output.failed.is_empty() && output.failed.values().all(|err| {
-                    err.to_lowercase().starts_with("duplicate:")
-                });
+                let all_duplicates = !output.failed.is_empty()
+                    && output
+                        .failed
+                        .values()
+                        .all(|err| err.to_lowercase().starts_with("duplicate:"));
 
                 if all_duplicates {
                     log::debug!(
@@ -684,7 +690,8 @@ async fn publish_swap_events(
                         PendingEventType::TokenEvent,
                         Some(pending_event_id.to_string()),
                         Some(mint_url.to_string()),
-                    ).await;
+                    )
+                    .await;
 
                     // Do NOT queue deletion events here - token event not confirmed yet.
                     // Deletions will be handled by publish_deletion_events after token retry succeeds.
@@ -713,7 +720,8 @@ async fn publish_swap_events(
                 PendingEventType::TokenEvent,
                 Some(pending_event_id.to_string()),
                 Some(mint_url.to_string()),
-            ).await;
+            )
+            .await;
 
             // Do NOT queue deletion events here - token event not confirmed yet.
             // Deletions will be handled by publish_deletion_events after token retry succeeds.
@@ -728,8 +736,14 @@ async fn publish_swap_events(
 ///
 /// CDK pattern: centralize tag building for publish_deletion_events
 fn build_deletion_tags(event_ids: &[EventId]) -> Vec<nostr_sdk::Tag> {
-    let mut tags: Vec<_> = event_ids.iter().map(|eid| nostr_sdk::Tag::event(*eid)).collect();
-    tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]));
+    let mut tags: Vec<_> = event_ids
+        .iter()
+        .map(|eid| nostr_sdk::Tag::event(*eid))
+        .collect();
+    tags.push(nostr_sdk::Tag::custom(
+        nostr_sdk::TagKind::custom("k"),
+        ["7375"],
+    ));
     tags
 }
 
@@ -755,15 +769,19 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
     }
 
     let tags = build_deletion_tags(&valid_event_ids);
-    let deletion_builder =
-        nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
+    let deletion_builder = nostr_sdk::EventBuilder::new(Kind::from(5), "Swapped token").tags(tags);
 
     match client.send_event_builder(deletion_builder.clone()).await {
         Ok(output) => {
             if output.success.is_empty() {
                 log::warn!("No relays accepted deletion event, queuing for retry");
-                super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None)
-                    .await;
+                super::events::queue_event_for_retry(
+                    deletion_builder,
+                    PendingEventType::DeletionEvent,
+                    None,
+                    None,
+                )
+                .await;
             } else {
                 log::info!(
                     "Published deletion events for {} token events (to {}/{} relays)",
@@ -775,8 +793,13 @@ async fn publish_deletion_events(client: &nostr_sdk::Client, event_ids_to_delete
         }
         Err(e) => {
             log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-            super::events::queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None)
-                .await;
+            super::events::queue_event_for_retry(
+                deletion_builder,
+                PendingEventType::DeletionEvent,
+                None,
+                None,
+            )
+            .await;
         }
     }
 

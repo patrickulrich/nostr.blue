@@ -2,8 +2,8 @@
 //!
 //! Displays full badge information with accept/reject actions.
 
-use dioxus::prelude::*;
 use dioxus::dioxus_core::Task;
+use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
@@ -52,7 +52,7 @@ pub fn BadgeDetailModal(
 
         // Cancel any existing timeout - write().take() swaps with None via std::mem::take
         if let Some(task) = timeout_task.write().take() {
-            task.cancel();  // Immediately removes future from scheduler
+            task.cancel(); // Immediately removes future from scheduler
         }
 
         if current_state != ProcessingState::Idle {
@@ -62,7 +62,7 @@ pub fn BadgeDetailModal(
                     log::warn!("Processing state timed out, resetting to Idle");
                     processing_state.set(ProcessingState::Idle);
                 }
-                timeout_task.set(None);  // Clear handle when timer completes naturally
+                timeout_task.set(None); // Clear handle when timer completes naturally
             });
             timeout_task.set(Some(task));
         }

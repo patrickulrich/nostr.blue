@@ -1,31 +1,23 @@
-use dioxus::prelude::*;
 use crate::stores::cashu::{self, TransferProgress, TRANSFER_PROGRESS};
 use crate::utils::shorten_url;
+use dioxus::prelude::*;
 
 /// Select a valid mint from the list, optionally excluding one mint
-fn select_valid_mint(
-    current: &str,
-    mints: &[String],
-    exclude: Option<&str>,
-) -> Option<String> {
+fn select_valid_mint(current: &str, mints: &[String], exclude: Option<&str>) -> Option<String> {
     // If current is valid and not excluded, keep it
-    if !current.is_empty()
-        && mints.iter().any(|m| m == current)
-        && (exclude != Some(current))
-    {
+    if !current.is_empty() && mints.iter().any(|m| m == current) && (exclude != Some(current)) {
         return Some(current.to_string());
     }
 
     // Otherwise, find first valid alternative
-    mints.iter()
+    mints
+        .iter()
         .find(|m| exclude.is_none_or(|ex| *m != ex))
         .cloned()
 }
 
 #[component]
-pub fn CashuTransferModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
     let mut amount = use_signal(String::new);
     // Use memo for reactive mint list that updates when WALLET_STATE changes
     let mints = use_memo(cashu::get_mints);
@@ -56,7 +48,11 @@ pub fn CashuTransferModal(
         // Initialize target mint if empty or invalid (prefer different from source)
         if target.is_empty() || !current_mints.contains(&target) {
             let current_source = source_mint.read().clone();
-            if let Some(new_target) = current_mints.iter().find(|m| **m != current_source).or(current_mints.first()) {
+            if let Some(new_target) = current_mints
+                .iter()
+                .find(|m| **m != current_source)
+                .or(current_mints.first())
+            {
                 target_mint.set(new_target.clone());
             }
         }
@@ -67,7 +63,8 @@ pub fn CashuTransferModal(
                 source_mint.set(new_source.clone());
             }
 
-            if let Some(new_target) = select_valid_mint(&target, &current_mints, Some(&new_source)) {
+            if let Some(new_target) = select_valid_mint(&target, &current_mints, Some(&new_source))
+            {
                 if new_target != target {
                     target_mint.set(new_target);
                 }
@@ -147,7 +144,9 @@ pub fn CashuTransferModal(
         }
 
         if source == target {
-            error_message.set(Some("Source and target mints must be different".to_string()));
+            error_message.set(Some(
+                "Source and target mints must be different".to_string(),
+            ));
             return;
         }
 

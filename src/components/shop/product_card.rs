@@ -1,10 +1,10 @@
 //! ProductCard component - displays a product in a grid
 
-use dioxus::prelude::*;
-use crate::utils::nip99::Product;
+use super::{ConditionBadge, PriceDisplay};
 use crate::routes::Route;
 use crate::stores::shop_store::add_to_cart;
-use super::{PriceDisplay, ConditionBadge};
+use crate::utils::nip99::Product;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ProductCardProps {

@@ -2,12 +2,14 @@
 //!
 //! Displays file content at a specific path and ref.
 
-use dioxus::prelude::*;
+use crate::components::{
+    BranchSelector, CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb,
+};
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
-use crate::components::{CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb, BranchSelector};
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 #[component]
 pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
@@ -103,7 +105,10 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                 }
 
                 // Read file content
-                match git_service().read_file(&repo, &decoded_path, Some(&git_ref)).await {
+                match git_service()
+                    .read_file(&repo, &decoded_path, Some(&git_ref))
+                    .await
+                {
                     Ok(file_content) => {
                         content.set(file_content);
                     }

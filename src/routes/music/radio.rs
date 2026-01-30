@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
+use dioxus::prelude::*;
 
 #[component]
 pub fn MusicRadio() -> Element {
@@ -11,15 +11,31 @@ pub fn MusicRadio() -> Element {
     let mut radio_started = use_signal(|| false);
 
     let genres = [
-        "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
-        "Classical", "Blues", "Country", "Reggae", "Punk", "Metal",
-        "R&B", "Alternative", "Indie", "Ambient"
+        "all",
+        "Rock",
+        "Pop",
+        "Hip-Hop",
+        "Electronic",
+        "Folk",
+        "Jazz",
+        "Classical",
+        "Blues",
+        "Country",
+        "Reggae",
+        "Punk",
+        "Metal",
+        "R&B",
+        "Alternative",
+        "Indie",
+        "Ambient",
     ];
 
-    let time_periods = [(1, "24 hours"),
+    let time_periods = [
+        (1, "24 hours"),
         (7, "7 days"),
         (30, "30 days"),
-        (90, "90 days")];
+        (90, "90 days"),
+    ];
 
     // Start radio
     let start_radio = move |_| {
@@ -30,18 +46,23 @@ pub fn MusicRadio() -> Element {
         spawn(async move {
             log::info!("Starting radio: genre={}, days={}", genre, days);
             let api = WavlakeAPI::new();
-            let genre_filter = if genre == "all" { None } else { Some(genre.as_str()) };
+            let genre_filter = if genre == "all" {
+                None
+            } else {
+                Some(genre.as_str())
+            };
 
-            match api.get_rankings("sats", Some(days), None, None, genre_filter, Some(100)).await {
+            match api
+                .get_rankings("sats", Some(days), None, None, genre_filter, Some(100))
+                .await
+            {
                 Ok(tracks) => {
                     if !tracks.is_empty() {
                         log::info!("Loaded {} tracks for radio", tracks.len());
 
                         // Convert to MusicTrack and shuffle
-                        let mut music_tracks: Vec<MusicTrack> = tracks
-                            .into_iter()
-                            .map(|t| t.into())
-                            .collect();
+                        let mut music_tracks: Vec<MusicTrack> =
+                            tracks.into_iter().map(|t| t.into()).collect();
 
                         // Simple shuffle using current timestamp
                         use js_sys::Date;

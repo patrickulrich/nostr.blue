@@ -2,11 +2,11 @@
 //!
 //! Functions for streaming events with callbacks for progressive UI updates.
 
-use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
-use super::fetching::{get_client, ensure_relays_ready, fetch_events_aggregated_outbox};
+use super::fetching::{ensure_relays_ready, fetch_events_aggregated_outbox, get_client};
 use super::platform_sleep_ms;
 use super::signals::HAS_SIGNER;
 use crate::stores::relay::USER_RELAYS_APPLIED;
@@ -52,7 +52,10 @@ where
         }
 
         if *USER_RELAYS_APPLIED.peek() {
-            log::debug!("Streaming callback: User relays applied after {}ms", start.elapsed().as_millis());
+            log::debug!(
+                "Streaming callback: User relays applied after {}ms",
+                start.elapsed().as_millis()
+            );
         } else {
             log::warn!("Streaming callback: User relays not applied after timeout");
         }
@@ -60,7 +63,8 @@ where
 
     ensure_relays_ready(&client).await;
 
-    let mut stream = client.stream_events(filter, timeout)
+    let mut stream = client
+        .stream_events(filter, timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
 
@@ -123,9 +127,14 @@ where
         }
 
         if *USER_RELAYS_APPLIED.peek() {
-            log::debug!("Streaming: User relay lists applied after {}ms", start.elapsed().as_millis());
+            log::debug!(
+                "Streaming: User relay lists applied after {}ms",
+                start.elapsed().as_millis()
+            );
         } else {
-            log::warn!("Streaming: User relay lists not applied after timeout, proceeding with defaults");
+            log::warn!(
+                "Streaming: User relay lists not applied after timeout, proceeding with defaults"
+            );
         }
     }
 
@@ -135,14 +144,16 @@ where
     // Capture authors for client-side filtering (defense-in-depth)
     // Must be before stream_events consumes the filter
     let filter_authors = filter.authors.clone();
-    let author_set: Option<std::collections::HashSet<_>> = filter_authors.as_ref()
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors
+        .as_ref()
         .map(|authors| authors.iter().collect());
 
-    let mut stream = client.stream_events(filter, timeout)
+    let mut stream = client
+        .stream_events(filter, timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
 
-    let mut accepted_count = 0;  // Renamed from total_count - only counts accepted events
+    let mut accepted_count = 0; // Renamed from total_count - only counts accepted events
     let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
 
@@ -151,7 +162,7 @@ where
         if let Some(ref authors) = author_set {
             if !authors.contains(&event.pubkey) {
                 filtered_count += 1;
-                continue;  // Skip events from non-matching authors
+                continue; // Skip events from non-matching authors
             }
         }
 
@@ -172,9 +183,16 @@ where
     }
 
     if filtered_count > 0 {
-        log::info!("Stream completed: {} accepted events ({} filtered out from non-matching authors)", accepted_count, filtered_count);
+        log::info!(
+            "Stream completed: {} accepted events ({} filtered out from non-matching authors)",
+            accepted_count,
+            filtered_count
+        );
     } else {
-        log::info!("Stream completed: received {} events in batches", accepted_count);
+        log::info!(
+            "Stream completed: received {} events in batches",
+            accepted_count
+        );
     }
     Ok(accepted_count)
 }
@@ -219,12 +237,16 @@ where
         return stream_events_batched(filter, timeout, batch_size, on_batch).await;
     }
 
-    log::info!("Fast streaming from {} connected relays (bypassing gossip)", connected_urls.len());
+    log::info!(
+        "Fast streaming from {} connected relays (bypassing gossip)",
+        connected_urls.len()
+    );
 
     // Capture authors for client-side filtering (defense-in-depth)
     // Relays may return events from any author, ignoring the filter
     let filter_authors = filter.authors.clone();
-    let author_set: Option<std::collections::HashSet<_>> = filter_authors.as_ref()
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors
+        .as_ref()
         .map(|authors| authors.iter().collect());
 
     // Use stream_events_from which bypasses gossip entirely
@@ -233,7 +255,7 @@ where
         .await
         .map_err(|e| format!("Failed to create stream: {}", e))?;
 
-    let mut accepted_count = 0;  // Renamed from total_count - only counts accepted events
+    let mut accepted_count = 0; // Renamed from total_count - only counts accepted events
     let mut filtered_count = 0;
     let mut batch = Vec::with_capacity(batch_size);
 
@@ -242,7 +264,7 @@ where
         if let Some(ref authors) = author_set {
             if !authors.contains(&event.pubkey) {
                 filtered_count += 1;
-                continue;  // Skip events from non-followed authors
+                continue; // Skip events from non-followed authors
             }
         }
 
@@ -261,9 +283,16 @@ where
     }
 
     if filtered_count > 0 {
-        log::info!("Fast stream completed: {} accepted events ({} filtered out from non-followed authors)", accepted_count, filtered_count);
+        log::info!(
+            "Fast stream completed: {} accepted events ({} filtered out from non-followed authors)",
+            accepted_count,
+            filtered_count
+        );
     } else {
-        log::info!("Fast stream completed: {} events from connected relays", accepted_count);
+        log::info!(
+            "Fast stream completed: {} events from connected relays",
+            accepted_count
+        );
     }
     Ok(accepted_count)
 }
@@ -287,7 +316,8 @@ pub async fn stream_events_collected(
 
     let client = get_client().ok_or("Client not initialized")?;
 
-    let mut stream = client.stream_events(filter, timeout)
+    let mut stream = client
+        .stream_events(filter, timeout)
         .await
         .map_err(|e| format!("Failed to create event stream: {}", e))?;
 

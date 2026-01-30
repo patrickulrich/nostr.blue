@@ -22,8 +22,7 @@ pub struct RecipeDetails {
 }
 
 /// Parsed recipe content from markdown
-#[derive(Clone, Debug, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct ParsedRecipe {
     pub chef_notes: Option<String>,
     pub details: RecipeDetails,
@@ -31,7 +30,6 @@ pub struct ParsedRecipe {
     pub directions: Vec<String>,
     pub additional_resources: Option<String>,
 }
-
 
 /// Recipe metadata extracted from event tags
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -73,13 +71,19 @@ impl std::fmt::Display for ValidationError {
             ValidationError::MissingSections => write!(f, "Recipe sections are missing"),
             ValidationError::NoIngredients => write!(f, "At least one ingredient is required"),
             ValidationError::NoDirections => write!(f, "At least one direction step is required"),
-            ValidationError::InvalidDirectionFormat(msg) => write!(f, "Invalid direction format: {}", msg),
+            ValidationError::InvalidDirectionFormat(msg) => {
+                write!(f, "Invalid direction format: {}", msg)
+            }
             ValidationError::ChefNotesTooLong => write!(f, "Chef's notes exceed character limit"),
             ValidationError::PrepTimeTooLong => write!(f, "Prep time exceeds character limit"),
             ValidationError::CookTimeTooLong => write!(f, "Cook time exceeds character limit"),
             ValidationError::ServingsTooLong => write!(f, "Servings exceed character limit"),
-            ValidationError::IngredientTooLong => write!(f, "An ingredient exceeds character limit"),
-            ValidationError::DirectionTooLong => write!(f, "A direction step exceeds character limit"),
+            ValidationError::IngredientTooLong => {
+                write!(f, "An ingredient exceeds character limit")
+            }
+            ValidationError::DirectionTooLong => {
+                write!(f, "A direction step exceeds character limit")
+            }
         }
     }
 }
@@ -222,9 +226,10 @@ fn parse_directions(content: &str) -> Result<Vec<String>, ValidationError> {
             let step_text = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
 
             if step_num != expected_step {
-                return Err(ValidationError::InvalidDirectionFormat(
-                    format!("Expected step {}, found step {}", expected_step, step_num)
-                ));
+                return Err(ValidationError::InvalidDirectionFormat(format!(
+                    "Expected step {}, found step {}",
+                    expected_step, step_num
+                )));
             }
 
             // Start a new step
@@ -288,10 +293,7 @@ pub fn extract_metadata(event: &Event) -> RecipeMetadata {
         .collect();
 
     // Identifier (d tag)
-    meta.identifier = event
-        .tags
-        .identifier()
-        .map(|s| s.to_string());
+    meta.identifier = event.tags.identifier().map(|s| s.to_string());
 
     // Published at
     meta.published_at = event
@@ -307,9 +309,9 @@ pub fn extract_metadata(event: &Event) -> RecipeMetadata {
         .tags
         .hashtags()
         .filter(|tag| {
-            RECIPE_TAG_PREFIXES.iter().any(|prefix| {
-                tag.starts_with(prefix) && *tag != *prefix
-            })
+            RECIPE_TAG_PREFIXES
+                .iter()
+                .any(|prefix| tag.starts_with(prefix) && *tag != *prefix)
         })
         .map(|tag| {
             // Remove prefix to get clean tag name (try all prefixes)
@@ -327,7 +329,10 @@ pub fn extract_metadata(event: &Event) -> RecipeMetadata {
 
 /// Check if an event is a recipe (has nostrcooking or zapcooking tag)
 pub fn is_recipe_event(event: &Event) -> bool {
-    event.tags.hashtags().any(|tag| RECIPE_TAG_PREFIXES.contains(&tag))
+    event
+        .tags
+        .hashtags()
+        .any(|tag| RECIPE_TAG_PREFIXES.contains(&tag))
 }
 
 #[cfg(test)]
@@ -367,7 +372,10 @@ Check out my other recipes!
         assert!(result.is_ok());
 
         let recipe = result.unwrap();
-        assert_eq!(recipe.chef_notes, Some("This is a simple test recipe.".to_string()));
+        assert_eq!(
+            recipe.chef_notes,
+            Some("This is a simple test recipe.".to_string())
+        );
         assert_eq!(recipe.details.prep_time, Some("10 minutes".to_string()));
         assert_eq!(recipe.details.cook_time, Some("20 minutes".to_string()));
         assert_eq!(recipe.details.servings, Some("4".to_string()));

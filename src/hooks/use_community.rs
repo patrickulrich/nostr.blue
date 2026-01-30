@@ -8,24 +8,22 @@
 use dioxus::prelude::*;
 use std::collections::HashSet;
 
-use crate::stores::community_store::{
-    Community, CommunityPost, CommunityThread, JoinRequest, MembershipStatus,
-    CommunityWithMembership,
-    fetch_community_by_a_tag, fetch_community_posts, fetch_pending_posts,
-    fetch_approved_members, approve_post, remove_post, post_to_community,
-    reply_to_post as store_reply_to_post, build_community_thread_tree,
-    get_user_role, can_moderate, UserRole, get_membership_status,
-    submit_join_request, approve_join_request, decline_join_request,
-    fetch_community_join_requests,
-    sort_communities_by_membership,
-};
-use crate::stores::pinned_communities::{
-    pin_community, unpin_community,
-    get_pinned_communities, get_pinned_communities_set, init_pinned_communities,
-};
-use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
 use crate::services::aggregation::{fetch_interaction_counts_batch, InteractionCounts};
 use crate::stores::auth_store;
+use crate::stores::community_store::{
+    approve_join_request, approve_post, build_community_thread_tree, can_moderate,
+    decline_join_request, fetch_approved_members, fetch_community_by_a_tag,
+    fetch_community_join_requests, fetch_community_posts, fetch_pending_posts,
+    get_membership_status, get_user_role, post_to_community, remove_post,
+    reply_to_post as store_reply_to_post, sort_communities_by_membership, submit_join_request,
+    Community, CommunityPost, CommunityThread, CommunityWithMembership, JoinRequest,
+    MembershipStatus, UserRole,
+};
+use crate::stores::pinned_communities::{
+    get_pinned_communities, get_pinned_communities_set, init_pinned_communities, pin_community,
+    unpin_community,
+};
+use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
 
 /// State of a community action
 #[derive(Clone, Debug, PartialEq)]
@@ -73,9 +71,7 @@ pub fn use_community_actions(community: Community) -> UseCommunityActions {
     let community_for_post = community.clone();
     let community_for_reply = community.clone();
 
-    let is_pending = use_memo(move || {
-        matches!(*state.read(), CommunityActionState::Pending)
-    });
+    let is_pending = use_memo(move || matches!(*state.read(), CommunityActionState::Pending));
 
     // Approve handler
     let approve = use_callback(move |post: CommunityPost| {
@@ -352,9 +348,12 @@ pub fn use_post_interaction_counts(posts: Vec<CommunityPost>) -> Signal<PostInte
                 return;
             }
 
-            match fetch_interaction_counts_batch(event_ids, std::time::Duration::from_secs(5)).await {
+            match fetch_interaction_counts_batch(event_ids, std::time::Duration::from_secs(5)).await
+            {
                 Ok(batch_counts) => {
-                    counts.set(PostInteractionCounts { counts: batch_counts });
+                    counts.set(PostInteractionCounts {
+                        counts: batch_counts,
+                    });
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch interaction counts: {}", e);
@@ -432,9 +431,7 @@ pub fn use_join_request(community: Community) -> UseJoinRequestActions {
     let mut state = use_signal(|| CommunityActionState::Idle);
     let community_for_submit = community.clone();
 
-    let is_pending = use_memo(move || {
-        matches!(*state.read(), CommunityActionState::Pending)
-    });
+    let is_pending = use_memo(move || matches!(*state.read(), CommunityActionState::Pending));
 
     // Submit join request handler
     let submit = use_callback(move |reason: Option<String>| {
@@ -489,8 +486,8 @@ pub struct UseJoinRequestManagement {
 
 impl PartialEq for UseJoinRequestManagement {
     fn eq(&self, other: &Self) -> bool {
-        *self.state.read() == *other.state.read() &&
-        self.pending_requests.read().len() == other.pending_requests.read().len()
+        *self.state.read() == *other.state.read()
+            && self.pending_requests.read().len() == other.pending_requests.read().len()
     }
 }
 
@@ -676,10 +673,6 @@ pub fn use_sorted_communities(communities: Vec<Community>) -> Memo<Vec<Community
         let current_pubkey = auth_store::get_pubkey();
         let pinned_set = get_pinned_communities_set();
 
-        sort_communities_by_membership(
-            communities.clone(),
-            current_pubkey.as_deref(),
-            &pinned_set,
-        )
+        sort_communities_by_membership(communities.clone(), current_pubkey.as_deref(), &pinned_set)
     })
 }

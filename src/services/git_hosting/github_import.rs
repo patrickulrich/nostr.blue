@@ -45,10 +45,7 @@ pub struct GitHubOwner {
 
 /// Parse a GitHub URL to extract owner and repo
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
-    let url = url
-        .trim()
-        .trim_end_matches(".git")
-        .trim_end_matches('/');
+    let url = url.trim().trim_end_matches(".git").trim_end_matches('/');
 
     // Handle various formats:
     // https://github.com/owner/repo
@@ -58,7 +55,13 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
     if url.contains("github.com") {
         let parts: Vec<&str> = url
             .split(['/', ':'])
-            .filter(|s| !s.is_empty() && *s != "https" && *s != "http" && *s != "git@github.com" && *s != "github.com")
+            .filter(|s| {
+                !s.is_empty()
+                    && *s != "https"
+                    && *s != "http"
+                    && *s != "git@github.com"
+                    && *s != "github.com"
+            })
             .collect();
 
         if parts.len() >= 2 {
@@ -85,7 +88,11 @@ pub async fn fetch_github_repo(owner: &str, repo: &str) -> Result<GitHubRepo, St
     }
 
     if !response.ok() {
-        return Err(format!("GitHub API error: {} {}", response.status(), response.status_text()));
+        return Err(format!(
+            "GitHub API error: {} {}",
+            response.status(),
+            response.status_text()
+        ));
     }
 
     response
@@ -96,8 +103,8 @@ pub async fn fetch_github_repo(owner: &str, repo: &str) -> Result<GitHubRepo, St
 
 /// Fetch repository from URL
 pub async fn fetch_repo_from_url(github_url: &str) -> Result<GitHubRepo, String> {
-    let (owner, repo) = parse_github_url(github_url)
-        .ok_or_else(|| "Invalid GitHub URL".to_string())?;
+    let (owner, repo) =
+        parse_github_url(github_url).ok_or_else(|| "Invalid GitHub URL".to_string())?;
 
     fetch_github_repo(&owner, &repo).await
 }
@@ -181,7 +188,11 @@ pub struct GitHubCommitAuthor {
 }
 
 /// Fetch recent commits
-pub async fn fetch_commits(owner: &str, repo: &str, limit: usize) -> Result<Vec<GitHubCommit>, String> {
+pub async fn fetch_commits(
+    owner: &str,
+    repo: &str,
+    limit: usize,
+) -> Result<Vec<GitHubCommit>, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/commits?per_page={}",
         owner, repo, limit
@@ -206,10 +217,7 @@ pub async fn fetch_commits(owner: &str, repo: &str, limit: usize) -> Result<Vec<
 
 /// Fetch branches
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/branches",
-        owner, repo
-    );
+    let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);
 
     let response = Request::get(&url)
         .header("Accept", "application/vnd.github.v3+json")

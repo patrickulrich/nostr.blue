@@ -2,9 +2,9 @@
 //!
 //! Displays a repository card for lists and discovery pages.
 
-use dioxus::prelude::*;
-use crate::utils::nip34::Repository;
 use crate::routes::Route;
+use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 /// Repository card component
 #[component]

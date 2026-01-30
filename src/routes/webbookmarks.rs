@@ -1,7 +1,10 @@
-use dioxus::prelude::*;
-use crate::stores::{nostr_client, webbookmarks};
-use crate::components::{WebBookmarkCard, WebBookmarkCardSkeleton, WebBookmarkModal, BookmarkModalMode, ClientInitializing};
+use crate::components::{
+    BookmarkModalMode, ClientInitializing, WebBookmarkCard, WebBookmarkCardSkeleton,
+    WebBookmarkModal,
+};
 use crate::hooks::use_infinite_scroll;
+use crate::stores::{nostr_client, webbookmarks};
+use dioxus::prelude::*;
 use nostr_sdk::Event;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -169,7 +172,8 @@ pub fn WebBookmarks() -> Element {
 
                     // Filter out duplicates before appending
                     let current = bookmarks.read().clone();
-                    let existing_ids: std::collections::HashSet<_> = current.iter().map(|e| e.id).collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        current.iter().map(|e| e.id).collect();
 
                     let filtered_bookmarks: Vec<_> = new_bookmarks
                         .into_iter()
@@ -243,7 +247,6 @@ pub fn WebBookmarks() -> Element {
         });
     };
 
-
     // Filter and sort bookmarks
     let filtered_bookmarks = use_memo(move || {
         let bookmarks_list = bookmarks.read();
@@ -259,7 +262,9 @@ pub fn WebBookmarks() -> Element {
                 // Filter by tab
                 match current_tab {
                     FilterTab::All => !webbookmarks::is_archived(event),
-                    FilterTab::Favorites => webbookmarks::is_favorite(event) && !webbookmarks::is_archived(event),
+                    FilterTab::Favorites => {
+                        webbookmarks::is_favorite(event) && !webbookmarks::is_archived(event)
+                    }
                     FilterTab::Archived => webbookmarks::is_archived(event),
                 }
             })
@@ -269,8 +274,12 @@ pub fn WebBookmarks() -> Element {
                     return true;
                 }
 
-                let title = webbookmarks::get_title(event).unwrap_or_default().to_lowercase();
-                let url = webbookmarks::get_url(event).unwrap_or_default().to_lowercase();
+                let title = webbookmarks::get_title(event)
+                    .unwrap_or_default()
+                    .to_lowercase();
+                let url = webbookmarks::get_url(event)
+                    .unwrap_or_default()
+                    .to_lowercase();
                 let desc = event.content.to_lowercase();
 
                 title.contains(&search) || url.contains(&search) || desc.contains(&search)
@@ -300,8 +309,12 @@ pub fn WebBookmarks() -> Element {
             }
             SortOrder::Title => {
                 filtered.sort_by(|a, b| {
-                    let a_title = webbookmarks::get_title(a).unwrap_or_default().to_lowercase();
-                    let b_title = webbookmarks::get_title(b).unwrap_or_default().to_lowercase();
+                    let a_title = webbookmarks::get_title(a)
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    let b_title = webbookmarks::get_title(b)
+                        .unwrap_or_default()
+                        .to_lowercase();
                     a_title.cmp(&b_title)
                 });
             }

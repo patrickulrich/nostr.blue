@@ -2,20 +2,20 @@
 //! Displays a community post with approval status badges, moderation actions,
 //! reactions, zaps, and threading support
 
-use dioxus::prelude::*;
-use crate::stores::community_store::{
-    Community, CommunityPost, ApprovalStatus, AutoApprovalReason, UserRole,
-    approve_post, remove_post, can_moderate,
-};
+use crate::components::{CommunityPostComposer, RichContent, ZapModal};
+use crate::hooks::{use_reaction, ReactionState};
+use crate::routes::Route;
+use crate::services::aggregation::InteractionCounts;
 use crate::stores::auth_store;
+use crate::stores::community_store::{
+    approve_post, can_moderate, remove_post, ApprovalStatus, AutoApprovalReason, Community,
+    CommunityPost, UserRole,
+};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::get_cached_profile;
-use crate::services::aggregation::InteractionCounts;
-use crate::utils::format::{format_sats_human, format_relative_time_or};
+use crate::utils::format::{format_relative_time_or, format_sats_human};
 use crate::utils::validation::is_valid_http_url;
-use crate::hooks::{use_reaction, ReactionState};
-use crate::components::{RichContent, ZapModal, CommunityPostComposer};
-use crate::routes::Route;
+use dioxus::prelude::*;
 
 /// Maximum depth for visual indentation
 const MAX_VISUAL_DEPTH: usize = 4;
@@ -31,7 +31,8 @@ pub fn CommunityPostCard(
     #[props(default = false)] show_moderation: bool,
     #[props(default)] on_reply_success: Option<EventHandler<String>>,
     /// Called when a moderation action (approve/remove) completes successfully
-    #[props(default)] on_moderation_complete: Option<EventHandler<()>>,
+    #[props(default)]
+    on_moderation_complete: Option<EventHandler<()>>,
 ) -> Element {
     let mut approving = use_signal(|| false);
     let mut removing = use_signal(|| false);
@@ -83,7 +84,10 @@ pub fn CommunityPostCard(
 
     // Get counts from precomputed or default
     let reply_count = interaction_counts.as_ref().map(|c| c.replies).unwrap_or(0);
-    let zap_amount = interaction_counts.as_ref().map(|c| c.zap_amount_sats).unwrap_or(0);
+    let zap_amount = interaction_counts
+        .as_ref()
+        .map(|c| c.zap_amount_sats)
+        .unwrap_or(0);
 
     // Clone values for closures
     let post_for_approve = post.clone();
@@ -124,7 +128,11 @@ pub fn CommunityPostCard(
         error.set(None);
 
         spawn(async move {
-            let reason_opt = if reason.is_empty() { None } else { Some(reason.as_str()) };
+            let reason_opt = if reason.is_empty() {
+                None
+            } else {
+                Some(reason.as_str())
+            };
             match remove_post(&community, &post, reason_opt).await {
                 Ok(_) => {
                     log::info!("Post removed: {}", post.id);
@@ -841,4 +849,3 @@ pub fn CommunityPostCardSkeleton() -> Element {
         }
     }
 }
-

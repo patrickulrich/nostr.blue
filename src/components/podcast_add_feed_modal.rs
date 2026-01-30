@@ -3,9 +3,9 @@
 //! Modal for subscribing to new podcast RSS feeds.
 //! Validates the feed URL, previews podcast metadata, and saves to NIP-51 list.
 
-use dioxus::prelude::*;
 use crate::services::podcast_index;
 use crate::stores::{nostr_client, podcast_subscription};
+use dioxus::prelude::*;
 
 /// Modal for adding a podcast RSS feed subscription
 #[component]
@@ -60,10 +60,17 @@ pub fn PodcastAddFeedModal(
             // Use Podcast Index API to look up by feed URL - this gives us the podcast ID
             match podcast_index::get_podcast_by_url(&url).await {
                 Ok(feed) => {
-                    log::info!("Found podcast: {} (id: {}, guid: {:?})", feed.title, feed.id, feed.podcast_guid);
+                    log::info!(
+                        "Found podcast: {} (id: {}, guid: {:?})",
+                        feed.title,
+                        feed.id,
+                        feed.podcast_guid
+                    );
                     // Require GUID for NIP-73 compliance
                     let Some(guid) = feed.podcast_guid.clone() else {
-                        error_msg.set(Some("Podcast does not have a GUID - cannot subscribe".to_string()));
+                        error_msg.set(Some(
+                            "Podcast does not have a GUID - cannot subscribe".to_string(),
+                        ));
                         is_fetching.set(false);
                         return;
                     };
@@ -113,9 +120,20 @@ pub fn PodcastAddFeedModal(
         error_msg.set(None);
 
         spawn(async move {
-            match podcast_subscription::add_rss_subscription(&podcast_guid, Some(podcast_id), Some(&url)).await {
+            match podcast_subscription::add_rss_subscription(
+                &podcast_guid,
+                Some(podcast_id),
+                Some(&url),
+            )
+            .await
+            {
                 Ok(()) => {
-                    log::info!("Subscribed to podcast: {} (guid: {}, id: {})", url, podcast_guid, podcast_id);
+                    log::info!(
+                        "Subscribed to podcast: {} (guid: {}, id: {})",
+                        url,
+                        podcast_guid,
+                        podcast_id
+                    );
                     is_saving.set(false);
                     on_added.call(url);
                 }

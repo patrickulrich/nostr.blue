@@ -5,8 +5,8 @@
 
 use dioxus::prelude::*;
 
+use super::dialog::{DialogContent, DialogDescription, DialogRoot, DialogTitle};
 use crate::utils::markdown::render_markdown;
-use super::dialog::{DialogRoot, DialogContent, DialogTitle, DialogDescription};
 
 /// Configuration for what to publish
 #[derive(Clone, Debug, Default)]

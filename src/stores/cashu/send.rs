@@ -13,13 +13,13 @@ use super::internal::{
 };
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{try_acquire_mint_lock, WALLET_STATE, WALLET_TOKENS};
+use super::types::PendingEventType;
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, InFlightSendRequest, ProofData, TokenData,
     WalletTokensStoreStoreExt,
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
-use super::types::PendingEventType;
 
 // =============================================================================
 // Public API
@@ -72,12 +72,19 @@ pub async fn estimate_send_fee(mint_url: String, amount: u64) -> Result<u64, Str
         .map_err(|e| format!("Failed to estimate fee: {}", e))?;
 
     let fee = u64::from(prepared.fee());
-    log::debug!("Estimated fee for {} sats from {}: {} sats", amount, mint_url, fee);
+    log::debug!(
+        "Estimated fee for {} sats from {}: {} sats",
+        amount,
+        mint_url,
+        fee
+    );
 
     // Cancel the prepared send to release reserved proofs back to Unspent state
     // This is required per CDK best practices - dropping without cancel/confirm
     // leaves proofs stuck in Reserved state in IndexedDB
-    prepared.cancel().await
+    prepared
+        .cancel()
+        .await
         .map_err(|e| format!("Failed to cancel prepared send: {}", e))?;
 
     Ok(fee)
@@ -145,10 +152,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         &mint_url,
         all_proofs.clone(),
         execute_send_with_retry(
-            &mint_url,
-            amount,
-            all_proofs,
-            None, // No P2PK conditions
+            &mint_url, amount, all_proofs, None, // No P2PK conditions
         ),
     )
     .await;
@@ -190,7 +194,9 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         &keep_proofs,
         &event_ids_to_delete,
         &pending_event_id,
-    ).await {
+    )
+    .await
+    {
         Ok(Some(event_id)) => Some(event_id),
         Ok(None) => {
             // Invariant: when publish returns None, keep_proofs should be empty
@@ -325,12 +331,7 @@ pub async fn send_tokens_p2pk(
     let result = super::internal::try_operation_or_recover(
         &mint_url,
         all_proofs.clone(),
-        execute_p2pk_send_via_swap(
-            &mint_url,
-            amount,
-            all_proofs,
-            spending_conditions,
-        ),
+        execute_p2pk_send_via_swap(&mint_url, amount, all_proofs, spending_conditions),
     )
     .await;
 
@@ -371,7 +372,9 @@ pub async fn send_tokens_p2pk(
         &keep_proofs,
         &event_ids_to_delete,
         &pending_event_id,
-    ).await {
+    )
+    .await
+    {
         Ok(Some(event_id)) => Some(event_id),
         Ok(None) => {
             // Invariant: when publish returns None, keep_proofs should be empty
@@ -417,7 +420,10 @@ pub async fn send_tokens_p2pk(
 
     // Sync state
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!("Failed to sync MultiMintWallet state after P2PK send: {}", e);
+        log::warn!(
+            "Failed to sync MultiMintWallet state after P2PK send: {}",
+            e
+        );
     }
 
     log::info!(
@@ -435,7 +441,10 @@ pub async fn send_tokens_p2pk(
 pub fn get_wallet_pubkey() -> Result<String, String> {
     let wallet_state = WALLET_STATE.read();
     let state = wallet_state.as_ref().ok_or("Wallet not initialized")?;
-    let privkey = state.privkey.as_ref().ok_or("Wallet private key not available")?;
+    let privkey = state
+        .privkey
+        .as_ref()
+        .ok_or("Wallet private key not available")?;
 
     let secret_key = cdk::nuts::SecretKey::from_hex(privkey)
         .map_err(|e| format!("Invalid wallet privkey: {}", e))?;
@@ -854,7 +863,8 @@ async fn publish_send_events(
                         PendingEventType::TokenEvent,
                         Some(pending_event_id.to_string()),
                         Some(mint_url.to_string()),
-                    ).await;
+                    )
+                    .await;
                     new_event_id = Some(pending_event_id.to_string());
                 }
             }
@@ -865,7 +875,8 @@ async fn publish_send_events(
                     PendingEventType::TokenEvent,
                     Some(pending_event_id.to_string()),
                     Some(mint_url.to_string()),
-                ).await;
+                )
+                .await;
                 new_event_id = Some(pending_event_id.to_string());
             }
         }
@@ -900,17 +911,20 @@ async fn publish_send_events(
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
-                    queue_event_for_retry(deletion_builder, PendingEventType::DeletionEvent, None, None).await;
+                    queue_event_for_retry(
+                        deletion_builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
                 }
             }
         }
 
         let invalid_count = event_ids_to_delete.len() - valid_event_ids.len();
         if invalid_count > 0 {
-            log::warn!(
-                "Skipped {} invalid event IDs in deletion",
-                invalid_count
-            );
+            log::warn!("Skipped {} invalid event IDs in deletion", invalid_count);
         }
     }
 
@@ -953,7 +967,10 @@ fn update_local_state_after_send(
     // This already registers all proofs including the new ones, so no separate call needed
     super::proofs::rebuild_proof_event_map();
 
-    log::info!("Local state updated. Balance after send: {} sats", new_balance);
+    log::info!(
+        "Local state updated. Balance after send: {} sats",
+        new_balance
+    );
     Ok(())
 }
 
@@ -979,15 +996,12 @@ fn update_local_state_after_send(
 ///     log::info!("Tokens were claimed by recipient!");
 /// });
 /// ```
-pub fn watch_sent_token_claims<F>(
-    mint_url: String,
-    y_values: Vec<String>,
-    mut on_claimed: F,
-) where
+pub fn watch_sent_token_claims<F>(mint_url: String, y_values: Vec<String>, mut on_claimed: F)
+where
     F: FnMut() + 'static,
 {
-    use dioxus::prelude::spawn;
     use super::ws as cashu_ws;
+    use dioxus::prelude::spawn;
 
     if y_values.is_empty() {
         log::warn!("watch_sent_token_claims called with empty Y values");
@@ -1020,11 +1034,8 @@ pub fn watch_sent_token_claims<F>(
 
 #[allow(dead_code)] // Called by watch_sent_token_claims
 /// Poll proof states to detect when tokens are claimed (fallback for no WebSocket)
-async fn poll_for_token_claims<F>(
-    mint_url: String,
-    y_values: Vec<String>,
-    mut on_claimed: F,
-) where
+async fn poll_for_token_claims<F>(mint_url: String, y_values: Vec<String>, mut on_claimed: F)
+where
     F: FnMut() + 'static,
 {
     use super::ws as cashu_ws;
@@ -1043,7 +1054,10 @@ async fn poll_for_token_claims<F>(
             Ok(states) => {
                 for state in states {
                     if state.state == cashu_ws::ProofState::Spent {
-                        log::info!("Sent token claimed (via polling)! Proof {} is now spent", state.y);
+                        log::info!(
+                            "Sent token claimed (via polling)! Proof {} is now spent",
+                            state.y
+                        );
                         on_claimed();
                         return;
                     }
@@ -1055,7 +1069,10 @@ async fn poll_for_token_claims<F>(
         }
     }
 
-    log::info!("Stopped watching for token claims after {} minutes", (max_polls * poll_interval_ms / 60000));
+    log::info!(
+        "Stopped watching for token claims after {} minutes",
+        (max_polls * poll_interval_ms / 60000)
+    );
 }
 
 /// Extract Y values from a token string for proof state tracking
@@ -1067,22 +1084,23 @@ pub fn extract_y_values_from_token(token_str: &str) -> Result<Vec<String>, Strin
     use cdk::nuts::Token;
 
     // Parse the token
-    let token: Token = token_str.parse()
+    let token: Token = token_str
+        .parse()
         .map_err(|e| format!("Failed to parse token: {}", e))?;
 
     // Extract secrets from proofs based on token version
     // We access internal structure directly to avoid needing keyset info
     let secrets: Vec<cdk::secret::Secret> = match &token {
-        Token::TokenV3(v3) => {
-            v3.token.iter()
-                .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
-                .collect()
-        }
-        Token::TokenV4(v4) => {
-            v4.token.iter()
-                .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
-                .collect()
-        }
+        Token::TokenV3(v3) => v3
+            .token
+            .iter()
+            .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
+            .collect(),
+        Token::TokenV4(v4) => v4
+            .token
+            .iter()
+            .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
+            .collect(),
     };
 
     if secrets.is_empty() {

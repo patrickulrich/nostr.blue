@@ -82,8 +82,8 @@ impl GitService {
         }
 
         // Select best clone URL
-        let clone_url = Self::select_clone_url(repo)
-            .ok_or_else(|| "No clone URL available".to_string())?;
+        let clone_url =
+            Self::select_clone_url(repo).ok_or_else(|| "No clone URL available".to_string())?;
 
         log::info!("Cloning {} to {}", clone_url, dir);
 

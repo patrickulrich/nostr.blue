@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::components::cashu::{WalletHealthIndicator, WalletHealthModal, NutzapBadge};
+use crate::components::cashu::{NutzapBadge, WalletHealthIndicator, WalletHealthModal};
 use crate::stores::cashu;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::format_sats_with_separator;
+use dioxus::prelude::*;
 
 #[component]
 pub fn WalletBalanceCard(

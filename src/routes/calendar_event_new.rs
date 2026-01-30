@@ -2,16 +2,16 @@
 //!
 //! Create new calendar events (NIP-52 kinds 31922/31923)
 
-use dioxus::prelude::*;
-use dioxus::events::MouseData;
-use crate::stores::{auth_store, calendar_store};
-use crate::routes::Route;
-use crate::utils::date_helpers::get_today;
-use crate::utils::ics::{parse_ics, IcsEvent, IcsDateTime};
 use crate::components::MediaUploader;
+use crate::routes::Route;
+use crate::stores::{auth_store, calendar_store};
+use crate::utils::date_helpers::get_today;
+use crate::utils::ics::{parse_ics, IcsDateTime, IcsEvent};
+use dioxus::events::MouseData;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::ToBech32;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
-use nostr_sdk::prelude::ToBech32;
 
 /// Maximum ICS file size (1MB)
 const MAX_ICS_FILE_SIZE: u64 = 1_048_576;
@@ -100,13 +100,16 @@ pub fn CalendarEventNew() -> Element {
         let pk = match nostr_sdk::prelude::PublicKey::parse(&input) {
             Ok(pk) => pk,
             Err(_) => {
-                error_message.set(Some("Invalid pubkey. Use hex, npub, or nostr:npub format".to_string()));
+                error_message.set(Some(
+                    "Invalid pubkey. Use hex, npub, or nostr:npub format".to_string(),
+                ));
                 return;
             }
         };
         let pubkey_hex = pk.to_hex();
         // Use to_bech32() for user-friendly display
-        let display = pk.to_bech32()
+        let display = pk
+            .to_bech32()
             .map(|s| format!("{}...", &s[..12]))
             .unwrap_or_else(|_| format!("{}...", &pubkey_hex[..8]));
 
@@ -213,9 +216,7 @@ pub fn CalendarEventNew() -> Element {
                 .unwrap_or(desc.len().min(200));
 
             // Find word boundary within the safe slice
-            let truncate_at = desc[..safe_boundary]
-                .rfind(' ')
-                .unwrap_or(safe_boundary);
+            let truncate_at = desc[..safe_boundary].rfind(' ').unwrap_or(safe_boundary);
 
             summary.set(format!("{}...", &desc[..truncate_at]));
         } else {
@@ -235,7 +236,10 @@ pub fn CalendarEventNew() -> Element {
                     start_date.set(date);
                     start_time.set(time);
                 }
-                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
+                IcsDateTime::DateTimeWithTz {
+                    timestamp: ts,
+                    timezone: tz,
+                } => {
                     event_type.set(EventType::TimeBased);
                     // Convert to event's timezone for accurate display
                     let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
@@ -257,7 +261,10 @@ pub fn CalendarEventNew() -> Element {
                     end_date.set(date);
                     end_time.set(time);
                 }
-                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
+                IcsDateTime::DateTimeWithTz {
+                    timestamp: ts,
+                    timezone: tz,
+                } => {
                     // Convert to event's timezone for accurate display
                     let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
                     end_date.set(date);
@@ -310,7 +317,8 @@ pub fn CalendarEventNew() -> Element {
         let timezone_val = timezone.read().clone();
         let is_private_val = *is_private.read();
         // Convert participants to (pubkey, role) tuples with role validation (defense in depth)
-        let participants_val: Vec<(String, String)> = participants.read()
+        let participants_val: Vec<(String, String)> = participants
+            .read()
             .iter()
             .filter_map(|(pk, _, role)| {
                 // Validate role before publishing
@@ -354,14 +362,27 @@ pub fn CalendarEventNew() -> Element {
                         &title_val,
                         &start_date_val,
                         end_date_opt,
-                        if summary_val.is_empty() { None } else { Some(&summary_val) },
-                        if content_val.is_empty() { None } else { Some(&content_val) },
-                        if image_val.is_empty() { None } else { Some(&image_val) },
+                        if summary_val.is_empty() {
+                            None
+                        } else {
+                            Some(&summary_val)
+                        },
+                        if content_val.is_empty() {
+                            None
+                        } else {
+                            Some(&content_val)
+                        },
+                        if image_val.is_empty() {
+                            None
+                        } else {
+                            Some(&image_val)
+                        },
                         &all_locations,
                         &hashtags,
                         &participants_val,
                         is_private_val,
-                    ).await
+                    )
+                    .await
                 }
                 EventType::TimeBased => {
                     // Convert date/time to timestamps
@@ -371,23 +392,47 @@ pub fn CalendarEventNew() -> Element {
                     calendar_store::publish_time_event(
                         &title_val,
                         start_ts,
-                        if end_ts > start_ts { Some(end_ts) } else { None },
-                        if summary_val.is_empty() { None } else { Some(&summary_val) },
-                        if content_val.is_empty() { None } else { Some(&content_val) },
-                        if image_val.is_empty() { None } else { Some(&image_val) },
+                        if end_ts > start_ts {
+                            Some(end_ts)
+                        } else {
+                            None
+                        },
+                        if summary_val.is_empty() {
+                            None
+                        } else {
+                            Some(&summary_val)
+                        },
+                        if content_val.is_empty() {
+                            None
+                        } else {
+                            Some(&content_val)
+                        },
+                        if image_val.is_empty() {
+                            None
+                        } else {
+                            Some(&image_val)
+                        },
                         &all_locations,
                         &hashtags,
                         &participants_val,
-                        if timezone_val.is_empty() { None } else { Some(&timezone_val) },
+                        if timezone_val.is_empty() {
+                            None
+                        } else {
+                            Some(&timezone_val)
+                        },
                         is_private_val,
-                    ).await
+                    )
+                    .await
                 }
             };
 
             match result {
                 Ok(naddr) => {
                     // Navigate to the new event
-                    nav.push(Route::CalendarEventDetail { naddr, from: Some("calendar".to_string()) });
+                    nav.push(Route::CalendarEventDetail {
+                        naddr,
+                        from: Some("calendar".to_string()),
+                    });
                 }
                 Err(e) => {
                     error_message.set(Some(e));
@@ -938,8 +983,16 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
 
     // Validate timezone string - basic sanity check before passing to Intl API
     // Invalid timezones cause RangeError in Intl.DateTimeFormat
-    if tz.is_empty() || tz.len() > 64 || !tz.chars().all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+') {
-        log::debug!("Invalid timezone format: {}, falling back to local time", tz);
+    if tz.is_empty()
+        || tz.len() > 64
+        || !tz
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+')
+    {
+        log::debug!(
+            "Invalid timezone format: {}, falling back to local time",
+            tz
+        );
         return timestamp_to_date_time(ts);
     }
 
@@ -1072,7 +1125,9 @@ async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
         .await
         .map_err(|_| "Failed to read file")?;
 
-    result.as_string().ok_or("Could not convert to string".to_string())
+    result
+        .as_string()
+        .ok_or("Could not convert to string".to_string())
 }
 
 /// Clear file input value to allow re-selecting the same file

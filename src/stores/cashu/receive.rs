@@ -12,7 +12,9 @@ use super::internal::{
 };
 use super::proofs::{cdk_proof_to_proof_data, register_proofs_in_event_map};
 use super::signals::{try_acquire_mint_lock, WALLET_TOKENS};
-use super::types::{ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt};
+use super::types::{
+    ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, WalletTokensStoreStoreExt,
+};
 use super::utils::{normalize_mint_url, sanitize_and_validate_token};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 
@@ -66,8 +68,8 @@ pub async fn preview_token(token_string: String) -> Result<TokenPreview, String>
     let token_string = sanitize_and_validate_token(&token_string)?;
 
     // Parse token
-    let token = Token::from_str(&token_string)
-        .map_err(|e| format!("Failed to parse token: {}", e))?;
+    let token =
+        Token::from_str(&token_string).map_err(|e| format!("Failed to parse token: {}", e))?;
 
     // Get MultiMintWallet
     let multi_wallet = cashu_cdk_bridge::MULTI_WALLET
@@ -83,12 +85,13 @@ pub async fn preview_token(token_string: String) -> Result<TokenPreview, String>
         .map_err(|e| format!("Failed to get token data: {}", e))?;
 
     // Calculate total value from proofs
-    let value: u64 = token_data.proofs.iter()
-        .map(|p| u64::from(p.amount))
-        .sum();
+    let value: u64 = token_data.proofs.iter().map(|p| u64::from(p.amount)).sum();
 
     // Get unit from token (defaults to sat)
-    let unit = token.unit().map(|u| u.to_string()).unwrap_or_else(|| "sat".to_string());
+    let unit = token
+        .unit()
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| "sat".to_string());
 
     // Truncate memo to prevent UI issues from arbitrarily long memos (UTF-8 safe)
     let memo = token_data.memo.map(|m| {
@@ -287,7 +290,9 @@ pub async fn receive_tokens_with_options(
                     }
                     CdkError::CouldNotVerifyDleq => {
                         log::error!("DLEQ verification failed: invalid signature");
-                        return Err("Token verification failed: Invalid DLEQ proof signature.".to_string());
+                        return Err(
+                            "Token verification failed: Invalid DLEQ proof signature.".to_string()
+                        );
                     }
                     _ => {
                         // Other errors (e.g., keyset not found, network issues)
@@ -366,13 +371,13 @@ pub async fn receive_tokens_with_options(
                     }
                     Ok(_) => {
                         return Err(
-                            "This token has already been spent and cannot be redeemed.".to_string(),
+                            "This token has already been spent and cannot be redeemed.".to_string()
                         );
                     }
                     Err(cleanup_err) => {
                         log::error!("Cleanup failed: {}", cleanup_err);
                         return Err(
-                            "This token has already been spent and cannot be redeemed.".to_string(),
+                            "This token has already been spent and cannot be redeemed.".to_string()
                         );
                     }
                 }
@@ -444,7 +449,10 @@ pub async fn receive_tokens_with_options(
     let mut retryable = true; // Track if error is retryable
     let delays_ms = [500u32, 1000, 2000]; // Exponential backoff delays
 
-    for (attempt, delay_ms) in std::iter::once(0u32).chain(delays_ms.iter().copied()).enumerate() {
+    for (attempt, delay_ms) in std::iter::once(0u32)
+        .chain(delays_ms.iter().copied())
+        .enumerate()
+    {
         if attempt > 0 {
             #[cfg(target_arch = "wasm32")]
             {
@@ -476,12 +484,16 @@ pub async fn receive_tokens_with_options(
                     break;
                 } else {
                     // nostr-sdk pattern: duplicates start with "duplicate:" prefix
-                    let all_duplicates = output.failed.values().all(|err| {
-                        err.to_lowercase().starts_with("duplicate:")
-                    });
+                    let all_duplicates = output
+                        .failed
+                        .values()
+                        .all(|err| err.to_lowercase().starts_with("duplicate:"));
 
                     if all_duplicates && !output.failed.is_empty() {
-                        log::debug!("Token event {} already exists on all relays (duplicate)", pre_signed_event_id);
+                        log::debug!(
+                            "Token event {} already exists on all relays (duplicate)",
+                            pre_signed_event_id
+                        );
                         event_id = Some(pre_signed_event_id.clone());
                         retryable = false;
                         break;
@@ -516,13 +528,17 @@ pub async fn receive_tokens_with_options(
         Some(id) => id,
         None => {
             if retryable {
-                log::error!("All publish attempts failed, queueing for retry: {}", last_error);
+                log::error!(
+                    "All publish attempts failed, queueing for retry: {}",
+                    last_error
+                );
                 // Use UUID for collision-resistant pending IDs (Issue #13)
                 let pending_id = format!("pending_{}", uuid::Uuid::new_v4());
 
                 // Queue for background retry - proofs are safe in CDK, just need Nostr backup
                 // Re-create builder for retry queue since we used signed_event for publish attempts
-                let retry_builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
+                let retry_builder =
+                    nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted.clone());
                 super::events::queue_token_event_for_retry(
                     retry_builder,
                     pending_id.clone(),

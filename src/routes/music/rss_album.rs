@@ -1,11 +1,13 @@
-use dioxus::prelude::*;
-use std::sync::Arc;
-use crate::routes::Route;
 use crate::components::icons::*;
-use crate::services::podcast_index::{self, PodcastFeed, Episode};
+use crate::components::{
+    ContentShareModal, ContentType, UnifiedTrackCard, UnifiedTrackCardSkeleton,
+};
+use crate::routes::Route;
+use crate::services::podcast_index::{self, Episode, PodcastFeed};
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_client;
-use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton, ContentShareModal, ContentType};
+use dioxus::prelude::*;
+use std::sync::Arc;
 
 #[component]
 pub fn MusicRssAlbum(feed_id: u64) -> Element {
@@ -62,7 +64,8 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
     // Convert episodes to MusicTrack for player, wrapped in Arc for efficient sharing
     let tracks_arc = use_memo(move || {
         let tracks = if let Some(ref feed) = *feed_state.read() {
-            episodes_state.read()
+            episodes_state
+                .read()
                 .iter()
                 .map(|ep| MusicTrack::from_rss_music_track(ep, feed))
                 .collect::<Vec<MusicTrack>>()

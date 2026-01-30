@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use wasm_bindgen::prelude::*;
-use js_sys::Reflect;
 use gloo_timers::future::TimeoutFuture;
+use js_sys::Reflect;
 use uuid::Uuid;
+use wasm_bindgen::prelude::*;
 
 const MAX_DURATION_SECONDS: f64 = 60.0;
 
@@ -36,10 +36,13 @@ pub fn VoiceRecorder(
         let recorder_id = recorder_id.read().clone();
         move |_| {
             let recorder_id = recorder_id.clone();
-            log::info!("Start recording button clicked, recorder_id: {}", recorder_id);
+            log::info!(
+                "Start recording button clicked, recorder_id: {}",
+                recorder_id
+            );
 
             state.set(RecorderState::Recording {
-                started_at: js_sys::Date::now() / 1000.0
+                started_at: js_sys::Date::now() / 1000.0,
             });
             log::debug!("State set to Recording");
 
@@ -63,14 +66,18 @@ pub fn VoiceRecorder(
                         match wasm_bindgen_futures::JsFuture::from(promise).await {
                             Ok(result) => {
                                 // Check if start was successful
-                                if let Ok(success) = Reflect::get(&result, &JsValue::from_str("success")) {
+                                if let Ok(success) =
+                                    Reflect::get(&result, &JsValue::from_str("success"))
+                                {
                                     if !success.as_bool().unwrap_or(false) {
-                                        if let Ok(error) = Reflect::get(&result, &JsValue::from_str("error")) {
-                                            let error_msg = error.as_string().unwrap_or_else(|| "Unknown error".to_string());
+                                        if let Ok(error) =
+                                            Reflect::get(&result, &JsValue::from_str("error"))
+                                        {
+                                            let error_msg = error
+                                                .as_string()
+                                                .unwrap_or_else(|| "Unknown error".to_string());
                                             log::error!("Failed to start recording: {}", error_msg);
-                                            state.set(RecorderState::Error {
-                                                message: error_msg
-                                            });
+                                            state.set(RecorderState::Error { message: error_msg });
                                             return;
                                         }
                                     }
@@ -95,13 +102,16 @@ pub fn VoiceRecorder(
 
                                         // Check if component is still mounted
                                         if !*monitor_is_mounted.read() {
-                                            log::debug!("Component unmounted, stopping monitoring loop");
+                                            log::debug!(
+                                                "Component unmounted, stopping monitoring loop"
+                                            );
                                             break;
                                         }
 
                                         let current_state = monitor_state.read().clone();
                                         if let RecorderState::Recording { .. } = current_state {
-                                            let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
+                                            let elapsed =
+                                                (js_sys::Date::now() / 1000.0) - started_at;
                                             monitor_current_time.set(elapsed);
 
                                             // Log once per second (avoid duplicate logs from 100ms polling)
@@ -112,7 +122,9 @@ pub fn VoiceRecorder(
                                             }
 
                                             if elapsed >= MAX_DURATION_SECONDS {
-                                                log::info!("Max duration reached, stopping recording");
+                                                log::info!(
+                                                    "Max duration reached, stopping recording"
+                                                );
 
                                                 // Stop via JavaScript manager
                                                 let stop_script = format!(
@@ -121,7 +133,9 @@ pub fn VoiceRecorder(
                                                 );
                                                 match js_sys::eval(&stop_script) {
                                                     Ok(_) => log::debug!("Auto-stop requested"),
-                                                    Err(e) => log::error!("Failed to auto-stop: {:?}", e),
+                                                    Err(e) => {
+                                                        log::error!("Failed to auto-stop: {:?}", e)
+                                                    }
                                                 }
                                                 break;
                                             }
@@ -134,7 +148,7 @@ pub fn VoiceRecorder(
                             Err(e) => {
                                 log::error!("Failed to start recording: {:?}", e);
                                 state.set(RecorderState::Error {
-                                    message: format!("Failed to start recording: {:?}", e)
+                                    message: format!("Failed to start recording: {:?}", e),
                                 });
                             }
                         }
@@ -142,7 +156,7 @@ pub fn VoiceRecorder(
                     Err(e) => {
                         log::error!("Failed to eval start script: {:?}", e);
                         state.set(RecorderState::Error {
-                            message: "Failed to initialize recording".to_string()
+                            message: "Failed to initialize recording".to_string(),
                         });
                     }
                 }
@@ -179,23 +193,26 @@ pub fn VoiceRecorder(
                             if attempts > MAX_ATTEMPTS {
                                 log::error!("Timeout waiting for recording result");
                                 state.set(RecorderState::Error {
-                                    message: "Timeout waiting for recording".to_string()
+                                    message: "Timeout waiting for recording".to_string(),
                                 });
                                 break;
                             }
 
-                            let get_result_script = format!(
-                                "window.voiceRecorderManager.getResult('{}')",
-                                recorder_id
-                            );
+                            let get_result_script =
+                                format!("window.voiceRecorderManager.getResult('{}')", recorder_id);
 
                             if let Ok(result) = js_sys::eval(&get_result_script) {
                                 if !result.is_null() && !result.is_undefined() {
                                     // Check if successful
-                                    if let Ok(success) = Reflect::get(&result, &JsValue::from_str("success")) {
+                                    if let Ok(success) =
+                                        Reflect::get(&result, &JsValue::from_str("success"))
+                                    {
                                         if success.as_bool().unwrap_or(false) {
                                             // Extract duration
-                                            let dur = if let Ok(dur_val) = Reflect::get(&result, &JsValue::from_str("duration")) {
+                                            let dur = if let Ok(dur_val) = Reflect::get(
+                                                &result,
+                                                &JsValue::from_str("duration"),
+                                            ) {
                                                 dur_val.as_f64().unwrap_or(duration)
                                             } else {
                                                 duration
@@ -231,11 +248,15 @@ pub fn VoiceRecorder(
                                             break;
                                         } else {
                                             // Error case
-                                            if let Ok(error) = Reflect::get(&result, &JsValue::from_str("error")) {
-                                                let error_msg = error.as_string().unwrap_or_else(|| "Unknown error".to_string());
+                                            if let Ok(error) =
+                                                Reflect::get(&result, &JsValue::from_str("error"))
+                                            {
+                                                let error_msg = error
+                                                    .as_string()
+                                                    .unwrap_or_else(|| "Unknown error".to_string());
                                                 log::error!("Recording error: {}", error_msg);
                                                 state.set(RecorderState::Error {
-                                                    message: error_msg
+                                                    message: error_msg,
                                                 });
                                                 break;
                                             }
@@ -248,7 +269,7 @@ pub fn VoiceRecorder(
                     Err(e) => {
                         log::error!("Failed to stop recording: {:?}", e);
                         state.set(RecorderState::Error {
-                            message: format!("Failed to stop recording: {:?}", e)
+                            message: format!("Failed to stop recording: {:?}", e),
                         });
                     }
                 }
@@ -325,8 +346,7 @@ pub fn VoiceRecorder(
                         return true;
                     }})();
                     "#,
-                    audio_id,
-                    !is_playing
+                    audio_id, !is_playing
                 );
 
                 match js_sys::eval(&script) {
@@ -359,18 +379,22 @@ pub fn VoiceRecorder(
         let recorder_id = recorder_id.read().clone();
 
         if let RecorderState::Stopped { duration } = state.read().clone() {
-            log::info!("Use recording clicked, retrieving data for recorder: {}", recorder_id);
+            log::info!(
+                "Use recording clicked, retrieving data for recorder: {}",
+                recorder_id
+            );
             spawn(async move {
                 // Get the result from JavaScript manager
-                let get_result_script = format!(
-                    "window.voiceRecorderManager.getResult('{}')",
-                    recorder_id
-                );
+                let get_result_script =
+                    format!("window.voiceRecorderManager.getResult('{}')", recorder_id);
 
                 match js_sys::eval(&get_result_script) {
                     Ok(result) => {
                         if result.is_null() || result.is_undefined() {
-                            log::error!("getResult returned null/undefined for recorder: {}", recorder_id);
+                            log::error!(
+                                "getResult returned null/undefined for recorder: {}",
+                                recorder_id
+                            );
                             return;
                         }
 
@@ -382,20 +406,32 @@ pub fn VoiceRecorder(
                                         let bytes = bytes_array.to_vec();
 
                                         // Extract waveform
-                                        let waveform = if let Ok(wf_val) = Reflect::get(&result, &JsValue::from_str("waveform")) {
-                                            js_sys::Array::from(&wf_val).to_vec().into_iter()
+                                        let waveform = if let Ok(wf_val) =
+                                            Reflect::get(&result, &JsValue::from_str("waveform"))
+                                        {
+                                            js_sys::Array::from(&wf_val)
+                                                .to_vec()
+                                                .into_iter()
                                                 .map(|v| v.as_f64().unwrap_or(0.0) as u8)
                                                 .collect::<Vec<_>>()
                                         } else {
-                                            log::warn!("Failed to extract waveform, using placeholder");
+                                            log::warn!(
+                                                "Failed to extract waveform, using placeholder"
+                                            );
                                             vec![0u8; 100]
                                         };
 
                                         // Extract MIME type
-                                        let mime_type = if let Ok(mime_val) = Reflect::get(&result, &JsValue::from_str("mimeType")) {
-                                            mime_val.as_string().unwrap_or_else(|| "audio/webm".to_string())
+                                        let mime_type = if let Ok(mime_val) =
+                                            Reflect::get(&result, &JsValue::from_str("mimeType"))
+                                        {
+                                            mime_val
+                                                .as_string()
+                                                .unwrap_or_else(|| "audio/webm".to_string())
                                         } else {
-                                            log::warn!("Failed to extract MIME type, using default");
+                                            log::warn!(
+                                                "Failed to extract MIME type, using default"
+                                            );
                                             "audio/webm".to_string()
                                         };
 
@@ -404,15 +440,20 @@ pub fn VoiceRecorder(
 
                                         // Revoke blob URL before calling callback
                                         if let Some(url) = blob_url_cache.read().clone() {
-                                            let revoke_script = format!("URL.revokeObjectURL('{}')", url);
+                                            let revoke_script =
+                                                format!("URL.revokeObjectURL('{}')", url);
                                             let _ = js_sys::eval(&revoke_script);
                                         }
                                         blob_url_cache.set(None);
 
-                                        on_recording_complete.call((bytes, duration, waveform, mime_type));
+                                        on_recording_complete
+                                            .call((bytes, duration, waveform, mime_type));
                                     }
                                     Err(e) => {
-                                        log::error!("Failed to convert bytes to Uint8Array: {:?}", e);
+                                        log::error!(
+                                            "Failed to convert bytes to Uint8Array: {:?}",
+                                            e
+                                        );
                                     }
                                 }
                             }

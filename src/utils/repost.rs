@@ -1,4 +1,4 @@
-use nostr_sdk::{Event, Kind, JsonUtil, PublicKey, Timestamp};
+use nostr_sdk::{Event, JsonUtil, Kind, PublicKey, Timestamp};
 
 /// Check if an event is a repost (Kind 6 or Kind 16)
 pub fn is_repost(event: &Event) -> bool {
@@ -11,13 +11,15 @@ pub fn is_repost(event: &Event) -> bool {
 /// original event in their content field
 pub fn extract_reposted_event(repost: &Event) -> Result<Event, String> {
     if !is_repost(repost) {
-        return Err(format!("Event is not a repost (kind {})", repost.kind.as_u16()));
+        return Err(format!(
+            "Event is not a repost (kind {})",
+            repost.kind.as_u16()
+        ));
     }
 
     // Parse the content field as JSON using SDK's built-in method
-    Event::from_json(&repost.content).map_err(|e| {
-        format!("Failed to parse repost content as event JSON: {}", e)
-    })
+    Event::from_json(&repost.content)
+        .map_err(|e| format!("Failed to parse repost content as event JSON: {}", e))
 }
 
 /// Represents a feed item that could be either an original post or a repost
@@ -49,7 +51,9 @@ impl FeedItem {
     pub fn sort_timestamp(&self) -> Timestamp {
         match self {
             FeedItem::OriginalPost(event) => event.created_at,
-            FeedItem::Repost { repost_timestamp, .. } => *repost_timestamp,
+            FeedItem::Repost {
+                repost_timestamp, ..
+            } => *repost_timestamp,
         }
     }
 
@@ -57,9 +61,11 @@ impl FeedItem {
     pub fn repost_info(&self) -> Option<(PublicKey, Timestamp)> {
         match self {
             FeedItem::OriginalPost(_) => None,
-            FeedItem::Repost { reposted_by, repost_timestamp, .. } => {
-                Some((*reposted_by, *repost_timestamp))
-            }
+            FeedItem::Repost {
+                reposted_by,
+                repost_timestamp,
+                ..
+            } => Some((*reposted_by, *repost_timestamp)),
         }
     }
 }

@@ -1,17 +1,14 @@
 //! Citation Picker Modal
 //! Select citations to insert into wiki pages and publications
 
+use super::card::CitationCardCompact;
+use crate::components::icons::{SearchIcon, XIcon};
+use crate::stores::auth_store;
+use crate::stores::citation_store::{fetch_citations_by_author, CachedCitation, USER_CITATIONS};
+use crate::utils::nkbip03::CitationStyle;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::ToBech32;
-use crate::stores::citation_store::{
-    CachedCitation, USER_CITATIONS,
-    fetch_citations_by_author,
-};
-use crate::stores::auth_store;
-use crate::utils::nkbip03::CitationStyle;
-use super::card::CitationCardCompact;
-use crate::components::icons::{XIcon, SearchIcon};
 
 /// Citation selection result
 #[derive(Clone, Debug)]
@@ -152,12 +149,13 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
     // Generate markup preview
     let markup_preview = use_memo(move || {
         if let Some(ref citation) = *selected_citation.read() {
-            let identifier = citation.naddr.as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    citation.event.id.to_bech32()
-                        .unwrap_or_else(|_| citation.event.id.to_hex())
-                });
+            let identifier = citation.naddr.as_ref().cloned().unwrap_or_else(|| {
+                citation
+                    .event
+                    .id
+                    .to_bech32()
+                    .unwrap_or_else(|_| citation.event.id.to_hex())
+            });
             let style = *selected_style.read();
             format!("{}{}", style.markup_prefix(), identifier)
         } else {
@@ -189,12 +187,13 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
             }
             is_searching.set(false);
 
-            let identifier = citation.naddr.as_ref()
-                .cloned()
-                .unwrap_or_else(|| {
-                    citation.event.id.to_bech32()
-                        .unwrap_or_else(|_| citation.event.id.to_hex())
-                });
+            let identifier = citation.naddr.as_ref().cloned().unwrap_or_else(|| {
+                citation
+                    .event
+                    .id
+                    .to_bech32()
+                    .unwrap_or_else(|_| citation.event.id.to_hex())
+            });
             let style = *selected_style.read();
             let markup = format!("{}{}", style.markup_prefix(), identifier);
 

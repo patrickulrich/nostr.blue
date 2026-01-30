@@ -6,9 +6,9 @@
 //! - Links to bios/social profiles
 //! - Group organization (cast, crew)
 
-use dioxus::prelude::*;
-use crate::utils::podcast::Person;
 use crate::components::icons;
+use crate::utils::podcast::Person;
+use dioxus::prelude::*;
 
 // ============================================================================
 // Persons List Component
@@ -290,7 +290,7 @@ pub enum AvatarSize {
     Small,  // 24px
     Medium, // 40px
     #[allow(dead_code)]
-    Large,  // 64px - reserved for future use
+    Large, // 64px - reserved for future use
 }
 
 impl AvatarSize {

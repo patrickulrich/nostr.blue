@@ -117,7 +117,9 @@ pub fn truncate_with_word_break(text: &str, max_chars: usize) -> String {
 /// Shortens a URL for display by stripping protocol and truncating
 /// Uses UTF-8 safe character-based slicing to avoid panic on multi-byte chars
 pub fn shorten_url(url: &str, max_len: usize) -> String {
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
+    let url = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
 
     // Handle very small max_len - return truncated URL without ellipsis
     if max_len <= 3 {
@@ -131,7 +133,12 @@ pub fn shorten_url(url: &str, max_len: usize) -> String {
     // Safe path for non-ASCII to avoid panic on multi-byte UTF-8
     let char_count = url.chars().count();
     if char_count > max_len {
-        format!("{}...", url.chars().take(max_len.saturating_sub(3)).collect::<String>())
+        format!(
+            "{}...",
+            url.chars()
+                .take(max_len.saturating_sub(3))
+                .collect::<String>()
+        )
     } else {
         url.to_string()
     }

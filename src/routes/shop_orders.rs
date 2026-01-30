@@ -1,10 +1,12 @@
 //! Shop Orders - Buyer's order history
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus, extract_product_name_from_coordinate};
-use crate::stores::shop_store::{fetch_my_orders, listen_for_order_updates, ensure_orders_loaded};
 use crate::components::shop::{OrderStatusBadge, ReviewForm};
+use crate::routes::Route;
+use crate::stores::shop_store::{ensure_orders_loaded, fetch_my_orders, listen_for_order_updates};
+use crate::utils::nip99::{
+    extract_product_name_from_coordinate, OrderStatus, ShippingStatus, ShopOrder,
+};
+use dioxus::prelude::*;
 
 /// Buyer orders page
 #[component]

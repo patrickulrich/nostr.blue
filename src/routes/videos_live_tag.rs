@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
-use crate::stores::nostr_client;
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use crate::routes::Route;
+use crate::stores::nostr_client;
+use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -20,7 +20,7 @@ impl Drop for ScrollListenerGuard {
             if let Some(window) = web_sys::window() {
                 let _ = window.remove_event_listener_with_callback(
                     "scroll",
-                    callback.as_ref().unchecked_ref()
+                    callback.as_ref().unchecked_ref(),
                 );
             }
         }
@@ -37,36 +37,39 @@ pub fn VideosLiveTag(tag: String) -> Element {
     let mut error = use_signal(|| None::<String>);
 
     // Load streams with specific tag
-    use_effect(use_reactive((&tag, &*refresh_trigger.read()), move |(current_tag, _)| {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+    use_effect(use_reactive(
+        (&tag, &*refresh_trigger.read()),
+        move |(current_tag, _)| {
+            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
-        if !client_initialized {
-            return;
-        }
-
-        loading.set(true);
-        error.set(None);
-        oldest_timestamp.set(None);
-        has_more.set(true);
-
-        spawn(async move {
-            match load_streams_by_tag(&current_tag, None).await {
-                Ok((events, hit_limit)) => {
-                    if let Some(last_event) = events.last() {
-                        oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                    }
-
-                    has_more.set(hit_limit);
-                    stream_events.set(events);
-                    loading.set(false);
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
-                }
+            if !client_initialized {
+                return;
             }
-        });
-    }));
+
+            loading.set(true);
+            error.set(None);
+            oldest_timestamp.set(None);
+            has_more.set(true);
+
+            spawn(async move {
+                match load_streams_by_tag(&current_tag, None).await {
+                    Ok((events, hit_limit)) => {
+                        if let Some(last_event) = events.last() {
+                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                        }
+
+                        has_more.set(hit_limit);
+                        stream_events.set(events);
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            });
+        },
+    ));
 
     // Clone tag for use in load more
     let tag_for_scroll = tag.clone();
@@ -78,7 +81,12 @@ pub fn VideosLiveTag(tag: String) -> Element {
         // Remove old listener if it exists
         if let Some(old_callback) = scroll_callback.write().take() {
             if let Some(window) = web_sys::window() {
-                window.remove_event_listener_with_callback("scroll", old_callback.as_ref().unchecked_ref()).ok();
+                window
+                    .remove_event_listener_with_callback(
+                        "scroll",
+                        old_callback.as_ref().unchecked_ref(),
+                    )
+                    .ok();
             }
         }
 
@@ -114,7 +122,8 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 current.iter().map(|e| e.id).collect()
                             };
 
-                            let unique_events: Vec<_> = new_events.into_iter()
+                            let unique_events: Vec<_> = new_events
+                                .into_iter()
                                 .filter(|e| !existing_ids.contains(&e.id))
                                 .collect();
 
@@ -146,14 +155,18 @@ pub fn VideosLiveTag(tag: String) -> Element {
         }) as Box<dyn FnMut()>);
 
         // Register the event listener (keep ownership of callback)
-        window.add_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref()).ok();
+        window
+            .add_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref())
+            .ok();
 
         // Store callback to clean up later
         scroll_callback.set(Some(callback));
     }));
 
     // Cleanup scroll listener on unmount using use_hook with Drop
-    use_hook(move || ScrollListenerGuard { callback: scroll_callback });
+    use_hook(move || ScrollListenerGuard {
+        callback: scroll_callback,
+    });
 
     rsx! {
         div {
@@ -262,7 +275,7 @@ async fn load_streams_by_tag(tag: &str, until: Option<u64>) -> Result<(Vec<Event
         .kind(Kind::from(30311))
         .custom_tag(
             nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::T),
-            tag
+            tag,
         )
         .limit(50);
 

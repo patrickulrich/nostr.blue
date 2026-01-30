@@ -114,9 +114,8 @@ impl SignerBackend {
 pub static CURRENT_SIGNER: GlobalSignal<Option<SignerType>> = Signal::global(|| None);
 
 /// Global signal for signer info (persisted)
-pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> = Signal::global(|| {
-    LocalStorage::get("signer_info").ok()
-});
+pub static SIGNER_INFO: GlobalSignal<Option<SignerInfo>> =
+    Signal::global(|| LocalStorage::get("signer_info").ok());
 
 /// Set the current signer and persist session info
 pub async fn set_signer(signer: SignerType) -> Result<(), String> {

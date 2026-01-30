@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{FromBech32, ToBech32};
 
-use crate::components::{PinMenu, pin_menu::PinToBoardRequest};
+use crate::components::{pin_menu::PinToBoardRequest, PinMenu};
 use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinMetadata, PinReference};
 use crate::utils::validation::is_valid_http_url;
@@ -87,8 +87,7 @@ pub fn PinCard(
     /// Whether the current user owns this pin (can delete)
     #[props(default = false)]
     is_owner: bool,
-    #[props(default)]
-    on_delete: Option<EventHandler<String>>,
+    #[props(default)] on_delete: Option<EventHandler<String>>,
     /// Optional content type override (from fetching the referenced event)
     /// Used when Kind 30023 needs to be distinguished between article/recipe
     #[props(default)]
@@ -101,13 +100,15 @@ pub fn PinCard(
     on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 ) -> Element {
     // Use metadata content type if available, then override, then infer
-    let content_type = metadata.as_ref()
+    let content_type = metadata
+        .as_ref()
         .and_then(|m| m.content_type.clone())
         .or(content_type_override)
         .unwrap_or_else(|| pin.content_type());
 
     // Use metadata title if available, otherwise fall back to pin title or content type name
-    let title = metadata.as_ref()
+    let title = metadata
+        .as_ref()
         .and_then(|m| m.title.clone())
         .or(pin.title.clone())
         .unwrap_or_else(|| content_type.display_name().to_string());
@@ -116,9 +117,16 @@ pub fn PinCard(
     let image_url = metadata.as_ref().and_then(|m| m.image.clone());
 
     // Get summary from metadata, or use pin content (user's note) as fallback
-    let description = metadata.as_ref()
+    let description = metadata
+        .as_ref()
         .and_then(|m| m.summary.clone())
-        .or_else(|| if pin.content.is_empty() { None } else { Some(pin.content.clone()) });
+        .or_else(|| {
+            if pin.content.is_empty() {
+                None
+            } else {
+                Some(pin.content.clone())
+            }
+        });
 
     let pin_for_menu = pin.clone();
 
@@ -126,25 +134,48 @@ pub fn PinCard(
     let (display_ref, item_route) = match &pin.reference {
         PinReference::Event { id, .. } => {
             // Note reference - link to note page
-            (id.clone(), Some(Route::Nip19Handler { identifier: id.clone() }))
+            (
+                id.clone(),
+                Some(Route::Nip19Handler {
+                    identifier: id.clone(),
+                }),
+            )
         }
         PinReference::Coordinate { address, .. } => {
             // Addressable event - determine route from kind
             // Convert to naddr format for routes that expect it
             let naddr = to_naddr(address);
             let route = match content_type {
-                PinContentType::Recipe => Some(Route::RecipeDetail { naddr: naddr.clone() }),
-                PinContentType::Community => Some(Route::CommunityPage { a_tag: address.clone() }),
-                PinContentType::CodeRepo => Some(Route::CodeRepo { naddr: naddr.clone() }),
-                PinContentType::CalendarEvent => Some(Route::CalendarEventDetail { naddr: naddr.clone(), from: None }),
-                PinContentType::Article => Some(Route::ArticleDetail { naddr: naddr.clone() }),
-                PinContentType::LiveStream => Some(Route::LiveStreamDetail { note_id: naddr.clone() }),
-                PinContentType::Badge => Some(Route::BadgeDetail { naddr: naddr.clone() }),
-                PinContentType::Pinboard => Some(Route::PinBoardDetail { naddr: naddr.clone() }),
+                PinContentType::Recipe => Some(Route::RecipeDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::Community => Some(Route::CommunityPage {
+                    a_tag: address.clone(),
+                }),
+                PinContentType::CodeRepo => Some(Route::CodeRepo {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::CalendarEvent => Some(Route::CalendarEventDetail {
+                    naddr: naddr.clone(),
+                    from: None,
+                }),
+                PinContentType::Article => Some(Route::ArticleDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::LiveStream => Some(Route::LiveStreamDetail {
+                    note_id: naddr.clone(),
+                }),
+                PinContentType::Badge => Some(Route::BadgeDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::Pinboard => Some(Route::PinBoardDetail {
+                    naddr: naddr.clone(),
+                }),
                 PinContentType::Profile => {
                     // Parse coordinate (supports both formats) to extract pubkey
-                    parse_coordinate(address)
-                        .map(|coord| Route::Profile { pubkey: coord.public_key.to_hex() })
+                    parse_coordinate(address).map(|coord| Route::Profile {
+                        pubkey: coord.public_key.to_hex(),
+                    })
                 }
                 _ => None,
             };
@@ -225,10 +256,7 @@ pub fn PinCard(
 
 /// Internal remove button component (kept for PinGrid backward compatibility)
 #[component]
-fn RemoveButton(
-    pin: Pin,
-    on_remove: EventHandler<Pin>,
-) -> Element {
+fn RemoveButton(pin: Pin, on_remove: EventHandler<Pin>) -> Element {
     rsx! {
         button {
             class: "absolute top-2 right-2 p-1.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600",
@@ -273,7 +301,10 @@ fn PinContent(
     let is_image_type = matches!(content_type, PinContentType::Image);
     let is_external = matches!(
         content_type,
-        PinContentType::Link | PinContentType::Video | PinContentType::Podcast | PinContentType::Music
+        PinContentType::Link
+            | PinContentType::Video
+            | PinContentType::Podcast
+            | PinContentType::Music
     );
 
     // Check if we have a valid image to display (either from metadata or image-type reference)
@@ -458,12 +489,9 @@ pub fn PinGrid(
     /// Whether the current user owns these pins (can delete)
     #[props(default = false)]
     is_owner: bool,
-    #[props(default)]
-    on_delete: Option<EventHandler<String>>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 8)]
-    skeleton_count: usize,
+    #[props(default)] on_delete: Option<EventHandler<String>>,
+    #[props(default = false)] loading: bool,
+    #[props(default = 8)] skeleton_count: usize,
     /// Content type overrides by pin event_id (for Kind 30023 article/recipe disambiguation)
     /// DEPRECATED: Use metadata_map instead for full metadata including image/title
     #[props(default)]
@@ -523,12 +551,9 @@ pub fn PinCardMosaic(
     /// Whether the current user owns this pin (can delete)
     #[props(default = false)]
     is_owner: bool,
-    #[props(default)]
-    on_delete: Option<EventHandler<String>>,
-    #[props(default)]
-    content_type_override: Option<PinContentType>,
-    #[props(default)]
-    metadata: Option<PinMetadata>,
+    #[props(default)] on_delete: Option<EventHandler<String>>,
+    #[props(default)] content_type_override: Option<PinContentType>,
+    #[props(default)] metadata: Option<PinMetadata>,
     /// Size variant for cards without images (small, medium, large)
     #[props(default)]
     size_variant: Option<String>,
@@ -537,55 +562,80 @@ pub fn PinCardMosaic(
     on_pin_to_board: Option<EventHandler<PinToBoardRequest>>,
 ) -> Element {
     // Use metadata content type if available, then override, then infer
-    let content_type = metadata.as_ref()
+    let content_type = metadata
+        .as_ref()
         .and_then(|m| m.content_type.clone())
         .or(content_type_override)
         .unwrap_or_else(|| pin.content_type());
 
     // Use metadata title if available, otherwise fall back to pin title or content type name
-    let title = metadata.as_ref()
+    let title = metadata
+        .as_ref()
         .and_then(|m| m.title.clone())
         .or(pin.title.clone())
         .unwrap_or_else(|| content_type.display_name().to_string());
 
     // Get image from metadata
-    let image_url = metadata.as_ref()
-        .and_then(|m| m.image.clone());
+    let image_url = metadata.as_ref().and_then(|m| m.image.clone());
 
     // Get summary from metadata, or use pin content
-    let description = metadata.as_ref()
+    let description = metadata
+        .as_ref()
         .and_then(|m| m.summary.clone())
-        .or_else(|| if pin.content.is_empty() { None } else { Some(pin.content.clone()) });
+        .or_else(|| {
+            if pin.content.is_empty() {
+                None
+            } else {
+                Some(pin.content.clone())
+            }
+        });
 
     let pin_for_menu = pin.clone();
 
     // Get display reference and determine link target
     let (display_ref, item_route) = match &pin.reference {
-        PinReference::Event { id, .. } => {
-            (id.clone(), Some(Route::Nip19Handler { identifier: id.clone() }))
-        }
+        PinReference::Event { id, .. } => (
+            id.clone(),
+            Some(Route::Nip19Handler {
+                identifier: id.clone(),
+            }),
+        ),
         PinReference::Coordinate { address, .. } => {
             let naddr = to_naddr(address);
             let route = match content_type {
-                PinContentType::Recipe => Some(Route::RecipeDetail { naddr: naddr.clone() }),
-                PinContentType::Community => Some(Route::CommunityPage { a_tag: address.clone() }),
-                PinContentType::CodeRepo => Some(Route::CodeRepo { naddr: naddr.clone() }),
-                PinContentType::CalendarEvent => Some(Route::CalendarEventDetail { naddr: naddr.clone(), from: None }),
-                PinContentType::Article => Some(Route::ArticleDetail { naddr: naddr.clone() }),
-                PinContentType::LiveStream => Some(Route::LiveStreamDetail { note_id: naddr.clone() }),
-                PinContentType::Badge => Some(Route::BadgeDetail { naddr: naddr.clone() }),
-                PinContentType::Pinboard => Some(Route::PinBoardDetail { naddr: naddr.clone() }),
-                PinContentType::Profile => {
-                    parse_coordinate(address)
-                        .map(|coord| Route::Profile { pubkey: coord.public_key.to_hex() })
-                }
+                PinContentType::Recipe => Some(Route::RecipeDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::Community => Some(Route::CommunityPage {
+                    a_tag: address.clone(),
+                }),
+                PinContentType::CodeRepo => Some(Route::CodeRepo {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::CalendarEvent => Some(Route::CalendarEventDetail {
+                    naddr: naddr.clone(),
+                    from: None,
+                }),
+                PinContentType::Article => Some(Route::ArticleDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::LiveStream => Some(Route::LiveStreamDetail {
+                    note_id: naddr.clone(),
+                }),
+                PinContentType::Badge => Some(Route::BadgeDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::Pinboard => Some(Route::PinBoardDetail {
+                    naddr: naddr.clone(),
+                }),
+                PinContentType::Profile => parse_coordinate(address).map(|coord| Route::Profile {
+                    pubkey: coord.public_key.to_hex(),
+                }),
                 _ => None,
             };
             (address.clone(), route)
         }
-        PinReference::External { content, .. } => {
-            (content.to_string(), None)
-        }
+        PinReference::External { content, .. } => (content.to_string(), None),
     };
 
     // Height class for placeholder when no image
@@ -676,7 +726,10 @@ fn PinMosaicContent(
     let is_image_type = matches!(content_type, PinContentType::Image);
     let is_external = matches!(
         content_type,
-        PinContentType::Link | PinContentType::Video | PinContentType::Podcast | PinContentType::Music
+        PinContentType::Link
+            | PinContentType::Video
+            | PinContentType::Podcast
+            | PinContentType::Music
     );
 
     // Check if we have a valid image to display
@@ -769,10 +822,7 @@ fn PinMosaicContent(
 
 /// Loading skeleton for PinCardMosaic with varied heights
 #[component]
-pub fn PinCardMosaicSkeleton(
-    #[props(default)]
-    height_variant: Option<String>,
-) -> Element {
+pub fn PinCardMosaicSkeleton(#[props(default)] height_variant: Option<String>) -> Element {
     let height_class = match height_variant.as_deref() {
         Some("small") => "h-32",
         Some("large") => "h-64",
@@ -813,16 +863,11 @@ pub fn PinMosaicGrid(
     /// Whether the current user owns these pins (can delete)
     #[props(default = false)]
     is_owner: bool,
-    #[props(default)]
-    on_delete: Option<EventHandler<String>>,
-    #[props(default = false)]
-    loading: bool,
-    #[props(default = 8)]
-    skeleton_count: usize,
-    #[props(default)]
-    content_type_overrides: HashMap<String, PinContentType>,
-    #[props(default)]
-    metadata_map: HashMap<String, PinMetadata>,
+    #[props(default)] on_delete: Option<EventHandler<String>>,
+    #[props(default = false)] loading: bool,
+    #[props(default = 8)] skeleton_count: usize,
+    #[props(default)] content_type_overrides: HashMap<String, PinContentType>,
+    #[props(default)] metadata_map: HashMap<String, PinMetadata>,
     /// Callback when more items should be loaded
     #[props(default)]
     on_load_more: Option<EventHandler<()>>,

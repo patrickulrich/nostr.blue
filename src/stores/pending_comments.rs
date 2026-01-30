@@ -4,12 +4,12 @@
 //! It enables optimistic UI updates so users see their comments immediately.
 
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Timestamp};
-use nostr_sdk::prelude::{EventBuilder, CommentTarget, Tags};
+use dioxus_core::spawn_forever;
+use nostr_sdk::prelude::{CommentTarget, EventBuilder, Tags};
 use nostr_sdk::secp256k1::schnorr::Signature;
+use nostr_sdk::{Event as NostrEvent, EventId, Kind, PublicKey, Timestamp};
 use std::collections::HashMap;
 use std::str::FromStr;
-use dioxus_core::spawn_forever;
 
 use crate::stores::nostr_client::{get_client, publish_note};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
@@ -75,9 +75,13 @@ impl PendingComment {
         // Use unwrap_or_else instead of expect to avoid unhelpful WASM panics
         let dummy_sig = Signature::from_str(
             "0000000000000000000000000000000000000000000000000000000000000000\
-             0000000000000000000000000000000000000000000000000000000000000000"
-        ).unwrap_or_else(|e| {
-            log::error!("Failed to create dummy signature (should never happen): {}", e);
+             0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap_or_else(|e| {
+            log::error!(
+                "Failed to create dummy signature (should never happen): {}",
+                e
+            );
             // Fallback: create from raw bytes - 64 zero bytes is always valid
             Signature::from_slice(&[0u8; 64]).expect("64 zero bytes is valid signature format")
         });
@@ -107,19 +111,26 @@ pub static PENDING_COMMENTS: GlobalSignal<HashMap<String, Vec<PendingComment>>> 
 /// This prevents duplicate comments from rapid double-clicks.
 pub fn add_pending_comment(comment: PendingComment) {
     let target_id = comment.target_event_id.to_hex();
-    log::debug!("Adding pending comment {} for target {}", comment.local_id, target_id);
+    log::debug!(
+        "Adding pending comment {} for target {}",
+        comment.local_id,
+        target_id
+    );
 
     let mut store = PENDING_COMMENTS.write();
     let comments = store.entry(target_id).or_default();
 
     // Prevent duplicates: check if we already have a pending or failed comment with same content
-    let already_exists = comments.iter().any(|c|
-        c.content == comment.content &&
-        matches!(c.status, CommentStatus::Pending | CommentStatus::Failed(_))
-    );
+    let already_exists = comments.iter().any(|c| {
+        c.content == comment.content
+            && matches!(c.status, CommentStatus::Pending | CommentStatus::Failed(_))
+    });
 
     if already_exists {
-        log::warn!("Duplicate pending comment detected, skipping: {}", comment.local_id);
+        log::warn!(
+            "Duplicate pending comment detected, skipping: {}",
+            comment.local_id
+        );
         return;
     }
 
@@ -128,7 +139,11 @@ pub fn add_pending_comment(comment: PendingComment) {
 
 /// Update status of a pending comment
 pub fn update_pending_status(local_id: &str, status: CommentStatus) {
-    log::debug!("Updating pending comment {} status to {:?}", local_id, status);
+    log::debug!(
+        "Updating pending comment {} status to {:?}",
+        local_id,
+        status
+    );
     let mut store = PENDING_COMMENTS.write();
     for comments in store.values_mut() {
         if let Some(comment) = comments.iter_mut().find(|c| c.local_id == local_id) {
@@ -181,7 +196,9 @@ pub fn retry_pending_comment(local_id: &str) {
         found
     };
 
-    let Some((local_id, content, kind, target_event, parent_comment, target_event_id)) = comment_data else {
+    let Some((local_id, content, kind, target_event, parent_comment, target_event_id)) =
+        comment_data
+    else {
         log::warn!("Retry failed: pending comment {} not found", local_id);
         return;
     };
@@ -199,7 +216,10 @@ pub fn retry_pending_comment(local_id: &str) {
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized for retry");
-                    update_pending_status(&local_id, CommentStatus::Failed("Client not initialized".to_string()));
+                    update_pending_status(
+                        &local_id,
+                        CommentStatus::Failed("Client not initialized".to_string()),
+                    );
                     return;
                 }
             };
@@ -217,20 +237,18 @@ pub fn retry_pending_comment(local_id: &str) {
             let comment_target = CommentTarget::event(
                 comment_to.id,
                 comment_to.kind,
-                None,  // relay hint
-                None   // marker
+                None, // relay hint
+                None, // marker
             );
-            let root_target = root.map(|r| CommentTarget::event(
-                r.id,
-                r.kind,
-                None,
-                None
-            ));
+            let root_target = root.map(|r| CommentTarget::event(r.id, r.kind, None, None));
             let builder = EventBuilder::comment(&content, comment_target, root_target);
 
             match client.send_event_builder(builder).await {
                 Ok(send_output) => {
-                    log::info!("NIP-22 comment retry successful: {}", send_output.id().to_hex());
+                    log::info!(
+                        "NIP-22 comment retry successful: {}",
+                        send_output.id().to_hex()
+                    );
 
                     // Invalidate thread tree cache (matching NIP-10 behavior)
                     invalidate_thread_tree_cache(&target_event_id);
@@ -270,11 +288,26 @@ pub fn retry_pending_comment(local_id: &str) {
 
             if let Some(root_id) = parent_root {
                 // This is a nested reply (replying to a reply)
-                tags.push(vec!["e".to_string(), root_id, "".to_string(), "root".to_string()]);
-                tags.push(vec!["e".to_string(), event_id.clone(), "".to_string(), "reply".to_string()]);
+                tags.push(vec![
+                    "e".to_string(),
+                    root_id,
+                    "".to_string(),
+                    "root".to_string(),
+                ]);
+                tags.push(vec![
+                    "e".to_string(),
+                    event_id.clone(),
+                    "".to_string(),
+                    "reply".to_string(),
+                ]);
             } else {
                 // This is a direct reply to root
-                tags.push(vec!["e".to_string(), event_id.clone(), "".to_string(), "root".to_string()]);
+                tags.push(vec![
+                    "e".to_string(),
+                    event_id.clone(),
+                    "".to_string(),
+                    "root".to_string(),
+                ]);
             }
 
             // Add p tags: parent author + all p tags from parent event
@@ -303,11 +336,17 @@ pub fn retry_pending_comment(local_id: &str) {
                     // Update pending comment status
                     match EventId::from_hex(&published_event_id) {
                         Ok(event_id_parsed) => {
-                            update_pending_status(&local_id, CommentStatus::Confirmed(event_id_parsed));
+                            update_pending_status(
+                                &local_id,
+                                CommentStatus::Confirmed(event_id_parsed),
+                            );
                         }
                         Err(e) => {
                             log::error!("Failed to parse event ID '{}': {}", published_event_id, e);
-                            update_pending_status(&local_id, CommentStatus::Failed("Event ID parse error".to_string()));
+                            update_pending_status(
+                                &local_id,
+                                CommentStatus::Failed("Event ID parse error".to_string()),
+                            );
                         }
                     }
                 }

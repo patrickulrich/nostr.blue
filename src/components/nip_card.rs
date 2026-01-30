@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::services::github_nips::OfficialNip;
-use crate::utils::{truncate_pubkey, format::truncate_with_word_break, time::format_relative_time};
 use crate::utils::validation::is_valid_http_url;
+use crate::utils::{format::truncate_with_word_break, time::format_relative_time, truncate_pubkey};
+use dioxus::prelude::*;
 
 /// Card component for displaying an official NIP from GitHub
 #[component]
@@ -66,8 +66,8 @@ pub fn CustomNipCard(
     #[props(default = None)] author_name: Option<String>,
     #[props(default = None)] author_picture: Option<String>,
 ) -> Element {
-    use nostr_sdk::prelude::*;
     use crate::hooks::use_author_metadata;
+    use nostr_sdk::prelude::*;
 
     // Extract metadata from event tags
     // Validate identifier exists - addressable events require a non-empty d-tag per NIP-01
@@ -76,13 +76,17 @@ pub fn CustomNipCard(
         // Skip rendering cards with empty identifiers - they create invalid naddrs
         return rsx! { div { class: "hidden" } };
     }
-    let title = event.tags.iter()
+    let title = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::Title)
         .and_then(|t| t.content().map(|s| s.to_string()))
         .unwrap_or_else(|| format!("Custom NIP: {}", identifier));
 
     // Extract related kinds from k tags
-    let related_kinds: Vec<String> = event.tags.iter()
+    let related_kinds: Vec<String> = event
+        .tags
+        .iter()
         .filter(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::K)))
         .filter_map(|t| t.content().map(|s| s.to_string()))
         .collect();
@@ -93,26 +97,33 @@ pub fn CustomNipCard(
     let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Get display name from provided prop or fetched metadata (using UTF-8 safe truncation)
-    let display_name = author_name.or_else(|| {
-        author_metadata.read().as_ref()
-            .and_then(|m| m.display_name.clone().or(m.name.clone()))
-    }).unwrap_or_else(|| truncate_pubkey(&author_pubkey));
+    let display_name = author_name
+        .or_else(|| {
+            author_metadata
+                .read()
+                .as_ref()
+                .and_then(|m| m.display_name.clone().or(m.name.clone()))
+        })
+        .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
     let profile_picture = author_picture.clone().or_else(|| {
-        author_metadata.read().as_ref()
+        author_metadata
+            .read()
+            .as_ref()
             .and_then(|m| m.picture.clone())
     });
 
     // Generate avatar fallback
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
 
     // Generate naddr for linking
     let naddr = {
-        let coord = Coordinate::new(event.kind, event.pubkey)
-            .identifier(&identifier);
+        let coord = Coordinate::new(event.kind, event.pubkey).identifier(&identifier);
         let relays: Vec<RelayUrl> = vec![];
         Nip19Coordinate::new(coord, relays)
             .to_bech32()
@@ -247,4 +258,3 @@ pub fn NipCardSkeleton() -> Element {
         }
     }
 }
-

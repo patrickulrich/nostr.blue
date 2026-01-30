@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::stores::nostr_client;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ReportModalProps {
@@ -49,7 +49,8 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                 Some(report_details)
             };
 
-            match nostr_client::report_post(event_id, author_pubkey, report_type, details_opt).await {
+            match nostr_client::report_post(event_id, author_pubkey, report_type, details_opt).await
+            {
                 Ok(_) => {
                     log::info!("Post reported successfully");
                     success.set(true);

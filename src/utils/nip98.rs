@@ -32,7 +32,10 @@ pub struct AuthResult {
 /// # Returns
 /// * `Ok(AuthResult)` - The authorization header and signed URL
 /// * `Err(String)` - Error message if auth creation fails
-pub async fn create_auth_header(url: &str, method: nip98::HttpMethod) -> Result<AuthResult, String> {
+pub async fn create_auth_header(
+    url: &str,
+    method: nip98::HttpMethod,
+) -> Result<AuthResult, String> {
     let signer = nostr_client::get_signer()
         .ok_or_else(|| "Not authenticated. Please sign in to access this feature.".to_string())?;
 
@@ -42,19 +45,19 @@ pub async fn create_auth_header(url: &str, method: nip98::HttpMethod) -> Result<
     let http_data = nip98::HttpData::new(parsed_url, method);
 
     let header = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            http_data.to_authorization(&keys).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
+        crate::stores::signer::SignerType::Keys(keys) => http_data
+            .to_authorization(&keys)
+            .await
+            .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            http_data.to_authorization(browser_signer.as_ref()).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            http_data.to_authorization(nostr_connect.as_ref()).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => http_data
+            .to_authorization(browser_signer.as_ref())
+            .await
+            .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => http_data
+            .to_authorization(nostr_connect.as_ref())
+            .await
+            .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
     };
 
     Ok(AuthResult { header, signed_url })
@@ -88,19 +91,19 @@ pub async fn create_auth_header_with_payload(
     let http_data = nip98::HttpData::new(parsed_url, method).payload(payload_hash);
 
     let header = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            http_data.to_authorization(&keys).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
+        crate::stores::signer::SignerType::Keys(keys) => http_data
+            .to_authorization(&keys)
+            .await
+            .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            http_data.to_authorization(browser_signer.as_ref()).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            http_data.to_authorization(nostr_connect.as_ref()).await
-                .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => http_data
+            .to_authorization(browser_signer.as_ref())
+            .await
+            .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => http_data
+            .to_authorization(nostr_connect.as_ref())
+            .await
+            .map_err(|e| format!("Failed to create NIP-98 auth: {}", e))?,
     };
 
     Ok(AuthResult { header, signed_url })

@@ -1,16 +1,16 @@
 //! Shop Home - Browse marketplace products (NIP-99)
 
+use crate::components::shop::{CategorySelector, ProductCard, ProductCardSkeleton};
+use crate::hooks::use_infinite_scroll::use_infinite_scroll;
+use crate::routes::Route;
+use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey};
+use crate::stores::shop_store::{
+    fetch_products, fetch_products_paginated, filter_products, get_cart_count, sort_products,
+    ProductSortBy, ShopFilterState,
+};
+use crate::utils::nip99::{Product, ProductFormat};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-use crate::routes::Route;
-use crate::utils::nip99::{Product, ProductFormat};
-use crate::stores::shop_store::{
-    fetch_products, fetch_products_paginated, get_cart_count,
-    ShopFilterState, filter_products, sort_products, ProductSortBy,
-};
-use crate::stores::nostr_client::{fetch_contacts, get_cached_pubkey};
-use crate::components::shop::{ProductCard, ProductCardSkeleton, CategorySelector};
-use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 
 /// Shop browse page - displays product grid with filters
 #[component]
@@ -78,7 +78,11 @@ pub fn ShopHome() -> Element {
         ShopFilterState {
             min_price_sats: *min_price.read(),
             max_price_sats: *max_price.read(),
-            category: if cats.is_empty() { None } else { cats.first().cloned() },
+            category: if cats.is_empty() {
+                None
+            } else {
+                cats.first().cloned()
+            },
             format: if digital {
                 Some(ProductFormat::Digital)
             } else if physical {
@@ -128,8 +132,10 @@ pub fn ShopHome() -> Element {
                             has_more.set(false);
                         } else {
                             // Deduplicate against existing products
-                            let existing_ids: HashSet<_> = products.peek().iter().map(|p| p.naddr.clone()).collect();
-                            let unique: Vec<_> = new_products.into_iter()
+                            let existing_ids: HashSet<_> =
+                                products.peek().iter().map(|p| p.naddr.clone()).collect();
+                            let unique: Vec<_> = new_products
+                                .into_iter()
                                 .filter(|p| !existing_ids.contains(&p.naddr))
                                 .collect();
 

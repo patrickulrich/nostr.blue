@@ -6,26 +6,24 @@
 //! - Trending/recent podcasts from both sources
 //! - NIP-51 subscription management
 
-use dioxus::prelude::*;
 use crate::components::{
-    PodcastShowCard, PodcastShowCardSkeleton, PodcastShow,
-    PodcastEpisodeCard, PodcastEpisodeCardSkeleton, DisplayEpisode,
-    PodcastAddFeedModal,
-    icons,
+    icons, DisplayEpisode, PodcastAddFeedModal, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
+    PodcastShow, PodcastShowCard, PodcastShowCardSkeleton,
 };
 use crate::routes::Route;
 use crate::services::podcast_index;
-use crate::stores::{nostr_client, auth_store, podcast_subscription};
+use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::podcast;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind};
 use std::time::Duration;
 
 /// Podcast home page
 #[component]
 pub fn PodcastHome() -> Element {
-    let mut search_query = use_signal(String::new);  // Display value in input
-    let mut submitted_query = use_signal(String::new);  // Actual search query (set on Enter)
+    let mut search_query = use_signal(String::new); // Display value in input
+    let mut submitted_query = use_signal(String::new); // Actual search query (set on Enter)
     let mut active_tab = use_signal(|| PodcastTab::Discover);
     let mut selected_platform = use_signal(|| String::from("all")); // "all", "rss", "nostr"
     let mut show_add_feed_modal = use_signal(|| false);
@@ -517,15 +515,20 @@ fn BrowsePodcastsByCategory(props: BrowsePodcastsByCategoryProps) -> Element {
                     // Filter by category if specified
                     if let Some(ref category) = cat {
                         let cat_lower = category.to_lowercase();
-                        let filtered: Vec<_> = shows.into_iter()
-                            .filter(|s| s.categories.iter().any(|c| c.to_lowercase().contains(&cat_lower)))
+                        let filtered: Vec<_> = shows
+                            .into_iter()
+                            .filter(|s| {
+                                s.categories
+                                    .iter()
+                                    .any(|c| c.to_lowercase().contains(&cat_lower))
+                            })
                             .collect();
                         Ok(filtered)
                     } else {
                         Ok(shows)
                     }
                 }
-                Err(e) => Err(e)
+                Err(e) => Err(e),
             }
         }
     });
@@ -643,8 +646,12 @@ struct BrowsePodcastRowProps {
 
 #[component]
 fn BrowsePodcastRow(props: BrowsePodcastRowProps) -> Element {
-    let image = props.image.clone()
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", props.title));
+    let image = props.image.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            props.title
+        )
+    });
 
     rsx! {
         Link {
@@ -836,20 +843,36 @@ fn ApiCategoryTiles(props: ApiCategoryTilesProps) -> Element {
     });
 
     // Popular categories to show first (subset of all)
-    let popular_cats = ["Technology", "Business", "Comedy", "News", "Science", "Education", "Sports", "Health & Fitness", "True Crime", "Music"];
+    let popular_cats = [
+        "Technology",
+        "Business",
+        "Comedy",
+        "News",
+        "Science",
+        "Education",
+        "Sports",
+        "Health & Fitness",
+        "True Crime",
+        "Music",
+    ];
 
     // Pre-compute category buttons outside rsx! to avoid let-in-rsx issues
     let is_loading = *loading.read();
     let cats_data = categories.read();
 
     let category_buttons: Vec<(String, String, bool)> = if let Some(ref cats) = *cats_data {
-        popular_cats.iter()
+        popular_cats
+            .iter()
             .filter_map(|display_name| {
                 cats.iter()
                     .find(|c| c.name.to_lowercase().contains(&display_name.to_lowercase()))
                     .map(|api_cat| {
                         let api_name = api_cat.name.clone();
-                        let is_selected = props.selected.as_ref().map(|s| s == &api_name).unwrap_or(false);
+                        let is_selected = props
+                            .selected
+                            .as_ref()
+                            .map(|s| s == &api_name)
+                            .unwrap_or(false);
                         (display_name.to_string(), api_name, is_selected)
                     })
             })
@@ -1005,7 +1028,9 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                         if podcast_ids_set.contains(&feed_id) {
                             // Get feed metadata for the live episode
                             if let Ok(feed) = podcast_index::get_podcast_by_id(feed_id).await {
-                                all_episodes.push(DisplayEpisode::from_podcast_index_live_episode(&ep, &feed));
+                                all_episodes.push(DisplayEpisode::from_podcast_index_live_episode(
+                                    &ep, &feed,
+                                ));
                             }
                         }
                     }
@@ -1014,35 +1039,40 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
 
             // Fetch regular episodes from subscriptions concurrently
             // Handle both GUID-only and ID-cached subscriptions
-            let fetch_futures: Vec<_> = subscriptions.iter().take(20).map(|sub| {
-                let guid = sub.podcast_guid.clone();
-                let id = sub.numeric_id();
-                async move {
-                    // Try by ID first (cached, more efficient), then by GUID
-                    let feed_result = if let Some(id) = id {
-                        podcast_index::get_podcast_by_id(id).await
-                    } else if let Some(ref guid) = guid {
-                        podcast_index::get_podcast_by_guid(guid).await
-                    } else {
-                        return None;
-                    };
+            let fetch_futures: Vec<_> = subscriptions
+                .iter()
+                .take(20)
+                .map(|sub| {
+                    let guid = sub.podcast_guid.clone();
+                    let id = sub.numeric_id();
+                    async move {
+                        // Try by ID first (cached, more efficient), then by GUID
+                        let feed_result = if let Some(id) = id {
+                            podcast_index::get_podcast_by_id(id).await
+                        } else if let Some(ref guid) = guid {
+                            podcast_index::get_podcast_by_guid(guid).await
+                        } else {
+                            return None;
+                        };
 
-                    let Ok(feed) = feed_result else {
-                        log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
-                        return None;
-                    };
+                        let Ok(feed) = feed_result else {
+                            log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
+                            return None;
+                        };
 
-                    // Fetch episodes by feed ID (need the ID from the feed response)
-                    let episodes = podcast_index::get_episodes_by_feed_id(feed.id, Some(5)).await
-                        .unwrap_or_default();
+                        // Fetch episodes by feed ID (need the ID from the feed response)
+                        let episodes = podcast_index::get_episodes_by_feed_id(feed.id, Some(5))
+                            .await
+                            .unwrap_or_default();
 
-                    let display_episodes: Vec<DisplayEpisode> = episodes
-                        .iter()
-                        .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
-                        .collect();
-                    Some(display_episodes)
-                }
-            }).collect();
+                        let display_episodes: Vec<DisplayEpisode> = episodes
+                            .iter()
+                            .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                            .collect();
+                        Some(display_episodes)
+                    }
+                })
+                .collect();
 
             // Execute all podcast fetches concurrently
             let results = futures::future::join_all(fetch_futures).await;
@@ -1094,9 +1124,11 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                 for ep in episodes {
                     // Check if episode's source pubkey matches any subscription
                     let is_subscribed = match &ep.source {
-                        crate::stores::nostr_music::TrackSource::NostrPodcast { pubkey, .. } => {
-                            subscribed_pubkeys.iter().any(|sub_pk| sub_pk == &pubkey.to_lowercase())
-                        }
+                        crate::stores::nostr_music::TrackSource::NostrPodcast {
+                            pubkey, ..
+                        } => subscribed_pubkeys
+                            .iter()
+                            .any(|sub_pk| sub_pk == &pubkey.to_lowercase()),
                         _ => false,
                     };
                     if is_subscribed {
@@ -1135,17 +1167,20 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
         all
     };
 
-    let has_any_data = (show_rss && rss_episodes.read().is_some()) ||
-                       (show_nostr && nostr_episodes.read().is_some());
+    let has_any_data = (show_rss && rss_episodes.read().is_some())
+        || (show_nostr && nostr_episodes.read().is_some());
     // Check if we're still initializing - show skeleton until client is ready and subscriptions loaded
     let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
     let has_signer = nostr_client::has_signer();
     let subs_loading = *podcast_subscription::SUBSCRIPTIONS_LOADING.read();
     let subs_loaded = *podcast_subscription::SUBSCRIPTIONS_LOADED.read();
     // Show loading if: client not ready, no signer, subscriptions not loaded, or still fetching episodes
-    let is_initial_loading = !client_ready || !has_signer || !subs_loaded || subs_loading ||
-                             (show_rss && *rss_loading.read() && rss_episodes.read().is_none()) ||
-                             (show_nostr && *nostr_loading.read() && nostr_episodes.read().is_none() && !show_rss);
+    let is_initial_loading = !client_ready
+        || !has_signer
+        || !subs_loaded
+        || subs_loading
+        || (show_rss && *rss_loading.read() && rss_episodes.read().is_none())
+        || (show_nostr && *nostr_loading.read() && nostr_episodes.read().is_none() && !show_rss);
     let nostr_still_loading = show_nostr && (!client_ready || *nostr_loading.read());
 
     if is_initial_loading && !has_any_data {
@@ -1242,15 +1277,18 @@ fn LibraryTab(props: LibraryTabProps) -> Element {
     let is_loading = podcast_subscription::is_loading();
 
     // Filter subscriptions based on platform
-    let subscriptions: Vec<_> = all_subscriptions.into_iter().filter(|sub| {
-        if sub.is_rss() {
-            show_rss
-        } else if sub.is_nostr() {
-            show_nostr
-        } else {
-            true // Show unknown types in all views
-        }
-    }).collect();
+    let subscriptions: Vec<_> = all_subscriptions
+        .into_iter()
+        .filter(|sub| {
+            if sub.is_rss() {
+                show_rss
+            } else if sub.is_nostr() {
+                show_nostr
+            } else {
+                true // Show unknown types in all views
+            }
+        })
+        .collect();
 
     if is_loading {
         return rsx! {
@@ -1321,7 +1359,11 @@ struct SubscribedPodcastRowProps {
 #[derive(Clone, Debug)]
 enum SubscriptionMetadata {
     Rss(Box<podcast_index::PodcastFeed>),
-    Nostr { title: String, image: Option<String>, author: Option<String> },
+    Nostr {
+        title: String,
+        image: Option<String>,
+        author: Option<String>,
+    },
 }
 
 #[component]
@@ -1381,7 +1423,11 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                     let kind_num: u16 = match parts[0].parse() {
                         Ok(k) => k,
                         Err(_) => {
-                            log::warn!("Invalid kind in coordinate '{}': could not parse '{}'", coord, parts[0]);
+                            log::warn!(
+                                "Invalid kind in coordinate '{}': could not parse '{}'",
+                                coord,
+                                parts[0]
+                            );
                             return None;
                         }
                     };
@@ -1394,13 +1440,13 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
                         let filter = Filter::new()
                             .author(pubkey)
                             .kind(Kind::from(kind_num))
-                            .custom_tag(
-                                SingleLetterTag::from_char('d').unwrap(),
-                                d_tag
-                            )
+                            .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag)
                             .limit(1);
 
-                        if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                        if let Ok(events) =
+                            nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
+                                .await
+                        {
                             if let Some(event) = events.into_iter().next() {
                                 // Parse podcast metadata from the event
                                 if let Ok(metadata) = podcast::parse_podcast_metadata(&event) {
@@ -1428,55 +1474,78 @@ fn SubscribedPodcastRow(props: SubscribedPodcastRowProps) -> Element {
     let (title, image, author) = match metadata {
         Some(SubscriptionMetadata::Rss(feed)) => (
             feed.title.clone(),
-            feed.get_image().map(String::from)
+            feed.get_image()
+                .map(String::from)
                 .or_else(|| props.subscription.image.clone())
-                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", feed.title)),
+                .unwrap_or_else(|| {
+                    format!(
+                        "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                        feed.title
+                    )
+                }),
             feed.author.clone(),
         ),
-        Some(SubscriptionMetadata::Nostr { title, image, author }) => (
+        Some(SubscriptionMetadata::Nostr {
+            title,
+            image,
+            author,
+        }) => (
             title.clone(),
-            image.clone()
+            image
+                .clone()
                 .or_else(|| props.subscription.image.clone())
-                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", title)),
+                .unwrap_or_else(|| {
+                    format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", title)
+                }),
             author.clone(),
         ),
         None => {
             // Fallback when no metadata loaded yet
-            let fallback_title = props.subscription.title.clone()
-                .unwrap_or_else(|| {
-                    if let Some(id) = props.subscription.podcast_id {
-                        format!("Podcast #{}", id)
-                    } else if props.subscription.podcast_guid.is_some() {
-                        "Loading podcast...".to_string()
-                    } else {
-                        "Nostr Podcast".to_string()
-                    }
-                });
-            let fallback_image = props.subscription.image.clone()
-                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", fallback_title));
+            let fallback_title = props.subscription.title.clone().unwrap_or_else(|| {
+                if let Some(id) = props.subscription.podcast_id {
+                    format!("Podcast #{}", id)
+                } else if props.subscription.podcast_guid.is_some() {
+                    "Loading podcast...".to_string()
+                } else {
+                    "Nostr Podcast".to_string()
+                }
+            });
+            let fallback_image = props.subscription.image.clone().unwrap_or_else(|| {
+                format!(
+                    "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                    fallback_title
+                )
+            });
             (fallback_title, fallback_image, None)
         }
     };
 
     // Determine the route based on subscription type
     // For RSS podcasts, prefer subscription's podcast_id, then fall back to ID from fetched feed
-    let route = props.subscription.podcast_id
-        .map(|podcast_id| Route::PodcastRssFeedDetail {
-            podcast_id: podcast_id.to_string()
-        })
-        .or_else(|| {
-            // If we fetched by GUID, get the ID from the fetched feed
-            if let Some(SubscriptionMetadata::Rss(ref feed)) = metadata {
-                Some(Route::PodcastRssFeedDetail {
-                    podcast_id: feed.id.to_string()
+    let route =
+        props
+            .subscription
+            .podcast_id
+            .map(|podcast_id| Route::PodcastRssFeedDetail {
+                podcast_id: podcast_id.to_string(),
+            })
+            .or_else(|| {
+                // If we fetched by GUID, get the ID from the fetched feed
+                if let Some(SubscriptionMetadata::Rss(ref feed)) = metadata {
+                    Some(Route::PodcastRssFeedDetail {
+                        podcast_id: feed.id.to_string(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                props.subscription.nostr_coordinate.as_ref().map(|coord| {
+                    Route::PodcastNostrDetail {
+                        naddr: coord.clone(),
+                    }
                 })
-            } else {
-                None
-            }
-        })
-        .or_else(|| props.subscription.nostr_coordinate.as_ref().map(|coord| Route::PodcastNostrDetail {
-            naddr: coord.clone()
-        }));
+            });
 
     // Show loading state while fetching
     let is_loading = data.is_none();
@@ -1644,18 +1713,18 @@ fn PodcastSearchResults(props: PodcastSearchResultsProps) -> Element {
     let api_result = api_search.read();
     let api_feeds = api_result.as_ref().and_then(|r| r.as_ref().ok());
     // Check if API is in "waiting" state (distinct from real errors)
-    let api_waiting = api_result.as_ref().is_some_and(|r| {
-        r.as_ref().err().is_some_and(|e| e.starts_with("__waiting"))
-    });
+    let api_waiting = api_result
+        .as_ref()
+        .is_some_and(|r| r.as_ref().err().is_some_and(|e| e.starts_with("__waiting")));
     let api_loading = api_result.is_none() || api_waiting;
 
     // Read Nostr search results from resource
     let nostr_result = nostr_search.read();
     let nostr_shows = nostr_result.as_ref().and_then(|r| r.as_ref().ok());
     // Check if Nostr is in "waiting" state (distinct from real errors)
-    let nostr_waiting = nostr_result.as_ref().is_some_and(|r| {
-        r.as_ref().err().is_some_and(|e| e.starts_with("__waiting"))
-    });
+    let nostr_waiting = nostr_result
+        .as_ref()
+        .is_some_and(|r| r.as_ref().err().is_some_and(|e| e.starts_with("__waiting")));
     let nostr_loading = nostr_result.is_none() || nostr_waiting;
 
     let api_count = api_feeds.map(|r| r.len()).unwrap_or(0);
@@ -1769,11 +1838,15 @@ enum SearchResultSource {
 fn get_show_route(show: &PodcastShow) -> Route {
     match &show.source {
         crate::utils::podcast::PodcastSource::Nostr { coordinate, .. } => {
-            Route::PodcastNostrDetail { naddr: coordinate.clone() }
+            Route::PodcastNostrDetail {
+                naddr: coordinate.clone(),
+            }
         }
         crate::utils::podcast::PodcastSource::Rss { podcast_id, .. } => {
             if let Some(id) = podcast_id {
-                Route::PodcastRssFeedDetail { podcast_id: id.to_string() }
+                Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string(),
+                }
             } else {
                 // No podcast ID available, go to home
                 Route::PodcastHome {}
@@ -1795,8 +1868,12 @@ struct SearchResultRowProps {
 
 #[component]
 fn SearchResultRow(props: SearchResultRowProps) -> Element {
-    let image = props.image.clone()
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", props.title));
+    let image = props.image.clone().unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            props.title
+        )
+    });
 
     rsx! {
         Link {
@@ -2133,43 +2210,52 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
 
                 // Fetch all podcasts and their episodes concurrently
                 // Handle both GUID-only and ID-cached subscriptions
-                let fetch_futures: Vec<_> = subscriptions.iter().take(20).map(|sub| {
-                    let guid = sub.podcast_guid.clone();
-                    let id = sub.numeric_id();
-                    async move {
-                        // Try by ID first (cached, more efficient), then by GUID
-                        let feed_result = if let Some(id) = id {
-                            podcast_index::get_podcast_by_id(id).await
-                        } else if let Some(ref guid) = guid {
-                            podcast_index::get_podcast_by_guid(guid).await
-                        } else {
-                            return None;
-                        };
+                let fetch_futures: Vec<_> = subscriptions
+                    .iter()
+                    .take(20)
+                    .map(|sub| {
+                        let guid = sub.podcast_guid.clone();
+                        let id = sub.numeric_id();
+                        async move {
+                            // Try by ID first (cached, more efficient), then by GUID
+                            let feed_result = if let Some(id) = id {
+                                podcast_index::get_podcast_by_id(id).await
+                            } else if let Some(ref guid) = guid {
+                                podcast_index::get_podcast_by_guid(guid).await
+                            } else {
+                                return None;
+                            };
 
-                        let Ok(feed) = feed_result else {
-                            log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
-                            return None;
-                        };
+                            let Ok(feed) = feed_result else {
+                                log::warn!("Failed to fetch podcast: {:?}/{:?}", guid, id);
+                                return None;
+                            };
 
-                        // Fetch episodes by feed ID
-                        let episodes = podcast_index::get_episodes_by_feed_id(feed.id, Some(5)).await
-                            .unwrap_or_default();
+                            // Fetch episodes by feed ID
+                            let episodes = podcast_index::get_episodes_by_feed_id(feed.id, Some(5))
+                                .await
+                                .unwrap_or_default();
 
-                        let display_episodes: Vec<DisplayEpisode> = episodes
-                            .iter()
-                            .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
-                            .collect();
-                        Some(display_episodes)
-                    }
-                }).collect();
+                            let display_episodes: Vec<DisplayEpisode> = episodes
+                                .iter()
+                                .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                                .collect();
+                            Some(display_episodes)
+                        }
+                    })
+                    .collect();
 
                 // Execute all podcast fetches concurrently
                 let results = futures::future::join_all(fetch_futures).await;
 
                 // Collect successful results
-                let all_episodes: Vec<DisplayEpisode> = results.into_iter().flatten().flatten().collect();
+                let all_episodes: Vec<DisplayEpisode> =
+                    results.into_iter().flatten().flatten().collect();
 
-                log::info!("Fetched {} RSS episodes from subscriptions", all_episodes.len());
+                log::info!(
+                    "Fetched {} RSS episodes from subscriptions",
+                    all_episodes.len()
+                );
                 rss_episodes.set(Some(all_episodes));
                 rss_loading.set(false);
             });
@@ -2233,13 +2319,15 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
     // Determine if still loading based on platform
     let is_initial_loading = match props.platform.as_str() {
         "rss" => *rss_loading.read() && !has_rss_data,
-        "nostr" => !*nostr_client::CLIENT_INITIALIZED.read() || (*nostr_loading.read() && !has_nostr_data),
+        "nostr" => {
+            !*nostr_client::CLIENT_INITIALIZED.read() || (*nostr_loading.read() && !has_nostr_data)
+        }
         _ => *rss_loading.read() && !has_any_data, // "all" - show RSS first
     };
 
     // Is nostr still loading in the background?
-    let nostr_still_loading = props.platform == "all" &&
-        (!*nostr_client::CLIENT_INITIALIZED.read() || *nostr_loading.read());
+    let nostr_still_loading = props.platform == "all"
+        && (!*nostr_client::CLIENT_INITIALIZED.read() || *nostr_loading.read());
 
     // Show loading skeleton only during initial load
     if is_initial_loading {
@@ -2433,9 +2521,10 @@ fn SubscribedFeedCard(props: SubscribedFeedCardProps) -> Element {
         };
     }
 
-    let (title, author, image) = podcast_info.read().clone().unwrap_or_else(|| {
-        (format!("Podcast #{}", props.podcast_id), None, None)
-    });
+    let (title, author, image) = podcast_info
+        .read()
+        .clone()
+        .unwrap_or_else(|| (format!("Podcast #{}", props.podcast_id), None, None));
 
     rsx! {
         div {
@@ -2513,16 +2602,12 @@ async fn fetch_nostr_podcast_shows() -> std::result::Result<Vec<PodcastShow>, St
     // Per NIP spec, podcast metadata should use d="podcast-metadata"
     let filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
-        .custom_tag(
-            SingleLetterTag::from_char('d').unwrap(),
-            "podcast-metadata"
-        )
+        .custom_tag(SingleLetterTag::from_char('d').unwrap(), "podcast-metadata")
         .limit(50);
 
     log::info!("Fetching podcast metadata events (Kind 30078, d=podcast-metadata)...");
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
 
     log::info!("Received {} Kind 30078 events", events.len());
 
@@ -2567,8 +2652,7 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
         .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
         .limit(100);
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
 
     log::info!("Inferring shows from {} episode events", events.len());
 
@@ -2580,7 +2664,11 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
             let pubkey = episode.pubkey.clone();
             let entry = shows_by_pubkey.entry(pubkey.clone()).or_insert_with(|| {
                 // First episode for this pubkey
-                (episode.title.clone(), episode.created_at, episode.image.clone())
+                (
+                    episode.title.clone(),
+                    episode.created_at,
+                    episode.image.clone(),
+                )
             });
             // Track the most recent episode
             if episode.created_at > entry.1 {
@@ -2603,15 +2691,16 @@ async fn infer_shows_from_episodes() -> std::result::Result<Vec<PodcastShow>, St
 
             // Generate proper naddr for linking
             let pk = PublicKey::from_hex(&pubkey).ok()?;
-            let coord = Coordinate::new(Kind::from(30078), pk)
-                .identifier("podcast-metadata");
+            let coord = Coordinate::new(Kind::from(30078), pk).identifier("podcast-metadata");
             let nip19_coord = Nip19Coordinate::new(coord, vec![]);
             let naddr = nip19_coord.to_bech32().ok()?;
 
             Some(PodcastShow {
                 id: format!("inferred:{}", pubkey),
                 title: format!("Podcast by {}", truncate_pubkey(&pubkey)),
-                description: Some("Podcast discovered from episodes. Metadata not yet published.".to_string()),
+                description: Some(
+                    "Podcast discovered from episodes. Metadata not yet published.".to_string(),
+                ),
                 author: Some(pubkey.clone()),
                 image,
                 categories: vec![],
@@ -2639,8 +2728,7 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<Vec<DisplayEpisode
 
     log::info!("Fetching podcast episodes (Kind 30054)...");
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
 
     log::info!("Received {} Kind 30054 events", events.len());
 
@@ -2667,7 +2755,11 @@ async fn fetch_recent_nostr_episodes() -> std::result::Result<Vec<DisplayEpisode
     }
 
     if parse_errors > 0 {
-        log::info!("Parsed {} episodes, {} parse failures", episodes.len(), parse_errors);
+        log::info!(
+            "Parsed {} episodes, {} parse failures",
+            episodes.len(),
+            parse_errors
+        );
     } else {
         log::info!("Parsed {} episodes", episodes.len());
     }
@@ -2685,17 +2777,13 @@ async fn search_nostr_podcasts(query: &str) -> std::result::Result<Vec<PodcastSh
     // Use NIP-50 search filter for relay-side search
     let filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
-        .custom_tag(
-            SingleLetterTag::from_char('d').unwrap(),
-            "podcast-metadata"
-        )
+        .custom_tag(SingleLetterTag::from_char('d').unwrap(), "podcast-metadata")
         .search(query)
         .limit(50);
 
     log::info!("NIP-50 search for podcasts: '{}'", query);
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await?;
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
 
     log::info!("NIP-50 search returned {} events", events.len());
 
@@ -2723,8 +2811,15 @@ async fn search_nostr_podcasts(query: &str) -> std::result::Result<Vec<PodcastSh
             .into_iter()
             .filter(|show| {
                 show.title.to_lowercase().contains(&query_lower)
-                    || show.author.as_ref().map(|a| a.to_lowercase().contains(&query_lower)).unwrap_or(false)
-                    || show.categories.iter().any(|c| c.to_lowercase().contains(&query_lower))
+                    || show
+                        .author
+                        .as_ref()
+                        .map(|a| a.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false)
+                    || show
+                        .categories
+                        .iter()
+                        .any(|c| c.to_lowercase().contains(&query_lower))
             })
             .collect();
     }

@@ -2,13 +2,13 @@
 //! Displays a recipe in a grid card format with image, title, and author
 //! Standard recipe card (160x237px)
 
-use dioxus::prelude::*;
+use crate::components::content_menu::{ContentMenu, ContentMenuType};
+use crate::components::recipe_tag_chip::RecipeTagChipSmall;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;
-use crate::components::recipe_tag_chip::RecipeTagChipSmall;
-use crate::components::content_menu::{ContentMenu, ContentMenuType};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 /// Recipe card for grid display
 #[component]
@@ -36,15 +36,21 @@ pub fn RecipeCard(recipe: CachedRecipe) -> Element {
     };
 
     // Get display name from metadata or fallback
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     // Avatar fallback
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
@@ -53,16 +59,16 @@ pub fn RecipeCard(recipe: CachedRecipe) -> Element {
     let displayed_tags: Vec<String> = tags.iter().take(2).cloned().collect();
 
     // Preview text from summary or parsed chef's notes
-    let preview = summary.or_else(|| {
-        recipe.parsed.as_ref().and_then(|p| p.chef_notes.clone())
-    }).map(|s| {
-        if s.chars().count() > 80 {
-            let truncated: String = s.chars().take(80).collect();
-            format!("{}...", truncated.trim())
-        } else {
-            s
-        }
-    });
+    let preview = summary
+        .or_else(|| recipe.parsed.as_ref().and_then(|p| p.chef_notes.clone()))
+        .map(|s| {
+            if s.chars().count() > 80 {
+                let truncated: String = s.chars().take(80).collect();
+                format!("{}...", truncated.trim())
+            } else {
+                s
+            }
+        });
 
     // Clone data for menu
     let author_pubkey_menu = author_pubkey.clone();
@@ -250,4 +256,3 @@ pub fn RecipeCardSkeleton() -> Element {
         }
     }
 }
-

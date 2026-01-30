@@ -8,17 +8,15 @@
 //! - Zap/reaction buttons (Nostr episodes)
 //! - Share functionality
 
-use dioxus::prelude::*;
 use crate::components::{
-    icons, PodcastChapters, DisplayEpisode,
-    PodcastTranscript, PodcastSoundbites, FeaturedSoundbite,
-    PodcastPersons, InlineCredits, V4VInfo, V4VBoostButton,
-    ContentShareModal, ContentType,
+    icons, ContentShareModal, ContentType, DisplayEpisode, FeaturedSoundbite, InlineCredits,
+    PodcastChapters, PodcastPersons, PodcastSoundbites, PodcastTranscript, V4VBoostButton, V4VInfo,
 };
 use crate::routes::Route;
-use crate::stores::{nostr_client, auth_store, music_player, nostr_music};
 use crate::services::podcast_rss::{self, format_duration};
+use crate::stores::{auth_store, music_player, nostr_client, nostr_music};
 use crate::utils::podcast::{self, PodcastMetadata};
+use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
 
@@ -216,7 +214,9 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     let mut show_share_modal = use_signal(|| false);
 
     // Check if this episode is currently playing
-    let is_current_track = player_state.current_track.as_ref()
+    let is_current_track = player_state
+        .current_track
+        .as_ref()
         .map(|t| t.id == episode.id)
         .unwrap_or(false);
 
@@ -230,15 +230,20 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     };
 
     // Episode image with fallback
-    let image_url = episode.image.clone()
+    let image_url = episode
+        .image
+        .clone()
         .or(episode.podcast_image.clone())
-        .unwrap_or_else(|| format!(
-            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-            episode.id
-        ));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                episode.id
+            )
+        });
 
     // Format duration
-    let duration_str = episode.duration
+    let duration_str = episode
+        .duration
         .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
 
@@ -716,9 +721,7 @@ fn EpisodeDetailSkeleton() -> Element {
 // ============================================================================
 
 /// Fetch Nostr podcast episode by naddr/coordinate
-async fn fetch_nostr_episode(
-    naddr: &str
-) -> Result<(DisplayEpisode, PodcastMetadata), String> {
+async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
     // Parse the coordinate (format: "30054:pubkey:d-tag" or naddr)
     let (pubkey, d_tag) = parse_coordinate(naddr)?;
 
@@ -726,16 +729,14 @@ async fn fetch_nostr_episode(
     let episode_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
-        .custom_tag(
-            SingleLetterTag::from_char('d').unwrap(),
-            d_tag.clone()
-        )
+        .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag.clone())
         .limit(1);
 
-    let episode_events = nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10))
-        .await?;
+    let episode_events =
+        nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10)).await?;
 
-    let episode_event = episode_events.first()
+    let episode_event = episode_events
+        .first()
         .ok_or_else(|| "Episode not found".to_string())?;
 
     let episode = podcast::parse_podcast_episode(episode_event)?;
@@ -746,8 +747,8 @@ async fn fetch_nostr_episode(
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
         .limit(1);
 
-    let metadata_events = nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(5))
-        .await?;
+    let metadata_events =
+        nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(5)).await?;
 
     let metadata = if let Some(meta_event) = metadata_events.first() {
         podcast::parse_podcast_metadata(meta_event).ok()
@@ -772,20 +773,14 @@ async fn fetch_nostr_episode(
         created_at: 0,
     });
 
-    let display_episode = DisplayEpisode::from_nostr_episode(
-        &episode,
-        &metadata.title,
-        metadata.image.as_deref(),
-    );
+    let display_episode =
+        DisplayEpisode::from_nostr_episode(&episode, &metadata.title, metadata.image.as_deref());
 
     Ok((display_episode, metadata))
 }
 
 /// Fetch RSS podcast episode by podcast ID (numeric Podcast Index ID) or feed URL and episode GUID
-async fn fetch_rss_episode(
-    podcast_id: &str,
-    episode_id: &str,
-) -> Result<DisplayEpisode, String> {
+async fn fetch_rss_episode(podcast_id: &str, episode_id: &str) -> Result<DisplayEpisode, String> {
     use crate::services::podcast_index;
 
     // Decode the episode_id (GUID) first
@@ -795,7 +790,11 @@ async fn fetch_rss_episode(
 
     // Check if podcast_id is a numeric Podcast Index feed ID
     if let Ok(feed_id) = podcast_id.parse::<u64>() {
-        log::info!("Fetching episode via Podcast Index API: feed_id={}, episode_id={}", feed_id, decoded_episode_id);
+        log::info!(
+            "Fetching episode via Podcast Index API: feed_id={}, episode_id={}",
+            feed_id,
+            decoded_episode_id
+        );
 
         // Get podcast metadata from Podcast Index
         let feed = podcast_index::get_podcast_by_id(feed_id).await?;
@@ -804,7 +803,8 @@ async fn fetch_rss_episode(
         let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await?;
 
         // Find episode by Podcast Index episode ID (which is what we store as episode_guid in TrackSource)
-        let episode = episodes.iter()
+        let episode = episodes
+            .iter()
             .find(|ep| ep.id.to_string() == decoded_episode_id)
             .ok_or_else(|| format!("Episode not found: {}", decoded_episode_id))?;
 
@@ -816,12 +816,18 @@ async fn fetch_rss_episode(
         .map_err(|e| format!("Invalid podcast URL encoding: {}", e))?
         .into_owned();
 
-    log::info!("Fetching episode via RSS feed: url={}, episode_guid={}", feed_url, decoded_episode_id);
+    log::info!(
+        "Fetching episode via RSS feed: url={}, episode_guid={}",
+        feed_url,
+        decoded_episode_id
+    );
 
     let podcast = podcast_rss::fetch_podcast_feed(&feed_url).await?;
 
     // Find the episode by GUID
-    let episode = podcast.episodes.iter()
+    let episode = podcast
+        .episodes
+        .iter()
         .find(|ep| ep.guid == decoded_episode_id)
         .ok_or_else(|| "Episode not found".to_string())?;
 
@@ -834,8 +840,7 @@ fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
 
     // Handle naddr format
     if coord.starts_with("naddr") {
-        let nip19 = Nip19::from_bech32(coord)
-            .map_err(|e| format!("Invalid naddr: {}", e))?;
+        let nip19 = Nip19::from_bech32(coord).map_err(|e| format!("Invalid naddr: {}", e))?;
 
         match nip19 {
             Nip19::Coordinate(nip19_coord) => {
@@ -843,7 +848,7 @@ fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
                 let d_tag = nip19_coord.coordinate.identifier;
                 Ok((pubkey, d_tag))
             }
-            _ => Err("Expected naddr coordinate".to_string())
+            _ => Err("Expected naddr coordinate".to_string()),
         }
     } else {
         // Handle coordinate format: "KIND:PUBKEY:D-TAG" (splitn to handle identifiers with colons)

@@ -17,9 +17,9 @@ use crate::utils::nip84::{self, Highlight, HighlightSource};
 
 // Re-export types from bible_api for use by routes
 pub use crate::services::bible_api::{
-    Translation, Book, ChapterResponse, ChapterContent, VerseContent,
-    fetch_translations, fetch_books, fetch_chapter, get_chapter_api_url,
-    verse_to_plain_text, filter_english_translations, sort_translations_by_priority,
+    fetch_books, fetch_chapter, fetch_translations, filter_english_translations,
+    get_chapter_api_url, sort_translations_by_priority, verse_to_plain_text, Book, ChapterContent,
+    ChapterResponse, Translation, VerseContent,
 };
 
 // Re-export Highlight type for convenience (components use this)
@@ -83,7 +83,8 @@ pub static CHAPTER_CACHE: GlobalSignal<LruCache<String, CachedChapter>> =
 pub static USER_HIGHLIGHTS: GlobalSignal<Vec<BibleHighlight>> = GlobalSignal::new(Vec::new);
 
 /// Highlights for current chapter (from all users)
-pub static CURRENT_CHAPTER_HIGHLIGHTS: GlobalSignal<Vec<BibleHighlight>> = GlobalSignal::new(Vec::new);
+pub static CURRENT_CHAPTER_HIGHLIGHTS: GlobalSignal<Vec<BibleHighlight>> =
+    GlobalSignal::new(Vec::new);
 
 /// Loading states
 pub static LOADING_TRANSLATIONS: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -96,7 +97,8 @@ pub static BIBLE_STORE_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| fa
 
 /// Last viewed position (for "Continue Reading" feature)
 /// Tuple: (translation, book_id, book_common_name, chapter)
-pub static LAST_POSITION: GlobalSignal<Option<(String, String, String, u32)>> = GlobalSignal::new(|| None);
+pub static LAST_POSITION: GlobalSignal<Option<(String, String, String, u32)>> =
+    GlobalSignal::new(|| None);
 
 /// Latest requested translation for race guard (prevents stale data on fast navigation)
 static LATEST_REQUESTED_TRANSLATION: GlobalSignal<String> = GlobalSignal::new(String::new);
@@ -141,7 +143,11 @@ pub fn cache_chapter(translation: &str, book: &str, chapter: u32, response: Chap
 
 /// Get all cached chapters (for search)
 pub fn get_all_cached_chapters() -> Vec<CachedChapter> {
-    CHAPTER_CACHE.read().iter().map(|(_, c)| c.clone()).collect()
+    CHAPTER_CACHE
+        .read()
+        .iter()
+        .map(|(_, c)| c.clone())
+        .collect()
 }
 
 /// Get count of cached chapters without cloning
@@ -182,7 +188,8 @@ pub async fn initialize() -> StdResult<(), String> {
         load_books(DEFAULT_TRANSLATION).await?;
 
         Ok(())
-    }.await;
+    }
+    .await;
 
     *LOADING_TRANSLATIONS.write() = false;
 
@@ -221,7 +228,11 @@ pub async fn load_books(translation: &str) -> StdResult<Vec<Book>, String> {
 }
 
 /// Load a chapter (with caching)
-pub async fn load_chapter(translation: &str, book: &str, chapter: u32) -> StdResult<ChapterResponse, String> {
+pub async fn load_chapter(
+    translation: &str,
+    book: &str,
+    chapter: u32,
+) -> StdResult<ChapterResponse, String> {
     // Check cache first
     if let Some(cached) = get_cached_chapter(translation, book, chapter) {
         // Update LAST_POSITION even for cache hits to keep "Continue Reading" accurate
@@ -288,10 +299,11 @@ pub async fn create_highlight(
     let event_id = nip84::create_highlight(
         verse_text,
         HighlightSource::Url(source_url),
-        Some(reference),  // context tag
-        comment,          // comment tag
-        vec!["bible"],    // hashtags
-    ).await?;
+        Some(reference), // context tag
+        comment,         // comment tag
+        vec!["bible"],   // hashtags
+    )
+    .await?;
 
     log::info!("Bible highlight published: {}", event_id.to_hex());
 
@@ -332,7 +344,11 @@ pub async fn fetch_user_highlights(pubkey: &PublicKey) -> StdResult<Vec<BibleHig
 
 /// Fetch all highlights for a specific chapter (from all users)
 /// Uses centralized nip84 module for URL-based highlight fetching.
-pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u32) -> StdResult<Vec<BibleHighlight>, String> {
+pub async fn fetch_chapter_highlights(
+    translation: &str,
+    book: &str,
+    chapter: u32,
+) -> StdResult<Vec<BibleHighlight>, String> {
     let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
 
     // Set this as the latest requested URL for race prevention
@@ -348,12 +364,14 @@ pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u3
                 *CURRENT_CHAPTER_HIGHLIGHTS.write() = highlights.clone();
             }
 
-            log::info!("Fetched {} chapter highlights for {}", highlights.len(), bible_url);
+            log::info!(
+                "Fetched {} chapter highlights for {}",
+                highlights.len(),
+                bible_url
+            );
             Ok(highlights)
         }
-        Err(e) => {
-            Err(format!("Failed to fetch chapter highlights: {}", e))
-        }
+        Err(e) => Err(format!("Failed to fetch chapter highlights: {}", e)),
     }
 }
 
@@ -369,10 +387,7 @@ pub async fn fetch_chapter_highlights(translation: &str, book: &str, chapter: u3
 fn extract_verses_from_reference(reference: &str) -> Option<(u32, u32)> {
     // Find the colon, then extract the verse part before the space/parenthesis
     let after_colon = reference.split(':').nth(1)?;
-    let verse_part = after_colon
-        .split([' ', '('])
-        .next()?
-        .trim();
+    let verse_part = after_colon.split([' ', '(']).next()?.trim();
 
     if let Some((start, end)) = verse_part.split_once('-') {
         Some((start.trim().parse().ok()?, end.trim().parse().ok()?))
@@ -408,17 +423,24 @@ pub fn is_verse_highlighted(translation: &str, book: &str, chapter: u32, verse: 
     let user_highlights = USER_HIGHLIGHTS.read();
 
     user_highlights.iter().any(|h| {
-        highlight_matches_url(h, &bible_url) &&
-        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
+        highlight_matches_url(h, &bible_url)
+            && get_highlight_reference(h)
+                .map(|r| verse_matches_reference(r, verse))
+                .unwrap_or(false)
     })
 }
 
 /// Get highlight count for a verse from all users
 pub fn get_verse_highlight_count(verse: u32) -> usize {
     let highlights = CURRENT_CHAPTER_HIGHLIGHTS.read();
-    highlights.iter().filter(|h| {
-        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
-    }).count()
+    highlights
+        .iter()
+        .filter(|h| {
+            get_highlight_reference(h)
+                .map(|r| verse_matches_reference(r, verse))
+                .unwrap_or(false)
+        })
+        .count()
 }
 
 /// Get highlight stats for the current chapter
@@ -444,22 +466,38 @@ pub fn get_chapter_highlight_stats() -> ChapterHighlightStats {
 }
 
 /// Get user's highlight for a specific verse (if any)
-pub fn get_user_highlight_for_verse(translation: &str, book: &str, chapter: u32, verse: u32) -> Option<BibleHighlight> {
+pub fn get_user_highlight_for_verse(
+    translation: &str,
+    book: &str,
+    chapter: u32,
+    verse: u32,
+) -> Option<BibleHighlight> {
     let bible_url = get_nostr_blue_bible_url(translation, book, chapter);
     let user_highlights = USER_HIGHLIGHTS.read();
 
-    user_highlights.iter().find(|h| {
-        highlight_matches_url(h, &bible_url) &&
-        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
-    }).cloned()
+    user_highlights
+        .iter()
+        .find(|h| {
+            highlight_matches_url(h, &bible_url)
+                && get_highlight_reference(h)
+                    .map(|r| verse_matches_reference(r, verse))
+                    .unwrap_or(false)
+        })
+        .cloned()
 }
 
 /// Get all highlights for a specific verse (from all users)
 pub fn get_highlights_for_verse(verse: u32) -> Vec<BibleHighlight> {
     let highlights = CURRENT_CHAPTER_HIGHLIGHTS.read();
-    highlights.iter().filter(|h| {
-        get_highlight_reference(h).map(|r| verse_matches_reference(r, verse)).unwrap_or(false)
-    }).cloned().collect()
+    highlights
+        .iter()
+        .filter(|h| {
+            get_highlight_reference(h)
+                .map(|r| verse_matches_reference(r, verse))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect()
 }
 
 // ============================================================================
@@ -509,7 +547,11 @@ pub fn search_cached_verses(query: &str, limit: usize) -> Vec<BibleSearchResult>
         let book_name = &cached.response.book.common_name;
 
         for content in &cached.response.chapter.content {
-            if let ChapterContent::Verse { number, content: verse_content } = content {
+            if let ChapterContent::Verse {
+                number,
+                content: verse_content,
+            } = content
+            {
                 let text = verse_to_plain_text(verse_content);
                 if text.to_lowercase().contains(&query_lower) {
                     results.push(BibleSearchResult {
@@ -544,24 +586,29 @@ pub fn get_translation(id: &str) -> Option<Translation> {
 
 /// Get book by ID for current translation
 pub fn get_book(book_id: &str) -> Option<Book> {
-    CURRENT_BOOKS.read().iter().find(|b| b.id == book_id).cloned()
+    CURRENT_BOOKS
+        .read()
+        .iter()
+        .find(|b| b.id == book_id)
+        .cloned()
 }
 
 /// Split books into Old and New Testament
 pub fn split_books_by_testament(books: &[Book]) -> (Vec<Book>, Vec<Book>) {
     let ot_books: Vec<&str> = vec![
-        "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA",
-        "1KI", "2KI", "1CH", "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO",
-        "ECC", "SNG", "ISA", "JER", "LAM", "EZK", "DAN", "HOS", "JOL", "AMO",
-        "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
+        "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH",
+        "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK",
+        "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL",
     ];
 
-    let old_testament: Vec<Book> = books.iter()
+    let old_testament: Vec<Book> = books
+        .iter()
         .filter(|b| ot_books.contains(&b.id.as_str()))
         .cloned()
         .collect();
 
-    let new_testament: Vec<Book> = books.iter()
+    let new_testament: Vec<Book> = books
+        .iter()
         .filter(|b| !ot_books.contains(&b.id.as_str()) && b.is_apocryphal != Some(true))
         .cloned()
         .collect();

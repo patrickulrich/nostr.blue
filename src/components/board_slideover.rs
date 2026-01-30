@@ -5,19 +5,21 @@
 use dioxus::prelude::*;
 use dioxus_core::Task;
 
-use crate::hooks::use_author_metadata;
-use crate::stores::nostr_client::HAS_SIGNER;
-use crate::stores::pin_boards_store::{Pinboard, Pin, delete_pinboard, fetch_pins_for_board_filtered};
-use crate::stores::auth_store;
-use crate::utils::truncate_pubkey;
-use crate::utils::validation::is_valid_http_url;
+use crate::components::icons::PinIcon;
 use crate::components::pin_board_card::HashtagBadge;
 use crate::components::pin_board_item_card::PinCard;
 use crate::components::pin_board_item_selector::PinToBoardModal;
 use crate::components::pin_menu::PinToBoardRequest;
-use crate::components::{ZapModal, ShareModal, ConfirmModal};
-use crate::components::icons::PinIcon;
+use crate::components::{ConfirmModal, ShareModal, ZapModal};
+use crate::hooks::use_author_metadata;
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::pin_boards_store::{
+    delete_pinboard, fetch_pins_for_board_filtered, Pin, Pinboard,
+};
+use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 
 // ============================================================================
 // Board Slideover Component
@@ -26,11 +28,7 @@ use crate::routes::Route;
 /// Right-side sliding panel for viewing board details
 /// Opens over the current page, can be closed to return
 #[component]
-pub fn BoardSlideover(
-    board: Pinboard,
-    show: Signal<bool>,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandler<()>) -> Element {
     let title = board.title.clone();
     let description = board.description.clone();
     let cover_image = board.image.clone();
@@ -81,7 +79,7 @@ pub fn BoardSlideover(
             pin_to_board_request.set(None);
             // Reset pin state to prevent stale data from flashing on reopen
             pins.set(Vec::new());
-            pins_loading.set(true);  // Set to true so loading shows on reopen
+            pins_loading.set(true); // Set to true so loading shows on reopen
             pins_error.set(None);
             // Invalidate any in-flight requests by incrementing request_id
             // This prevents a quickly reopened slideover from reusing the same ID
@@ -92,25 +90,33 @@ pub fn BoardSlideover(
 
     // Check if current user owns this board
     // Recompute each render to stay in sync with board prop changes
-    let is_owner = auth_store::AUTH_STATE.read().pubkey
+    let is_owner = auth_store::AUTH_STATE
+        .read()
+        .pubkey
         .as_ref()
         .map(|pk| pk == &board.pubkey)
         .unwrap_or(false);
 
     // Memoize derived display values to avoid recalculating on every render
     let display_name = use_memo(move || {
-        author_metadata.read().as_ref()
+        author_metadata
+            .read()
+            .as_ref()
             .and_then(|m| m.display_name.clone().or(m.name.clone()))
             .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
     });
 
     let profile_picture = use_memo(move || {
-        author_metadata.read().as_ref()
+        author_metadata
+            .read()
+            .as_ref()
             .and_then(|m| m.picture.clone())
     });
 
     let avatar_letter = use_memo(move || {
-        display_name().chars().next()
+        display_name()
+            .chars()
+            .next()
             .unwrap_or('?')
             .to_uppercase()
             .to_string()
@@ -125,7 +131,13 @@ pub fn BoardSlideover(
     let show_signal = show;
     let mut request_id_mut = request_id;
     let mut retry_trigger_mut = retry_trigger;
-    use_effect(use_reactive!(|(show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative, retry_trigger)| {
+    use_effect(use_reactive!(|(
+        show_signal,
+        board_a_tag,
+        owner_pubkey_for_pins,
+        is_collaborative,
+        retry_trigger,
+    )| {
         // Read retry_trigger to register dependency (value not used directly)
         let _ = *retry_trigger.read();
         let shown = *show_signal.read();
@@ -140,7 +152,11 @@ pub fn BoardSlideover(
         // Skip 0 as it's reserved for "invalidated" state
         let current_request = {
             let next = request_id_mut.read().wrapping_add(1);
-            if next == 0 { 1 } else { next }
+            if next == 0 {
+                1
+            } else {
+                next
+            }
         };
         request_id_mut.set(current_request);
 
@@ -215,7 +231,7 @@ pub fn BoardSlideover(
                     delete_error.set(Some(format!("Failed to delete: {}", e)));
                     delete_task.set(None);
                     delete_task_id.set(0); // Reset to allow retry
-                    // Keep modal open so user sees the error
+                                           // Keep modal open so user sees the error
                 }
             }
         });

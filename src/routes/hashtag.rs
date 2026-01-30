@@ -3,9 +3,9 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 
-use crate::stores::nostr_client;
-use crate::components::{NoteCard, ClientInitializing};
+use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
+use crate::stores::nostr_client;
 
 #[component]
 pub fn Hashtag(tag: String) -> Element {
@@ -86,13 +86,13 @@ pub fn Hashtag(tag: String) -> Element {
                     }
 
                     // Deduplicate: build set of existing event IDs
-                    let existing_ids: std::collections::HashSet<_> = events.read().iter()
-                        .map(|e| e.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        events.read().iter().map(|e| e.id).collect();
                     let current = events.read().clone();
 
                     // Filter out duplicates
-                    let unique_events: Vec<_> = new_events.iter()
+                    let unique_events: Vec<_> = new_events
+                        .iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .cloned()
                         .collect();
@@ -121,12 +121,7 @@ pub fn Hashtag(tag: String) -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
-
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
 
     rsx! {
         div {

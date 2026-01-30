@@ -4,10 +4,10 @@
 //! - Native Nostr podcasts (kind 30078 metadata)
 //! - RSS podcasts (Podcasting 2.0)
 
-use dioxus::prelude::*;
+use crate::components::icons;
 use crate::routes::Route;
 use crate::utils::podcast::{PodcastMetadata, PodcastSource, ValueBlock};
-use crate::components::icons;
+use dioxus::prelude::*;
 
 /// Unified podcast show representation for display
 #[derive(Clone, Debug, PartialEq)]
@@ -43,12 +43,11 @@ impl PodcastShow {
         let naddr = PublicKey::from_hex(&metadata.pubkey)
             .ok()
             .map(|pk| {
-                let coord = Coordinate::new(Kind::from(30078), pk)
-                    .identifier(&metadata.d_tag);
+                let coord = Coordinate::new(Kind::from(30078), pk).identifier(&metadata.d_tag);
                 let nip19_coord = Nip19Coordinate::new(coord, vec![]);
-                nip19_coord.to_bech32().unwrap_or_else(|_| {
-                    format!("30078:{}:{}", metadata.pubkey, metadata.d_tag)
-                })
+                nip19_coord
+                    .to_bech32()
+                    .unwrap_or_else(|_| format!("30078:{}:{}", metadata.pubkey, metadata.d_tag))
             })
             .unwrap_or_else(|| format!("30078:{}:{}", metadata.pubkey, metadata.d_tag));
 
@@ -92,12 +91,16 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
     let route = match &show.source {
         PodcastSource::Nostr { coordinate, .. } => {
             // naddr encoding would be done here - for now use coordinate
-            Route::PodcastNostrDetail { naddr: coordinate.clone() }
+            Route::PodcastNostrDetail {
+                naddr: coordinate.clone(),
+            }
         }
         PodcastSource::Rss { podcast_id, .. } => {
             // Use podcast ID if available, otherwise fallback to URL search
             if let Some(id) = podcast_id {
-                Route::PodcastRssFeedDetail { podcast_id: id.to_string() }
+                Route::PodcastRssFeedDetail {
+                    podcast_id: id.to_string(),
+                }
             } else {
                 // TODO: Add a search-by-URL route or lookup
                 Route::PodcastHome {}
@@ -119,7 +122,9 @@ pub fn PodcastShowCard(props: PodcastShowCardProps) -> Element {
     };
 
     // Fallback image
-    let image_url = show.image.clone()
+    let image_url = show
+        .image
+        .clone()
         .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", show.id));
 
     // Has V4V support

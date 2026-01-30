@@ -6,12 +6,12 @@
 //! - Click-to-seek functionality
 //! - Current chapter highlighting
 
-use dioxus::prelude::*;
-use crate::utils::podcast::Chapter;
+use crate::components::icons;
 use crate::services::podcast_index::fetch_chapters_proxied;
 use crate::services::podcast_rss::format_duration;
 use crate::stores::music_player;
-use crate::components::icons;
+use crate::utils::podcast::Chapter;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastChaptersProps {

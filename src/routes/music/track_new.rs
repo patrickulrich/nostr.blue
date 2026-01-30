@@ -1,10 +1,10 @@
 // Track Publishing Page
 // Allows users to publish Kind 36787 music tracks to nostr
 
-use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_music};
 use crate::utils::slugify;
+use dioxus::prelude::*;
 
 #[component]
 pub fn MusicTrackNew() -> Element {
@@ -83,13 +83,14 @@ pub fn MusicTrackNew() -> Element {
         error_msg.set(None);
 
         spawn(async move {
-            let image = if image_url_val.is_empty() { None } else { Some(image_url_val) };
+            let image = if image_url_val.is_empty() {
+                None
+            } else {
+                Some(image_url_val)
+            };
 
             // Generate a unique d-tag based on title and timestamp
-            let d_tag = format!("{}-{}",
-                slugify(&title_val),
-                chrono::Utc::now().timestamp()
-            );
+            let d_tag = format!("{}-{}", slugify(&title_val), chrono::Utc::now().timestamp());
 
             match nostr_music::publish_track(
                 d_tag,
@@ -100,7 +101,9 @@ pub fn MusicTrackNew() -> Element {
                 duration_val,
                 genres_val,
                 ai_generated_val,
-            ).await {
+            )
+            .await
+            {
                 Ok(_event_id) => {
                     navigator.push(crate::routes::Route::MusicHome {});
                 }

@@ -4,8 +4,8 @@
 //! Uses `use_resource` for automatic cancellation when the id changes.
 
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventId, Filter, FromBech32};
 use nostr_sdk::nips::nip19::Nip19;
+use nostr_sdk::{Event as NostrEvent, EventId, Filter, FromBech32};
 use std::time::Duration;
 
 use crate::stores::nostr_client;
@@ -130,7 +130,10 @@ pub fn use_fetch_event_by_id(
     }));
 
     // use_resource auto-tracks id_signal reads and re-runs when it changes
-    let resource = use_resource(move || async move { fetch_event_by_id_inner(&id_signal(), valid_kinds).await });
+    let resource =
+        use_resource(
+            move || async move { fetch_event_by_id_inner(&id_signal(), valid_kinds).await },
+        );
     UseFetchEventById {
         resource,
         not_found_message,

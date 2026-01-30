@@ -3,10 +3,10 @@
 //! Displays the repository header with icon, owner/repo breadcrumb, and visibility badge.
 //! Styled to match gittr's layout-client.tsx header pattern.
 
-use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 /// Repository header with icon, breadcrumb, and badge
 #[component]
@@ -22,8 +22,8 @@ pub fn RepoHeader(
         .unwrap_or_else(|| repo.pubkey_display());
 
     // Use provided picture, profile picture, or fallback
-    let picture_url = owner_picture
-        .or_else(|| owner_profile.as_ref().and_then(|p| p.picture.clone()));
+    let picture_url =
+        owner_picture.or_else(|| owner_profile.as_ref().and_then(|p| p.picture.clone()));
 
     let display_name = repo.name.clone().unwrap_or_else(|| repo.id.clone());
 

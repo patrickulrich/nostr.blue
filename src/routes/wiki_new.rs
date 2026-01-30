@@ -1,15 +1,21 @@
 //! Wiki New/Edit Route
 //! Create or edit NIP-54 wiki pages (Kind 30818)
 
+use crate::components::icons::{
+    AlertTriangleIcon, ArrowLeftIcon, BookOpenIcon, BookmarkIcon, CheckIcon, Link2Icon,
+    PenSquareIcon,
+};
+use crate::components::{
+    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal, CitationSelection,
+    WikilinksList,
+};
+use crate::routes::Route;
+use crate::stores::{auth_store, nostr_client, wiki_store};
+use crate::utils::nip54::normalize_wiki_dtag;
+use dioxus::events::{KeyboardData, MouseData};
 use dioxus::prelude::*;
-use dioxus::events::{MouseData, KeyboardData};
 use wasm_bindgen::JsCast;
 use web_sys::HtmlTextAreaElement;
-use crate::components::{AsciiDocContent, WikilinksList, CitationPickerModal, CitationSelection, BookPickerModal, BookSelection};
-use crate::components::icons::{ArrowLeftIcon, AlertTriangleIcon, CheckIcon, PenSquareIcon, Link2Icon, BookmarkIcon, BookOpenIcon};
-use crate::stores::{wiki_store, auth_store, nostr_client};
-use crate::utils::nip54::normalize_wiki_dtag;
-use crate::routes::Route;
 
 /// Wiki page editor
 #[component]
@@ -203,10 +209,19 @@ pub fn WikiNew() -> Element {
                 Some(summary_val)
             };
 
-            match wiki_store::publish_wiki_page(&title_val, &content_val, Some(&identifier_val), summary_opt.as_deref()).await {
+            match wiki_store::publish_wiki_page(
+                &title_val,
+                &content_val,
+                Some(&identifier_val),
+                summary_opt.as_deref(),
+            )
+            .await
+            {
                 Ok(naddr) => {
                     log::info!("Published wiki page: {}", naddr);
-                    nav.push(Route::WikiDetail { identifier: identifier_val });
+                    nav.push(Route::WikiDetail {
+                        identifier: identifier_val,
+                    });
                 }
                 Err(e) => {
                     error.set(Some(e));

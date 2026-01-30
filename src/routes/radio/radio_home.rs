@@ -1,16 +1,33 @@
 // Radio Home - Main radio stations page with genre filters and station grid
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::components::{RadioCard, RadioCardSkeleton};
 use crate::components::icons;
-use crate::utils::radio::{RadioStation as RadioStationData, fetch_radio_stations, search_radio_stations};
+use crate::components::{RadioCard, RadioCardSkeleton};
+use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::radio::{
+    fetch_radio_stations, search_radio_stations, RadioStation as RadioStationData,
+};
+use dioxus::prelude::*;
 
 /// Common radio genres for filtering
 const GENRES: &[&str] = &[
-    "all", "rock", "pop", "jazz", "electronic", "classical",
-    "hip-hop", "country", "ambient", "metal", "folk", "indie",
-    "blues", "reggae", "latin", "world", "news", "talk"
+    "all",
+    "rock",
+    "pop",
+    "jazz",
+    "electronic",
+    "classical",
+    "hip-hop",
+    "country",
+    "ambient",
+    "metal",
+    "folk",
+    "indie",
+    "blues",
+    "reggae",
+    "latin",
+    "world",
+    "news",
+    "talk",
 ];
 
 #[component]
@@ -49,7 +66,11 @@ pub fn RadioHome() -> Element {
                 search_radio_stations(&query, 50).await
             } else {
                 // Genre browsing mode
-                let genre_filter = if genre.as_str() == "all" { None } else { Some(genre.clone()) };
+                let genre_filter = if genre.as_str() == "all" {
+                    None
+                } else {
+                    Some(genre.clone())
+                };
                 fetch_radio_stations(genre_filter.as_deref(), 50).await
             };
 

@@ -160,7 +160,11 @@ export function destroyVideoJsPlayer(videoId) {
 "#)]
 extern "C" {
     #[wasm_bindgen(catch)]
-    async fn initVideoJsPlayer(video_id: &str, url: &str, autoplay: bool) -> Result<JsValue, JsValue>;
+    async fn initVideoJsPlayer(
+        video_id: &str,
+        url: &str,
+        autoplay: bool,
+    ) -> Result<JsValue, JsValue>;
 
     fn destroyVideoJsPlayer(video_id: &str);
 }

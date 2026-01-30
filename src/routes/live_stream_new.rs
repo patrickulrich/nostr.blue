@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
+use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr::TagKind;
 use nostr_sdk::{EventBuilder, Kind, Tag, Timestamp};
-use nostr::{TagKind};
 use url::Url;
 
 #[component]
@@ -66,7 +66,9 @@ pub fn LiveStreamNew() -> Element {
                 stream_url_val,
                 hashtags_val,
                 status_val,
-            ).await {
+            )
+            .await
+            {
                 Ok(naddr) => {
                     log::info!("Live stream published successfully: {}", naddr);
                     is_publishing.set(false);
@@ -84,7 +86,9 @@ pub fn LiveStreamNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(Route::Home { list: String::new() });
+            navigator.push(Route::Home {
+                list: String::new(),
+            });
         }
     });
 
@@ -304,13 +308,17 @@ async fn publish_live_stream(
     hashtags: String,
     status: String,
 ) -> Result<String, String> {
-    let client = nostr_client::get_client()
-        .ok_or_else(|| "Client not initialized".to_string())?;
+    let client = nostr_client::get_client().ok_or_else(|| "Client not initialized".to_string())?;
 
     // Generate unique identifier (d tag) with high-resolution time and random component
     let now = chrono::Utc::now();
     let timestamp_ms = now.timestamp_millis();
-    let random_component = uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("").to_string();
+    let random_component = uuid::Uuid::new_v4()
+        .to_string()
+        .split('-')
+        .next()
+        .unwrap_or("")
+        .to_string();
     let d_tag = format!("stream-{}-{}", timestamp_ms, random_component);
 
     // Build event with tags
@@ -321,19 +329,31 @@ async fn publish_live_stream(
     builder = builder.tag(Tag::custom(TagKind::custom("title"), vec![title.clone()]));
 
     if !summary.is_empty() {
-        builder = builder.tag(Tag::custom(TagKind::custom("summary"), vec![summary.clone()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::custom("summary"),
+            vec![summary.clone()],
+        ));
     }
 
     if !image_url.is_empty() {
-        builder = builder.tag(Tag::custom(TagKind::custom("image"), vec![image_url.clone()]));
+        builder = builder.tag(Tag::custom(
+            TagKind::custom("image"),
+            vec![image_url.clone()],
+        ));
     }
 
-    builder = builder.tag(Tag::custom(TagKind::custom("streaming"), vec![stream_url.clone()]));
+    builder = builder.tag(Tag::custom(
+        TagKind::custom("streaming"),
+        vec![stream_url.clone()],
+    ));
     builder = builder.tag(Tag::custom(TagKind::custom("status"), vec![status.clone()]));
 
     // Add start time (current time)
     let now = Timestamp::now().as_secs();
-    builder = builder.tag(Tag::custom(TagKind::custom("starts"), vec![now.to_string()]));
+    builder = builder.tag(Tag::custom(
+        TagKind::custom("starts"),
+        vec![now.to_string()],
+    ));
 
     // Add hashtags
     if !hashtags.is_empty() {
@@ -346,7 +366,9 @@ async fn publish_live_stream(
     }
 
     // Publish the event
-    let _output = client.send_event_builder(builder).await
+    let _output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
 
     // Get the author pubkey (use cached - no signer call needed)

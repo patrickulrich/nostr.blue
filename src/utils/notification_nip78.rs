@@ -27,12 +27,9 @@ pub fn create_checked_at_event(timestamp: i64) -> EventBuilder {
         timestamp
     );
 
-    EventBuilder::new(
-        Kind::from(APP_DATA_KIND),
-        content
-    )
-    .tag(Tag::identifier(NOTIFICATION_CHECKED_AT_D_TAG))
-    .custom_created_at(Timestamp::from(timestamp as u64))
+    EventBuilder::new(Kind::from(APP_DATA_KIND), content)
+        .tag(Tag::identifier(NOTIFICATION_CHECKED_AT_D_TAG))
+        .custom_created_at(Timestamp::from(timestamp as u64))
 }
 
 /// Extract the checked_at timestamp from a NIP-78 event
@@ -97,7 +94,10 @@ mod tests {
                 false
             }
         });
-        assert!(has_d_tag, "Event should have d-tag for notifications_checked_at");
+        assert!(
+            has_d_tag,
+            "Event should have d-tag for notifications_checked_at"
+        );
 
         // Verify created_at matches the timestamp
         assert_eq!(event.created_at.as_secs(), timestamp as u64);

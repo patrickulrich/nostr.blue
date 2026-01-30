@@ -51,9 +51,7 @@ struct GitHubContentResponse {
 
 /// Extract owner and repo from GitHub URL
 fn parse_github_url(url: &str) -> Option<(String, String)> {
-    let url = url
-        .trim_end_matches(".git")
-        .trim_end_matches('/');
+    let url = url.trim_end_matches(".git").trim_end_matches('/');
 
     // Handle various GitHub URL formats
     let parts: Vec<&str> = url.split('/').collect();
@@ -71,9 +69,7 @@ fn parse_github_url(url: &str) -> Option<(String, String)> {
 
 /// Extract owner and repo from GitLab URL
 fn parse_gitlab_url(url: &str) -> Option<(String, String)> {
-    let url = url
-        .trim_end_matches(".git")
-        .trim_end_matches('/');
+    let url = url.trim_end_matches(".git").trim_end_matches('/');
 
     let parts: Vec<&str> = url.split('/').collect();
     let gitlab_idx = parts.iter().position(|&p| p.contains("gitlab.com"))?;
@@ -90,9 +86,7 @@ fn parse_gitlab_url(url: &str) -> Option<(String, String)> {
 
 /// Extract owner and repo from Codeberg URL
 fn parse_codeberg_url(url: &str) -> Option<(String, String)> {
-    let url = url
-        .trim_end_matches(".git")
-        .trim_end_matches('/');
+    let url = url.trim_end_matches(".git").trim_end_matches('/');
 
     let parts: Vec<&str> = url.split('/').collect();
     let codeberg_idx = parts.iter().position(|&p| p.contains("codeberg.org"))?;
@@ -108,7 +102,11 @@ fn parse_codeberg_url(url: &str) -> Option<(String, String)> {
 }
 
 /// Fetch file content from a repository
-pub async fn fetch_file(repo: &Repository, path: &str, git_ref: Option<&str>) -> Result<String, String> {
+pub async fn fetch_file(
+    repo: &Repository,
+    path: &str,
+    git_ref: Option<&str>,
+) -> Result<String, String> {
     let git_ref = git_ref.unwrap_or("main");
 
     // Try each source in order
@@ -141,7 +139,11 @@ pub async fn fetch_file(repo: &Repository, path: &str, git_ref: Option<&str>) ->
 }
 
 /// Fetch directory listing from a repository
-pub async fn fetch_directory(repo: &Repository, path: &str, git_ref: Option<&str>) -> Result<Vec<TreeEntry>, String> {
+pub async fn fetch_directory(
+    repo: &Repository,
+    path: &str,
+    git_ref: Option<&str>,
+) -> Result<Vec<TreeEntry>, String> {
     let git_ref = git_ref.unwrap_or("main");
 
     // Try each source in order
@@ -177,7 +179,12 @@ pub async fn fetch_directory(repo: &Repository, path: &str, git_ref: Option<&str
 // GitHub API
 // ============================================================================
 
-async fn fetch_github_file(owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<String, String> {
+async fn fetch_github_file(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<String, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
         owner, repo, path, git_ref
@@ -203,21 +210,23 @@ async fn fetch_github_file(owner: &str, repo: &str, path: &str, git_ref: &str) -
         if encoding == "base64" {
             // Remove newlines and decode
             let cleaned = content.replace('\n', "");
-            let decoded = base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD,
-                &cleaned,
-            )
-            .map_err(|e| format!("Base64 decode error: {}", e))?;
+            let decoded =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &cleaned)
+                    .map_err(|e| format!("Base64 decode error: {}", e))?;
 
-            return String::from_utf8(decoded)
-                .map_err(|e| format!("UTF-8 decode error: {}", e));
+            return String::from_utf8(decoded).map_err(|e| format!("UTF-8 decode error: {}", e));
         }
     }
 
     Err("No content in response".to_string())
 }
 
-async fn fetch_github_tree(owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<Vec<TreeEntry>, String> {
+async fn fetch_github_tree(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Vec<TreeEntry>, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
         owner, repo, git_ref
@@ -241,7 +250,11 @@ async fn fetch_github_tree(owner: &str, repo: &str, path: &str, git_ref: &str) -
 
     // Filter to entries in the requested path
     let prefix = if path.is_empty() { "" } else { path };
-    let _depth = if prefix.is_empty() { 0 } else { prefix.matches('/').count() + 1 };
+    let _depth = if prefix.is_empty() {
+        0
+    } else {
+        prefix.matches('/').count() + 1
+    };
 
     let entries = tree
         .tree
@@ -285,7 +298,12 @@ async fn fetch_github_tree(owner: &str, repo: &str, path: &str, git_ref: &str) -
 // GitLab API
 // ============================================================================
 
-async fn fetch_gitlab_file(owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<String, String> {
+async fn fetch_gitlab_file(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<String, String> {
     let project_id = format!("{}/{}", owner, repo);
     let encoded_path = urlencoding::encode(path);
 
@@ -311,7 +329,12 @@ async fn fetch_gitlab_file(owner: &str, repo: &str, path: &str, git_ref: &str) -
         .map_err(|e| format!("Read error: {}", e))
 }
 
-async fn fetch_gitlab_tree(owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<Vec<TreeEntry>, String> {
+async fn fetch_gitlab_tree(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Vec<TreeEntry>, String> {
     let project_id = format!("{}/{}", owner, repo);
 
     let url = format!(
@@ -361,7 +384,12 @@ async fn fetch_gitlab_tree(owner: &str, repo: &str, path: &str, git_ref: &str) -
 // Codeberg API (Gitea-compatible)
 // ============================================================================
 
-async fn fetch_codeberg_file(owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<String, String> {
+async fn fetch_codeberg_file(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<String, String> {
     let url = format!(
         "https://codeberg.org/api/v1/repos/{}/{}/raw/{}?ref={}",
         owner, repo, path, git_ref
@@ -382,7 +410,12 @@ async fn fetch_codeberg_file(owner: &str, repo: &str, path: &str, git_ref: &str)
         .map_err(|e| format!("Read error: {}", e))
 }
 
-async fn fetch_codeberg_tree(owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<Vec<TreeEntry>, String> {
+async fn fetch_codeberg_tree(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Vec<TreeEntry>, String> {
     let url = format!(
         "https://codeberg.org/api/v1/repos/{}/{}/contents/{}?ref={}",
         owner, repo, path, git_ref

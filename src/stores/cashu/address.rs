@@ -98,7 +98,10 @@ impl PaymentAddress {
 
     /// Check if this is a resolvable address (not already an invoice)
     pub fn is_resolvable(&self) -> bool {
-        matches!(self.address_type, AddressType::Lightning | AddressType::Bip353 | AddressType::Lnurl)
+        matches!(
+            self.address_type,
+            AddressType::Lightning | AddressType::Bip353 | AddressType::Lnurl
+        )
     }
 
     /// Check if this is a Lightning Address (user@domain)
@@ -155,9 +158,10 @@ pub struct LnurlInvoiceResponse {
 /// Resolve a Lightning Address to get payment info
 ///
 /// Returns the LNURL-pay response which can be used to request an invoice.
-pub async fn resolve_lightning_address(address: &PaymentAddress) -> Result<LnurlPayResponse, String> {
-    let url = address.lnurlp_url()
-        .ok_or("Not a Lightning Address")?;
+pub async fn resolve_lightning_address(
+    address: &PaymentAddress,
+) -> Result<LnurlPayResponse, String> {
+    let url = address.lnurlp_url().ok_or("Not a Lightning Address")?;
 
     log::info!("Resolving Lightning Address: {}", address.original);
 
@@ -177,7 +181,10 @@ pub async fn resolve_lightning_address(address: &PaymentAddress) -> Result<Lnurl
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     if lnurl_response.tag != "payRequest" {
-        return Err(format!("Invalid LNURL response tag: {}", lnurl_response.tag));
+        return Err(format!(
+            "Invalid LNURL response tag: {}",
+            lnurl_response.tag
+        ));
     }
 
     Ok(lnurl_response)
@@ -211,7 +218,10 @@ pub async fn request_invoice(
     // Add comment if allowed and provided
     if let Some(comment_text) = comment {
         if lnurl_pay.comment_allowed > 0 {
-            let truncated: String = comment_text.chars().take(lnurl_pay.comment_allowed as usize).collect();
+            let truncated: String = comment_text
+                .chars()
+                .take(lnurl_pay.comment_allowed as usize)
+                .collect();
             url.push_str(&format!("&comment={}", urlencoding::encode(&truncated)));
         }
     }

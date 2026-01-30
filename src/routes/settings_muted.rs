@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
-use crate::stores::nostr_client;
 use crate::routes::Route;
+use crate::stores::nostr_client;
+use dioxus::prelude::*;
 
 #[component]
 pub fn SettingsMuted() -> Element {

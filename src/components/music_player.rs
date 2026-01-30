@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
-use dioxus::web::WebEventExt;
+use crate::components::icons;
 use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::utils::radio::NowPlaying;
-use crate::components::icons;
+use dioxus::prelude::*;
+use dioxus::web::WebEventExt;
 use js_sys::eval;
 use wasm_bindgen::JsCast;
 
@@ -16,7 +16,6 @@ fn format_time(seconds: f64) -> String {
     let secs = (seconds % 60.0).floor() as u32;
     format!("{}:{:02}", mins, secs)
 }
-
 
 /// Persistent music player that stays at bottom of screen
 #[component]
@@ -35,8 +34,10 @@ pub fn PersistentMusicPlayer() -> Element {
 
             spawn(async move {
                 // Properly escape strings using JSON serialization to prevent injection
-                let audio_id_json = serde_json::to_string(&audio_id).unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-                let media_url_json = serde_json::to_string(&media_url).unwrap_or_else(|_| "\"\"".to_string());
+                let audio_id_json = serde_json::to_string(&audio_id)
+                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                let media_url_json =
+                    serde_json::to_string(&media_url).unwrap_or_else(|_| "\"\"".to_string());
                 let is_playing_literal = if is_playing { "true" } else { "false" };
 
                 // Check if this is an HLS stream (only .m3u8 needs HLS.js)
@@ -133,7 +134,8 @@ pub fn PersistentMusicPlayer() -> Element {
 
         spawn(async move {
             // Properly escape audio_id using JSON serialization
-            let audio_id_json = serde_json::to_string(&audio_id).unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+            let audio_id_json = serde_json::to_string(&audio_id)
+                .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
 
             let script = format!(
                 r#"
@@ -226,7 +228,12 @@ pub fn PersistentMusicPlayer() -> Element {
 
     // Memoize is_live to prevent effect re-running on every render
     let is_live = use_memo(move || {
-        MUSIC_PLAYER.read().current_track.as_ref().map(|t| t.is_live_stream).unwrap_or(false)
+        MUSIC_PLAYER
+            .read()
+            .current_track
+            .as_ref()
+            .map(|t| t.is_live_stream)
+            .unwrap_or(false)
     });
 
     // Clear now playing when switching away from live stream
@@ -249,14 +256,16 @@ pub fn PersistentMusicPlayer() -> Element {
             }
 
             // Read hlsManager.nowPlaying from JavaScript
-            let result = eval(r#"
+            let result = eval(
+                r#"
                 (function() {
                     if (window.hlsManager && window.hlsManager.nowPlaying) {
                         return JSON.stringify(window.hlsManager.nowPlaying);
                     }
                     return null;
                 })()
-            "#);
+            "#,
+            );
 
             if let Ok(js_value) = result {
                 if let Some(json_str) = js_value.as_string() {

@@ -40,7 +40,7 @@ fn parse_relay_urls(relay_urls: &[String]) -> Result<Vec<nostr::RelayUrl>, Strin
     let urls: Vec<nostr::RelayUrl> = valid_urls
         .into_iter()
         .filter_map(|(_, r)| r.ok())
-        .filter(|url| seen.insert(url.to_string()))  // Only keep first occurrence
+        .filter(|url| seen.insert(url.to_string())) // Only keep first occurrence
         .collect();
 
     if urls.is_empty() {
@@ -72,12 +72,12 @@ pub async fn publish_note_to_relays(
     // Convert raw tags to nostr::Tag format preserving relay hints and markers
     let nostr_tags = super::types::convert_raw_tags(tags);
 
-    let builder = nostr::EventBuilder::text_note(&content)
-        .tags(nostr_tags);
+    let builder = nostr::EventBuilder::text_note(&content).tags(nostr_tags);
 
     let urls = parse_relay_urls(&relay_urls)?;
 
-    let output = client.send_event_builder_to(urls, builder)
+    let output = client
+        .send_event_builder_to(urls, builder)
         .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
 
@@ -123,9 +123,9 @@ pub async fn publish_reaction_to_relays(
     let target_event_id = {
         use nostr::nips::nip19::Nip19;
         match Nip19::from_bech32(&event_id) {
-            Ok(Nip19::EventId(id)) => id,           // note1...
-            Ok(Nip19::Event(e)) => e.event_id,       // nevent1...
-            _ => nostr::EventId::parse(&event_id)    // hex, nostr:note1
+            Ok(Nip19::EventId(id)) => id,      // note1...
+            Ok(Nip19::Event(e)) => e.event_id, // nevent1...
+            _ => nostr::EventId::parse(&event_id) // hex, nostr:note1
                 .map_err(|e| format!("Invalid event ID: {}", e))?,
         }
     };
@@ -146,7 +146,8 @@ pub async fn publish_reaction_to_relays(
 
     let urls = parse_relay_urls(&relay_urls)?;
 
-    let output = client.send_event_builder_to(urls, builder)
+    let output = client
+        .send_event_builder_to(urls, builder)
         .await
         .map_err(|e| format!("Failed to publish reaction: {}", e))?;
 
@@ -185,7 +186,8 @@ pub async fn send_presigned_event_to_relays(
 
     let urls = parse_relay_urls(&relay_urls)?;
 
-    let output = client.send_event_to(urls, &event)
+    let output = client
+        .send_event_to(urls, &event)
         .await
         .map_err(|e| format!("Failed to send event: {}", e))?;
 

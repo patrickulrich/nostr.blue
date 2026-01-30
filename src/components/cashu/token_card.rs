@@ -3,12 +3,12 @@
 //! Renders an interactive card for Cashu ecash tokens found in note content.
 //! Supports both V3 (cashuA) and V4 (cashuB) token formats.
 
+use cdk::nuts::CurrencyUnit;
 use dioxus::prelude::*;
-use std::str::FromStr;
-use std::time::Duration;
 use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-use cdk::nuts::CurrencyUnit;
+use std::str::FromStr;
+use std::time::Duration;
 
 use crate::stores::nostr_client::HAS_SIGNER;
 
@@ -17,7 +17,7 @@ use crate::stores::nostr_client::HAS_SIGNER;
 enum ClaimState {
     Idle,
     Claiming,
-    Success(u64, String),  // (amount, unit_display)
+    Success(u64, String), // (amount, unit_display)
     Failed(String),
 }
 
@@ -94,21 +94,28 @@ pub fn CashuTokenCard(token: String) -> Element {
         let token = token.clone();
         // Capture unit from parsed token for display in success message
         // Use same plural form as header for consistency (CDK's Display returns lowercase singular)
-        let unit_for_claim = parsed.as_ref()
-            .map(|info| match info.unit {
-                CurrencyUnit::Sat => "sats",
-                CurrencyUnit::Msat => "msats",
-                CurrencyUnit::Usd => "USD",
-                CurrencyUnit::Eur => "EUR",
-                _ => "units",
-            }.to_string())
+        let unit_for_claim = parsed
+            .as_ref()
+            .map(|info| {
+                match info.unit {
+                    CurrencyUnit::Sat => "sats",
+                    CurrencyUnit::Msat => "msats",
+                    CurrencyUnit::Usd => "USD",
+                    CurrencyUnit::Eur => "EUR",
+                    _ => "units",
+                }
+                .to_string()
+            })
             .unwrap_or_else(|| "sats".to_string());
 
         move |e: MouseEvent| {
             e.stop_propagation();
 
             // Only allow claiming from Idle or Failed state (enables retry)
-            if !matches!(*claim_state.read(), ClaimState::Idle | ClaimState::Failed(_)) {
+            if !matches!(
+                *claim_state.read(),
+                ClaimState::Idle | ClaimState::Failed(_)
+            ) {
                 return;
             }
 
@@ -164,7 +171,7 @@ pub fn CashuTokenCard(token: String) -> Element {
                         log::warn!("Failed to copy to clipboard: {:?}", e);
                         toast_api.error(
                             "Failed to copy".to_string(),
-                            ToastOptions::new().duration(Duration::from_secs(2))
+                            ToastOptions::new().duration(Duration::from_secs(2)),
                         );
                     }
                 }

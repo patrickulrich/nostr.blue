@@ -6,10 +6,10 @@
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use super::utils::{normalize_mint_url, now_secs};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
-use super::utils::{now_secs, normalize_mint_url};
+use std::collections::HashMap;
 
 // =============================================================================
 // Cache Configuration
@@ -109,9 +109,9 @@ impl MintCacheEntry {
             return false;
         }
         // Returns true if ANY keyset is still within TTL
-        self.keysets.values().any(|ks| {
-            now_secs().saturating_sub(ks.cached_at) < ttl_secs
-        })
+        self.keysets
+            .values()
+            .any(|ks| now_secs().saturating_sub(ks.cached_at) < ttl_secs)
     }
 
     /// Get active keyset IDs
@@ -125,16 +125,16 @@ impl MintCacheEntry {
 
     /// Get keyset by ID if cached and valid
     pub fn get_keyset(&self, keyset_id: &str, ttl_secs: u64) -> Option<&CachedKeyset> {
-        self.keysets.get(keyset_id).filter(|ks| {
-            now_secs().saturating_sub(ks.cached_at) < ttl_secs
-        })
+        self.keysets
+            .get(keyset_id)
+            .filter(|ks| now_secs().saturating_sub(ks.cached_at) < ttl_secs)
     }
 
     /// Get keys for keyset if cached and valid
     pub fn get_keys(&self, keyset_id: &str, ttl_secs: u64) -> Option<&CachedKeys> {
-        self.keys.get(keyset_id).filter(|k| {
-            now_secs().saturating_sub(k.cached_at) < ttl_secs
-        })
+        self.keys
+            .get(keyset_id)
+            .filter(|k| now_secs().saturating_sub(k.cached_at) < ttl_secs)
     }
 }
 
@@ -225,14 +225,13 @@ impl MintMetadataCache {
 
     /// Get cached mint info if valid
     pub fn get_info(&self, mint_url: &str) -> Option<&CachedMintInfo> {
-        self.get_mint(mint_url)
-            .and_then(|e| {
-                if e.is_info_valid(self.ttl_secs) {
-                    e.info.as_ref()
-                } else {
-                    None
-                }
-            })
+        self.get_mint(mint_url).and_then(|e| {
+            if e.is_info_valid(self.ttl_secs) {
+                e.info.as_ref()
+            } else {
+                None
+            }
+        })
     }
 
     /// Invalidate cache for a mint
@@ -283,44 +282,77 @@ pub struct CacheStats {
 /// Parse mint info from JSON response into cached format
 pub fn parse_mint_info_to_cache(json: &serde_json::Value) -> CachedMintInfo {
     CachedMintInfo {
-        name: json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        description: json.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        pubkey: json.get("pubkey").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        nuts: json.get("nuts")
+        name: json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        description: json
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        pubkey: json
+            .get("pubkey")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        nuts: json
+            .get("nuts")
             .and_then(|v| v.as_object())
             .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default(),
-        contact: json.get("contact")
+        contact: json
+            .get("contact")
             .and_then(|v| serde_json::from_value(v.clone()).ok()),
-        motd: json.get("motd").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        icon_url: json.get("icon_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        motd: json
+            .get("motd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        icon_url: json
+            .get("icon_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         cached_at: now_secs(),
     }
 }
 
 /// Parse keysets from JSON response into cached format
 pub fn parse_keysets_to_cache(json: &serde_json::Value) -> Vec<CachedKeyset> {
-    let keysets = json.get("keysets")
+    let keysets = json
+        .get("keysets")
         .and_then(|v| v.as_array())
         .map(|arr| arr.to_vec())
         .unwrap_or_default();
 
     let now = now_secs();
-    keysets.into_iter().filter_map(|ks| {
-        Some(CachedKeyset {
-            id: ks.get("id")?.as_str()?.to_string(),
-            unit: ks.get("unit").and_then(|v| v.as_str()).unwrap_or("sat").to_string(),
-            active: ks.get("active").and_then(|v| v.as_bool()).unwrap_or(true),
-            input_fee_ppk: ks.get("input_fee_ppk").and_then(|v| v.as_u64()).unwrap_or(0),
-            cached_at: now,
+    keysets
+        .into_iter()
+        .filter_map(|ks| {
+            Some(CachedKeyset {
+                id: ks.get("id")?.as_str()?.to_string(),
+                unit: ks
+                    .get("unit")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("sat")
+                    .to_string(),
+                active: ks.get("active").and_then(|v| v.as_bool()).unwrap_or(true),
+                input_fee_ppk: ks
+                    .get("input_fee_ppk")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                cached_at: now,
+            })
         })
-    }).collect()
+        .collect()
 }
 
 /// Parse keys from JSON response into cached format
 pub fn parse_keys_to_cache(keyset_id: &str, json: &serde_json::Value) -> CachedKeys {
-    let keys_obj = json.get("keys")
-        .or_else(|| json.get("keysets").and_then(|ks| ks.get(0)).and_then(|k| k.get("keys")))
+    let keys_obj = json
+        .get("keys")
+        .or_else(|| {
+            json.get("keysets")
+                .and_then(|ks| ks.get(0))
+                .and_then(|k| k.get("keys"))
+        })
         .and_then(|v| v.as_object());
 
     let keys = keys_obj
@@ -384,7 +416,8 @@ pub fn get_cache_stats() -> CacheStats {
 
 /// Get active keyset IDs for a mint from cache
 pub fn get_cached_active_keysets(mint_url: &str) -> Vec<String> {
-    MINT_CACHE.read()
+    MINT_CACHE
+        .read()
         .get_mint(mint_url)
         .map(|e| e.active_keyset_ids())
         .unwrap_or_default()
@@ -393,7 +426,8 @@ pub fn get_cached_active_keysets(mint_url: &str) -> Vec<String> {
 /// Get input fee for a keyset from cache
 pub fn get_cached_keyset_fee(mint_url: &str, keyset_id: &str) -> Option<u64> {
     let cache = MINT_CACHE.read();
-    cache.get_mint(mint_url)
+    cache
+        .get_mint(mint_url)
         .and_then(|e| e.get_keyset(keyset_id, cache.ttl_secs))
         .map(|ks| ks.input_fee_ppk)
 }
@@ -450,12 +484,15 @@ impl ResponseCache {
 
     /// Store a response in the cache
     pub fn store(&mut self, url: String, body: String, ttl_secs: u64, etag: Option<String>) {
-        self.responses.insert(url, CachedResponse {
-            body,
-            cached_at: now_secs(),
-            ttl_secs,
-            etag,
-        });
+        self.responses.insert(
+            url,
+            CachedResponse {
+                body,
+                cached_at: now_secs(),
+                ttl_secs,
+                etag,
+            },
+        );
     }
 
     /// Remove a cached response
@@ -551,7 +588,9 @@ pub async fn cached_fetch(url: &str, default_ttl: u64) -> Result<String, String>
     let etag = response.headers().get("etag");
     let ttl = parse_cache_control(cache_control.as_deref()).unwrap_or(default_ttl);
 
-    let body = response.text().await
+    let body = response
+        .text()
+        .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
 
     // Store in cache
@@ -592,7 +631,10 @@ fn is_valid_keyset_id(id: &str) -> bool {
 }
 
 /// Fetch keys for a keyset with caching
-pub async fn cached_fetch_keys(mint_url: &str, keyset_id: &str) -> Result<serde_json::Value, String> {
+pub async fn cached_fetch_keys(
+    mint_url: &str,
+    keyset_id: &str,
+) -> Result<serde_json::Value, String> {
     // Validate keyset_id format to prevent path traversal
     if !is_valid_keyset_id(keyset_id) {
         return Err(format!(

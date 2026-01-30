@@ -6,15 +6,14 @@
 //! - V4V payment support (if available)
 //! - Chapters, transcripts, soundbites
 
-use dioxus::prelude::*;
 use crate::components::{
-    PodcastEpisodeList, DisplayEpisode, icons,
-    ContentShareModal, ContentType,
+    icons, ContentShareModal, ContentType, DisplayEpisode, PodcastEpisodeList,
 };
 use crate::routes::Route;
-use crate::services::podcast_index::{self, PodcastFeed, Episode};
+use crate::services::podcast_index::{self, Episode, PodcastFeed};
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::markdown::sanitize_html;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastRssFeedDetailProps {
@@ -43,7 +42,8 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
             }
 
             // Parse ID
-            let id: u64 = id_str.parse()
+            let id: u64 = id_str
+                .parse()
                 .map_err(|_| format!("Invalid podcast ID: {}", id_str))?;
 
             log::info!("Fetching podcast metadata for ID: {}", id);
@@ -52,13 +52,18 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
             let feed = podcast_index::get_podcast_by_id(id).await?;
 
             // Get episodes from Podcast Index (avoids CORS issues with direct RSS fetch)
-            let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100)).await
+            let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100))
+                .await
                 .unwrap_or_else(|e| {
                     log::warn!("Failed to fetch episodes: {}", e);
                     Vec::new()
                 });
 
-            log::info!("Successfully loaded podcast: {} with {} episodes", feed.title, episodes.len());
+            log::info!(
+                "Successfully loaded podcast: {} with {} episodes",
+                feed.title,
+                episodes.len()
+            );
             Ok::<_, String>((feed, episodes, id))
         }
     });
@@ -129,9 +134,12 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     let mut show_share_modal = use_signal(|| false);
 
     // Image URL with fallback
-    let image_url = feed.get_image()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", feed.title));
+    let image_url = feed.get_image().map(|s| s.to_string()).unwrap_or_else(|| {
+        format!(
+            "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+            feed.title
+        )
+    });
 
     // Check if V4V is available (from Podcast Index API)
     let has_v4v = feed.has_v4v();
@@ -151,12 +159,15 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
     let mut subscribing = use_signal(|| false);
 
     // Convert episodes to DisplayEpisode
-    let episodes: Vec<DisplayEpisode> = props.episodes.iter()
+    let episodes: Vec<DisplayEpisode> = props
+        .episodes
+        .iter()
         .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, feed))
         .collect();
 
     // Get category names from the HashMap
-    let category_names: Vec<String> = feed.categories
+    let category_names: Vec<String> = feed
+        .categories
         .as_ref()
         .map(|cats| cats.values().cloned().collect())
         .unwrap_or_default();
@@ -441,4 +452,3 @@ fn RssPodcastDetailSkeleton() -> Element {
         }
     }
 }
-

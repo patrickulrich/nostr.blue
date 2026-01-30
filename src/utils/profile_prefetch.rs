@@ -1,9 +1,9 @@
 // Profile prefetch utility
 // Consolidated, optimized profile prefetching for various event types
 
+use crate::stores::profiles;
 use nostr_sdk::{Event, PublicKey};
 use std::collections::HashSet;
-use crate::stores::profiles;
 
 /// Trait for types that have an author public key
 pub trait HasAuthor {
@@ -41,10 +41,7 @@ pub async fn prefetch_event_authors<T: HasAuthor>(events: &[T]) {
     }
 
     // Extract unique pubkeys - no string conversion!
-    let pubkeys: HashSet<PublicKey> = events
-        .iter()
-        .map(|e| e.author_pubkey())
-        .collect();
+    let pubkeys: HashSet<PublicKey> = events.iter().map(|e| e.author_pubkey()).collect();
 
     // Use optimized batch fetch
     match profiles::fetch_profiles_batch_native(pubkeys).await {

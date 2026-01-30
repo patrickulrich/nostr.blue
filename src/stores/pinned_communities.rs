@@ -7,14 +7,14 @@
 //! - Automatic retry with exponential backoff
 //! - Rollback on publish failure
 
+use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Filter, Kind, EventBuilder, PublicKey};
 use nostr_sdk::nips::nip01::Coordinate;
-use crate::stores::{auth_store, nostr_client};
-use std::time::Duration;
+use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey};
 use std::collections::HashSet;
+use std::time::Duration;
 
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::Timeout;
@@ -68,14 +68,15 @@ thread_local! {
 
 /// Initialize pinned communities by fetching from relays for the current user
 pub async fn init_pinned_communities() -> Result<(), String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     log::info!("Loading pinned communities for {}", pubkey_str);
 
@@ -92,7 +93,9 @@ pub async fn init_pinned_communities() -> Result<(), String> {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Extract a_tags from coordinate tags
-                let pinned: Vec<String> = event.tags.iter()
+                let pinned: Vec<String> = event
+                    .tags
+                    .iter()
                     .filter(|t| t.kind() == nostr_sdk::TagKind::a())
                     .filter_map(|t| t.content().map(|s| s.to_string()))
                     .collect();
@@ -115,7 +118,11 @@ pub async fn init_pinned_communities() -> Result<(), String> {
 
 /// Check if a community is pinned by the current user
 pub fn is_community_pinned(a_tag: &str) -> bool {
-    PINNED_COMMUNITIES.read().data().read().contains(&a_tag.to_string())
+    PINNED_COMMUNITIES
+        .read()
+        .data()
+        .read()
+        .contains(&a_tag.to_string())
 }
 
 /// Get all pinned community a_tags
@@ -125,7 +132,13 @@ pub fn get_pinned_communities() -> Vec<String> {
 
 /// Get pinned communities as a HashSet for efficient lookup
 pub fn get_pinned_communities_set() -> HashSet<String> {
-    PINNED_COMMUNITIES.read().data().read().iter().cloned().collect()
+    PINNED_COMMUNITIES
+        .read()
+        .data()
+        .read()
+        .iter()
+        .cloned()
+        .collect()
 }
 
 /// Pin a community
@@ -217,7 +230,10 @@ pub async fn unpin_community(a_tag: String) -> Result<(), String> {
 }
 
 /// Publish pinned communities with retry and exponential backoff
-fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+fn publish_with_retry(
+    pins: Vec<String>,
+    retry_count: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
     Box::pin(async move {
         const MAX_RETRIES: u32 = 3;
 
@@ -232,14 +248,22 @@ fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<
                 log::info!("Pinned communities published successfully");
             }
             Err(e) => {
-                log::error!("Failed to publish pinned communities (attempt {}): {}", retry_count + 1, e);
+                log::error!(
+                    "Failed to publish pinned communities (attempt {}): {}",
+                    retry_count + 1,
+                    e
+                );
 
                 if retry_count < MAX_RETRIES {
                     // Calculate exponential backoff delay: 1s, 2s, 4s
                     let delay_ms = 1000u32 * (1 << retry_count);
 
-                    log::info!("Retrying pinned communities publish in {}ms (attempt {}/{})",
-                        delay_ms, retry_count + 1, MAX_RETRIES);
+                    log::info!(
+                        "Retrying pinned communities publish in {}ms (attempt {}/{})",
+                        delay_ms,
+                        retry_count + 1,
+                        MAX_RETRIES
+                    );
 
                     // Schedule retry with exponential backoff
                     #[cfg(target_arch = "wasm32")]
@@ -257,10 +281,16 @@ fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<
                     }
                 } else {
                     // Max retries exceeded - rollback local state and set failed status
-                    log::error!("Pinned communities publish failed after {} retries: {}", MAX_RETRIES, e);
+                    log::error!(
+                        "Pinned communities publish failed after {} retries: {}",
+                        MAX_RETRIES,
+                        e
+                    );
 
                     // Rollback local state to match persisted state
-                    if let Some(previous_state) = PINNED_COMMUNITIES_ROLLBACK.read().data().read().clone() {
+                    if let Some(previous_state) =
+                        PINNED_COMMUNITIES_ROLLBACK.read().data().read().clone()
+                    {
                         log::warn!("Automatically rolling back pinned communities to previous state due to publish failure");
                         *PINNED_COMMUNITIES.read().data().write() = previous_state;
                     }
@@ -279,8 +309,11 @@ fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<
 
 /// Publish pinned communities list to relays (NIP-51 kind 10004)
 async fn publish_pinned_communities(pins: Vec<String>) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -289,7 +322,8 @@ async fn publish_pinned_communities(pins: Vec<String>) -> Result<(), String> {
     log::info!("Publishing {} pinned communities", pins.len());
 
     // Parse a_tags to Coordinates
-    let coordinates: Vec<Coordinate> = pins.iter()
+    let coordinates: Vec<Coordinate> = pins
+        .iter()
         .filter_map(|a_tag| parse_a_tag_to_coordinate(a_tag))
         .collect();
 

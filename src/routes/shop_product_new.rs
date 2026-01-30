@@ -1,8 +1,8 @@
 //! Shop Product New - Create a new product listing (NIP-99 Kind 30402)
 
-use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::stores::shop_store::{ProductFormData, publish_product};
+use crate::stores::shop_store::{publish_product, ProductFormData};
+use dioxus::prelude::*;
 
 /// Product creation form
 #[component]

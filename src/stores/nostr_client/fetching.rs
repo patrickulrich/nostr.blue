@@ -6,12 +6,12 @@
 //! - Outbox routing (NIP-65 gossip)
 //! - Connected-only fetch (fast, bypasses gossip discovery)
 
-use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
+use super::signals::{HAS_SIGNER, NOSTR_CLIENT};
 use crate::stores::relay;
-use super::signals::{NOSTR_CLIENT, HAS_SIGNER};
 use crate::stores::relay::USER_RELAYS_APPLIED;
 
 // =============================================================================
@@ -136,10 +136,14 @@ pub async fn fetch_events_from_relays(
 
     // Log relay status for debugging (count only - URLs may contain credentials)
     let relays = client.relays().await;
-    let connected_count = relays.iter()
+    let connected_count = relays
+        .iter()
         .filter(|(_, r)| r.status() == nostr_relay_pool::RelayStatus::Connected)
         .count();
-    log::info!("fetch_events_from_relays: {} relays connected", connected_count);
+    log::info!(
+        "fetch_events_from_relays: {} relays connected",
+        connected_count
+    );
 
     let result = client
         .fetch_events(filter.clone(), timeout)
@@ -202,7 +206,10 @@ async fn fetch_events_aggregated_outbox_with_client(
         }
 
         if *USER_RELAYS_APPLIED.peek() {
-            log::debug!("User relay lists applied after {}ms", start.elapsed().as_millis());
+            log::debug!(
+                "User relay lists applied after {}ms",
+                start.elapsed().as_millis()
+            );
         } else {
             log::warn!("User relay lists not applied after timeout, proceeding with defaults");
         }
@@ -215,14 +222,17 @@ async fn fetch_events_aggregated_outbox_with_client(
     let filter_authors = filter.authors.clone();
 
     // Use gossip for automatic relay routing
-    let events = client.fetch_events(filter, timeout).await
+    let events = client
+        .fetch_events(filter, timeout)
+        .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
     // Client-side author filtering (defense-in-depth against misbehaving relays)
     // Even with verify_subscriptions enabled, some relays may still send unmatched events
     let filtered_events: Vec<nostr::Event> = if let Some(ref authors) = filter_authors {
         let author_set: std::collections::HashSet<_> = authors.iter().collect();
-        events.into_iter()
+        events
+            .into_iter()
             .filter(|e| author_set.contains(&e.pubkey))
             .collect()
     } else {
@@ -331,18 +341,25 @@ async fn fetch_events_from_connected_relays_with_client(
         return fetch_events_aggregated_outbox_with_client(client, filter.clone(), timeout).await;
     }
 
-    log::info!("Fast fetching from {} connected relays (bypassing gossip)", connected_urls.len());
+    log::info!(
+        "Fast fetching from {} connected relays (bypassing gossip)",
+        connected_urls.len()
+    );
 
     // Capture authors for client-side filtering (defense-in-depth)
     let filter_authors = filter.authors.clone();
-    let author_set: Option<std::collections::HashSet<_>> = filter_authors.as_ref()
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors
+        .as_ref()
         .map(|authors| authors.iter().collect());
 
-    let events = client.fetch_events_from(connected_urls, filter, timeout).await
+    let events = client
+        .fetch_events_from(connected_urls, filter, timeout)
+        .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
     // Client-side author filtering (defense-in-depth against misbehaving relays)
-    let result: Vec<nostr::Event> = events.into_iter()
+    let result: Vec<nostr::Event> = events
+        .into_iter()
         .filter(|event| {
             if let Some(ref authors) = author_set {
                 authors.contains(&event.pubkey)
@@ -352,7 +369,10 @@ async fn fetch_events_from_connected_relays_with_client(
         })
         .collect();
 
-    log::info!("Fast fetch completed: {} events (after filtering)", result.len());
+    log::info!(
+        "Fast fetch completed: {} events (after filtering)",
+        result.len()
+    );
     Ok(result)
 }
 

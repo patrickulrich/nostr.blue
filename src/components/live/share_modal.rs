@@ -1,16 +1,16 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventBuilder, PublicKey, FromBech32, Kind};
-use std::sync::atomic::{AtomicU32, Ordering};
-use crate::stores::{nostr_client, dms};
-use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::icons::{
-    ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
-    Link2Icon, HashIcon, ArrowLeftIcon, CameraIcon, BarChartIcon
+    ArrowLeftIcon, BarChartIcon, CameraIcon, CheckIcon, CopyIcon, HashIcon, Link2Icon,
+    MessageCircleIcon, SendIcon, ShareIcon,
 };
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, PollCreatorModal};
-use wasm_bindgen::JsValue;
+use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
+use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::{dms, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, Kind, PublicKey};
+use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
 
 /// Global counter for generating unique modal IDs
 static LIVE_SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -63,7 +63,8 @@ pub fn LiveStreamShareModal(
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
@@ -77,7 +78,9 @@ pub fn LiveStreamShareModal(
         let mut utf8_index = 0;
         let mut utf16_count = 0;
         for c in text.chars() {
-            if utf16_count >= utf16_index { break; }
+            if utf16_count >= utf16_index {
+                break;
+            }
             utf16_count += c.len_utf16();
             utf8_index += c.len_utf8();
         }
@@ -98,7 +101,8 @@ pub fn LiveStreamShareModal(
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            let _ = textarea.set_selection_range(utf16_pos as u32, utf16_pos as u32);
+                            let _ =
+                                textarea.set_selection_range(utf16_pos as u32, utf16_pos as u32);
                         }
                     }
                 }
@@ -135,7 +139,10 @@ pub fn LiveStreamShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             let new_cursor_pos = safe_pos + text.len();
@@ -161,7 +168,10 @@ pub fn LiveStreamShareModal(
                     let safe_pos = if current.is_char_boundary(pos) {
                         pos
                     } else {
-                        (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                        (0..=pos)
+                            .rev()
+                            .find(|&i| current.is_char_boundary(i))
+                            .unwrap_or(0)
                     };
                     if let Some(prev_char) = current[..safe_pos].chars().last() {
                         if !prev_char.is_whitespace() {
@@ -198,7 +208,9 @@ pub fn LiveStreamShareModal(
 
     // Extract livestream title
     let content_title = title.unwrap_or_else(|| {
-        event.tags.iter()
+        event
+            .tags
+            .iter()
             .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
             .and_then(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
             .unwrap_or_else(|| "Check out this livestream".to_string())
@@ -208,8 +220,7 @@ pub fn LiveStreamShareModal(
     use nostr_sdk::prelude::Coordinate;
     use nostr_sdk::ToBech32;
 
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&d_tag);
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&d_tag);
     let naddr_bech32 = coord.to_bech32().unwrap_or_else(|_| {
         // Fallback to raw format if bech32 encoding fails
         format!("30311:{}:{}", event.pubkey, d_tag)
@@ -271,8 +282,7 @@ pub fn LiveStreamShareModal(
             };
 
             // Add event tag to reference the livestream being shared
-            let builder = EventBuilder::text_note(&text)
-                .tag(nostr_sdk::Tag::event(event_id));
+            let builder = EventBuilder::text_note(&text).tag(nostr_sdk::Tag::event(event_id));
 
             match client.send_event_builder(builder).await {
                 Ok(output) => {
@@ -318,12 +328,18 @@ pub fn LiveStreamShareModal(
                     pubkey.to_hex()
                 } else {
                     log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                    dm_error.set(Some("Invalid recipient. Please enter a valid npub or hex public key.".to_string()));
+                    dm_error.set(Some(
+                        "Invalid recipient. Please enter a valid npub or hex public key."
+                            .to_string(),
+                    ));
                     is_publishing.set(false);
                     return;
                 };
 
-                let message = format!("Check out this livestream on nostr.blue: {}", stream_url_clone);
+                let message = format!(
+                    "Check out this livestream on nostr.blue: {}",
+                    stream_url_clone
+                );
 
                 // Send DM using NIP-17
                 match dms::send_dm(recipient_hex.clone(), message).await {

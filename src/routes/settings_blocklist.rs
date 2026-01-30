@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
-use crate::stores::{nostr_client, profiles};
 use crate::routes::Route;
+use crate::stores::{nostr_client, profiles};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 use std::collections::HashMap;
 
 #[component]

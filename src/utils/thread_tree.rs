@@ -1,9 +1,9 @@
+use instant::{Duration, Instant};
 use lru::LruCache;
 use nostr_sdk::{Event, EventId, PublicKey, TagKind};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
-use instant::{Duration, Instant};
 
 use crate::stores::pending_comments::{CommentStatus, PendingComment};
 
@@ -42,11 +42,20 @@ impl ThreadNode {
     }
 
     /// Create a pending thread node
-    pub fn pending(event: Event, local_id: String, status: CommentStatus, author_pubkey: PublicKey) -> Self {
+    pub fn pending(
+        event: Event,
+        local_id: String,
+        status: CommentStatus,
+        author_pubkey: PublicKey,
+    ) -> Self {
         Self {
             event,
             children: Vec::new(),
-            source: ThreadNodeSource::Pending { local_id, status, author_pubkey },
+            source: ThreadNodeSource::Pending {
+                local_id,
+                status,
+                author_pubkey,
+            },
         }
     }
 }
@@ -63,8 +72,15 @@ impl ThreadNode {
 ///   - Falls back to uppercase 'E' tag (root reference) if no lowercase 'e' tag
 fn get_parent_id(event: &Event) -> Option<EventId> {
     // First, try lowercase 'e' tags (standard NIP-10 and NIP-22 parent reference)
-    let e_tags: Vec<_> = event.tags.iter()
-        .filter(|tag| tag.kind() == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)))
+    let e_tags: Vec<_> = event
+        .tags
+        .iter()
+        .filter(|tag| {
+            tag.kind()
+                == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
+        })
         .collect();
 
     if !e_tags.is_empty() {
@@ -107,8 +123,15 @@ fn get_parent_id(event: &Event) -> Option<EventId> {
     // check for uppercase 'E' tag (root reference)
     // This handles non-compliant comments that might only have uppercase tags
     if event.kind == nostr_sdk::Kind::Comment {
-        let upper_e_tags: Vec<_> = event.tags.iter()
-            .filter(|tag| tag.kind() == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E)))
+        let upper_e_tags: Vec<_> = event
+            .tags
+            .iter()
+            .filter(|tag| {
+                tag.kind()
+                    == TagKind::SingleLetter(nostr_sdk::SingleLetterTag::uppercase(
+                        nostr_sdk::Alphabet::E,
+                    ))
+            })
             .collect();
 
         if let Some(first_tag) = upper_e_tags.first() {
@@ -237,7 +260,10 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
             log::debug!("Thread tree cache HIT for {}", root_id_hex);
             return cached_tree;
         }
-        log::debug!("Thread tree cache MISS for {}, building tree...", root_id_hex);
+        log::debug!(
+            "Thread tree cache MISS for {}, building tree...",
+            root_id_hex
+        );
         // Cache lock released here
     }
 
@@ -247,10 +273,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 
     // Initialize nodes for all replies
     for reply in &replies {
-        node_map.insert(
-            reply.id,
-            ThreadNode::confirmed(reply.clone()),
-        );
+        node_map.insert(reply.id, ThreadNode::confirmed(reply.clone()));
     }
 
     // Array to store top-level replies (direct replies to the root event)
@@ -297,10 +320,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
     // We need to rebuild this because we removed nodes from the map
     let mut node_map: HashMap<EventId, ThreadNode> = HashMap::new();
     for reply in &replies {
-        node_map.insert(
-            reply.id,
-            ThreadNode::confirmed(reply.clone()),
-        );
+        node_map.insert(reply.id, ThreadNode::confirmed(reply.clone()));
     }
 
     // Build parent-child relationships
@@ -466,26 +486,34 @@ pub fn merge_pending_into_tree(
         if let Some(parent_id) = pending_comment.parent_comment_id {
             // Replying to another comment - find and insert as child
             // Returns Some(node) if not found (ownership returned), None if consumed
-            fn insert_as_child(nodes: &mut [ThreadNode], parent_id: &EventId, mut node: ThreadNode) -> Option<ThreadNode> {
+            fn insert_as_child(
+                nodes: &mut [ThreadNode],
+                parent_id: &EventId,
+                mut node: ThreadNode,
+            ) -> Option<ThreadNode> {
                 for existing in nodes.iter_mut() {
                     if existing.event.id == *parent_id {
                         existing.children.push(node);
                         // Sort children by timestamp
-                        existing.children.sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
+                        existing
+                            .children
+                            .sort_by(|a, b| a.event.created_at.cmp(&b.event.created_at));
                         return None; // Consumed
                     }
                 }
                 // Try children - pass ownership through each subtree
                 for existing in nodes.iter_mut() {
                     match insert_as_child(&mut existing.children, parent_id, node) {
-                        None => return None, // Found and consumed in subtree
+                        None => return None,               // Found and consumed in subtree
                         Some(returned) => node = returned, // Not found, continue with ownership
                     }
                 }
                 Some(node) // Not found anywhere, return ownership
             }
 
-            if let Some(orphan_node) = insert_as_child(&mut confirmed_tree, &parent_id, pending_node) {
+            if let Some(orphan_node) =
+                insert_as_child(&mut confirmed_tree, &parent_id, pending_node)
+            {
                 // Parent not found (maybe also pending), add to root
                 confirmed_tree.push(orphan_node);
             }

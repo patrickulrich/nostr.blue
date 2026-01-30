@@ -67,13 +67,37 @@ fn is_binary_extension(filename: &str) -> bool {
     let ext = extract_extension(filename).to_lowercase();
     matches!(
         ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" |
-        "pdf" | "doc" | "docx" | "xls" | "xlsx" |
-        "zip" | "tar" | "gz" | "rar" | "7z" |
-        "exe" | "dll" | "so" | "dylib" |
-        "mp3" | "mp4" | "wav" | "avi" | "mov" |
-        "woff" | "woff2" | "ttf" | "otf" | "eot" |
-        "wasm"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "ico"
+            | "pdf"
+            | "doc"
+            | "docx"
+            | "xls"
+            | "xlsx"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "rar"
+            | "7z"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "mp3"
+            | "mp4"
+            | "wav"
+            | "avi"
+            | "mov"
+            | "woff"
+            | "woff2"
+            | "ttf"
+            | "otf"
+            | "eot"
+            | "wasm"
     )
 }
 
@@ -327,10 +351,7 @@ pub fn CodeFileViewer(
 
 /// Compact code viewer for inline display (e.g., README preview)
 #[component]
-pub fn CodeFileViewerCompact(
-    content: String,
-    #[props(default = 10)] max_lines: usize,
-) -> Element {
+pub fn CodeFileViewerCompact(content: String, #[props(default = 10)] max_lines: usize) -> Element {
     // Collect once to avoid iterating the content twice
     let all_lines: Vec<&str> = content.lines().collect();
     let total_lines = all_lines.len();
@@ -367,10 +388,7 @@ pub fn CodeFileViewerCompact(
 
 /// Raw file download button
 #[component]
-pub fn RawFileButton(
-    content: String,
-    filename: String,
-) -> Element {
+pub fn RawFileButton(content: String, filename: String) -> Element {
     rsx! {
         button {
             class: "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition",

@@ -61,7 +61,6 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
         }
     };
 
-
     rsx! {
         div {
             class: "space-y-3",

@@ -129,7 +129,10 @@ pub async fn init_wallet() -> Result<(), String> {
     // Guard against concurrent initialization - atomic check-and-set
     {
         let mut status = WALLET_STATUS.write();
-        if matches!(*status, WalletStatus::Loading | WalletStatus::Ready | WalletStatus::Recovering) {
+        if matches!(
+            *status,
+            WalletStatus::Loading | WalletStatus::Ready | WalletStatus::Recovering
+        ) {
             log::debug!("Wallet init skipped - already {:?}", *status);
             return Ok(());
         }
@@ -168,7 +171,11 @@ pub async fn init_wallet() -> Result<(), String> {
                         *WALLET_STATE.write() = Some(WalletState {
                             privkey: Some(wallet_data.privkey.clone()),
                             // Normalize mint URLs on load to ensure consistent lookups
-                            mints: wallet_data.mints.iter().map(|u| normalize_mint_url(u.as_ref())).collect(),
+                            mints: wallet_data
+                                .mints
+                                .iter()
+                                .map(|u| normalize_mint_url(u.as_ref()))
+                                .collect(),
                             initialized: true,
                         });
 
@@ -308,11 +315,16 @@ pub async fn init_wallet() -> Result<(), String> {
 
                             // Phase 3: Check for paid mint quotes using CDK
                             // This uses CDK's built-in check_all_mint_quotes()
-                            if let Some(multi_wallet) = cashu_cdk_bridge::MULTI_WALLET.read().as_ref() {
+                            if let Some(multi_wallet) =
+                                cashu_cdk_bridge::MULTI_WALLET.read().as_ref()
+                            {
                                 match multi_wallet.check_all_mint_quotes(None).await {
                                     Ok(amount) => {
                                         if u64::from(amount) > 0 {
-                                            log::info!("Recovered {} sats from paid mint quotes", u64::from(amount));
+                                            log::info!(
+                                                "Recovered {} sats from paid mint quotes",
+                                                u64::from(amount)
+                                            );
                                             // Sync state to update UI
                                             let _ = cashu_cdk_bridge::sync_wallet_state().await;
                                         }
@@ -475,8 +487,8 @@ async fn decrypt_wallet_event(event: &Event) -> Result<WalletEvent, String> {
         .map_err(|e| format!("Failed to decrypt wallet event: {}", e))?;
 
     // Parse the decrypted JSON array
-    let pairs: Vec<Vec<String>> =
-        serde_json::from_str(&decrypted).map_err(|e| format!("Failed to parse wallet JSON: {}", e))?;
+    let pairs: Vec<Vec<String>> = serde_json::from_str(&decrypted)
+        .map_err(|e| format!("Failed to parse wallet JSON: {}", e))?;
 
     let mut privkey = String::new();
     let mut mints = Vec::new();
@@ -531,7 +543,8 @@ async fn load_pending_events() -> Result<(), String> {
     log::info!("Loading pending events from IndexedDB...");
 
     // Get the shared localstore
-    let localstore = SHARED_LOCALSTORE.read()
+    let localstore = SHARED_LOCALSTORE
+        .read()
         .as_ref()
         .ok_or("Localstore not initialized")?
         .clone();
@@ -547,7 +560,10 @@ async fn load_pending_events() -> Result<(), String> {
         return Ok(());
     }
 
-    log::info!("Loaded {} pending events from IndexedDB", pending_events.len());
+    log::info!(
+        "Loaded {} pending events from IndexedDB",
+        pending_events.len()
+    );
 
     // Populate the in-memory signal
     let mut events = PENDING_NOSTR_EVENTS.write();

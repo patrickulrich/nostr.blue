@@ -1,18 +1,21 @@
 //! Wiki Detail Route
 //! View individual NIP-54 wiki page (Kind 30818)
 
-use dioxus::prelude::*;
-use crate::components::{
-    WikiPageContent, WikiPageSkeleton, WikiPageNotFound,
-    WikiForwardLinks, WikiOutline, WikiBacklinks, WikiMetadataCard, ShareModal,
+use crate::components::icons::{
+    ArrowLeftIcon, BookOpenIcon, CheckIcon, ChevronDownIcon, GitMergeIcon, Link2Icon,
+    PenSquareIcon, ShareIcon, UserIcon, XIcon,
 };
-use crate::components::icons::{ArrowLeftIcon, PenSquareIcon, ShareIcon, UserIcon, BookOpenIcon, ChevronDownIcon, Link2Icon, GitMergeIcon, CheckIcon, XIcon};
-use crate::stores::wiki_store::{self, CachedWikiPage, WikiMetadata};
-use crate::utils::nip54::WikiMergeRequest;
-use crate::stores::{auth_store, nostr_client, profiles};
+use crate::components::{
+    ShareModal, WikiBacklinks, WikiForwardLinks, WikiMetadataCard, WikiOutline, WikiPageContent,
+    WikiPageNotFound, WikiPageSkeleton,
+};
 use crate::routes::Route;
+use crate::stores::wiki_store::{self, CachedWikiPage, WikiMetadata};
+use crate::stores::{auth_store, nostr_client, profiles};
+use crate::utils::nip54::WikiMergeRequest;
 use crate::utils::time::format_relative_time_ex;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 /// Wiki page detail view
 #[component]
@@ -289,10 +292,7 @@ pub fn WikiDetail(identifier: String) -> Element {
 
 /// Collapsible backlinks panel
 #[component]
-fn BacklinksCollapsiblePanel(
-    identifier: String,
-    backlink_count: usize,
-) -> Element {
+fn BacklinksCollapsiblePanel(identifier: String, backlink_count: usize) -> Element {
     let mut is_expanded = use_signal(|| false);
 
     // Don't show if no backlinks
@@ -466,7 +466,8 @@ fn MergeRequestCard(request: WikiMergeRequest) -> Element {
         .and_then(|p| p.display_name.clone().or(p.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&request.pubkey));
     let requester_picture = requester_profile.as_ref().and_then(|p| p.picture.clone());
-    let time_ago = format_relative_time_ex(nostr_sdk::Timestamp::from(request.created_at), true, true);
+    let time_ago =
+        format_relative_time_ex(nostr_sdk::Timestamp::from(request.created_at), true, true);
     let source_id_short = if request.source_event_id.len() > 12 {
         format!("{}...", &request.source_event_id[..12])
     } else {

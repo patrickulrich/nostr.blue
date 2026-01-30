@@ -2,12 +2,12 @@
 //!
 //! Create a new NIP-34 Git patch/PR (Kind 1617) for a repository.
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, publish_patch_by_naddr};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 /// New pull request page component
 #[component]
@@ -80,10 +80,27 @@ pub fn CodePullNew(naddr: String) -> Element {
                     labels_val.split(',').map(|s| s.trim()).collect()
                 };
 
-                let commit_ref = if commit_val.is_empty() { None } else { Some(commit_val.as_str()) };
-                let parent_ref = if parent_val.is_empty() { None } else { Some(parent_val.as_str()) };
+                let commit_ref = if commit_val.is_empty() {
+                    None
+                } else {
+                    Some(commit_val.as_str())
+                };
+                let parent_ref = if parent_val.is_empty() {
+                    None
+                } else {
+                    Some(parent_val.as_str())
+                };
 
-                match publish_patch_by_naddr(&naddr, &content_val, commit_ref, parent_ref, is_cover, &label_list).await {
+                match publish_patch_by_naddr(
+                    &naddr,
+                    &content_val,
+                    commit_ref,
+                    parent_ref,
+                    is_cover,
+                    &label_list,
+                )
+                .await
+                {
                     Ok(event_id) => {
                         // Navigate to the new PR
                         nav.push(Route::CodePullDetail { note_id: event_id });

@@ -1,13 +1,13 @@
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, EventBuilder, Tag};
-use nostr::{TagKind};
-use crate::stores::nostr_client::{get_client, fetch_events_aggregated, HAS_SIGNER};
+use crate::components::{EmojiPicker, RichContent};
+use crate::routes::Route;
+use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 use crate::stores::profiles;
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
-use crate::routes::Route;
-use crate::components::{EmojiPicker, RichContent};
+use dioxus::prelude::*;
+use dioxus_core::Task;
+use nostr::TagKind;
+use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, Tag};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
@@ -53,10 +53,7 @@ extern "C" {
 }
 
 #[component]
-pub fn LiveChat(
-    stream_author_pubkey: String,
-    stream_d_tag: String,
-) -> Element {
+pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut messages = use_signal(Vec::<Event>::new);
     let mut loading = use_signal(|| false);
     let mut message_input = use_signal(String::new);
@@ -79,93 +76,101 @@ pub fn LiveChat(
     let chat_id_for_auto_scroll = chat_container_id.clone();
 
     // Fetch chat messages - depends on stream props
-    use_effect(use_reactive((&stream_author_pubkey, &stream_d_tag), move |(author, dtag)| {
-        let tag = format!("30311:{}:{}", author, dtag);
-        spawn(async move {
-            loading.set(true);
+    use_effect(use_reactive(
+        (&stream_author_pubkey, &stream_d_tag),
+        move |(author, dtag)| {
+            let tag = format!("30311:{}:{}", author, dtag);
+            spawn(async move {
+                loading.set(true);
 
-            // Parse the 'a' tag to create proper filter
-            let parts: Vec<&str> = tag.split(':').collect();
-            if parts.len() == 3 {
-                let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
-                if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
-                    let _identifier = parts[2];
-
-                    // Fetch Kind 1311 chat messages that reference this livestream
-                    let filter = Filter::new()
-                        .kind(Kind::from(1311))
-                        .custom_tag(
-                            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
-                            tag.as_str()
-                        )
-                        .limit(200);
-
-                    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                        Ok(events) => {
-                            let mut sorted_messages = events;
-                            sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                            messages.set(sorted_messages);
-                            log::info!("Loaded {} chat messages", messages.read().len());
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch chat messages: {}", e);
-                        }
-                    }
-                }
-            }
-
-            loading.set(false);
-        });
-    }));
-
-    // Auto-refresh messages every 5 seconds with cancellable polling
-    // Track the spawned polling task so we can cancel it when needed
-    let mut poll_task = use_signal(|| None::<Task>);
-
-    use_effect(use_reactive((&stream_author_pubkey, &stream_d_tag), move |(author, dtag)| {
-        // Cancel the previous polling task if it exists
-        // Use peek() to avoid creating reactive dependency on poll_task
-        if let Some(task) = poll_task.peek().as_ref() {
-            task.cancel();
-        }
-
-        let tag = format!("30311:{}:{}", author, dtag);
-        // Start new polling loop and store its handle
-        let new_task = spawn(async move {
-            loop {
-                gloo_timers::future::TimeoutFuture::new(5000).await;
-
-                // Only poll if page is visible (optimization)
-                if !isPageVisible() {
-                    continue;
-                }
-
+                // Parse the 'a' tag to create proper filter
                 let parts: Vec<&str> = tag.split(':').collect();
                 if parts.len() == 3 {
                     let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
                     if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
                         let _identifier = parts[2];
 
+                        // Fetch Kind 1311 chat messages that reference this livestream
                         let filter = Filter::new()
                             .kind(Kind::from(1311))
                             .custom_tag(
                                 nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
-                                tag.as_str()
+                                tag.as_str(),
                             )
                             .limit(200);
 
-                        if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-                            let mut sorted_messages = events;
-                            sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                            messages.set(sorted_messages);
+                        match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                            Ok(events) => {
+                                let mut sorted_messages = events;
+                                sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                messages.set(sorted_messages);
+                                log::info!("Loaded {} chat messages", messages.read().len());
+                            }
+                            Err(e) => {
+                                log::error!("Failed to fetch chat messages: {}", e);
+                            }
                         }
                     }
                 }
-            }
-        });
 
-        poll_task.set(Some(new_task));
-    }));
+                loading.set(false);
+            });
+        },
+    ));
+
+    // Auto-refresh messages every 5 seconds with cancellable polling
+    // Track the spawned polling task so we can cancel it when needed
+    let mut poll_task = use_signal(|| None::<Task>);
+
+    use_effect(use_reactive(
+        (&stream_author_pubkey, &stream_d_tag),
+        move |(author, dtag)| {
+            // Cancel the previous polling task if it exists
+            // Use peek() to avoid creating reactive dependency on poll_task
+            if let Some(task) = poll_task.peek().as_ref() {
+                task.cancel();
+            }
+
+            let tag = format!("30311:{}:{}", author, dtag);
+            // Start new polling loop and store its handle
+            let new_task = spawn(async move {
+                loop {
+                    gloo_timers::future::TimeoutFuture::new(5000).await;
+
+                    // Only poll if page is visible (optimization)
+                    if !isPageVisible() {
+                        continue;
+                    }
+
+                    let parts: Vec<&str> = tag.split(':').collect();
+                    if parts.len() == 3 {
+                        let _kind_num = parts[0].parse::<u16>().unwrap_or(30311);
+                        if let Ok(_pubkey) = PublicKey::parse(parts[1]) {
+                            let _identifier = parts[2];
+
+                            let filter = Filter::new()
+                                .kind(Kind::from(1311))
+                                .custom_tag(
+                                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
+                                    tag.as_str(),
+                                )
+                                .limit(200);
+
+                            if let Ok(events) =
+                                fetch_events_aggregated(filter, Duration::from_secs(10)).await
+                            {
+                                let mut sorted_messages = events;
+                                sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                messages.set(sorted_messages);
+                            }
+                        }
+                    }
+                }
+            });
+
+            poll_task.set(Some(new_task));
+        },
+    ));
 
     // Track if this is the first load to force scroll to bottom
     let mut is_first_load = use_signal(|| true);
@@ -234,13 +239,19 @@ pub fn LiveChat(
                                         let filter = Filter::new()
                                             .kind(Kind::from(1311))
                                             .custom_tag(
-                                                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::A),
-                                                tag_clone_bg.as_str()
+                                                nostr_sdk::SingleLetterTag::lowercase(
+                                                    nostr_sdk::Alphabet::A,
+                                                ),
+                                                tag_clone_bg.as_str(),
                                             )
                                             .limit(200);
-                                        if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                                        if let Ok(events) =
+                                            fetch_events_aggregated(filter, Duration::from_secs(10))
+                                                .await
+                                        {
                                             let mut sorted_messages = events;
-                                            sorted_messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+                                            sorted_messages
+                                                .sort_by(|a, b| a.created_at.cmp(&b.created_at));
                                             messages.set(sorted_messages);
                                         }
                                     }
@@ -374,13 +385,12 @@ fn ChatMessage(event: Event) -> Element {
     let author_pk_for_display = author_pubkey.clone();
 
     // Get metadata from centralized profiles store
-    let metadata = use_memo(move || {
-        profiles::get_profile(&author_pk_for_metadata)
-    });
+    let metadata = use_memo(move || profiles::get_profile(&author_pk_for_metadata));
 
     let author_name = use_memo(move || {
         if let Some(ref meta) = *metadata.read() {
-            meta.display_name.clone()
+            meta.display_name
+                .clone()
                 .or_else(|| meta.name.clone())
                 .unwrap_or_else(|| truncate_pubkey(&author_pk_for_name))
         } else {
@@ -388,10 +398,7 @@ fn ChatMessage(event: Event) -> Element {
         }
     });
 
-    let author_picture = use_memo(move || {
-        metadata.read().as_ref()
-            .and_then(|m| m.picture.clone())
-    });
+    let author_picture = use_memo(move || metadata.read().as_ref().and_then(|m| m.picture.clone()));
 
     rsx! {
         div {

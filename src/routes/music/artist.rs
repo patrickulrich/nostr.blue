@@ -1,12 +1,12 @@
-use dioxus::prelude::*;
-use std::sync::Arc;
-use crate::routes::Route;
 use crate::components::icons::*;
 use crate::components::UnifiedTrackCard;
+use crate::routes::Route;
 use crate::services::wavlake::{get_artist, WavlakeArtist};
 use crate::stores::music_player::MusicTrack;
 use crate::stores::{nostr_client, nostr_music, profiles};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use std::sync::Arc;
 
 /// Check if the ID is a 64-char hex string (nostr pubkey)
 fn is_nostr_pubkey(id: &str) -> bool {
@@ -290,19 +290,26 @@ fn NostrArtistSection(pubkey: String) -> Element {
     }));
 
     // Get display info from profile
-    let artist_name = profile.read().as_ref()
+    let artist_name = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
-    let artist_image = profile.read().as_ref()
+    let artist_image = profile
+        .read()
+        .as_ref()
         .and_then(|p| p.picture.clone())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", &pubkey));
-    let artist_bio = profile.read().as_ref()
-        .and_then(|p| p.about.clone());
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                &pubkey
+            )
+        });
+    let artist_bio = profile.read().as_ref().and_then(|p| p.about.clone());
 
     // Convert tracks to MusicTrack for UnifiedTrackCard
-    let music_tracks: Arc<Vec<MusicTrack>> = Arc::new(tracks.read().iter()
-        .map(|t| t.clone().into())
-        .collect());
+    let music_tracks: Arc<Vec<MusicTrack>> =
+        Arc::new(tracks.read().iter().map(|t| t.clone().into()).collect());
 
     rsx! {
         div { class: "container mx-auto px-4 py-8",

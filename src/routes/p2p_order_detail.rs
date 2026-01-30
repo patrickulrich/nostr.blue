@@ -2,15 +2,17 @@
 //!
 //! Full details view for a NIP-69 P2P order
 
-use dioxus::prelude::*;
-use nostr::Timestamp;
+use crate::components::{
+    ClientInitializing, P2PLayerBadge, P2PNetworkBadge, P2PStatusBadge, P2PTypeBadge,
+};
 use crate::routes::Route;
 use crate::stores::{nostr_client, p2p_store};
-use crate::utils::nip69::{P2POrder, FiatAmount};
-use crate::components::{ClientInitializing, P2PStatusBadge, P2PTypeBadge, P2PLayerBadge, P2PNetworkBadge};
-use crate::utils::time::format_relative_time;
-use crate::utils::format::format_sats_with_separator;
 use crate::utils::duration::format_duration_verbose;
+use crate::utils::format::format_sats_with_separator;
+use crate::utils::nip69::{FiatAmount, P2POrder};
+use crate::utils::time::format_relative_time;
+use dioxus::prelude::*;
+use nostr::Timestamp;
 
 #[component]
 pub fn P2POrderDetail(naddr: String) -> Element {
@@ -317,4 +319,3 @@ fn OrderDetailContent(order: P2POrder) -> Element {
         }
     }
 }
-

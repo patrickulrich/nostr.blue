@@ -6,17 +6,12 @@
 //! - Code snippets
 //! - Navigation to explore, import, etc.
 
-use dioxus::prelude::*;
-use crate::components::{
-    CodeRepoCard, CodeSnippetCard,
-    icons,
-};
+use crate::components::{icons, CodeRepoCard, CodeSnippetCard};
 use crate::routes::Route;
-use crate::services::git_hosting::{
-    fetch_recent_repositories, fetch_recent_snippets,
-};
+use crate::services::git_hosting::{fetch_recent_repositories, fetch_recent_snippets};
 use crate::stores::nostr_client;
-use crate::utils::nip34::{Repository, DisplaySnippet};
+use crate::utils::nip34::{DisplaySnippet, Repository};
+use dioxus::prelude::*;
 
 /// Code home page component
 #[component]

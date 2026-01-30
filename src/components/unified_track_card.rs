@@ -1,14 +1,14 @@
 // Unified Track Card Component
 // Handles both Wavlake and Nostr tracks with source-aware zaps and prominent sats display
 
-use dioxus::prelude::*;
-use std::sync::Arc;
+use crate::components::icons;
+use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_music::TrackSource;
 use crate::stores::profiles;
-use crate::components::icons;
-use crate::components::{ContentShareModal, ContentType};
+use dioxus::prelude::*;
+use std::sync::Arc;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct UnifiedTrackCardProps {
@@ -52,18 +52,21 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
 
     // Fetch artist name from profile for nostr tracks
     // Use use_reactive to only run when dependencies change, not on every render
-    use_effect(use_reactive((&artist_pubkey, &artist_is_empty), move |(pubkey_opt, is_empty)| {
-        if let Some(pubkey) = pubkey_opt.clone() {
-            if is_empty {
-                // Look up profile for artist name
-                spawn(async move {
-                    if let Ok(profile) = profiles::fetch_profile(pubkey).await {
-                        artist_name.set(profile.get_display_name());
-                    }
-                });
+    use_effect(use_reactive(
+        (&artist_pubkey, &artist_is_empty),
+        move |(pubkey_opt, is_empty)| {
+            if let Some(pubkey) = pubkey_opt.clone() {
+                if is_empty {
+                    // Look up profile for artist name
+                    spawn(async move {
+                        if let Ok(profile) = profiles::fetch_profile(pubkey).await {
+                            artist_name.set(profile.get_display_name());
+                        }
+                    });
+                }
             }
-        }
-    }));
+        },
+    ));
 
     let playlist = props.playlist.clone();
     let handle_play = {
@@ -91,11 +94,14 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     };
 
     // Format duration from seconds to MM:SS
-    let duration_str = track.duration.map(|d| {
-        let mins = d / 60;
-        let secs = d % 60;
-        format!("{:02}:{:02}", mins, secs)
-    }).unwrap_or_else(|| "--:--".to_string());
+    let duration_str = track
+        .duration
+        .map(|d| {
+            let mins = d / 60;
+            let secs = d % 60;
+            format!("{:02}:{:02}", mins, secs)
+        })
+        .unwrap_or_else(|| "--:--".to_string());
 
     // Format sats total
     let sats_display = track.msat_total.map(|msats| {
@@ -113,14 +119,22 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
     let source_info = match &track.source {
         TrackSource::Wavlake { .. } => ("W", "Wavlake", "bg-orange-500/20 text-orange-400"),
         TrackSource::Nostr { .. } => ("N", "Nostr", "bg-purple-500/20 text-purple-400"),
-        TrackSource::NostrPodcast { .. } => ("P", "Nostr Podcast", "bg-green-500/20 text-green-400"),
+        TrackSource::NostrPodcast { .. } => {
+            ("P", "Nostr Podcast", "bg-green-500/20 text-green-400")
+        }
         TrackSource::RssPodcast { .. } => ("R", "RSS Podcast", "bg-green-500/20 text-green-400"),
-        TrackSource::RssMusic { .. } => ("RSS", "Podcasting 2.0 Music", "bg-orange-500/20 text-orange-400"),
+        TrackSource::RssMusic { .. } => (
+            "RSS",
+            "Podcasting 2.0 Music",
+            "bg-orange-500/20 text-orange-400",
+        ),
         TrackSource::Radio { .. } => ("LIVE", "Internet Radio", "bg-red-500/20 text-red-400"),
     };
 
     // Get artwork URL with fallback
-    let artwork_url = track.album_art_url.clone()
+    let artwork_url = track
+        .album_art_url
+        .clone()
         .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=music".to_string());
 
     // Build share URL and content type based on source
@@ -140,13 +154,27 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             format!("https://nostr.blue/podcast/episode/{}", coordinate),
             ContentType::PodcastEpisode,
         ),
-        TrackSource::RssPodcast { feed_url, episode_guid, .. } => (
-            format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                urlencoding::encode(feed_url), urlencoding::encode(episode_guid)),
+        TrackSource::RssPodcast {
+            feed_url,
+            episode_guid,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                urlencoding::encode(feed_url),
+                urlencoding::encode(episode_guid)
+            ),
             ContentType::PodcastEpisode,
         ),
-        TrackSource::RssMusic { feed_id, episode_id, .. } => (
-            format!("https://nostr.blue/music/rss/album/{}#track-{}", feed_id, episode_id),
+        TrackSource::RssMusic {
+            feed_id,
+            episode_id,
+            ..
+        } => (
+            format!(
+                "https://nostr.blue/music/rss/album/{}#track-{}",
+                feed_id, episode_id
+            ),
             ContentType::MusicTrack,
         ),
         TrackSource::Radio { d_tag, .. } => (
@@ -157,12 +185,20 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
 
     // Build artist route based on source (both go to music artist page, podcasts go to profile)
     let artist_route = match &track.source {
-        TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist { artist_id: artist_id.clone() },
-        TrackSource::Nostr { pubkey, .. } => Route::MusicArtist { artist_id: pubkey.clone() },
-        TrackSource::NostrPodcast { pubkey, .. } => Route::Profile { pubkey: pubkey.clone() },
+        TrackSource::Wavlake { artist_id, .. } => Route::MusicArtist {
+            artist_id: artist_id.clone(),
+        },
+        TrackSource::Nostr { pubkey, .. } => Route::MusicArtist {
+            artist_id: pubkey.clone(),
+        },
+        TrackSource::NostrPodcast { pubkey, .. } => Route::Profile {
+            pubkey: pubkey.clone(),
+        },
         TrackSource::RssPodcast { .. } => {
             // RSS podcasts don't have a profile page, use home as fallback
-            Route::Home { list: String::new() }
+            Route::Home {
+                list: String::new(),
+            }
         }
         TrackSource::RssMusic { feed_id, .. } => {
             // RSS music routes to album page
@@ -170,7 +206,9 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
         }
         TrackSource::Radio { pubkey, .. } => {
             // Radio stations route to station owner's profile
-            Route::Profile { pubkey: pubkey.clone() }
+            Route::Profile {
+                pubkey: pubkey.clone(),
+            }
         }
     };
 

@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use crate::routes::Route;
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use crate::stores::{auth_store, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -187,7 +187,8 @@ pub fn VideosLive() -> Element {
                         current.iter().map(|e| e.id).collect()
                     };
 
-                    let unique_events: Vec<_> = new_events.into_iter()
+                    let unique_events: Vec<_> = new_events
+                        .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
@@ -230,7 +231,8 @@ pub fn VideosLive() -> Element {
                         current.iter().map(|e| e.id).collect()
                     };
 
-                    let unique_events: Vec<_> = new_events.into_iter()
+                    let unique_events: Vec<_> = new_events
+                        .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
 
@@ -479,15 +481,24 @@ pub fn VideosLive() -> Element {
 // Helper functions to load streams
 
 /// Returns (events, next_until, hit_limit, did_fallback)
-async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool, bool), String> {
-    let pubkey_str = auth_store::AUTH_STATE.read().pubkey.clone()
+async fn load_following_streams(
+    until: Option<u64>,
+    status: StatusFilter,
+) -> Result<(Vec<Event>, Option<u64>, bool, bool), String> {
+    let pubkey_str = auth_store::AUTH_STATE
+        .read()
+        .pubkey
+        .clone()
         .ok_or("Not authenticated")?;
 
     // Fetch contacts
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
             return Ok((events, next_until, hit_limit, true));
         }
@@ -513,9 +524,7 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
 
     // Fetch all recent livestream events (we'll filter client-side)
     // We need to fetch more than just author-filtered to catch streams where the creator is in p tag
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(30311))
-        .limit(100); // Fetch more since we'll filter client-side
+    let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(100); // Fetch more since we'll filter client-side
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -526,13 +535,12 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
     // Compute pagination from raw events BEFORE filtering
-    let next_until = events.iter()
-        .map(|e| e.created_at.as_secs())
-        .min();
+    let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
     let hit_limit = events.len() >= 100;
 
     // Filter events where either the publisher OR the creator (p tag) is followed
-    let following_events: Vec<Event> = events.into_iter()
+    let following_events: Vec<Event> = events
+        .into_iter()
         .filter(|event| {
             // Check if publisher is followed
             if followed_pubkeys.contains(&event.pubkey.to_string()) {
@@ -561,11 +569,12 @@ async fn load_following_streams(until: Option<u64>, status: StatusFilter) -> Res
     Ok((filtered_events, next_until, hit_limit, false))
 }
 
-async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result<(Vec<Event>, Option<u64>, bool), String> {
+async fn load_global_streams(
+    until: Option<u64>,
+    status: StatusFilter,
+) -> Result<(Vec<Event>, Option<u64>, bool), String> {
     // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(30311))
-        .limit(50);
+    let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(50);
 
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
@@ -576,9 +585,7 @@ async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
 
     // Compute next_until from raw events BEFORE filtering
-    let next_until = events.iter()
-        .map(|e| e.created_at.as_secs())
-        .min();
+    let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
 
     // Base has_more on raw page size, not filtered results
     let hit_limit = events.len() >= 50;
@@ -590,23 +597,25 @@ async fn load_global_streams(until: Option<u64>, status: StatusFilter) -> Result
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {
     match status {
         StatusFilter::All => events,
-        StatusFilter::Live => {
-            events.into_iter().filter(|event| {
+        StatusFilter::Live => events
+            .into_iter()
+            .filter(|event| {
                 event.tags.iter().any(|tag| {
                     let tag_vec = tag.clone().to_vec();
-                    tag_vec.first().map(|s| s.as_str()) == Some("status") &&
-                    tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
+                    tag_vec.first().map(|s| s.as_str()) == Some("status")
+                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
                 })
-            }).collect()
-        }
-        StatusFilter::Upcoming => {
-            events.into_iter().filter(|event| {
+            })
+            .collect(),
+        StatusFilter::Upcoming => events
+            .into_iter()
+            .filter(|event| {
                 event.tags.iter().any(|tag| {
                     let tag_vec = tag.clone().to_vec();
-                    tag_vec.first().map(|s| s.as_str()) == Some("status") &&
-                    tag_vec.get(1).map(|s| s.to_lowercase()) == Some("planned".to_string())
+                    tag_vec.first().map(|s| s.as_str()) == Some("status")
+                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("planned".to_string())
                 })
-            }).collect()
-        }
+            })
+            .collect(),
     }
 }

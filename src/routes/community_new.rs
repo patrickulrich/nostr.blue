@@ -1,11 +1,11 @@
 //! Create New Community Page
 //! Form for creating a new NIP-72 moderated community
 
-use dioxus::prelude::*;
-use crate::stores::community_store::create_community;
-use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::components::ClientInitializing;
 use crate::routes::Route;
+use crate::stores::community_store::create_community;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use dioxus::prelude::*;
 
 #[component]
 pub fn CommunityNew() -> Element {
@@ -31,7 +31,9 @@ pub fn CommunityNew() -> Element {
 
         // Basic hex pubkey validation (64 chars)
         if pubkey.len() != 64 || !pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
-            error.set(Some("Invalid pubkey format. Please enter a 64-character hex pubkey.".to_string()));
+            error.set(Some(
+                "Invalid pubkey format. Please enter a 64-character hex pubkey.".to_string(),
+            ));
             return;
         }
 
@@ -68,8 +70,13 @@ pub fn CommunityNew() -> Element {
         }
 
         // Check identifier format (alphanumeric, dashes, underscores)
-        if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-            error.set(Some("Identifier can only contain letters, numbers, dashes, and underscores".to_string()));
+        if !id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            error.set(Some(
+                "Identifier can only contain letters, numbers, dashes, and underscores".to_string(),
+            ));
             return;
         }
 
@@ -84,7 +91,9 @@ pub fn CommunityNew() -> Element {
                 if img.is_empty() { None } else { Some(&img) },
                 if r.is_empty() { None } else { Some(&r) },
                 mods,
-            ).await {
+            )
+            .await
+            {
                 Ok(_event_id) => {
                     log::info!("Community created successfully");
                     // Navigate to communities list

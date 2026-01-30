@@ -25,8 +25,7 @@
 /// state.set(DataState::Error("Failed to load".to_string()));
 /// ```
 
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum DataState<T> {
     /// Initial state, no action taken yet
     #[default]
@@ -122,7 +121,6 @@ impl<T> DataState<T> {
         }
     }
 }
-
 
 /// Helper to convert Result into DataState
 impl<T, E: std::fmt::Display> From<Result<T, E>> for DataState<T> {

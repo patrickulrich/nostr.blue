@@ -622,7 +622,11 @@ pub fn generate_footnotes_html_with_data(
     for (i, citation) in footnotes.iter().enumerate() {
         let citation_data = resolved.get(&citation.identifier);
         let is_resolved = citation_data.is_some();
-        let resolved_class = if is_resolved { "" } else { " citation-unresolved" };
+        let resolved_class = if is_resolved {
+            ""
+        } else {
+            " citation-unresolved"
+        };
 
         let content = citation_data
             .map(|c| c.bibliographic_entry())
@@ -685,7 +689,11 @@ pub fn generate_endnotes_html_with_data(
     for (i, citation) in endnotes.iter().enumerate() {
         let citation_data = resolved.get(&citation.identifier);
         let is_resolved = citation_data.is_some();
-        let resolved_class = if is_resolved { "" } else { " citation-unresolved" };
+        let resolved_class = if is_resolved {
+            ""
+        } else {
+            " citation-unresolved"
+        };
 
         let content = citation_data
             .map(|c| c.bibliographic_entry())
@@ -826,8 +834,8 @@ pub fn parse_prompt_citation(event: &Event) -> Result<PromptCitation, String> {
 /// Parse any citation from an event
 pub fn parse_citation(event: &Event) -> Result<Citation, String> {
     let kind = event.kind.as_u16();
-    let citation_type = CitationType::from_kind(kind)
-        .ok_or_else(|| format!("Unknown citation kind: {}", kind))?;
+    let citation_type =
+        CitationType::from_kind(kind).ok_or_else(|| format!("Unknown citation kind: {}", kind))?;
 
     match citation_type {
         CitationType::Internal => Ok(Citation::Internal(parse_internal_citation(event)?)),
@@ -911,12 +919,9 @@ fn get_tag_with_optional_second(event: &Event, tag_name: &str) -> Option<(String
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
         .and_then(|t| {
             let slice = t.as_slice();
-            slice.get(1).map(|first| {
-                (
-                    first.to_string(),
-                    slice.get(2).map(|s| s.to_string()),
-                )
-            })
+            slice
+                .get(1)
+                .map(|first| (first.to_string(), slice.get(2).map(|s| s.to_string())))
         })
 }
 
@@ -939,7 +944,8 @@ mod tests {
 
     #[test]
     fn test_extract_multiple_citations() {
-        let content = "First citation::inline::nevent1abc and second citation::foot::naddr1xyz here.";
+        let content =
+            "First citation::inline::nevent1abc and second citation::foot::naddr1xyz here.";
         let citations = extract_citations(content);
         assert_eq!(citations.len(), 2);
         assert_eq!(citations[0].style, CitationStyle::Inline);

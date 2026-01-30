@@ -445,7 +445,10 @@ mod tests {
 
     #[test]
     fn test_transaction_type_display() {
-        assert_eq!(TransactionType::LightningSend.display_name(), "Lightning Send");
+        assert_eq!(
+            TransactionType::LightningSend.display_name(),
+            "Lightning Send"
+        );
         assert_eq!(TransactionType::P2pkReceive.display_name(), "P2PK Receive");
     }
 

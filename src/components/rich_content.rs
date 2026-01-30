@@ -1,50 +1,56 @@
+use crate::components::citation::card::get_citation_style;
+use crate::components::icons::{self, NostrBlueMiniLogo};
+use crate::components::live::stream_card::LiveStreamCard;
+use crate::components::{CashuTokenCard, PhotoCard, PollCard, VideoCard, VoiceMessageCard};
+use crate::components::{EventCardCompact, P2POrderCard};
+use crate::hooks::{use_fetch_event_by_coordinate_with_message, use_fetch_event_by_id};
+use crate::routes::Route;
+use crate::services::podcast_index;
+use crate::services::wavlake::WavlakeAPI;
+use crate::stores::calendar_store::UnifiedEvent;
+use crate::stores::music_player::{self, MusicTrack};
+use crate::stores::nostr_client;
+use crate::stores::nostr_music::TrackSource;
+use crate::stores::nostr_music::{
+    parse_playlist_event, parse_track_event, NostrPlaylist, NostrTrack,
+};
+use crate::stores::pin_boards_store::{parse_pinboard_event, Pinboard};
+use crate::stores::profiles;
+use crate::stores::publication_store::{parse_publication_index, PublicationIndex};
+use crate::utils::content_parser::{parse_content, ContentToken};
+use crate::utils::markdown::sanitize_html;
+use crate::utils::nip34::{Issue, PullRequest, Repository};
+use crate::utils::nip52::parse_calendar_event;
+use crate::utils::nip53::{parse_meeting_room_event, parse_meeting_space, LiveActivityEvent};
+use crate::utils::nip54::{parse_wiki_article, WikiArticle};
+use crate::utils::nip58::{parse_badge_definition, BadgeDefinition};
+use crate::utils::nip69::parse_p2p_order;
+use crate::utils::nip99::{
+    parse_collection, parse_product, parse_review, Product, ProductCollection, ProductReview,
+};
+use crate::utils::nkbip03::{parse_citation, Citation};
+use crate::utils::podcast::parse_podcast_episode;
+use crate::utils::recipe::{
+    extract_metadata as extract_recipe_metadata, is_recipe_event, RecipeMetadata,
+};
 use dioxus::prelude::*;
 use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::ContentSide;
-use crate::utils::content_parser::{parse_content, ContentToken};
-use crate::routes::Route;
-use crate::hooks::{use_fetch_event_by_coordinate_with_message, use_fetch_event_by_id};
-use nostr_sdk::{Tag, FromBech32, ToBech32, Metadata, PublicKey, Filter, Kind, Event, EventId};
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip19::Nip19;
-use crate::stores::nostr_client;
-use crate::stores::profiles;
-use crate::services::wavlake::WavlakeAPI;
-use crate::services::podcast_index;
-use crate::stores::music_player::{self, MusicTrack};
-use crate::stores::nostr_music::TrackSource;
-use crate::components::icons::{self, NostrBlueMiniLogo};
-use crate::components::{PhotoCard, VideoCard, VoiceMessageCard, PollCard, CashuTokenCard};
-use crate::components::live::stream_card::LiveStreamCard;
-use crate::components::{EventCardCompact, P2POrderCard};
-use crate::utils::nip52::parse_calendar_event;
-use crate::utils::nip53::{parse_meeting_space, parse_meeting_room_event, LiveActivityEvent};
-use crate::utils::nip34::{Repository, Issue, PullRequest};
-use crate::utils::nip69::parse_p2p_order;
-use crate::utils::podcast::parse_podcast_episode;
-use crate::utils::nip54::{parse_wiki_article, WikiArticle};
-use crate::utils::nip58::{parse_badge_definition, BadgeDefinition};
-use crate::utils::nip99::{parse_product, parse_collection, parse_review, Product, ProductCollection, ProductReview};
-use crate::utils::nkbip03::{parse_citation, Citation};
-use crate::utils::markdown::sanitize_html;
-use crate::components::citation::card::get_citation_style;
-use crate::utils::recipe::{is_recipe_event, extract_metadata as extract_recipe_metadata, RecipeMetadata};
-use crate::stores::nostr_music::{parse_track_event, parse_playlist_event, NostrTrack, NostrPlaylist};
-use crate::stores::publication_store::{parse_publication_index, PublicationIndex};
-use crate::stores::pin_boards_store::{parse_pinboard_event, Pinboard};
-use crate::stores::calendar_store::UnifiedEvent;
+use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata, PublicKey, Tag, ToBech32};
 // nostr.blue internal link rendering
-use crate::components::podcast_show_card::{PodcastShow, PodcastShowCard};
-use crate::components::podcast_episode_card::{DisplayEpisode, PodcastEpisodeCard};
-use crate::components::radio_card::RadioCard;
 use crate::components::article_card::ArticleCard;
+use crate::components::code::repo_card::CodeRepoCardCompact;
+use crate::components::pin_board_card::PinBoardCardCompact;
+use crate::components::podcast_episode_card::{DisplayEpisode, PodcastEpisodeCard};
+use crate::components::podcast_show_card::{PodcastShow, PodcastShowCard};
+use crate::components::publication_card::PublicationCardCompact;
+use crate::components::radio_card::RadioCard;
 use crate::components::recipe_card::RecipeCard;
 use crate::components::wiki_card::WikiCardCompact;
-use crate::components::publication_card::PublicationCardCompact;
-use crate::components::pin_board_card::PinBoardCardCompact;
-use crate::components::code::repo_card::CodeRepoCardCompact;
-use crate::utils::radio::RadioStation;
 use crate::utils::podcast::parse_podcast_metadata;
+use crate::utils::radio::RadioStation;
 
 #[component]
 pub fn RichContent(
@@ -59,9 +65,12 @@ pub fn RichContent(
     // Count characters and media items to estimate content height
     let is_long_content = if collapsible {
         let char_count = content.chars().count();
-        let media_count = tokens.iter().filter(|t| {
-            matches!(t,
-                ContentToken::Image(_) | ContentToken::Video(_) |
+        let media_count = tokens
+            .iter()
+            .filter(|t| {
+                matches!(
+                    t,
+                    ContentToken::Image(_) | ContentToken::Video(_) |
                 ContentToken::WavlakeTrack(_) | ContentToken::WavlakeAlbum(_) |
                 ContentToken::TwitterTweet(_) | ContentToken::TwitchStream(_) |
                 ContentToken::TwitchClip(_) | ContentToken::TwitchVod(_) |
@@ -78,8 +87,9 @@ pub fn RichContent(
                 ContentToken::NostrBlueProfile(_) | ContentToken::NostrBlueCalendarEvent(_) |
                 ContentToken::NostrBlueBadge(_) | ContentToken::NostrBlueRssPodcastEpisode(_, _) |
                 ContentToken::NostrBlueRssPodcastShow(_)
-            )
-        }).count();
+                )
+            })
+            .count();
 
         // Heuristic: >800 chars (roughly 16 lines at ~50 chars/line)
         // OR has media AND enough text that it would overflow with media (~200 chars + media)
@@ -174,11 +184,12 @@ fn hash_str(s: &str) -> u64 {
 /// Check if a token should be rendered inline (flows with text)
 /// vs block-level (renders on its own line with spacing)
 fn is_inline_token(token: &ContentToken) -> bool {
-    matches!(token,
-        ContentToken::Text(_) |
-        ContentToken::Link(_) |
-        ContentToken::Mention(_) |
-        ContentToken::Hashtag(_)
+    matches!(
+        token,
+        ContentToken::Text(_)
+            | ContentToken::Link(_)
+            | ContentToken::Mention(_)
+            | ContentToken::Hashtag(_)
     )
 }
 
@@ -241,13 +252,17 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::SpotifyEpisode(id) => format!("spotify-ep-{}-{}", idx, id),
         ContentToken::SoundCloud(url) => format!("soundcloud-{}-{:x}", idx, hash_str(url)),
         ContentToken::AppleMusicAlbum(url) => format!("apple-album-{}-{:x}", idx, hash_str(url)),
-        ContentToken::AppleMusicPlaylist(url) => format!("apple-playlist-{}-{:x}", idx, hash_str(url)),
+        ContentToken::AppleMusicPlaylist(url) => {
+            format!("apple-playlist-{}-{:x}", idx, hash_str(url))
+        }
         ContentToken::AppleMusicSong(url) => format!("apple-song-{}-{:x}", idx, hash_str(url)),
         ContentToken::MixCloud(user, mix) => format!("mixcloud-{}-{}-{}", idx, user, mix),
         ContentToken::Rumble(url) => format!("rumble-{}-{:x}", idx, hash_str(url)),
         ContentToken::Tidal(url) => format!("tidal-{}-{:x}", idx, hash_str(url)),
         ContentToken::ZapStream(naddr) => format!("zapstream-{}-{:x}", idx, hash_str(naddr)),
-        ContentToken::ZapCookingRecipe(naddr) => format!("zapcooking-{}-{:x}", idx, hash_str(naddr)),
+        ContentToken::ZapCookingRecipe(naddr) => {
+            format!("zapcooking-{}-{:x}", idx, hash_str(naddr))
+        }
         ContentToken::CashuToken(token) => format!("cashu-{}-{:x}", idx, hash_str(token)),
         ContentToken::Isbn(isbn) => format!("isbn-{}-{}", idx, isbn),
         ContentToken::Doi(doi) => format!("doi-{}-{:x}", idx, hash_str(doi)),
@@ -263,14 +278,20 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::NostrBluePhoto(id) => format!("nb-photo-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBlueVoice(id) => format!("nb-voice-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBluePodcastShow(id) => format!("nb-podcast-{}-{:x}", idx, hash_str(id)),
-        ContentToken::NostrBluePodcastEpisode(id) => format!("nb-podcast-ep-{}-{:x}", idx, hash_str(id)),
-        ContentToken::NostrBlueMusicPlaylist(id) => format!("nb-playlist-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBluePodcastEpisode(id) => {
+            format!("nb-podcast-ep-{}-{:x}", idx, hash_str(id))
+        }
+        ContentToken::NostrBlueMusicPlaylist(id) => {
+            format!("nb-playlist-{}-{:x}", idx, hash_str(id))
+        }
         ContentToken::NostrBlueRadioStation(id) => format!("nb-radio-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBlueArticle(id) => format!("nb-article-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBlueRecipe(id) => format!("nb-recipe-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBlueNote(id) => format!("nb-note-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBlueProfile(id) => format!("nb-profile-{}-{:x}", idx, hash_str(id)),
-        ContentToken::NostrBlueCalendarEvent(id) => format!("nb-calendar-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueCalendarEvent(id) => {
+            format!("nb-calendar-{}-{:x}", idx, hash_str(id))
+        }
         ContentToken::NostrBlueWiki(id) => format!("nb-wiki-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBluePublication(id) => format!("nb-pub-{}-{:x}", idx, hash_str(id)),
         ContentToken::NostrBluePinboard(id) => format!("nb-pinboard-{}-{:x}", idx, hash_str(id)),
@@ -281,7 +302,9 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         ContentToken::NostrBlueRssPodcastEpisode(pid, eid) => {
             format!("nb-rss-ep-{}-{:x}-{:x}", idx, hash_str(pid), hash_str(eid))
         }
-        ContentToken::NostrBlueRssPodcastShow(id) => format!("nb-rss-show-{}-{:x}", idx, hash_str(id)),
+        ContentToken::NostrBlueRssPodcastShow(id) => {
+            format!("nb-rss-show-{}-{:x}", idx, hash_str(id))
+        }
     }
 }
 
@@ -319,7 +342,7 @@ fn render_token(token: &ContentToken) -> Element {
                     }
                 }
             }
-        },
+        }
 
         // Regular video (YouTube URLs use ContentToken::YouTube)
         ContentToken::Video(url) => rsx! {
@@ -352,7 +375,7 @@ fn render_token(token: &ContentToken) -> Element {
                     "#{tag}"
                 }
             }
-        },
+        }
 
         ContentToken::WavlakeTrack(track_id) => rsx! {
             WavlakeTrackRenderer { track_id: track_id.clone() }
@@ -565,13 +588,14 @@ fn MentionRenderer(mention: String) -> Element {
     let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
 
     // Parse pubkey using Nip19 which handles type detection internally
-    let pubkey_result: Option<PublicKey> = Nip19::from_bech32(identifier)
-        .ok()
-        .and_then(|nip19| match nip19 {
-            Nip19::Pubkey(pk) => Some(pk),
-            Nip19::Profile(profile) => Some(profile.public_key),
-            _ => None, // Not a profile reference
-        });
+    let pubkey_result: Option<PublicKey> =
+        Nip19::from_bech32(identifier)
+            .ok()
+            .and_then(|nip19| match nip19 {
+                Nip19::Pubkey(pk) => Some(pk),
+                Nip19::Profile(profile) => Some(profile.public_key),
+                _ => None, // Not a profile reference
+            });
 
     // Check cache synchronously first - this makes most mentions instant
     let cached_metadata = pubkey_result
@@ -624,7 +648,11 @@ fn MentionRenderer(mention: String) -> Element {
             } else {
                 // Fallback to truncated hex
                 if pubkey_str.len() > 16 {
-                    format!("@{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..])
+                    format!(
+                        "@{}...{}",
+                        &pubkey_str[..8],
+                        &pubkey_str[pubkey_str.len() - 4..]
+                    )
                 } else {
                     format!("@{}", pubkey_str)
                 }
@@ -632,7 +660,11 @@ fn MentionRenderer(mention: String) -> Element {
         } else {
             // Loading state - show truncated hex
             if pubkey_str.len() > 16 {
-                format!("@{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..])
+                format!(
+                    "@{}...{}",
+                    &pubkey_str[..8],
+                    &pubkey_str[pubkey_str.len() - 4..]
+                )
             } else {
                 format!("@{}", pubkey_str)
             }
@@ -720,9 +752,7 @@ fn EventMentionRenderer(mention: String) -> Element {
     // Extract event ID and relay hints from either nevent or note
     let parsed_event: Option<(EventId, Vec<String>)> = nip19_result.and_then(|nip19| match nip19 {
         Nip19::Event(nevent) => {
-            let relays: Vec<String> = nevent.relays.iter()
-                .map(|r| r.to_string())
-                .collect();
+            let relays: Vec<String> = nevent.relays.iter().map(|r| r.to_string()).collect();
             Some((nevent.event_id, relays))
         }
         Nip19::EventId(id) => Some((id, Vec::new())),
@@ -748,21 +778,26 @@ fn EventMentionRenderer(mention: String) -> Element {
         if let Some(event_id) = event_id_result {
             let relay_hints_clone = relay_hints.clone();
             spawn(async move {
-                let event_filter = Filter::new()
-                    .id(event_id)
-                    .limit(1);
+                let event_filter = Filter::new().id(event_id).limit(1);
 
                 // Try relay hints first if available, then fall back to aggregated fetch
                 let fetch_result = if !relay_hints_clone.is_empty() {
                     // Use relay hints from nevent
                     if let Some(client) = nostr_client::get_client() {
-                        let relay_urls: Vec<nostr_sdk::Url> = relay_hints_clone.iter()
+                        let relay_urls: Vec<nostr_sdk::Url> = relay_hints_clone
+                            .iter()
                             .filter_map(|r| nostr_sdk::Url::parse(r).ok())
                             .collect();
 
                         if !relay_urls.is_empty() {
                             nostr_client::ensure_relays_ready(&client).await;
-                            client.fetch_events_from(relay_urls, event_filter.clone(), std::time::Duration::from_secs(5)).await
+                            client
+                                .fetch_events_from(
+                                    relay_urls,
+                                    event_filter.clone(),
+                                    std::time::Duration::from_secs(5),
+                                )
+                                .await
                                 .map(|events| events.into_iter().collect::<Vec<_>>())
                                 .ok()
                         } else {
@@ -778,12 +813,12 @@ fn EventMentionRenderer(mention: String) -> Element {
                 // Fall back to aggregated fetch if relay hints didn't work
                 let events = match fetch_result {
                     Some(events) if !events.is_empty() => events,
-                    _ => {
-                        nostr_client::fetch_events_aggregated(
-                            event_filter,
-                            std::time::Duration::from_secs(5)
-                        ).await.unwrap_or_default()
-                    }
+                    _ => nostr_client::fetch_events_aggregated(
+                        event_filter,
+                        std::time::Duration::from_secs(5),
+                    )
+                    .await
+                    .unwrap_or_default(),
                 };
 
                 if let Some(event) = events.into_iter().next() {
@@ -798,10 +833,14 @@ fn EventMentionRenderer(mention: String) -> Element {
 
                     if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
                         metadata_filter,
-                        std::time::Duration::from_secs(5)
-                    ).await {
+                        std::time::Duration::from_secs(5),
+                    )
+                    .await
+                    {
                         if let Some(metadata_event) = metadata_events.into_iter().next() {
-                            if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
+                            if let Ok(meta) =
+                                serde_json::from_str::<Metadata>(&metadata_event.content)
+                            {
                                 author_metadata.set(Some(meta));
                             }
                         }
@@ -904,7 +943,11 @@ fn EventMentionRenderer(mention: String) -> Element {
             // Loading state - show link
             let event_str = event_id.to_hex();
             let short = if event_str.len() > 16 {
-                format!("note:{}...{}", &event_str[..8], &event_str[event_str.len()-4..])
+                format!(
+                    "note:{}...{}",
+                    &event_str[..8],
+                    &event_str[event_str.len() - 4..]
+                )
             } else {
                 format!("note:{}", event_str)
             };
@@ -948,11 +991,22 @@ fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -> Element {
 
     // Get display name
     let display_name = if let Some(meta) = metadata {
-        meta.display_name.clone()
+        meta.display_name
+            .clone()
             .or_else(|| meta.name.clone())
-            .unwrap_or_else(|| format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..]))
+            .unwrap_or_else(|| {
+                format!(
+                    "{}...{}",
+                    &pubkey_str[..8],
+                    &pubkey_str[pubkey_str.len() - 4..]
+                )
+            })
     } else {
-        format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..])
+        format!(
+            "{}...{}",
+            &pubkey_str[..8],
+            &pubkey_str[pubkey_str.len() - 4..]
+        )
     };
 
     rsx! {
@@ -1037,7 +1091,10 @@ fn TwitchStreamRenderer(channel: String) -> Element {
     } else {
         "nostr.blue"
     };
-    let embed_url = format!("https://player.twitch.tv/?channel={}&parent={}", channel, parent_domain);
+    let embed_url = format!(
+        "https://player.twitch.tv/?channel={}&parent={}",
+        channel, parent_domain
+    );
 
     rsx! {
         div {
@@ -1084,7 +1141,10 @@ fn TwitchClipRenderer(clip_slug: String) -> Element {
     } else {
         "nostr.blue"
     };
-    let embed_url = format!("https://clips.twitch.tv/embed?clip={}&parent={}", clip_slug, parent_domain);
+    let embed_url = format!(
+        "https://clips.twitch.tv/embed?clip={}&parent={}",
+        clip_slug, parent_domain
+    );
 
     rsx! {
         div {
@@ -1131,7 +1191,10 @@ fn TwitchVodRenderer(vod_id: String) -> Element {
     } else {
         "nostr.blue"
     };
-    let embed_url = format!("https://player.twitch.tv/?video={}&parent={}", vod_id, parent_domain);
+    let embed_url = format!(
+        "https://player.twitch.tv/?video={}&parent={}",
+        vod_id, parent_domain
+    );
 
     rsx! {
         div {
@@ -1179,10 +1242,13 @@ fn NaddrMentionRenderer(mention: String) -> Element {
     let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
         .map(|coord| {
-            let relay_hints: Vec<String> = coord.relays.iter()
-                .map(|r| r.to_string())
-                .collect();
-            (coord.public_key.to_hex(), coord.identifier.clone(), coord.kind.as_u16(), relay_hints)
+            let relay_hints: Vec<String> = coord.relays.iter().map(|r| r.to_string()).collect();
+            (
+                coord.public_key.to_hex(),
+                coord.identifier.clone(),
+                coord.kind.as_u16(),
+                relay_hints,
+            )
         });
 
     // Always call hooks unconditionally
@@ -1204,39 +1270,45 @@ fn NaddrMentionRenderer(mention: String) -> Element {
 
                 // Fetch event by coordinate with the correct kind from naddr and relay hints
                 match crate::stores::nostr_client::fetch_event_by_coordinate_with_relays(
-                        kind,
-                        pubkey.clone(),
-                        ident,
-                        relay_hints
-                    ).await {
-                        Ok(Some(event)) => {
-                            let author_pubkey = event.pubkey;
-                            article_event.set(Some(event));
+                    kind,
+                    pubkey.clone(),
+                    ident,
+                    relay_hints,
+                )
+                .await
+                {
+                    Ok(Some(event)) => {
+                        let author_pubkey = event.pubkey;
+                        article_event.set(Some(event));
 
-                            // Fetch author metadata using Outbox
-                            let metadata_filter = Filter::new()
-                                .author(author_pubkey)
-                                .kind(Kind::Metadata)
-                                .limit(1);
+                        // Fetch author metadata using Outbox
+                        let metadata_filter = Filter::new()
+                            .author(author_pubkey)
+                            .kind(Kind::Metadata)
+                            .limit(1);
 
-                            if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
-                                metadata_filter,
-                                std::time::Duration::from_secs(5)
-                            ).await {
-                                if let Some(metadata_event) = metadata_events.into_iter().next() {
-                                    if let Ok(meta) = serde_json::from_str::<Metadata>(&metadata_event.content) {
-                                        author_metadata.set(Some(meta));
-                                    }
+                        if let Ok(metadata_events) = nostr_client::fetch_events_aggregated_outbox(
+                            metadata_filter,
+                            std::time::Duration::from_secs(5),
+                        )
+                        .await
+                        {
+                            if let Some(metadata_event) = metadata_events.into_iter().next() {
+                                if let Ok(meta) =
+                                    serde_json::from_str::<Metadata>(&metadata_event.content)
+                                {
+                                    author_metadata.set(Some(meta));
                                 }
                             }
                         }
-                        Ok(None) => {
-                            log::warn!("Article not found for coordinate");
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch article: {}", e);
-                        }
                     }
+                    Ok(None) => {
+                        log::warn!("Article not found for coordinate");
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch article: {}", e);
+                    }
+                }
 
                 loading.set(false);
             });
@@ -1540,7 +1612,7 @@ fn NaddrMentionRenderer(mention: String) -> Element {
 }
 
 fn render_embedded_article(event: &Event, metadata: Option<&Metadata>, naddr: &str) -> Element {
-    use crate::utils::article_meta::{get_title, get_summary, get_image};
+    use crate::utils::article_meta::{get_image, get_summary, get_title};
 
     let title = get_title(event);
     let summary = get_summary(event);
@@ -1549,11 +1621,22 @@ fn render_embedded_article(event: &Event, metadata: Option<&Metadata>, naddr: &s
 
     // Get display name
     let display_name = if let Some(meta) = metadata {
-        meta.display_name.clone()
+        meta.display_name
+            .clone()
             .or_else(|| meta.name.clone())
-            .unwrap_or_else(|| format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..]))
+            .unwrap_or_else(|| {
+                format!(
+                    "{}...{}",
+                    &pubkey_str[..8],
+                    &pubkey_str[pubkey_str.len() - 4..]
+                )
+            })
     } else {
-        format!("{}...{}", &pubkey_str[..8], &pubkey_str[pubkey_str.len()-4..])
+        format!(
+            "{}...{}",
+            &pubkey_str[..8],
+            &pubkey_str[pubkey_str.len() - 4..]
+        )
     };
 
     // Truncate summary if too long (character-aware)
@@ -2395,9 +2478,21 @@ fn render_issue_minicard(issue: &Issue) -> Element {
 /// Render a Git PR minicard with HoverCard preview
 fn render_pr_minicard(pr: &PullRequest) -> Element {
     let title = if pr.is_cover_letter {
-        pr.content.lines().next().unwrap_or("Pull Request").to_string()
+        pr.content
+            .lines()
+            .next()
+            .unwrap_or("Pull Request")
+            .to_string()
     } else {
-        format!("Patch: {}", pr.commit.as_deref().unwrap_or("").chars().take(8).collect::<String>())
+        format!(
+            "Patch: {}",
+            pr.commit
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(8)
+                .collect::<String>()
+        )
     };
     let status = pr.status;
     let status_class = match status {
@@ -2458,7 +2553,9 @@ fn render_pr_minicard(pr: &PullRequest) -> Element {
 /// Render a repost minicard
 fn render_repost_minicard(event: &Event) -> Element {
     // Repost events reference another event in the content or e tag
-    let reposted_id = event.tags.iter()
+    let reposted_id = event
+        .tags
+        .iter()
         .find_map(|t| {
             if t.kind() == nostr_sdk::TagKind::e() {
                 t.content().map(|s| s.to_string())
@@ -2468,14 +2565,27 @@ fn render_repost_minicard(event: &Event) -> Element {
         })
         .or_else(|| {
             if event.content.starts_with("nostr:") {
-                Some(event.content.strip_prefix("nostr:").unwrap_or(&event.content).to_string())
+                Some(
+                    event
+                        .content
+                        .strip_prefix("nostr:")
+                        .unwrap_or(&event.content)
+                        .to_string(),
+                )
             } else {
                 None
             }
         });
 
-    let short_id = reposted_id.as_ref()
-        .map(|id| if id.len() > 16 { format!("{}...{}", &id[..8], &id[id.len()-4..]) } else { id.clone() })
+    let short_id = reposted_id
+        .as_ref()
+        .map(|id| {
+            if id.len() > 16 {
+                format!("{}...{}", &id[..8], &id[id.len() - 4..])
+            } else {
+                id.clone()
+            }
+        })
         .unwrap_or_else(|| "unknown".to_string());
 
     rsx! {
@@ -2502,10 +2612,11 @@ fn render_comment_minicard(event: &Event, metadata: Option<&Metadata>) -> Elemen
         content.clone()
     };
 
-    let author_name = metadata.and_then(|m| m.display_name.clone().or(m.name.clone()))
+    let author_name = metadata
+        .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_hex();
-            format!("{}...{}", &pk[..8], &pk[pk.len()-4..])
+            format!("{}...{}", &pk[..8], &pk[pk.len() - 4..])
         });
 
     rsx! {
@@ -2644,86 +2755,86 @@ fn WavlakeTrackRenderer(track_id: String) -> Element {
         },
         // Success state - render track card
         Some(Ok(track)) => {
-        let track_clone = track.clone();
+            let track_clone = track.clone();
 
-        let handle_play = move |_: MouseEvent| {
-            let music_track: MusicTrack = track_clone.clone().into();
-            music_player::play_track(music_track, None, None);
-        };
+            let handle_play = move |_: MouseEvent| {
+                let music_track: MusicTrack = track_clone.clone().into();
+                music_player::play_track(music_track, None, None);
+            };
 
-        rsx! {
-            div {
-                class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card",
-                onclick: move |e: MouseEvent| e.stop_propagation(),
-
+            rsx! {
                 div {
-                    class: "flex items-center gap-4 p-4",
+                    class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
 
-                    // Album art
                     div {
-                        class: "relative w-16 h-16 shrink-0 rounded overflow-hidden bg-muted group",
-                        img {
-                            src: "{track.album_art_url}",
-                            alt: "Album art",
-                            class: "w-full h-full object-cover"
-                        }
+                        class: "flex items-center gap-4 p-4",
 
-                        // Play button overlay
-                        button {
-                            class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
-                            onclick: handle_play,
-                            dangerous_inner_html: icons::PLAY
-                        }
-                    }
+                        // Album art
+                        div {
+                            class: "relative w-16 h-16 shrink-0 rounded overflow-hidden bg-muted group",
+                            img {
+                                src: "{track.album_art_url}",
+                                alt: "Album art",
+                                class: "w-full h-full object-cover"
+                            }
 
-                    // Track info
-                    div {
-                        class: "flex-1 min-w-0",
-                        div {
-                            class: "font-semibold text-sm truncate",
-                            "{track.title}"
-                        }
-                        div {
-                            class: "text-xs text-muted-foreground truncate",
-                            Link {
-                                to: Route::MusicArtist { artist_id: track.artist_id.clone() },
-                                class: "hover:text-foreground hover:underline",
-                                onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
-                                "{track.artist}"
+                            // Play button overlay
+                            button {
+                                class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                                onclick: handle_play,
+                                dangerous_inner_html: icons::PLAY
                             }
                         }
-                        div {
-                            class: "text-xs text-muted-foreground/80 truncate mt-1",
-                            Link {
-                                to: Route::MusicAlbum { album_id: track.album_id.clone() },
-                                class: "hover:text-foreground hover:underline",
-                                onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
-                                "{track.album_title}"
-                            }
-                        }
-                    }
 
-                    // Duration and Wavlake badge
-                    div {
-                        class: "flex flex-col items-end gap-1 shrink-0",
+                        // Track info
                         div {
-                            class: "text-xs text-muted-foreground",
-                            {
-                                let mins = track.duration / 60;
-                                let secs = track.duration % 60;
-                                format!("{:02}:{:02}", mins, secs)
+                            class: "flex-1 min-w-0",
+                            div {
+                                class: "font-semibold text-sm truncate",
+                                "{track.title}"
+                            }
+                            div {
+                                class: "text-xs text-muted-foreground truncate",
+                                Link {
+                                    to: Route::MusicArtist { artist_id: track.artist_id.clone() },
+                                    class: "hover:text-foreground hover:underline",
+                                    onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
+                                    "{track.artist}"
+                                }
+                            }
+                            div {
+                                class: "text-xs text-muted-foreground/80 truncate mt-1",
+                                Link {
+                                    to: Route::MusicAlbum { album_id: track.album_id.clone() },
+                                    class: "hover:text-foreground hover:underline",
+                                    onclick: move |e: dioxus::prelude::Event<MouseData>| e.stop_propagation(),
+                                    "{track.album_title}"
+                                }
                             }
                         }
+
+                        // Duration and Wavlake badge
                         div {
-                            class: "flex items-center gap-1 text-xs text-purple-400",
-                            icons::MusicIcon { class: "w-3 h-3" }
-                            "Wavlake"
+                            class: "flex flex-col items-end gap-1 shrink-0",
+                            div {
+                                class: "text-xs text-muted-foreground",
+                                {
+                                    let mins = track.duration / 60;
+                                    let secs = track.duration % 60;
+                                    format!("{:02}:{:02}", mins, secs)
+                                }
+                            }
+                            div {
+                                class: "flex items-center gap-1 text-xs text-purple-400",
+                                icons::MusicIcon { class: "w-3 h-3" }
+                                "Wavlake"
+                            }
                         }
                     }
                 }
             }
         }
-        },
     }
 }
 
@@ -2768,124 +2879,129 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
         },
         // Success state - render album card with track list
         Some(Ok(album)) => {
-        let tracks: Vec<MusicTrack> = album.tracks.iter().map(|track| track.clone().into()).collect();
+            let tracks: Vec<MusicTrack> = album
+                .tracks
+                .iter()
+                .map(|track| track.clone().into())
+                .collect();
 
-        rsx! {
-            div {
-                class: "my-2 border border-border rounded-lg overflow-hidden bg-card",
-                onclick: move |e: MouseEvent| e.stop_propagation(),
-
-                // Album header
+            rsx! {
                 div {
-                    class: "flex gap-4 p-4 border-b border-border",
+                    class: "my-2 border border-border rounded-lg overflow-hidden bg-card",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
 
-                    // Album art
-                    if let Some(art_url) = &album.album_art_url {
-                        img {
-                            src: "{art_url}",
-                            alt: "Album art",
-                            class: "w-32 h-32 rounded object-cover shrink-0"
-                        }
-                    } else {
-                        div {
-                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center shrink-0",
-                            icons::DiscIcon { class: "w-16 h-16 text-muted-foreground" }
-                        }
-                    }
-
-                    // Album info
+                    // Album header
                     div {
-                        class: "flex-1 min-w-0",
-                        div {
-                            class: "text-xs text-muted-foreground mb-1",
-                            "ALBUM"
-                        }
-                        div {
-                            class: "font-bold text-lg truncate mb-1",
-                            "{album.title}"
-                        }
-                        div {
-                            class: "text-sm text-muted-foreground truncate mb-2",
-                            a {
-                                href: if let Some(first_track) = album.tracks.first() {
-                                    format!("/music/artist/{}", first_track.artist_id)
-                                } else {
-                                    "#".to_string()
-                                },
-                                class: "hover:text-foreground hover:underline",
-                                onclick: move |e| e.stop_propagation(),
-                                "{album.artist}"
+                        class: "flex gap-4 p-4 border-b border-border",
+
+                        // Album art
+                        if let Some(art_url) = &album.album_art_url {
+                            img {
+                                src: "{art_url}",
+                                alt: "Album art",
+                                class: "w-32 h-32 rounded object-cover shrink-0"
+                            }
+                        } else {
+                            div {
+                                class: "w-32 h-32 rounded bg-muted flex items-center justify-center shrink-0",
+                                icons::DiscIcon { class: "w-16 h-16 text-muted-foreground" }
                             }
                         }
+
+                        // Album info
                         div {
-                            class: "flex items-center gap-3 text-xs text-muted-foreground",
-                            span {
-                                {album.release_date.split('T').next().unwrap_or("Unknown").split('-').next().unwrap_or("Unknown")}
+                            class: "flex-1 min-w-0",
+                            div {
+                                class: "text-xs text-muted-foreground mb-1",
+                                "ALBUM"
                             }
-                            span { "•" }
-                            span {
-                                "{album.tracks.len()} "
-                                {if album.tracks.len() == 1 { "track" } else { "tracks" }}
+                            div {
+                                class: "font-bold text-lg truncate mb-1",
+                                "{album.title}"
                             }
-                            span { "•" }
-                            span {
-                                class: "flex items-center gap-1 text-purple-400",
-                                icons::MusicIcon { class: "w-3 h-3" }
-                                "Wavlake"
+                            div {
+                                class: "text-sm text-muted-foreground truncate mb-2",
+                                a {
+                                    href: if let Some(first_track) = album.tracks.first() {
+                                        format!("/music/artist/{}", first_track.artist_id)
+                                    } else {
+                                        "#".to_string()
+                                    },
+                                    class: "hover:text-foreground hover:underline",
+                                    onclick: move |e| e.stop_propagation(),
+                                    "{album.artist}"
+                                }
+                            }
+                            div {
+                                class: "flex items-center gap-3 text-xs text-muted-foreground",
+                                span {
+                                    {album.release_date.split('T').next().unwrap_or("Unknown").split('-').next().unwrap_or("Unknown")}
+                                }
+                                span { "•" }
+                                span {
+                                    "{album.tracks.len()} "
+                                    {if album.tracks.len() == 1 { "track" } else { "tracks" }}
+                                }
+                                span { "•" }
+                                span {
+                                    class: "flex items-center gap-1 text-purple-400",
+                                    icons::MusicIcon { class: "w-3 h-3" }
+                                    "Wavlake"
+                                }
                             }
                         }
                     }
-                }
 
-                // Track list
-                div {
-                    class: "divide-y divide-border",
-                    for (index, track_data) in album.tracks.iter().enumerate() {
-                        {
-                            let track_clone = tracks[index].clone();
-                            let playlist = tracks.clone();
-                            let track_title = track_data.title.clone();
-                            let track_artist = track_data.artist.clone();
-                            let track_duration = track_data.duration;
+                    // Track list
+                    div {
+                        class: "divide-y divide-border",
+                        for (index, track_data) in album.tracks.iter().enumerate() {
+                            {
+                                let track_clone = tracks[index].clone();
+                                let playlist = tracks.clone();
+                                let track_title = track_data.title.clone();
+                                let track_artist = track_data.artist.clone();
+                                let track_duration = track_data.duration;
 
-                            rsx! {
-                                div {
-                                    key: "{track_data.id}",
-                                    class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
-                                    onclick: move |_| {
-                                        music_player::play_track(track_clone.clone(), Some(playlist.clone()), Some(index));
-                                    },
-
-                                    // Track number / play icon
+                                rsx! {
                                     div {
-                                        class: "w-8 text-center text-sm text-muted-foreground shrink-0",
-                                        span { class: "group-hover:hidden", "{index + 1}" }
-                                        div {
-                                            class: "hidden group-hover:flex items-center justify-center",
-                                            dangerous_inner_html: icons::PLAY
-                                        }
-                                    }
+                                        key: "{track_data.id}",
+                                        class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
+                                        onclick: move |_| {
+                                            music_player::play_track(track_clone.clone(), Some(playlist.clone()), Some(index));
+                                        },
 
-                                    // Track info
-                                    div {
-                                        class: "flex-1 min-w-0",
+                                        // Track number / play icon
                                         div {
-                                            class: "font-medium text-sm truncate",
-                                            "{track_title}"
+                                            class: "w-8 text-center text-sm text-muted-foreground shrink-0",
+                                            span { class: "group-hover:hidden", "{index + 1}" }
+                                            div {
+                                                class: "hidden group-hover:flex items-center justify-center",
+                                                dangerous_inner_html: icons::PLAY
+                                            }
                                         }
-                                        div {
-                                            class: "text-xs text-muted-foreground truncate",
-                                            "{track_artist}"
-                                        }
-                                    }
 
-                                    // Duration
-                                    div {
-                                        class: "text-xs text-muted-foreground shrink-0",
-                                        {
-                                            let mins = track_duration / 60;
-                                            let secs = track_duration % 60;
-                                            format!("{:02}:{:02}", mins, secs)
+                                        // Track info
+                                        div {
+                                            class: "flex-1 min-w-0",
+                                            div {
+                                                class: "font-medium text-sm truncate",
+                                                "{track_title}"
+                                            }
+                                            div {
+                                                class: "text-xs text-muted-foreground truncate",
+                                                "{track_artist}"
+                                            }
+                                        }
+
+                                        // Duration
+                                        div {
+                                            class: "text-xs text-muted-foreground shrink-0",
+                                            {
+                                                let mins = track_duration / 60;
+                                                let secs = track_duration % 60;
+                                                format!("{:02}:{:02}", mins, secs)
+                                            }
                                         }
                                     }
                                 }
@@ -2895,7 +3011,6 @@ fn WavlakeAlbumRenderer(album_id: String) -> Element {
                 }
             }
         }
-        },
     }
 }
 
@@ -2942,30 +3057,35 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
         },
         // Success state - render artist card
         Some(Ok(artist)) => {
-
-        rsx! {
-            div {
-                class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
-                onclick: {
-                    let artist_id_nav = artist.id.clone();
-                    let navigator = nav;
-                    move |e: MouseEvent| {
-                        e.stop_propagation();
-                        // Navigate to artist page
-                        navigator.push(Route::MusicArtist { artist_id: artist_id_nav.clone() });
-                    }
-                },
-
+            rsx! {
                 div {
-                    class: "flex items-center gap-4 p-4",
+                    class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
+                    onclick: {
+                        let artist_id_nav = artist.id.clone();
+                        let navigator = nav;
+                        move |e: MouseEvent| {
+                            e.stop_propagation();
+                            // Navigate to artist page
+                            navigator.push(Route::MusicArtist { artist_id: artist_id_nav.clone() });
+                        }
+                    },
 
-                    // Artist image
-                    if let Some(art_url) = &artist.artist_art_url {
-                        if !art_url.is_empty() {
-                            img {
-                                src: "{art_url}",
-                                alt: "Artist",
-                                class: "w-20 h-20 rounded-full object-cover shrink-0"
+                    div {
+                        class: "flex items-center gap-4 p-4",
+
+                        // Artist image
+                        if let Some(art_url) = &artist.artist_art_url {
+                            if !art_url.is_empty() {
+                                img {
+                                    src: "{art_url}",
+                                    alt: "Artist",
+                                    class: "w-20 h-20 rounded-full object-cover shrink-0"
+                                }
+                            } else {
+                                div {
+                                    class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center shrink-0",
+                                    icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
+                                }
                             }
                         } else {
                             div {
@@ -2973,48 +3093,42 @@ fn WavlakeArtistRenderer(artist_id: String) -> Element {
                                 icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
                             }
                         }
-                    } else {
-                        div {
-                            class: "w-20 h-20 rounded-full bg-muted flex items-center justify-center shrink-0",
-                            icons::UserIcon { class: "w-10 h-10 text-muted-foreground" }
-                        }
-                    }
 
-                    // Artist info
-                    div {
-                        class: "flex-1 min-w-0",
+                        // Artist info
                         div {
-                            class: "text-xs text-muted-foreground mb-1",
-                            "ARTIST"
-                        }
-                        div {
-                            class: "font-bold text-lg truncate mb-1",
-                            "{artist.name}"
-                        }
-                        div {
-                            class: "flex items-center gap-2 text-xs text-muted-foreground",
-                            span {
-                                "{artist.albums.len()} "
-                                {if artist.albums.len() == 1 { "album" } else { "albums" }}
+                            class: "flex-1 min-w-0",
+                            div {
+                                class: "text-xs text-muted-foreground mb-1",
+                                "ARTIST"
                             }
-                            span { "•" }
-                            span {
-                                class: "flex items-center gap-1 text-purple-400",
-                                icons::MusicIcon { class: "w-3 h-3" }
-                                "Wavlake"
+                            div {
+                                class: "font-bold text-lg truncate mb-1",
+                                "{artist.name}"
+                            }
+                            div {
+                                class: "flex items-center gap-2 text-xs text-muted-foreground",
+                                span {
+                                    "{artist.albums.len()} "
+                                    {if artist.albums.len() == 1 { "album" } else { "albums" }}
+                                }
+                                span { "•" }
+                                span {
+                                    class: "flex items-center gap-1 text-purple-400",
+                                    icons::MusicIcon { class: "w-3 h-3" }
+                                    "Wavlake"
+                                }
                             }
                         }
-                    }
 
-                    // Arrow icon
-                    div {
-                        class: "shrink-0 text-muted-foreground",
-                        dangerous_inner_html: r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>"#
+                        // Arrow icon
+                        div {
+                            class: "shrink-0 text-muted-foreground",
+                            dangerous_inner_html: r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>"#
+                        }
                     }
                 }
             }
         }
-        },
     }
 }
 
@@ -3058,112 +3172,117 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
         },
         // Success state - render playlist card with track list
         Some(Ok(playlist)) => {
-        let tracks: Vec<MusicTrack> = playlist.tracks.iter().map(|track| track.clone().into()).collect();
+            let tracks: Vec<MusicTrack> = playlist
+                .tracks
+                .iter()
+                .map(|track| track.clone().into())
+                .collect();
 
-        rsx! {
-            div {
-                class: "my-2 border border-border rounded-lg overflow-hidden bg-card",
-                onclick: move |e: MouseEvent| e.stop_propagation(),
-
-                // Playlist header
+            rsx! {
                 div {
-                    class: "flex gap-4 p-4 border-b border-border",
+                    class: "my-2 border border-border rounded-lg overflow-hidden bg-card",
+                    onclick: move |e: MouseEvent| e.stop_propagation(),
 
-                    // Playlist cover (use first track's album art)
-                    if let Some(first_track) = playlist.tracks.first() {
-                        img {
-                            src: "{first_track.album_art_url}",
-                            alt: "Playlist cover",
-                            class: "w-32 h-32 rounded object-cover shrink-0"
-                        }
-                    } else {
-                        div {
-                            class: "w-32 h-32 rounded bg-muted flex items-center justify-center shrink-0",
-                            icons::MusicIcon { class: "w-16 h-16 text-muted-foreground" }
-                        }
-                    }
-
-                    // Playlist info
+                    // Playlist header
                     div {
-                        class: "flex-1 min-w-0",
-                        div {
-                            class: "text-xs text-muted-foreground mb-1",
-                            "PLAYLIST"
-                        }
-                        div {
-                            class: "font-bold text-lg truncate mb-1",
-                            "{playlist.title}"
-                        }
-                        div {
-                            class: "flex items-center gap-3 text-xs text-muted-foreground",
-                            span {
-                                "{playlist.tracks.len()} "
-                                {if playlist.tracks.len() == 1 { "track" } else { "tracks" }}
+                        class: "flex gap-4 p-4 border-b border-border",
+
+                        // Playlist cover (use first track's album art)
+                        if let Some(first_track) = playlist.tracks.first() {
+                            img {
+                                src: "{first_track.album_art_url}",
+                                alt: "Playlist cover",
+                                class: "w-32 h-32 rounded object-cover shrink-0"
                             }
-                            span { "•" }
-                            span {
-                                class: "flex items-center gap-1 text-purple-400",
-                                icons::MusicIcon { class: "w-3 h-3" }
-                                "Wavlake"
+                        } else {
+                            div {
+                                class: "w-32 h-32 rounded bg-muted flex items-center justify-center shrink-0",
+                                icons::MusicIcon { class: "w-16 h-16 text-muted-foreground" }
+                            }
+                        }
+
+                        // Playlist info
+                        div {
+                            class: "flex-1 min-w-0",
+                            div {
+                                class: "text-xs text-muted-foreground mb-1",
+                                "PLAYLIST"
+                            }
+                            div {
+                                class: "font-bold text-lg truncate mb-1",
+                                "{playlist.title}"
+                            }
+                            div {
+                                class: "flex items-center gap-3 text-xs text-muted-foreground",
+                                span {
+                                    "{playlist.tracks.len()} "
+                                    {if playlist.tracks.len() == 1 { "track" } else { "tracks" }}
+                                }
+                                span { "•" }
+                                span {
+                                    class: "flex items-center gap-1 text-purple-400",
+                                    icons::MusicIcon { class: "w-3 h-3" }
+                                    "Wavlake"
+                                }
                             }
                         }
                     }
-                }
 
-                // Track list
-                div {
-                    class: "divide-y divide-border max-h-96 overflow-y-auto",
-                    for (index, track_data) in playlist.tracks.iter().enumerate() {
-                        {
-                            let track_clone = tracks[index].clone();
-                            let playlist_clone = tracks.clone();
-                            let track_title = track_data.title.clone();
-                            let track_artist = track_data.artist.clone();
-                            let track_duration = track_data.duration;
-                            let track_album_art = track_data.album_art_url.clone();
+                    // Track list
+                    div {
+                        class: "divide-y divide-border max-h-96 overflow-y-auto",
+                        for (index, track_data) in playlist.tracks.iter().enumerate() {
+                            {
+                                let track_clone = tracks[index].clone();
+                                let playlist_clone = tracks.clone();
+                                let track_title = track_data.title.clone();
+                                let track_artist = track_data.artist.clone();
+                                let track_duration = track_data.duration;
+                                let track_album_art = track_data.album_art_url.clone();
 
-                            rsx! {
-                                div {
-                                    key: "{track_data.id}",
-                                    class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
-                                    onclick: move |_| {
-                                        music_player::play_track(track_clone.clone(), Some(playlist_clone.clone()), Some(index));
-                                    },
-
-                                    // Album art thumbnail
+                                rsx! {
                                     div {
-                                        class: "relative w-10 h-10 shrink-0 rounded overflow-hidden bg-muted group-hover:opacity-80",
-                                        img {
-                                            src: "{track_album_art}",
-                                            alt: "Album art",
-                                            class: "w-full h-full object-cover"
-                                        }
-                                        div {
-                                            class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
-                                            dangerous_inner_html: icons::PLAY_SMALL
-                                        }
-                                    }
+                                        key: "{track_data.id}",
+                                        class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
+                                        onclick: move |_| {
+                                            music_player::play_track(track_clone.clone(), Some(playlist_clone.clone()), Some(index));
+                                        },
 
-                                    // Track info
-                                    div {
-                                        class: "flex-1 min-w-0",
+                                        // Album art thumbnail
                                         div {
-                                            class: "font-medium text-sm truncate",
-                                            "{track_title}"
+                                            class: "relative w-10 h-10 shrink-0 rounded overflow-hidden bg-muted group-hover:opacity-80",
+                                            img {
+                                                src: "{track_album_art}",
+                                                alt: "Album art",
+                                                class: "w-full h-full object-cover"
+                                            }
+                                            div {
+                                                class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                                                dangerous_inner_html: icons::PLAY_SMALL
+                                            }
                                         }
-                                        div {
-                                            class: "text-xs text-muted-foreground truncate",
-                                            "{track_artist}"
-                                        }
-                                    }
 
-                                    // Duration
-                                    div {
-                                        class: "text-xs text-muted-foreground shrink-0",
-                                        {
-                                            let mins = track_duration / 60;
-                                            let secs = track_duration % 60;
-                                            format!("{:02}:{:02}", mins, secs)
+                                        // Track info
+                                        div {
+                                            class: "flex-1 min-w-0",
+                                            div {
+                                                class: "font-medium text-sm truncate",
+                                                "{track_title}"
+                                            }
+                                            div {
+                                                class: "text-xs text-muted-foreground truncate",
+                                                "{track_artist}"
+                                            }
+                                        }
+
+                                        // Duration
+                                        div {
+                                            class: "text-xs text-muted-foreground shrink-0",
+                                            {
+                                                let mins = track_duration / 60;
+                                                let secs = track_duration % 60;
+                                                format!("{:02}:{:02}", mins, secs)
+                                            }
                                         }
                                     }
                                 }
@@ -3173,7 +3292,6 @@ fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                 }
             }
         }
-        },
     }
 }
 
@@ -3246,7 +3364,10 @@ fn YouTubeRenderer(video_id: String) -> Element {
 #[component]
 fn SpotifyRenderer(content_type: String, content_id: String) -> Element {
     let mut is_visible = use_signal(|| false);
-    let embed_url = format!("https://open.spotify.com/embed/{}/{}?utm_source=generator&theme=0", content_type, content_id);
+    let embed_url = format!(
+        "https://open.spotify.com/embed/{}/{}?utm_source=generator&theme=0",
+        content_type, content_id
+    );
 
     // Tracks are shorter, albums/playlists/episodes are taller
     let height = match content_type.as_str() {
@@ -3497,8 +3618,9 @@ fn RumbleRenderer(embed_url: String) -> Element {
         // Embed format is: https://rumble.com/embed/vXXXXX/
         if let Some(start) = embed_url.find("/v") {
             let after_v = &embed_url[start + 1..]; // Skip the "/"
-            // Extract video ID (everything up to "-" or "." or "/" or end)
-            let video_id: String = after_v.chars()
+                                                   // Extract video ID (everything up to "-" or "." or "/" or end)
+            let video_id: String = after_v
+                .chars()
                 .take_while(|c| *c != '-' && *c != '.' && *c != '/')
                 .collect();
             if !video_id.is_empty() {
@@ -3561,7 +3683,9 @@ fn TidalRenderer(embed_url: String) -> Element {
         embed_url.clone()
     } else if embed_url.contains("tidal.com/browse/track/") {
         // Convert tidal.com/browse/track/{id} to embed format
-        let track_id = embed_url.split("/track/").nth(1)
+        let track_id = embed_url
+            .split("/track/")
+            .nth(1)
             .and_then(|s| s.split(&['?', '#', '/'][..]).next())
             .unwrap_or("");
         format!("https://embed.tidal.com/tracks/{}?layout=gridify", track_id)
@@ -3631,16 +3755,17 @@ fn ZapStreamRenderer(naddr: String) -> Element {
             match Nip19::from_bech32(&naddr_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
                     // Use helper that handles relay hints, ensure_relays_ready, and DB caching
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
+                    let relay_hints: Vec<String> =
+                        coord.relays.iter().map(|r| r.to_string()).collect();
 
                     match nostr_client::fetch_event_by_coordinate_with_relays(
                         coord.kind.as_u16(),
                         coord.public_key.to_hex(),
                         coord.identifier.clone(),
                         relay_hints,
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(Some(e)) => {
                             event.set(Some(e));
                         }
@@ -3718,16 +3843,17 @@ fn ZapCookingRecipeRenderer(naddr: String) -> Element {
         spawn(async move {
             match Nip19::from_bech32(&naddr_clone) {
                 Ok(Nip19::Coordinate(coord)) => {
-                    let relay_hints: Vec<String> = coord.relays.iter()
-                        .map(|r| r.to_string())
-                        .collect();
+                    let relay_hints: Vec<String> =
+                        coord.relays.iter().map(|r| r.to_string()).collect();
 
                     match nostr_client::fetch_event_by_coordinate_with_relays(
                         coord.kind.as_u16(),
                         coord.public_key.to_hex(),
                         coord.identifier.clone(),
                         relay_hints,
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(Some(e)) => {
                             event.set(Some(e));
                         }
@@ -3893,9 +4019,7 @@ fn PodcastFeedRenderer(guid: String) -> Element {
     // Let the service layer (authenticated_get) handle auth/retry behavior.
     let podcast_resource = use_resource(move || {
         let g = guid_for_resource.clone();
-        async move {
-            podcast_index::get_podcast_by_guid(&g).await
-        }
+        async move { podcast_index::get_podcast_by_guid(&g).await }
     });
 
     match podcast_resource.read_unchecked().as_ref() {
@@ -3927,12 +4051,18 @@ fn PodcastFeedRenderer(guid: String) -> Element {
                     span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
                 }
             }
-        },
+        }
         // Success - render podcast card with link to podcast page
         Some(Ok(podcast)) => {
-            let image = podcast.get_image()
+            let image = podcast
+                .get_image()
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", podcast.title));
+                .unwrap_or_else(|| {
+                    format!(
+                        "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                        podcast.title
+                    )
+                });
             let podcast_id = podcast.id;
 
             rsx! {
@@ -4006,9 +4136,7 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
     // Let the service layer (authenticated_get) handle auth/retry behavior.
     let episode_resource = use_resource(move || {
         let g = guid_for_resource.clone();
-        async move {
-            podcast_index::get_episode_by_guid(&g, None).await
-        }
+        async move { podcast_index::get_episode_by_guid(&g, None).await }
     });
 
     match episode_resource.read_unchecked().as_ref() {
@@ -4040,12 +4168,18 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                     span { class: "font-mono text-xs truncate max-w-32", "{guid}" }
                 }
             }
-        },
+        }
         // Success - render playable episode card
         Some(Ok((episode, podcast))) => {
-            let image = episode.get_image()
+            let image = episode
+                .get_image()
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.title));
+                .unwrap_or_else(|| {
+                    format!(
+                        "https://api.dicebear.com/7.x/shapes/svg?seed={}",
+                        episode.title
+                    )
+                });
 
             let episode_clone = episode.clone();
             let podcast_clone = podcast.clone();
@@ -4059,7 +4193,10 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                 let media_url = match &ep.enclosure_url {
                     Some(url) if !url.trim().is_empty() => url.clone(),
                     _ => {
-                        log::warn!("Cannot play episode '{}': missing or empty enclosure URL", ep.title);
+                        log::warn!(
+                            "Cannot play episode '{}': missing or empty enclosure URL",
+                            ep.title
+                        );
                         return;
                     }
                 };
@@ -4077,7 +4214,9 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
                 let track = MusicTrack {
                     id: format!("pi-ep-{}", ep.id),
                     title: ep.title.clone(),
-                    artist: ep.feed_title.clone().unwrap_or_else(|| pod.as_ref().map(|p| p.title.clone()).unwrap_or_default()),
+                    artist: ep.feed_title.clone().unwrap_or_else(|| {
+                        pod.as_ref().map(|p| p.title.clone()).unwrap_or_default()
+                    }),
                     artist_npub: None,
                     artist_id: None,
                     artist_art_url: None,
@@ -4192,7 +4331,9 @@ fn PodcastEpisodeRenderer(guid: String) -> Element {
 fn BitcoinTxRenderer(txid: String) -> Element {
     let mempool_endpoint = crate::stores::settings_store::get_mempool_endpoint();
     // Remove /api suffix if present for display URL
-    let base_url = mempool_endpoint.trim_end_matches("/api").trim_end_matches('/');
+    let base_url = mempool_endpoint
+        .trim_end_matches("/api")
+        .trim_end_matches('/');
     let tx_url = format!("{}/tx/{}", base_url, txid);
     let truncated = crate::services::mempool::truncate_bitcoin_id(&txid);
 
@@ -4213,7 +4354,9 @@ fn BitcoinTxRenderer(txid: String) -> Element {
 fn BitcoinAddressRenderer(address: String) -> Element {
     let mempool_endpoint = crate::stores::settings_store::get_mempool_endpoint();
     // Remove /api suffix if present for display URL
-    let base_url = mempool_endpoint.trim_end_matches("/api").trim_end_matches('/');
+    let base_url = mempool_endpoint
+        .trim_end_matches("/api")
+        .trim_end_matches('/');
     let addr_url = format!("{}/address/{}", base_url, address);
     let truncated = crate::services::mempool::truncate_bitcoin_id(&address);
 
@@ -4432,7 +4575,8 @@ fn render_podcast_episode_card(event: &Event, naddr: &str) -> Element {
     match parse_podcast_episode(event) {
         Ok(episode) => {
             // Use episode title as a fallback podcast title since we don't have the show metadata here
-            let display_episode = DisplayEpisode::from_nostr_episode(&episode, "Podcast Episode", None);
+            let display_episode =
+                DisplayEpisode::from_nostr_episode(&episode, "Podcast Episode", None);
             rsx! {
                 PodcastEpisodeCard {
                     episode: display_episode,
@@ -4469,38 +4613,41 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
                 .unwrap_or(episode_id);
 
             // Check if podcast_id is numeric (Podcast Index feed ID)
-            let feed_id = podcast_id.parse::<u64>()
+            let feed_id = podcast_id
+                .parse::<u64>()
                 .map_err(|_| "Invalid podcast ID format".to_string())?;
 
             // Helper to create minimal feed from episode data
-            let create_minimal_feed = |ep: &podcast_index::Episode, feed_id: u64| -> podcast_index::PodcastFeed {
-                podcast_index::PodcastFeed {
-                    id: feed_id,
-                    title: ep.feed_title.clone().unwrap_or_default(),
-                    url: ep.feed_url.clone().unwrap_or_default(),
-                    original_url: None,
-                    link: None,
-                    description: None,
-                    author: None,
-                    owner_name: None,
-                    image: ep.feed_image.clone(),
-                    artwork: None,
-                    language: None,
-                    itunes_id: None,
-                    podcast_guid: ep.podcast_guid.clone(),
-                    categories: None,
-                    episode_count: None,
-                    trending_score: None,
-                    value: None,
-                }
-            };
+            let create_minimal_feed =
+                |ep: &podcast_index::Episode, feed_id: u64| -> podcast_index::PodcastFeed {
+                    podcast_index::PodcastFeed {
+                        id: feed_id,
+                        title: ep.feed_title.clone().unwrap_or_default(),
+                        url: ep.feed_url.clone().unwrap_or_default(),
+                        original_url: None,
+                        link: None,
+                        description: None,
+                        author: None,
+                        owner_name: None,
+                        image: ep.feed_image.clone(),
+                        artwork: None,
+                        language: None,
+                        itunes_id: None,
+                        podcast_guid: ep.podcast_guid.clone(),
+                        categories: None,
+                        episode_count: None,
+                        trending_score: None,
+                        value: None,
+                    }
+                };
 
             // Try direct episode fetch if episode_id is numeric
             if let Ok(ep_id) = decoded_episode_id.parse::<u64>() {
                 // Fetch episode directly by ID - more efficient and doesn't miss episodes
                 if let Ok(ep) = podcast_index::get_episode_by_id(ep_id).await {
                     // Fetch podcast info for display context
-                    let feed = podcast_index::get_podcast_by_id(feed_id).await
+                    let feed = podcast_index::get_podcast_by_id(feed_id)
+                        .await
                         .unwrap_or_else(|e| {
                             // Episode found but feed fetch failed - still show with limited info
                             log::warn!("Feed fetch failed but episode found: {}", e);
@@ -4511,14 +4658,17 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
                 log::debug!("Direct episode fetch failed, falling back to search");
             } else {
                 // Non-numeric episode ID - try GUID-based lookup first
-                if let Ok((ep, feed_opt)) = podcast_index::get_episode_by_guid(&decoded_episode_id, None).await {
+                if let Ok((ep, feed_opt)) =
+                    podcast_index::get_episode_by_guid(&decoded_episode_id, None).await
+                {
                     // Verify it's from the correct podcast by checking feed_id
                     if ep.feed_id == Some(feed_id) {
                         let feed = match feed_opt {
                             Some(f) => f,
                             None => {
                                 // Try to fetch feed info, fall back to minimal feed
-                                podcast_index::get_podcast_by_id(feed_id).await
+                                podcast_index::get_podcast_by_id(feed_id)
+                                    .await
                                     .unwrap_or_else(|_| create_minimal_feed(&ep, feed_id))
                             }
                         };
@@ -4533,7 +4683,8 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
 
             // Fallback: search through episodes with pagination
             // This handles when direct/GUID fetch fails
-            let feed = podcast_index::get_podcast_by_id(feed_id).await
+            let feed = podcast_index::get_podcast_by_id(feed_id)
+                .await
                 .map_err(|e| format!("Failed to fetch podcast: {}", e))?;
 
             const MAX_PAGES: u32 = 5;
@@ -4542,11 +4693,16 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
             for page in 0..MAX_PAGES {
                 // Podcast Index API doesn't have offset, so we use max with increasing limits
                 let fetch_count = PAGE_SIZE * (page + 1);
-                let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(fetch_count)).await
+                let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(fetch_count))
+                    .await
                     .map_err(|e| format!("Failed to fetch episodes: {}", e))?;
 
                 // Skip episodes we've already checked in previous iterations
-                let start_idx = if page == 0 { 0 } else { (PAGE_SIZE * page) as usize };
+                let start_idx = if page == 0 {
+                    0
+                } else {
+                    (PAGE_SIZE * page) as usize
+                };
                 let episodes_to_check = if start_idx < episodes.len() {
                     &episodes[start_idx..]
                 } else {
@@ -4554,7 +4710,8 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
                     break;
                 };
 
-                if let Some(ep) = episodes_to_check.iter()
+                if let Some(ep) = episodes_to_check
+                    .iter()
                     .find(|e| e.id.to_string() == decoded_episode_id)
                 {
                     return Ok(DisplayEpisode::from_podcast_index_episode(ep, &feed));
@@ -4566,7 +4723,10 @@ fn NostrBlueRssPodcastEpisodeRenderer(podcast_id: String, episode_id: String) ->
                 }
             }
 
-            Err(format!("Episode not found (searched {} episodes)", MAX_PAGES * PAGE_SIZE))
+            Err(format!(
+                "Episode not found (searched {} episodes)",
+                MAX_PAGES * PAGE_SIZE
+            ))
         }
     });
 
@@ -4614,10 +4774,12 @@ fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
     let resource: Resource<Result<PodcastShow, String>> = use_resource(move || {
         let podcast_id = podcast_id.clone();
         async move {
-            let feed_id = podcast_id.parse::<u64>()
+            let feed_id = podcast_id
+                .parse::<u64>()
                 .map_err(|_| "Invalid podcast ID format".to_string())?;
 
-            let feed = podcast_index::get_podcast_by_id(feed_id).await
+            let feed = podcast_index::get_podcast_by_id(feed_id)
+                .await
                 .map_err(|e| e.to_string())?;
 
             // Create PodcastShow from PodcastFeed
@@ -4625,20 +4787,33 @@ fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
             let value = feed.value.as_ref().and_then(|v| {
                 let model = v.model.as_ref()?;
                 Some(crate::utils::podcast::ValueBlock {
-                    value_type: model.model_type.clone().unwrap_or_else(|| "lightning".to_string()),
-                    method: model.method.clone().unwrap_or_else(|| "keysend".to_string()),
+                    value_type: model
+                        .model_type
+                        .clone()
+                        .unwrap_or_else(|| "lightning".to_string()),
+                    method: model
+                        .method
+                        .clone()
+                        .unwrap_or_else(|| "keysend".to_string()),
                     suggested: model.suggested.as_ref().and_then(|s| s.parse().ok()),
-                    recipients: v.destinations.iter().filter_map(|d| {
-                        Some(crate::utils::podcast::ValueRecipient {
-                            name: d.name.clone(),
-                            custom_key: None,
-                            custom_value: None,
-                            recipient_type: d.dest_type.clone().unwrap_or_else(|| "node".to_string()),
-                            address: d.address.clone()?,
-                            split: d.split.unwrap_or(0),
-                            fee: None,
+                    recipients: v
+                        .destinations
+                        .iter()
+                        .filter_map(|d| {
+                            Some(crate::utils::podcast::ValueRecipient {
+                                name: d.name.clone(),
+                                custom_key: None,
+                                custom_value: None,
+                                recipient_type: d
+                                    .dest_type
+                                    .clone()
+                                    .unwrap_or_else(|| "node".to_string()),
+                                address: d.address.clone()?,
+                                split: d.split.unwrap_or(0),
+                                fee: None,
+                            })
                         })
-                    }).collect(),
+                        .collect(),
                 })
             });
 
@@ -4655,7 +4830,8 @@ fn NostrBlueRssPodcastShowRenderer(podcast_id: String) -> Element {
                     podcast_id: Some(feed.id),
                 },
                 value,
-                categories: feed.categories
+                categories: feed
+                    .categories
                     .as_ref()
                     .map(|c| c.values().cloned().collect())
                     .unwrap_or_default(),
@@ -4805,10 +4981,15 @@ fn render_recipe_from_event(event: &Event, naddr: &str) -> Element {
 
     // Build a_tag for the recipe using identifier
     // Guard against empty identifier - use event ID as fallback to ensure uniqueness
-    let identifier = metadata.identifier.clone()
+    let identifier = metadata
+        .identifier
+        .clone()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            log::debug!("Recipe event {} has empty identifier, using event ID as fallback", event.id);
+            log::debug!(
+                "Recipe event {} has empty identifier, using event ID as fallback",
+                event.id
+            );
             event.id.to_hex()
         });
     // Build a_tag (no encoding needed - use splitn(3, ':') when parsing to handle colons in identifier)
@@ -4911,7 +5092,10 @@ fn NostrBlueProfileRenderer(id: String) -> Element {
     }
 }
 
-fn render_profile_minicard(profile: Option<&profiles::Profile>, valid_pubkey: Option<&str>) -> Element {
+fn render_profile_minicard(
+    profile: Option<&profiles::Profile>,
+    valid_pubkey: Option<&str>,
+) -> Element {
     let display_name = profile
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| "Unknown".to_string());
@@ -5070,8 +5254,8 @@ fn render_wiki_card(event: &Event, identifier: &str) -> Element {
 
     if let Ok(article) = parse_wiki_article(event) {
         // Build proper bech32 naddr using nostr-sdk builder pattern
-        let coord = Coordinate::new(Kind::from(30818), event.pubkey)
-            .identifier(&article.identifier);
+        let coord =
+            Coordinate::new(Kind::from(30818), event.pubkey).identifier(&article.identifier);
         let naddr = coord.to_bech32().unwrap_or_else(|_| identifier.to_string());
         let a_tag = format!("30818:{}:{}", event.pubkey.to_hex(), article.identifier);
 
@@ -5336,7 +5520,7 @@ fn NostrBlueCommunityRenderer(id: String) -> Element {
     let is_valid = parts.len() == 3
         && parts[0].parse::<u32>().is_ok()  // kind is numeric
         && PublicKey::from_hex(parts[1]).is_ok()  // validate hex pubkey
-        && !parts[2].is_empty();  // identifier must be non-empty
+        && !parts[2].is_empty(); // identifier must be non-empty
 
     rsx! {
         div {
@@ -5406,7 +5590,9 @@ mod tests {
             ContentToken::Isan("0000-0000-401A-0000-7".to_string()),
             ContentToken::PodcastFeed("guid123".to_string()),
             ContentToken::PodcastEpisode("ep-guid".to_string()),
-            ContentToken::BitcoinTx("a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d".to_string()),
+            ContentToken::BitcoinTx(
+                "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d".to_string(),
+            ),
             ContentToken::BitcoinAddress("bc1qtest".to_string()),
             ContentToken::Geohash("u4pruydqqvj".to_string()),
             ContentToken::NostrBlueLiveStream("naddr1test".to_string()),
@@ -5507,8 +5693,10 @@ mod tests {
         // Test NostrBlueRssPodcastEpisode tokens (tuple variant)
         let feed_url = "https://example.com/feed.xml";
         let guid = "episode-123";
-        let token9 = ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
-        let token10 = ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
+        let token9 =
+            ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
+        let token10 =
+            ContentToken::NostrBlueRssPodcastEpisode(feed_url.to_string(), guid.to_string());
 
         let key9 = token_key(&token9, 0);
         let key10 = token_key(&token10, 1);

@@ -5,12 +5,12 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use crate::utils::nip69::{parse_p2p_order, OrderStatus, OrderType, Layer, Network, P2POrder};
+use crate::utils::nip69::{parse_p2p_order, Layer, Network, OrderStatus, OrderType, P2POrder};
 
 // ============================================================================
 // Cache sizes
@@ -172,7 +172,11 @@ pub fn filter_orders(orders: &[P2POrder], filters: &P2PFilterState) -> Vec<P2POr
             // Payment method filter (check if any payment method matches)
             if let Some(pm) = &filters.payment_method {
                 let pm_lower = pm.to_lowercase();
-                if !order.payment_methods.iter().any(|m| m.to_lowercase().contains(&pm_lower)) {
+                if !order
+                    .payment_methods
+                    .iter()
+                    .any(|m| m.to_lowercase().contains(&pm_lower))
+                {
                     return false;
                 }
             }
@@ -292,9 +296,7 @@ pub fn sort_orders(orders: &mut [P2POrder], sort_by: OrderSortBy) {
 
 /// Build filter for fetching all P2P orders (with optional limit)
 pub fn orders_filter(limit: usize) -> Filter {
-    Filter::new()
-        .kind(Kind::PeerToPeerOrder)
-        .limit(limit)
+    Filter::new().kind(Kind::PeerToPeerOrder).limit(limit)
 }
 
 /// Build filter for fetching ALL P2P orders without limit
@@ -367,7 +369,8 @@ pub async fn fetch_orders(limit: usize) -> std::result::Result<Vec<P2POrder>, St
     *LOADING_ORDERS.write() = true;
 
     let filter = orders_filter(limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
 
     *LOADING_ORDERS.write() = false;
 
@@ -391,7 +394,8 @@ pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
 
     let filter = orders_filter_all();
     // Longer timeout for full fetch
-    let result = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(30)).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(30)).await;
 
     *LOADING_ORDERS.write() = false;
 
@@ -410,13 +414,18 @@ pub async fn fetch_all_orders() -> std::result::Result<Vec<P2POrder>, String> {
 }
 
 /// Fetch orders by author
-pub async fn fetch_orders_by_author(pubkey: &str, limit: usize) -> std::result::Result<Vec<P2POrder>, String> {
+pub async fn fetch_orders_by_author(
+    pubkey: &str,
+    limit: usize,
+) -> std::result::Result<Vec<P2POrder>, String> {
     let pk = PublicKey::from_hex(pubkey)
         .or_else(|_| PublicKey::from_bech32(pubkey))
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = orders_filter_by_author(pk, limit);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     cache_order_events(&events);
     let orders: Vec<P2POrder> = events
@@ -434,15 +443,16 @@ pub async fn fetch_order_by_naddr(naddr: &str) -> std::result::Result<Option<P2P
     }
 
     // Parse naddr
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let coordinate = nip19.coordinate;
     let pk = coordinate.public_key;
     let identifier = coordinate.identifier.clone();
 
     let filter = order_filter_by_coordinate(pk, &identifier);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     if let Some(event) = events.first() {
         if let Ok(order) = parse_p2p_order(event) {

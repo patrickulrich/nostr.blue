@@ -1,9 +1,9 @@
 //! Shop Product Edit - Edit an existing product listing (NIP-99 Kind 30402)
 
-use dioxus::prelude::*;
 use crate::routes::Route;
+use crate::stores::shop_store::{fetch_product_by_naddr, update_product, ProductFormData};
 use crate::utils::nip99::Product;
-use crate::stores::shop_store::{ProductFormData, update_product, fetch_product_by_naddr};
+use dioxus::prelude::*;
 
 /// Product edit form
 #[component]

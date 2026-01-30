@@ -453,14 +453,10 @@ pub async fn create_badge_definition(
         if let Some(dims) = thumb_dimensions {
             thumb_tag.push(dims.to_string());
         }
-        tags.push(Tag::custom(
-            TagKind::Custom("thumb".into()),
-            thumb_tag,
-        ));
+        tags.push(Tag::custom(TagKind::Custom("thumb".into()), thumb_tag));
     }
 
-    let event = EventBuilder::new(Kind::Custom(KIND_BADGE_DEFINITION), "")
-        .tags(tags);
+    let event = EventBuilder::new(Kind::Custom(KIND_BADGE_DEFINITION), "").tags(tags);
 
     let output = client
         .send_event_builder(event)
@@ -503,8 +499,7 @@ pub async fn award_badge(
         tags.push(Tag::public_key(pk));
     }
 
-    let event = EventBuilder::new(Kind::Custom(KIND_BADGE_AWARD), "")
-        .tags(tags);
+    let event = EventBuilder::new(Kind::Custom(KIND_BADGE_AWARD), "").tags(tags);
 
     let output = client
         .send_event_builder(event)
@@ -529,7 +524,9 @@ pub async fn accept_badge(
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Fetch existing profile badges
-    let existing = fetch_profile_badges(&pubkey.to_hex()).await.unwrap_or_default();
+    let existing = fetch_profile_badges(&pubkey.to_hex())
+        .await
+        .unwrap_or_default();
 
     // Check if already accepted
     if existing
@@ -564,8 +561,7 @@ pub async fn accept_badge(
         vec![award_event_id.to_string()],
     ));
 
-    let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "")
-        .tags(tags);
+    let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
 
     let output = client
         .send_event_builder(event)
@@ -587,7 +583,9 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Fetch existing profile badges
-    let existing = fetch_profile_badges(&pubkey.to_hex()).await.unwrap_or_default();
+    let existing = fetch_profile_badges(&pubkey.to_hex())
+        .await
+        .unwrap_or_default();
 
     // Filter out the badge to reject
     let remaining: Vec<_> = existing
@@ -609,8 +607,7 @@ pub async fn reject_badge(definition_coordinate: &str) -> Result<String, String>
         ));
     }
 
-    let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "")
-        .tags(tags);
+    let event = EventBuilder::new(Kind::Custom(KIND_PROFILE_BADGES), "").tags(tags);
 
     let output = client
         .send_event_builder(event)

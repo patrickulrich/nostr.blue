@@ -1,5 +1,5 @@
+use crate::stores::{auth_store, cashu, nostr_client};
 use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client, cashu};
 
 #[component]
 pub fn CashuWallet() -> Element {
@@ -63,21 +63,27 @@ pub fn CashuWallet() -> Element {
 
         // Terms already checked - if accepted, init wallet
         if terms == Some(true)
-            && matches!(*cashu::WALLET_STATUS.read(), cashu::WalletStatus::Uninitialized) {
-                // Mark init as started to prevent duplicate spawns
-                init_started.set(true);
-                spawn(async move {
-                    if let Err(e) = cashu::init_wallet().await {
-                        log::error!("Failed to initialize wallet: {}", e);
-                    }
-                });
-            }
+            && matches!(
+                *cashu::WALLET_STATUS.read(),
+                cashu::WalletStatus::Uninitialized
+            )
+        {
+            // Mark init as started to prevent duplicate spawns
+            init_started.set(true);
+            spawn(async move {
+                if let Err(e) = cashu::init_wallet().await {
+                    log::error!("Failed to initialize wallet: {}", e);
+                }
+            });
+        }
     });
 
     // Check if we should show setup wizard
-    let should_show_wizard = wallet_state.as_ref()
+    let should_show_wizard = wallet_state
+        .as_ref()
         .map(|w| !w.initialized)
-        .unwrap_or(false) || *show_setup_wizard.read();
+        .unwrap_or(false)
+        || *show_setup_wizard.read();
 
     // Cache client_initialized once for use throughout the render
     let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();

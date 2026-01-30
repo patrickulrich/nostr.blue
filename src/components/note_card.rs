@@ -3,19 +3,27 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, PublicKey, Filter, Kind, ToBech32, Timestamp};
-use nostr_sdk::nips::nip19::Nip19Event;
 use nostr::nips::nip48::Protocol;
+use nostr_sdk::nips::nip19::Nip19Event;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind, PublicKey, Timestamp, ToBech32};
 
-use crate::routes::Route;
-use crate::stores::nostr_client::{self, HAS_SIGNER, get_client, publish_repost, delete_repost};
+use crate::components::icons::{
+    BlueskyIcon, BookmarkIcon, ExternalLinkIcon, GlobeIcon, MastodonIcon, MessageCircleIcon,
+    Repeat2Icon, RssIcon, ShareIcon, ZapIcon,
+};
+use crate::components::{
+    ConfirmModal, ExternalContentList, NoteMenu, ReactionButton, ReplyComposer, RichContent,
+    ZapModal,
+};
 use crate::hooks::use_reaction;
-use crate::stores::bookmarks;
-use crate::stores::signer::SIGNER_INFO;
+use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
-use crate::components::{RichContent, ReplyComposer, ZapModal, NoteMenu, ReactionButton, ConfirmModal, ExternalContentList};
-use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon, ShareIcon, MastodonIcon, BlueskyIcon, RssIcon, GlobeIcon, ExternalLinkIcon};
-use crate::utils::{format_sats_compact, nip73, nip48, is_valid_http_url, format_relative_time_or, truncate_pubkey};
+use crate::stores::bookmarks;
+use crate::stores::nostr_client::{self, delete_repost, get_client, publish_repost, HAS_SIGNER};
+use crate::stores::signer::SIGNER_INFO;
+use crate::utils::{
+    format_relative_time_or, format_sats_compact, is_valid_http_url, nip48, nip73, truncate_pubkey,
+};
 
 #[component]
 pub fn NoteCard(
@@ -90,7 +98,8 @@ pub fn NoteCard(
                 reply > 0 || repost > 0 || zap > 0
             };
 
-            let new_has_data = counts.replies > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
+            let new_has_data =
+                counts.replies > 0 || counts.reposts > 0 || counts.zap_amount_sats > 0;
 
             // Only update if: new data exists, OR no current data exists
             if new_has_data || !current_has_data {
@@ -120,17 +129,23 @@ pub fn NoteCard(
             // Note: Reactions are handled by use_reaction hook
             let combined_filter = Filter::new()
                 .kinds(vec![
-                    Kind::TextNote,      // kind 1 - replies
-                    Kind::Repost,        // kind 6 - reposts
-                    Kind::ZapReceipt,    // kind 9735 - zaps
+                    Kind::TextNote,   // kind 1 - replies
+                    Kind::Repost,     // kind 6 - reposts
+                    Kind::ZapReceipt, // kind 9735 - zaps
                 ])
                 .event(event_id_parsed)
                 .limit(2000);
 
             // Single fetch for interaction types (excluding reactions - handled by hook)
-            if let Ok(events) = client.fetch_events(combined_filter, Duration::from_secs(5)).await {
+            if let Ok(events) = client
+                .fetch_events(combined_filter, Duration::from_secs(5))
+                .await
+            {
                 // Get current user's pubkey to check if they've already reacted
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
 
                 // Partition events by kind
                 let mut replies = 0;
@@ -152,7 +167,7 @@ pub fn NoteCard(
                                     user_repost_event_id = Some(event.id.to_hex());
                                 }
                             }
-                        },
+                        }
                         Kind::ZapReceipt => {
                             // Check if this zap is from the current user
                             // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
@@ -175,9 +190,14 @@ pub fn NoteCard(
                                         let slice = tag.as_slice();
                                         if slice.first()?.as_str() == "description" {
                                             let zap_request_json = slice.get(1)?.as_str();
-                                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                                            if let Ok(zap_request) =
+                                                serde_json::from_str::<serde_json::Value>(
+                                                    zap_request_json,
+                                                )
+                                            {
                                                 // The pubkey field in the zap request is the sender
-                                                return zap_request.get("pubkey")
+                                                return zap_request
+                                                    .get("pubkey")
                                                     .and_then(|p| p.as_str())
                                                     .map(|s| s.to_string());
                                             }
@@ -199,15 +219,25 @@ pub fn NoteCard(
                                 if slice.first()?.as_str() == "description" {
                                     // Parse the JSON zap request
                                     let zap_request_json = slice.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                                    if let Ok(zap_request) =
+                                        serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                    {
                                         // Find the amount tag in the zap request
-                                        if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
+                                        if let Some(tags) =
+                                            zap_request.get("tags").and_then(|t| t.as_array())
+                                        {
                                             for tag_array in tags {
                                                 if let Some(tag_vals) = tag_array.as_array() {
-                                                    if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                        if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
+                                                    {
+                                                        if let Some(amount_str) =
+                                                            tag_vals.get(1).and_then(|v| v.as_str())
+                                                        {
                                                             // Amount is in millisats, convert to sats
-                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                            if let Ok(millisats) =
+                                                                amount_str.parse::<u64>()
+                                                            {
                                                                 return Some(millisats / 1000);
                                                             }
                                                         }
@@ -350,7 +380,9 @@ pub fn NoteCard(
             let reposter_pubkey_str = reposter_pubkey.to_string();
             spawn(async move {
                 // Check PROFILE_CACHE first
-                if let Some(cached_profile) = crate::stores::profiles::get_cached_profile(&reposter_pubkey_str) {
+                if let Some(cached_profile) =
+                    crate::stores::profiles::get_cached_profile(&reposter_pubkey_str)
+                {
                     let mut metadata = nostr_sdk::Metadata::new();
                     if let Some(name) = &cached_profile.name {
                         metadata = metadata.name(name);
@@ -397,61 +429,68 @@ pub fn NoteCard(
     let event_id_mute_check = event_id.clone();
     let author_pubkey_block_check = author_pubkey.clone();
 
-    use_effect(use_reactive!(
-        |(cached_muted_posts, cached_blocked_users, event_id_mute_check, author_pubkey_block_check)| {
-            let event_id = event_id_mute_check.clone();
-            let author_pubkey = author_pubkey_block_check.clone();
+    use_effect(use_reactive!(|(
+        cached_muted_posts,
+        cached_blocked_users,
+        event_id_mute_check,
+        author_pubkey_block_check,
+    )| {
+        let event_id = event_id_mute_check.clone();
+        let author_pubkey = author_pubkey_block_check.clone();
 
-            // Use cached data if available (synchronous O(1) check)
-            if let Some(ref muted_set) = cached_muted_posts {
-                if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
-                    is_muted.set(muted);
-                }
-            } else {
-                // Reset when cache is None (e.g., logout or not yet loaded)
-                is_muted.set(false);
+        // Use cached data if available (synchronous O(1) check)
+        if let Some(ref muted_set) = cached_muted_posts {
+            if let Ok(muted) = nostr_client::is_post_muted_cached(&event_id, muted_set) {
+                is_muted.set(muted);
             }
-
-            if let Some(ref blocked_set) = cached_blocked_users {
-                if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
-                    is_author_blocked.set(blocked);
-                }
-            } else {
-                // Reset when cache is None
-                is_author_blocked.set(false);
-            }
-
-            // Fall back to async fetch only if no cached data provided
-            if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
-                let need_muted = cached_muted_posts.is_none();
-                let need_blocked = cached_blocked_users.is_none();
-                spawn(async move {
-                    if need_muted {
-                        match nostr_client::is_post_muted(event_id.clone()).await {
-                            Ok(muted) => is_muted.set(muted),
-                            Err(_) => is_muted.set(false), // Reset on error
-                        }
-                    }
-                    if need_blocked {
-                        match nostr_client::is_user_blocked(author_pubkey).await {
-                            Ok(blocked) => is_author_blocked.set(blocked),
-                            Err(_) => is_author_blocked.set(false), // Reset on error
-                        }
-                    }
-                });
-            }
+        } else {
+            // Reset when cache is None (e.g., logout or not yet loaded)
+            is_muted.set(false);
         }
-    ));
+
+        if let Some(ref blocked_set) = cached_blocked_users {
+            if let Ok(blocked) = nostr_client::is_user_blocked_cached(&author_pubkey, blocked_set) {
+                is_author_blocked.set(blocked);
+            }
+        } else {
+            // Reset when cache is None
+            is_author_blocked.set(false);
+        }
+
+        // Fall back to async fetch only if no cached data provided
+        if cached_muted_posts.is_none() || cached_blocked_users.is_none() {
+            let need_muted = cached_muted_posts.is_none();
+            let need_blocked = cached_blocked_users.is_none();
+            spawn(async move {
+                if need_muted {
+                    match nostr_client::is_post_muted(event_id.clone()).await {
+                        Ok(muted) => is_muted.set(muted),
+                        Err(_) => is_muted.set(false), // Reset on error
+                    }
+                }
+                if need_blocked {
+                    match nostr_client::is_user_blocked(author_pubkey).await {
+                        Ok(blocked) => is_author_blocked.set(blocked),
+                        Err(_) => is_author_blocked.set(false), // Reset on error
+                    }
+                }
+            });
+        }
+    }));
 
     // Format timestamp using shared utility
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
 
     // Get display name and picture from metadata or fallback
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let username = author_metadata.read().as_ref()
+    let username = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.name.clone())
         .unwrap_or_else(|| {
             // Truncated npub
@@ -459,13 +498,16 @@ pub fn NoteCard(
                 match pk.to_bech32() {
                     Ok(npub) => {
                         if npub.len() > 18 {
-                            format!("{}...{}", &npub[..12], &npub[npub.len()-6..])
+                            format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])
                         } else {
                             npub
                         }
                     }
                     Err(e) => {
-                        log::warn!("Failed to encode pubkey to bech32: {}, using hex fallback", e);
+                        log::warn!(
+                            "Failed to encode pubkey to bech32: {}, using hex fallback",
+                            e
+                        );
                         // Fallback to hex truncation
                         truncate_pubkey(&author_pubkey)
                     }
@@ -475,13 +517,17 @@ pub fn NoteCard(
             }
         });
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     // Get reposter info if this is a repost
     let reposter_display_info = repost_info.map(|(reposter_pubkey, repost_timestamp)| {
         let reposter_pubkey_str = reposter_pubkey.to_string();
-        let reposter_display = reposter_metadata.read().as_ref()
+        let reposter_display = reposter_metadata
+            .read()
+            .as_ref()
             .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
             .unwrap_or_else(|| truncate_pubkey(&reposter_pubkey_str));
         let repost_time = format_relative_time_or(repost_timestamp.as_secs(), "just now");

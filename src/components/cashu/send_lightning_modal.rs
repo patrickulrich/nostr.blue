@@ -1,16 +1,24 @@
-use dioxus::prelude::*;
-use dioxus_core::use_drop;
-use futures::future::join_all;
 use crate::stores::cashu::{
-    get_mints, create_melt_quote, melt_tokens,
-    MeltProgress, MeltQuoteInfo, MELT_PROGRESS,
-    // MPP types and functions
-    MppQuoteInfo, get_balances_per_mint, mint_supports_mpp,
-    calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt,
+    calculate_mpp_split,
+    create_melt_quote,
+    create_mpp_melt_quotes,
+    execute_mpp_melt,
+    get_balances_per_mint,
+    get_mints,
+    melt_tokens,
+    mint_supports_mpp,
     ws as cashu_ws,
+    MeltProgress,
+    MeltQuoteInfo,
+    // MPP types and functions
+    MppQuoteInfo,
+    MELT_PROGRESS,
 };
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::shorten_url;
+use dioxus::prelude::*;
+use dioxus_core::use_drop;
+use futures::future::join_all;
 
 /// Payment mode for Lightning send
 #[derive(Clone, Debug, PartialEq)]
@@ -22,9 +30,7 @@ enum PaymentMode {
 }
 
 #[component]
-pub fn CashuSendLightningModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
     let mut invoice = use_signal(String::new);
     let mints = get_mints();
     let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
@@ -56,11 +62,15 @@ pub fn CashuSendLightningModal(
     use_effect(move || {
         spawn(async move {
             if let Ok(balances) = get_balances_per_mint().await {
-                let all_balances: Vec<_> = balances.iter().map(|b| (b.mint_url.clone(), b.balance)).collect();
+                let all_balances: Vec<_> = balances
+                    .iter()
+                    .map(|b| (b.mint_url.clone(), b.balance))
+                    .collect();
                 mint_balances.set(all_balances.clone());
 
                 // Check which mints support MPP in parallel (now faster with caching)
-                let mpp_futures: Vec<_> = all_balances.iter()
+                let mpp_futures: Vec<_> = all_balances
+                    .iter()
                     .map(|(mint_url, balance)| {
                         let url = mint_url.clone();
                         let bal = *balance;
@@ -102,7 +112,9 @@ pub fn CashuSendLightningModal(
     // Get balance for selected mint
     let selected_mint_balance = {
         let mint = selected_mint.read().clone();
-        mint_balances.read().iter()
+        mint_balances
+            .read()
+            .iter()
             .find(|(url, _)| *url == mint)
             .map(|(_, b)| *b)
             .unwrap_or(0)
@@ -118,7 +130,9 @@ pub fn CashuSendLightningModal(
             return;
         }
 
-        if !invoice_str.to_lowercase().starts_with("lnbc") && !invoice_str.to_lowercase().starts_with("lntb") {
+        if !invoice_str.to_lowercase().starts_with("lnbc")
+            && !invoice_str.to_lowercase().starts_with("lntb")
+        {
             error_message.set(Some("Invalid lightning invoice format".to_string()));
             return;
         }
@@ -200,13 +214,19 @@ pub fn CashuSendLightningModal(
                             mint_for_ws,
                             quote_id_for_ws,
                             cashu_ws::SubscriptionKind::Bolt11MeltQuote,
-                        ).await {
+                        )
+                        .await
+                        {
                             // Check if still mounted before updating signals
-                            if !*mounted.peek() { return; }
+                            if !*mounted.peek() {
+                                return;
+                            }
                             melt_status.set(Some("Processing payment...".to_string()));
                             while let Some(status) = rx.recv().await {
                                 // Check if still mounted before each update
-                                if !*mounted.peek() { break; }
+                                if !*mounted.peek() {
+                                    break;
+                                }
                                 match status {
                                     cashu_ws::QuoteStatus::Pending => {
                                         melt_status.set(Some("Payment pending...".to_string()));
@@ -295,9 +315,17 @@ pub fn CashuSendLightningModal(
     // Auto-calculate MPP split (can be used for manual "Auto-split" button in future)
     // Only uses MPP-supporting mints
     let _on_auto_split = move |amount: u64| {
-        let mpp_mints: Vec<String> = mpp_mint_balances.read().iter().map(|(url, _)| url.clone()).collect();
+        let mpp_mints: Vec<String> = mpp_mint_balances
+            .read()
+            .iter()
+            .map(|(url, _)| url.clone())
+            .collect();
         spawn(async move {
-            let include_mints = if mpp_mints.is_empty() { None } else { Some(mpp_mints) };
+            let include_mints = if mpp_mints.is_empty() {
+                None
+            } else {
+                Some(mpp_mints)
+            };
             match calculate_mpp_split(amount, include_mints).await {
                 Ok(allocations) => {
                     mpp_allocations.set(allocations);
@@ -662,7 +690,8 @@ pub fn CashuSendLightningModal(
 
 /// Get balance for a specific mint from balances list
 fn get_mint_balance(balances: &[(String, u64)], mint_url: &str) -> u64 {
-    balances.iter()
+    balances
+        .iter()
         .find(|(url, _)| url == mint_url)
         .map(|(_, b)| *b)
         .unwrap_or(0)

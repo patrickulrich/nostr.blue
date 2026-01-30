@@ -2,11 +2,11 @@
 //!
 //! Displays a feed of highlights with Following/Global toggle.
 
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client};
-use crate::components::{HighlightCard, HighlightCardSkeleton, ClientInitializing};
+use crate::components::{ClientInitializing, HighlightCard, HighlightCardSkeleton};
 use crate::hooks::use_infinite_scroll;
+use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip84::{self, Highlight};
+use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -34,7 +34,7 @@ pub fn Highlights() -> Element {
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut refresh_trigger = use_signal(|| 0);
-    let mut feed_type = use_signal(|| FeedType::Following);  // Default to Following
+    let mut feed_type = use_signal(|| FeedType::Following); // Default to Following
     let mut show_dropdown = use_signal(|| false);
 
     // Pagination state for infinite scroll
@@ -89,7 +89,7 @@ pub fn Highlights() -> Element {
                 Ok((new_highlights, did_fallback)) => {
                     // Update feed_type if fallback occurred
                     if did_fallback {
-                        fallback_in_progress.set(true);  // Signal to skip next effect run
+                        fallback_in_progress.set(true); // Signal to skip next effect run
                         feed_type.set(FeedType::Global);
                     }
                     // Track oldest timestamp for pagination (use saturating_sub(1) for exclusive boundary,
@@ -136,7 +136,7 @@ pub fn Highlights() -> Element {
                         Ok((highlights, did_fallback)) => {
                             if did_fallback {
                                 log::info!("Pagination fallback detected, returning empty to preserve feed type");
-                                Ok(Vec::new())  // Triggers has_more.set(false)
+                                Ok(Vec::new()) // Triggers has_more.set(false)
                             } else {
                                 Ok(highlights)
                             }
@@ -156,11 +156,8 @@ pub fn Highlights() -> Element {
             match result {
                 Ok(new_highlights) => {
                     // Build existing IDs set FIRST for deduplication
-                    let existing_ids: std::collections::HashSet<_> = highlights
-                        .read()
-                        .iter()
-                        .map(|h| h.event.id)
-                        .collect();
+                    let existing_ids: std::collections::HashSet<_> =
+                        highlights.read().iter().map(|h| h.event.id).collect();
 
                     // Filter unique items BEFORE setting has_more
                     let unique: Vec<_> = new_highlights
@@ -185,7 +182,7 @@ pub fn Highlights() -> Element {
                 Err(e) => {
                     log::error!("Failed to load more highlights: {}", e);
                     loading.set(false);
-                    has_more.set(false);  // Stop infinite retry loop on error
+                    has_more.set(false); // Stop infinite retry loop on error
                 }
             }
         });
@@ -351,7 +348,10 @@ async fn load_following_highlights(until: Option<u64>) -> Result<(Vec<Highlight>
     let contacts = match nostr_client::fetch_contacts(pubkey_hex.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let highlights = load_global_highlights(until).await?;
             return Ok((highlights, true));
         }

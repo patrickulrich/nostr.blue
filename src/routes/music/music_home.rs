@@ -1,15 +1,12 @@
+use crate::components::{DiscoveryTab, DiscoveryTabs, UnifiedTrackCard, UnifiedTrackCardSkeleton};
+use crate::services::podcast_index;
+use crate::services::wavlake::WavlakeAPI;
+use crate::stores::auth_store;
+use crate::stores::music_player::MusicTrack;
+use crate::stores::nostr_client;
+use crate::stores::nostr_music::{self, MusicFeedFilter};
 use dioxus::prelude::*;
 use std::sync::Arc;
-use crate::services::wavlake::WavlakeAPI;
-use crate::services::podcast_index;
-use crate::stores::music_player::MusicTrack;
-use crate::stores::nostr_music::{self, MusicFeedFilter};
-use crate::stores::auth_store;
-use crate::stores::nostr_client;
-use crate::components::{
-    DiscoveryTabs, DiscoveryTab,
-    UnifiedTrackCard, UnifiedTrackCardSkeleton,
-};
 
 #[component]
 pub fn MusicHome() -> Element {
@@ -34,14 +31,22 @@ pub fn MusicHome() -> Element {
     let mut rss_error = use_signal(|| None::<String>);
 
     let genres = [
-        "all", "Rock", "Pop", "Hip-Hop", "Electronic", "Folk", "Jazz",
-        "Classical", "Blues", "Country", "Reggae", "Punk", "Metal"
+        "all",
+        "Rock",
+        "Pop",
+        "Hip-Hop",
+        "Electronic",
+        "Folk",
+        "Jazz",
+        "Classical",
+        "Blues",
+        "Country",
+        "Reggae",
+        "Punk",
+        "Metal",
     ];
 
-    let time_periods = [(1, "24h"),
-        (7, "7d"),
-        (30, "30d"),
-        (90, "90d")];
+    let time_periods = [(1, "24h"), (7, "7d"), (30, "30d"), (90, "90d")];
 
     // Fetch tracks when filters change
     use_effect(move || {
@@ -67,12 +72,17 @@ pub fn MusicHome() -> Element {
             // For Following tab, always fetch nostr tracks from people the user follows
             // Also check if nostr client is initialized
             let nostr_client_ready = crate::stores::nostr_client::get_client().is_some();
-            let should_fetch_nostr = nostr_client_ready && (platform == "all" || platform == "nostr" || tab == DiscoveryTab::Following);
+            let should_fetch_nostr = nostr_client_ready
+                && (platform == "all" || platform == "nostr" || tab == DiscoveryTab::Following);
 
             // Fetch Wavlake tracks
             if should_fetch_wavlake {
                 let api = WavlakeAPI::new();
-                let genre_filter = if genre == "all" { None } else { Some(genre.as_str()) };
+                let genre_filter = if genre == "all" {
+                    None
+                } else {
+                    Some(genre.as_str())
+                };
 
                 // Sort by sats for trending, release_date for new
                 let sort = match tab {
@@ -81,7 +91,10 @@ pub fn MusicHome() -> Element {
                     _ => "sats",
                 };
 
-                match api.get_rankings(sort, Some(days), None, None, genre_filter, Some(30)).await {
+                match api
+                    .get_rankings(sort, Some(days), None, None, genre_filter, Some(30))
+                    .await
+                {
                     Ok(wavlake_tracks) => {
                         for wt in wavlake_tracks {
                             all_tracks.push(wt.into());
@@ -102,15 +115,20 @@ pub fn MusicHome() -> Element {
                     MusicFeedFilter::All
                 };
                 // Apply same genre filter as Wavlake
-                let nostr_genre = if genre == "all" { None } else { Some(genre.as_str()) };
+                let nostr_genre = if genre == "all" {
+                    None
+                } else {
+                    Some(genre.as_str())
+                };
                 match nostr_music::fetch_nostr_tracks(nostr_filter, 30, nostr_genre).await {
                     Ok(nostr_tracks) => {
                         // Get zap totals for ranking (filtered by selected time period)
-                        let coords: Vec<String> = nostr_tracks.iter()
-                            .map(|t| t.coordinate.clone())
-                            .collect();
+                        let coords: Vec<String> =
+                            nostr_tracks.iter().map(|t| t.coordinate.clone()).collect();
 
-                        let zap_totals = nostr_music::fetch_track_zap_totals(coords, Some(days)).await.unwrap_or_default();
+                        let zap_totals = nostr_music::fetch_track_zap_totals(coords, Some(days))
+                            .await
+                            .unwrap_or_default();
 
                         for nt in nostr_tracks {
                             let mut track: MusicTrack = nt.clone().into();
@@ -128,21 +146,18 @@ pub fn MusicHome() -> Element {
             match tab {
                 DiscoveryTab::Trending => {
                     // Sort by msat_total descending (hottest first)
-                    all_tracks.sort_by(|a, b| {
-                        b.msat_total.unwrap_or(0).cmp(&a.msat_total.unwrap_or(0))
-                    });
+                    all_tracks
+                        .sort_by(|a, b| b.msat_total.unwrap_or(0).cmp(&a.msat_total.unwrap_or(0)));
                 }
                 DiscoveryTab::New => {
                     // Sort by created_at descending (newest first)
-                    all_tracks.sort_by(|a, b| {
-                        b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0))
-                    });
+                    all_tracks
+                        .sort_by(|a, b| b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0)));
                 }
                 DiscoveryTab::Following => {
                     // Already filtered by Following in fetch, sort by recency
-                    all_tracks.sort_by(|a, b| {
-                        b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0))
-                    });
+                    all_tracks
+                        .sort_by(|a, b| b.created_at.unwrap_or(0).cmp(&a.created_at.unwrap_or(0)));
                 }
                 DiscoveryTab::Playlists | DiscoveryTab::Rss => {
                     // Handled separately
@@ -179,24 +194,34 @@ pub fn MusicHome() -> Element {
             match podcast_index::get_music_albums(Some(20)).await {
                 Ok(albums) => {
                     // Fetch tracks from each album concurrently (limit to 15 albums, 5 tracks each)
-                    let fetch_futures: Vec<_> = albums.iter().take(15).map(|album| {
-                        let album = album.clone();
-                        async move {
-                            match podcast_index::get_episodes_by_feed_id(album.id, Some(5)).await {
-                                Ok(episodes) => {
-                                    let tracks: Vec<MusicTrack> = episodes
-                                        .iter()
-                                        .map(|ep| MusicTrack::from_rss_music_track(ep, &album))
-                                        .collect();
-                                    Some(tracks)
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to fetch tracks for album {}: {}", album.id, e);
-                                    None
+                    let fetch_futures: Vec<_> = albums
+                        .iter()
+                        .take(15)
+                        .map(|album| {
+                            let album = album.clone();
+                            async move {
+                                match podcast_index::get_episodes_by_feed_id(album.id, Some(5))
+                                    .await
+                                {
+                                    Ok(episodes) => {
+                                        let tracks: Vec<MusicTrack> = episodes
+                                            .iter()
+                                            .map(|ep| MusicTrack::from_rss_music_track(ep, &album))
+                                            .collect();
+                                        Some(tracks)
+                                    }
+                                    Err(e) => {
+                                        log::warn!(
+                                            "Failed to fetch tracks for album {}: {}",
+                                            album.id,
+                                            e
+                                        );
+                                        None
+                                    }
                                 }
                             }
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     // Execute all fetches concurrently
                     let results = futures::future::join_all(fetch_futures).await;

@@ -2,9 +2,9 @@
 //!
 //! Displays pending and received nutzaps with redemption controls.
 
-use dioxus::prelude::*;
 use crate::stores::cashu;
-use crate::utils::{shorten_url, format::truncate_pubkey};
+use crate::utils::{format::truncate_pubkey, shorten_url};
+use dioxus::prelude::*;
 
 #[component]
 pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {

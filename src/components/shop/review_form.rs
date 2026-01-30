@@ -1,7 +1,7 @@
 //! ReviewForm component - form for leaving product reviews
 
-use dioxus::prelude::*;
 use crate::stores::shop_store::publish_review;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ReviewFormProps {

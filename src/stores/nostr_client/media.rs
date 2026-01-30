@@ -7,7 +7,7 @@ use nostr_sdk::prelude::*;
 
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
-use super::types::{PublishResult, detect_mime_type};
+use super::types::{detect_mime_type, PublishResult};
 
 // =============================================================================
 // Helper Functions
@@ -16,10 +16,19 @@ use super::types::{PublishResult, detect_mime_type};
 /// Extract root event information from a reply event (NIP-10/NIP-22)
 /// Returns (root_event_id, root_pubkey, root_relay_url)
 /// Note: Kind is not available from standard e-tags, so caller should use parent's kind as fallback
-fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<PublicKey>, Option<RelayUrl>) {
+fn extract_root_from_event(
+    event: &nostr::Event,
+) -> (Option<String>, Option<PublicKey>, Option<RelayUrl>) {
     // Try modern NIP-10/NIP-22 marker-based tag (marker == Root)
     if let Some(result) = event.tags.iter().find_map(|tag| {
-        if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
+        if let Some(nostr::TagStandard::Event {
+            event_id,
+            relay_url,
+            marker,
+            public_key,
+            ..
+        }) = tag.as_standardized()
+        {
             if marker == &Some(nostr_sdk::nips::nip10::Marker::Root) {
                 return Some((Some(event_id.to_hex()), *public_key, relay_url.clone()));
             }
@@ -32,7 +41,14 @@ fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<Publ
     // Fallback: Standardized "e" tag with marker == None (markerless)
     // NIP-10: If no markers are used, first e-tag is root, last is reply
     if let Some(result) = event.tags.iter().find_map(|tag| {
-        if let Some(nostr::TagStandard::Event { event_id, relay_url, marker, public_key, .. }) = tag.as_standardized() {
+        if let Some(nostr::TagStandard::Event {
+            event_id,
+            relay_url,
+            marker,
+            public_key,
+            ..
+        }) = tag.as_standardized()
+        {
             if marker.is_none() {
                 // First markerless e-tag is treated as root
                 return Some((Some(event_id.to_hex()), *public_key, relay_url.clone()));
@@ -45,11 +61,14 @@ fn extract_root_from_event(event: &nostr::Event) -> (Option<String>, Option<Publ
 
     // Fallback: Legacy uppercase E/P positional convention
     // Use as_slice() instead of clone().to_vec() to avoid unnecessary allocations
-    let uppercase_e_tags: Vec<_> = event.tags.iter()
+    let uppercase_e_tags: Vec<_> = event
+        .tags
+        .iter()
         .filter_map(|tag| {
             let tag_slice = tag.as_slice();
             if tag_slice.len() >= 2 && tag_slice[0] == "E" {
-                let relay = tag_slice.get(2)
+                let relay = tag_slice
+                    .get(2)
                     .filter(|r| !r.is_empty())
                     .and_then(|r| RelayUrl::parse(r).ok());
                 Some((tag_slice[1].to_string(), relay))
@@ -145,9 +164,7 @@ pub async fn publish_picture_tracked(
 
     // Build tags
     use nostr::Tag;
-    let mut tags = vec![
-        Tag::title(title.clone()),
-    ];
+    let mut tags = vec![Tag::title(title.clone())];
 
     // Add imeta tags for each image
     // Detect MIME type from extension or omit if unknown
@@ -157,8 +174,7 @@ pub async fn publish_picture_tracked(
             return Err("Image URLs cannot be empty".to_string());
         }
         // nostr-sdk URL validation pattern: validate with Url::parse
-        nostr::Url::parse(url)
-            .map_err(|e| format!("Invalid image URL '{}': {}", url, e))?;
+        nostr::Url::parse(url).map_err(|e| format!("Invalid image URL '{}': {}", url, e))?;
 
         let mut imeta_fields = vec![format!("url {}", url)];
 
@@ -169,7 +185,7 @@ pub async fn publish_picture_tracked(
 
         tags.push(Tag::custom(
             nostr::TagKind::Custom("imeta".into()),
-            imeta_fields
+            imeta_fields,
         ));
     }
 
@@ -177,7 +193,7 @@ pub async fn publish_picture_tracked(
     if !location.is_empty() {
         tags.push(Tag::custom(
             nostr::TagKind::Custom("location".into()),
-            vec![location]
+            vec![location],
         ));
     }
 
@@ -187,11 +203,12 @@ pub async fn publish_picture_tracked(
     }
 
     // Build the event (Kind 20 - Picture)
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption)
-        .tags(tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(20), caption).tags(tags);
 
     // Publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish picture: {}", e))?;
 
     let result = PublishResult::from_output(output);
@@ -253,14 +270,12 @@ pub async fn publish_video_tracked(
         return Err("Video URL is required".to_string());
     }
     // nostr-sdk URL validation pattern: validate with Url::parse
-    nostr::Url::parse(video_url)
-        .map_err(|e| format!("Invalid video URL: {}", e))?;
+    nostr::Url::parse(video_url).map_err(|e| format!("Invalid video URL: {}", e))?;
 
     // Also validate optional thumbnail URL if provided
     let thumbnail_url = thumbnail_url.trim();
     if !thumbnail_url.is_empty() {
-        nostr::Url::parse(thumbnail_url)
-            .map_err(|e| format!("Invalid thumbnail URL: {}", e))?;
+        nostr::Url::parse(thumbnail_url).map_err(|e| format!("Invalid thumbnail URL: {}", e))?;
     }
 
     if title.trim().is_empty() {
@@ -272,14 +287,10 @@ pub async fn publish_video_tracked(
 
     // Build tags per NIP-71
     use nostr::Tag;
-    let mut tags = vec![
-        Tag::title(title.clone()),
-    ];
+    let mut tags = vec![Tag::title(title.clone())];
 
     // Build imeta tag with video metadata (NIP-71 + NIP-92)
-    let mut imeta_fields = vec![
-        format!("url {}", video_url),
-    ];
+    let mut imeta_fields = vec![format!("url {}", video_url)];
 
     // Detect video mime type from extension (video-specific, not using detect_mime_type)
     // Return None for unknown extensions instead of forcing a default
@@ -287,8 +298,12 @@ pub async fn publish_video_tracked(
         let url_lower = video_url.to_lowercase();
         // Strip fragments first (e.g., video.webm#t=10) then query params
         let path = url_lower
-            .split('#').next().unwrap_or(&url_lower)
-            .split('?').next().unwrap_or(&url_lower);
+            .split('#')
+            .next()
+            .unwrap_or(&url_lower)
+            .split('?')
+            .next()
+            .unwrap_or(&url_lower);
         let ext = path.split('.').next_back().unwrap_or("");
         match ext {
             "mp4" | "m4v" => Some("video/mp4"),
@@ -313,7 +328,7 @@ pub async fn publish_video_tracked(
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("imeta".into()),
-        imeta_fields
+        imeta_fields,
     ));
 
     // Add hashtags
@@ -325,11 +340,12 @@ pub async fn publish_video_tracked(
     let content = description;
 
     // Build the event
-    let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content)
-        .tags(tags);
+    let builder = nostr::EventBuilder::new(nostr::Kind::from(kind), content).tags(tags);
 
     // Publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish video: {}", e))?;
 
     let result = PublishResult::from_output(output);
@@ -361,9 +377,16 @@ pub async fn publish_video(
     hashtags: Vec<String>,
     is_portrait: bool,
 ) -> std::result::Result<String, String> {
-    publish_video_tracked(title, description, video_url, thumbnail_url, hashtags, is_portrait)
-        .await
-        .map(|result| result.event_id)
+    publish_video_tracked(
+        title,
+        description,
+        video_url,
+        thumbnail_url,
+        hashtags,
+        is_portrait,
+    )
+    .await
+    .map(|result| result.event_id)
 }
 
 // =============================================================================
@@ -391,8 +414,7 @@ pub async fn publish_voice_message_tracked(
     let (duration_u64, waveform) = validate_voice_params(duration, &waveform)?;
 
     // Parse URL
-    let url = nostr::Url::parse(&audio_url)
-        .map_err(|e| format!("Invalid audio URL: {}", e))?;
+    let url = nostr::Url::parse(&audio_url).map_err(|e| format!("Invalid audio URL: {}", e))?;
 
     // Build event using EventBuilder::voice_message
     let mut builder = nostr::EventBuilder::voice_message(url);
@@ -402,7 +424,8 @@ pub async fn publish_voice_message_tracked(
     let mut tags = Vec::new();
 
     // Add imeta tag with duration and waveform (NIP-92)
-    let waveform_str = waveform.iter()
+    let waveform_str = waveform
+        .iter()
         .map(|v| v.to_string())
         .collect::<Vec<_>>()
         .join(" ");
@@ -421,7 +444,7 @@ pub async fn publish_voice_message_tracked(
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("imeta".into()),
-        imeta_fields
+        imeta_fields,
     ));
 
     // Add hashtags
@@ -433,7 +456,9 @@ pub async fn publish_voice_message_tracked(
     builder = builder.tags(tags);
 
     // Publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish voice message: {}", e))?;
 
     let result = PublishResult::from_output(output);
@@ -484,14 +509,16 @@ pub async fn publish_voice_message_reply_tracked(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
-    log::info!("Publishing voice message reply to: {}", reply_to.id.to_hex());
+    log::info!(
+        "Publishing voice message reply to: {}",
+        reply_to.id.to_hex()
+    );
 
     // Validate duration and waveform using extracted helper
     let (duration_u64, waveform) = validate_voice_params(duration, &waveform)?;
 
     // Parse URL
-    let url = nostr::Url::parse(&audio_url)
-        .map_err(|e| format!("Invalid audio URL: {}", e))?;
+    let url = nostr::Url::parse(&audio_url).map_err(|e| format!("Invalid audio URL: {}", e))?;
 
     // Determine root and parent for NIP-22 structure
     // Extract root event ID, author pubkey, and relay URL using helper
@@ -523,9 +550,9 @@ pub async fn publish_voice_message_reply_tracked(
             use std::borrow::Cow;
             Some(CommentTarget::event(
                 event_id,
-                reply_to.kind,  // Use parent's kind as best approximation for root
-                root_pubkey,  // Root author's public key
-                root_relay_url.as_ref().map(Cow::Borrowed)  // Relay hint/URL as Cow
+                reply_to.kind, // Use parent's kind as best approximation for root
+                root_pubkey,   // Root author's public key
+                root_relay_url.as_ref().map(Cow::Borrowed), // Relay hint/URL as Cow
             ))
         } else {
             None
@@ -542,7 +569,8 @@ pub async fn publish_voice_message_reply_tracked(
     let mut tags = Vec::new();
 
     // Add imeta tag with duration and waveform (NIP-92)
-    let waveform_str = waveform.iter()
+    let waveform_str = waveform
+        .iter()
         .map(|v| v.to_string())
         .collect::<Vec<_>>()
         .join(" ");
@@ -561,7 +589,7 @@ pub async fn publish_voice_message_reply_tracked(
 
     tags.push(Tag::custom(
         nostr::TagKind::Custom("imeta".into()),
-        imeta_fields
+        imeta_fields,
     ));
 
     // Add p tag for parent author
@@ -590,7 +618,9 @@ pub async fn publish_voice_message_reply_tracked(
     builder = builder.tags(tags);
 
     // Publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish voice message reply: {}", e))?;
 
     let result = PublishResult::from_output(output);

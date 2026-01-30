@@ -5,11 +5,11 @@
 //! - Split payments to multiple recipients
 //! - Support for both node pubkeys and Lightning Addresses
 
-use dioxus::prelude::*;
-use crate::utils::podcast::{ValueBlock, ValueRecipient};
-use crate::stores::nwc_store;
-use crate::services::lnurl;
 use crate::components::icons;
+use crate::services::lnurl;
+use crate::stores::nwc_store;
+use crate::utils::podcast::{ValueBlock, ValueRecipient};
+use dioxus::prelude::*;
 
 // ============================================================================
 // V4V Info Display
@@ -143,7 +143,7 @@ fn RecipientRow(props: RecipientRowProps) -> Element {
         // Truncate address for display
         let addr = &recipient.address;
         if addr.len() > 20 {
-            format!("{}...{}", &addr[..8], &addr[addr.len()-8..])
+            format!("{}...{}", &addr[..8], &addr[addr.len() - 8..])
         } else {
             addr.clone()
         }
@@ -441,7 +441,8 @@ async fn send_v4v_payment(value_block: &ValueBlock, total_sats: u64) -> Result<(
 
     // Send to each recipient based on split
     for recipient in &value_block.recipients {
-        let amount = (total_sats as f64 * recipient.split as f64 / total_split as f64).round() as u64;
+        let amount =
+            (total_sats as f64 * recipient.split as f64 / total_split as f64).round() as u64;
         if amount == 0 {
             continue;
         }
@@ -463,18 +464,35 @@ async fn send_v4v_payment(value_block: &ValueBlock, total_sats: u64) -> Result<(
                         // Fetch invoice from callback
                         match reqwest::get(&callback_url).await {
                             Ok(response) => {
-                                if let Ok(invoice_response) = response.json::<serde_json::Value>().await {
-                                    if let Some(pr) = invoice_response.get("pr").and_then(|v| v.as_str()) {
-                                        if let Err(e) = nwc_store::pay_invoice(pr.to_string()).await {
-                                            log::error!("Payment failed for {}: {}", recipient.address, e);
+                                if let Ok(invoice_response) =
+                                    response.json::<serde_json::Value>().await
+                                {
+                                    if let Some(pr) =
+                                        invoice_response.get("pr").and_then(|v| v.as_str())
+                                    {
+                                        if let Err(e) = nwc_store::pay_invoice(pr.to_string()).await
+                                        {
+                                            log::error!(
+                                                "Payment failed for {}: {}",
+                                                recipient.address,
+                                                e
+                                            );
                                         } else {
-                                            log::info!("V4V payment sent: {} sats to {}", amount, recipient.address);
+                                            log::info!(
+                                                "V4V payment sent: {} sats to {}",
+                                                amount,
+                                                recipient.address
+                                            );
                                         }
                                     }
                                 }
                             }
                             Err(e) => {
-                                log::error!("Failed to get invoice from {}: {}", recipient.address, e);
+                                log::error!(
+                                    "Failed to get invoice from {}: {}",
+                                    recipient.address,
+                                    e
+                                );
                             }
                         }
                     }
@@ -485,7 +503,10 @@ async fn send_v4v_payment(value_block: &ValueBlock, total_sats: u64) -> Result<(
             }
             "node" => {
                 // Keysend payment - would need keysend support in NWC
-                log::warn!("Keysend payments not yet supported for node: {}", recipient.address);
+                log::warn!(
+                    "Keysend payments not yet supported for node: {}",
+                    recipient.address
+                );
             }
             _ => {
                 log::warn!("Unknown recipient type: {}", recipient.recipient_type);

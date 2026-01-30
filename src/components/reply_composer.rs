@@ -1,18 +1,20 @@
-use dioxus::prelude::*;
-use std::time::Duration;
+use crate::components::icons::{BarChartIcon, CameraIcon};
+use crate::components::{
+    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal, RichContent,
+};
 use crate::stores::nostr_client::{publish_note_tracked, HAS_SIGNER};
 use crate::stores::pending_comments::{
-    PendingComment, CommentStatus, add_pending_comment, update_pending_status,
+    add_pending_comment, update_pending_status, CommentStatus, PendingComment,
 };
 use crate::stores::relay;
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, RichContent, MentionAutocomplete, PollCreatorModal};
-use crate::components::icons::{CameraIcon, BarChartIcon};
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
-use crate::utils::{SignerValidationResult, get_current_user_pubkey, truncate_pubkey};
-use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
-use nostr_sdk::prelude::*;
+use crate::utils::{get_current_user_pubkey, truncate_pubkey, SignerValidationResult};
+use dioxus::prelude::*;
 use dioxus_core::spawn_forever;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr_sdk::prelude::*;
+use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
+use std::time::Duration;
 
 /// Extract relay hint for reply tagging (NIP-10)
 /// First tries to find a relay hint from parent's e-tags, then falls back to user's write relays
@@ -54,7 +56,9 @@ pub fn ReplyComposer(
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
         let separator_len = if content_len > 0 { 2 } else { 0 }; // "\n\n"
-        let urls_with_newlines: usize = uploaded_media.read().iter()
+        let urls_with_newlines: usize = uploaded_media
+            .read()
+            .iter()
             .map(|url| url.len() + 1) // +1 for '\n' after each URL
             .sum();
         separator_len + urls_with_newlines
@@ -99,7 +103,11 @@ pub fn ReplyComposer(
         "Reply composer: Extracted {} thread participants: author={}, others={:?}",
         thread_participants.len(),
         reply_to.pubkey.to_hex(),
-        thread_participants.iter().skip(1).map(|pk| pk.to_hex()).collect::<Vec<_>>()
+        thread_participants
+            .iter()
+            .skip(1)
+            .map(|pk| pk.to_hex())
+            .collect::<Vec<_>>()
     );
 
     // Handle media upload
@@ -212,7 +220,7 @@ pub fn ReplyComposer(
                         "Unable to reply".to_string(),
                         ToastOptions::new()
                             .description("Invalid signer configuration")
-                            .duration(Duration::from_secs(3))
+                            .duration(Duration::from_secs(3)),
                     );
                     return;
                 }
@@ -222,170 +230,199 @@ pub fn ReplyComposer(
                         "Unable to reply".to_string(),
                         ToastOptions::new()
                             .description("Please sign in first")
-                            .duration(Duration::from_secs(3))
+                            .duration(Duration::from_secs(3)),
                     );
                     return;
                 }
             };
 
-        is_publishing.set(true);
+            is_publishing.set(true);
 
-        let event_id = reply_id.clone();
-        let author_pk = author_pubkey.clone();
+            let event_id = reply_id.clone();
+            let author_pk = author_pubkey.clone();
 
-        // Clone the tags from reply_to before moving into async block
-        let parent_tags = reply_to.tags.clone();
-        let reply_to_event = reply_to.clone();
+            // Clone the tags from reply_to before moving into async block
+            let parent_tags = reply_to.tags.clone();
+            let reply_to_event = reply_to.clone();
 
-        // Generate unique local ID for tracking this pending comment
-        let local_id = uuid::Uuid::new_v4().to_string();
+            // Generate unique local ID for tracking this pending comment
+            let local_id = uuid::Uuid::new_v4().to_string();
 
-        // Check if the event we're replying to has a root marker
-        // to determine if this is a top-level reply or nested reply
-        let parent_root = parent_tags.iter().find_map(|tag| {
-            let tag_vec = tag.clone().to_vec();
-            if tag_vec.len() >= 4
-                && tag_vec[0] == "e"
-                && tag_vec[3] == "root" {
-                Some(tag_vec[1].clone())
-            } else {
-                None
-            }
-        });
-
-        // Determine the root event ID for optimistic update and cache invalidation
-        let thread_root_id = if let Some(root_id) = &parent_root {
-            root_id.clone()
-        } else {
-            event_id.clone()
-        };
-
-        // For optimistic updates, we need to know the root event ID as EventId
-        let target_event_id = if let Ok(id) = EventId::from_hex(&thread_root_id) {
-            id
-        } else {
-            log::error!("Invalid thread root ID");
-            is_publishing.set(false);
-            return;
-        };
-
-        // Determine if this is a nested reply (replying to a reply vs replying to root)
-        let is_nested_reply = parent_root.is_some();
-
-        // Create pending comment for optimistic UI update
-        let pending = PendingComment {
-            local_id: local_id.clone(),
-            content: content_value.clone(),
-            target_event_id,
-            parent_comment_id: if is_nested_reply {
-                Some(reply_to_event.id)
-            } else {
-                None
-            },
-            kind: Kind::TextNote,
-            status: CommentStatus::Pending,
-            created_at: Timestamp::now(),
-            author_pubkey: current_user_pubkey,
-            target_event: reply_to_event.clone(),
-            parent_comment: if is_nested_reply {
-                Some(reply_to_event.clone())
-            } else {
-                None
-            },
-        };
-
-        // Add to pending store immediately (optimistic update)
-        add_pending_comment(pending);
-
-        // Clear form immediately for better UX
-        content.set(String::new());
-        uploaded_media.set(Vec::new());
-        is_publishing.set(false);
-        on_success.call(());
-
-        // Clone for async block
-        let local_id_clone = local_id.clone();
-        let content_for_publish = content_value.clone();
-        let thread_root_id_clone = thread_root_id.clone();
-
-        // Get relay hint for better discoverability (NIP-10)
-        // Tries parent's e-tags first, falls back to user's write relays
-        let relay_hint = get_relay_hint_for_reply(&parent_tags);
-
-        // Use spawn_forever so the task survives component unmount
-        spawn_forever(async move {
-            // Build tags for reply following NIP-10 properly
-            let mut tags = Vec::new();
-
-            if let Some(root_id) = parent_root {
-                // This is a nested reply (replying to a reply)
-                // Add root marker for the thread root (with relay hint for discoverability)
-                tags.push(vec!["e".to_string(), root_id, relay_hint.clone(), "root".to_string()]);
-                // Add reply marker for the immediate parent (with relay hint)
-                tags.push(vec!["e".to_string(), event_id.clone(), relay_hint.clone(), "reply".to_string()]);
-            } else {
-                // This is a direct reply to root
-                // Use only root marker (not reply) with relay hint
-                tags.push(vec!["e".to_string(), event_id.clone(), relay_hint.clone(), "root".to_string()]);
-            }
-
-            // Collect all p tags from parent event plus the parent's author
-            // Start with the parent's author
-            tags.push(vec!["p".to_string(), author_pk.clone()]);
-
-            // Add all p tags from the parent event (to notify everyone in thread)
-            for tag in parent_tags.iter() {
+            // Check if the event we're replying to has a root marker
+            // to determine if this is a top-level reply or nested reply
+            let parent_root = parent_tags.iter().find_map(|tag| {
                 let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 2 && tag_vec[0] == "p" {
-                    let pubkey = tag_vec[1].clone();
-                    // Don't duplicate the author we already added
-                    if pubkey != author_pk {
-                        tags.push(vec!["p".to_string(), pubkey]);
-                    }
+                if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
+                    Some(tag_vec[1].clone())
+                } else {
+                    None
                 }
-            }
+            });
 
-            match publish_note_tracked(content_for_publish, tags).await {
-                Ok(result) => {
-                    log::info!(
-                        "Reply published: {} ({}/{} relays)",
-                        result.event_id,
-                        result.success_count(),
-                        result.total_attempted()
-                    );
+            // Determine the root event ID for optimistic update and cache invalidation
+            let thread_root_id = if let Some(root_id) = &parent_root {
+                root_id.clone()
+            } else {
+                event_id.clone()
+            };
 
-                    if result.has_failures() {
-                        for (relay, error) in &result.failed_relays {
-                            log::warn!("Relay {} failed for reply: {}", relay, error);
+            // For optimistic updates, we need to know the root event ID as EventId
+            let target_event_id = if let Ok(id) = EventId::from_hex(&thread_root_id) {
+                id
+            } else {
+                log::error!("Invalid thread root ID");
+                is_publishing.set(false);
+                return;
+            };
+
+            // Determine if this is a nested reply (replying to a reply vs replying to root)
+            let is_nested_reply = parent_root.is_some();
+
+            // Create pending comment for optimistic UI update
+            let pending = PendingComment {
+                local_id: local_id.clone(),
+                content: content_value.clone(),
+                target_event_id,
+                parent_comment_id: if is_nested_reply {
+                    Some(reply_to_event.id)
+                } else {
+                    None
+                },
+                kind: Kind::TextNote,
+                status: CommentStatus::Pending,
+                created_at: Timestamp::now(),
+                author_pubkey: current_user_pubkey,
+                target_event: reply_to_event.clone(),
+                parent_comment: if is_nested_reply {
+                    Some(reply_to_event.clone())
+                } else {
+                    None
+                },
+            };
+
+            // Add to pending store immediately (optimistic update)
+            add_pending_comment(pending);
+
+            // Clear form immediately for better UX
+            content.set(String::new());
+            uploaded_media.set(Vec::new());
+            is_publishing.set(false);
+            on_success.call(());
+
+            // Clone for async block
+            let local_id_clone = local_id.clone();
+            let content_for_publish = content_value.clone();
+            let thread_root_id_clone = thread_root_id.clone();
+
+            // Get relay hint for better discoverability (NIP-10)
+            // Tries parent's e-tags first, falls back to user's write relays
+            let relay_hint = get_relay_hint_for_reply(&parent_tags);
+
+            // Use spawn_forever so the task survives component unmount
+            spawn_forever(async move {
+                // Build tags for reply following NIP-10 properly
+                let mut tags = Vec::new();
+
+                if let Some(root_id) = parent_root {
+                    // This is a nested reply (replying to a reply)
+                    // Add root marker for the thread root (with relay hint for discoverability)
+                    tags.push(vec![
+                        "e".to_string(),
+                        root_id,
+                        relay_hint.clone(),
+                        "root".to_string(),
+                    ]);
+                    // Add reply marker for the immediate parent (with relay hint)
+                    tags.push(vec![
+                        "e".to_string(),
+                        event_id.clone(),
+                        relay_hint.clone(),
+                        "reply".to_string(),
+                    ]);
+                } else {
+                    // This is a direct reply to root
+                    // Use only root marker (not reply) with relay hint
+                    tags.push(vec![
+                        "e".to_string(),
+                        event_id.clone(),
+                        relay_hint.clone(),
+                        "root".to_string(),
+                    ]);
+                }
+
+                // Collect all p tags from parent event plus the parent's author
+                // Start with the parent's author
+                tags.push(vec!["p".to_string(), author_pk.clone()]);
+
+                // Add all p tags from the parent event (to notify everyone in thread)
+                for tag in parent_tags.iter() {
+                    let tag_vec = tag.clone().to_vec();
+                    if tag_vec.len() >= 2 && tag_vec[0] == "p" {
+                        let pubkey = tag_vec[1].clone();
+                        // Don't duplicate the author we already added
+                        if pubkey != author_pk {
+                            tags.push(vec!["p".to_string(), pubkey]);
                         }
                     }
-
-                    // Invalidate thread tree cache to ensure fresh data on next view
-                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
-                        invalidate_thread_tree_cache(&root_event_id);
-                        log::debug!("Invalidated thread tree cache for root: {}", thread_root_id_clone);
-                    }
-
-                    // Update pending comment status
-                    match EventId::from_hex(&result.event_id) {
-                        Ok(event_id_parsed) => {
-                            update_pending_status(&local_id_clone, CommentStatus::Confirmed(event_id_parsed));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to parse published event ID '{}': {}", result.event_id, e);
-                            update_pending_status(&local_id_clone, CommentStatus::Failed("Event ID parse error".to_string()));
-                        }
-                    }
-                    // Note: We don't remove the pending comment here. It will remain visible
-                    // until the page is refreshed or navigated away. The merge function will
-                    // skip duplicates once the relay data is fetched on next load.
                 }
-                Err(e) => {
-                    log::error!("Failed to publish reply: {}", e);
-                    update_pending_status(&local_id_clone, CommentStatus::Failed(e.to_string()));
+
+                match publish_note_tracked(content_for_publish, tags).await {
+                    Ok(result) => {
+                        log::info!(
+                            "Reply published: {} ({}/{} relays)",
+                            result.event_id,
+                            result.success_count(),
+                            result.total_attempted()
+                        );
+
+                        if result.has_failures() {
+                            for (relay, error) in &result.failed_relays {
+                                log::warn!("Relay {} failed for reply: {}", relay, error);
+                            }
+                        }
+
+                        // Invalidate thread tree cache to ensure fresh data on next view
+                        if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
+                            invalidate_thread_tree_cache(&root_event_id);
+                            log::debug!(
+                                "Invalidated thread tree cache for root: {}",
+                                thread_root_id_clone
+                            );
+                        }
+
+                        // Update pending comment status
+                        match EventId::from_hex(&result.event_id) {
+                            Ok(event_id_parsed) => {
+                                update_pending_status(
+                                    &local_id_clone,
+                                    CommentStatus::Confirmed(event_id_parsed),
+                                );
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "Failed to parse published event ID '{}': {}",
+                                    result.event_id,
+                                    e
+                                );
+                                update_pending_status(
+                                    &local_id_clone,
+                                    CommentStatus::Failed("Event ID parse error".to_string()),
+                                );
+                            }
+                        }
+                        // Note: We don't remove the pending comment here. It will remain visible
+                        // until the page is refreshed or navigated away. The merge function will
+                        // skip duplicates once the relay data is fetched on next load.
+                    }
+                    Err(e) => {
+                        log::error!("Failed to publish reply: {}", e);
+                        update_pending_status(
+                            &local_id_clone,
+                            CommentStatus::Failed(e.to_string()),
+                        );
+                    }
                 }
-            }
-        });
+            });
         }
     };
 

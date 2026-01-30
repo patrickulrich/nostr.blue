@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
+use dioxus::prelude::*;
 
 /// Modal for accepting Cashu wallet terms and disclaimer
 /// This modal is non-dismissible - users must accept to proceed

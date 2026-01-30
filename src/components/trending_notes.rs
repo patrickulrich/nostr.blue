@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::services::trending::{TrendingNote, get_trending_notes, truncate_content};
-use crate::stores::{nostr_client, profiles};
 use crate::routes::Route;
+use crate::services::trending::{get_trending_notes, truncate_content, TrendingNote};
+use crate::stores::{nostr_client, profiles};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 #[component]
 pub fn TrendingNotes() -> Element {
@@ -51,7 +51,8 @@ pub fn TrendingNotes() -> Element {
                     // Prefetch author metadata for trending notes
                     use crate::utils::profile_prefetch;
                     use nostr_sdk::PublicKey;
-                    let pubkeys: Vec<PublicKey> = filtered_notes.iter()
+                    let pubkeys: Vec<PublicKey> = filtered_notes
+                        .iter()
                         .filter_map(|note| PublicKey::from_hex(&note.event.pubkey).ok())
                         .collect();
 
@@ -141,16 +142,14 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
     let author_pubkey_for_profile = author_pubkey.clone();
 
     // Get profile from centralized profiles store (reactive)
-    let profile = use_memo(move || {
-        profiles::get_profile(&author_pubkey_for_profile)
-    });
+    let profile = use_memo(move || profiles::get_profile(&author_pubkey_for_profile));
 
     let note_id = &note.event.id;
     let note_bech32 = match nostr_sdk::EventId::from_hex(note_id) {
         Ok(id) => {
             use nostr_sdk::ToBech32;
             id.to_bech32().unwrap_or_else(|_| note_id.clone())
-        },
+        }
         Err(_) => note_id.clone(),
     };
 
@@ -158,7 +157,8 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
     let author_name = {
         let p = profile.read();
         if let Some(ref prof) = *p {
-            prof.display_name.clone()
+            prof.display_name
+                .clone()
                 .or_else(|| prof.name.clone())
                 .unwrap_or_else(|| truncate_pubkey(&author_pubkey))
         } else {
@@ -171,7 +171,12 @@ fn TrendingNoteItem(note: TrendingNote) -> Element {
         let p = profile.read();
         p.as_ref()
             .and_then(|prof| prof.picture.clone())
-            .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", author_pubkey))
+            .unwrap_or_else(|| {
+                format!(
+                    "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                    author_pubkey
+                )
+            })
     };
 
     let content = truncate_content(&note.event.content, 100);

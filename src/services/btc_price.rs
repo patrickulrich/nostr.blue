@@ -3,9 +3,9 @@
 //! Fetches BTC prices from CoinGecko API for fiat currency conversions.
 //! CoinGecko supports CORS and provides free API access.
 
+use dioxus::prelude::*;
 use gloo_net::http::Request;
 use serde::Deserialize;
-use dioxus::prelude::*;
 use std::collections::HashMap;
 
 /// CoinGecko simple price response
@@ -16,8 +16,7 @@ pub struct CoinGeckoResponse {
 }
 
 /// Cached BTC prices by currency (USD, EUR, GBP, etc.)
-pub static BTC_PRICES: GlobalSignal<HashMap<String, f64>> =
-    Signal::global(HashMap::new);
+pub static BTC_PRICES: GlobalSignal<HashMap<String, f64>> = Signal::global(HashMap::new);
 
 /// Last fetch timestamp (unix seconds)
 pub static PRICE_LAST_FETCH: GlobalSignal<u64> = Signal::global(|| 0);
@@ -64,8 +63,9 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
 /// Falls back to USD for unknown currencies
 pub fn get_btc_price(currency: &str) -> Option<f64> {
     let prices = BTC_PRICES.read();
-    prices.get(&currency.to_uppercase())
-        .or_else(|| prices.get("USD"))  // Fallback to USD
+    prices
+        .get(&currency.to_uppercase())
+        .or_else(|| prices.get("USD")) // Fallback to USD
         .copied()
 }
 

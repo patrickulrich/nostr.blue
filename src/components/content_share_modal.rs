@@ -1,14 +1,14 @@
+use crate::components::icons::{
+    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon, Link2Icon,
+    MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
+};
+use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
+use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::{dms, nostr_client};
+use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use nostr_sdk::{EventBuilder, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-use crate::stores::{nostr_client, dms};
-use crate::stores::nostr_client::HAS_SIGNER;
-use crate::components::icons::{
-    ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
-    Link2Icon, ArrowLeftIcon, RssIcon, MusicIcon, BookOpenIcon, CameraIcon, BarChartIcon
-};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, PollCreatorModal};
-use crate::utils::clipboard::copy_to_clipboard;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
@@ -74,7 +74,9 @@ impl ContentType {
             ContentType::MusicAlbum => format!("Check out this album on nostr.blue: {}", url),
             ContentType::MusicTrack => format!("Check out this track on nostr.blue: {}", url),
             #[cfg(target_arch = "wasm32")]
-            ContentType::BibleVerse => format!("Check out this Bible passage on nostr.blue: {}", url),
+            ContentType::BibleVerse => {
+                format!("Check out this Bible passage on nostr.blue: {}", url)
+            }
         }
     }
 }
@@ -122,7 +124,8 @@ pub fn ContentShareModal(
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
@@ -136,7 +139,9 @@ pub fn ContentShareModal(
         let mut utf8_index = 0;
         let mut utf16_count = 0;
         for c in text.chars() {
-            if utf16_count >= utf16_index { break; }
+            if utf16_count >= utf16_index {
+                break;
+            }
             utf16_count += c.len_utf16();
             utf8_index += c.len_utf8();
         }
@@ -155,7 +160,10 @@ pub fn ContentShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             // Add leading space if previous char is not whitespace
             if safe_pos > 0 {
@@ -185,7 +193,10 @@ pub fn ContentShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
@@ -261,7 +272,9 @@ pub fn ContentShareModal(
         // Defensive check: verify signer exists before attempting to post
         if !*HAS_SIGNER.read() {
             log::error!("Attempted to share to Nostr without a signer");
-            nostr_error.set(Some("No signer available. Please log in first.".to_string()));
+            nostr_error.set(Some(
+                "No signer available. Please log in first.".to_string(),
+            ));
             return;
         }
 
@@ -324,7 +337,10 @@ pub fn ContentShareModal(
                     Ok(pubkey) => pubkey.to_hex(),
                     Err(_) => {
                         log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                        dm_error.set(Some("Invalid recipient. Please enter a valid npub, hex, or nostr: URI.".to_string()));
+                        dm_error.set(Some(
+                            "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
+                                .to_string(),
+                        ));
                         is_publishing.set(false);
                         return;
                     }

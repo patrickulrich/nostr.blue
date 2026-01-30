@@ -3,9 +3,9 @@
 //! Displays a repository file tree with expandable directories.
 //! Uses isomorphic-git Web Worker for git operations.
 
-use dioxus::prelude::*;
-use crate::services::git_worker::FileEntry;
 use crate::routes::Route;
+use crate::services::git_worker::FileEntry;
+use dioxus::prelude::*;
 
 /// Encode path segments individually to preserve slashes in the URL.
 /// This avoids encoding the path separator, which would break routing.
@@ -251,11 +251,7 @@ pub fn CodeFileTree(
 
 /// Breadcrumb navigation for file path
 #[component]
-pub fn FilePathBreadcrumb(
-    naddr: String,
-    git_ref: String,
-    path: String,
-) -> Element {
+pub fn FilePathBreadcrumb(naddr: String, git_ref: String, path: String) -> Element {
     // Decode path once at entry to prevent double-encoding if path came from URL
     let decoded_path = urlencoding::decode(&path)
         .map(|s| s.into_owned())

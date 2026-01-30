@@ -1,69 +1,69 @@
 use dioxus::prelude::*;
 
+pub mod article_detail;
+pub mod article_new;
+pub mod articles;
+pub mod bookmarks;
+pub mod dms;
+pub mod explore;
+pub mod hashtag;
 pub mod home;
-pub mod profile;
+pub mod live_stream_detail;
+pub mod live_stream_new;
+pub mod music;
+pub mod nip19;
 pub mod note;
+pub mod note_new;
+pub mod notifications;
+pub mod photo_new;
+pub mod profile;
+pub mod search;
 pub mod settings;
 pub mod settings_blocklist;
 pub mod settings_muted;
 pub mod settings_relays;
-pub mod notifications;
-pub mod bookmarks;
-pub mod dms;
-pub mod explore;
 pub mod trending;
-pub mod hashtag;
-pub mod nip19;
-pub mod videos;
 pub mod video_detail;
-pub mod videos_live;
-pub mod videos_live_tag;
-pub mod live_stream_detail;
-pub mod live_stream_new;
-pub mod articles;
-pub mod article_detail;
-pub mod music;
-pub mod note_new;
-pub mod article_new;
-pub mod photo_new;
 pub mod video_new_landscape;
 pub mod video_new_portrait;
-pub mod search;
+pub mod videos;
+pub mod videos_live;
+pub mod videos_live_tag;
 
 // Placeholder modules for missing routes
-mod lists;
-mod list_detail;
-pub mod dvm;
-pub mod photos;
-pub mod photo_detail;
-pub mod voicemessages;
-pub mod voice_message_new;
-pub mod voice_message_detail;
-pub mod webbookmarks;
-pub mod polls;
-pub mod poll_view;
-pub mod poll_new;
-pub mod cashu_wallet;
-pub mod terms;
-pub mod privacy;
-pub mod cookies;
 pub mod about;
+pub mod cashu_wallet;
+pub mod cookies;
+pub mod dvm;
+mod list_detail;
+mod lists;
+pub mod photo_detail;
+pub mod photos;
 pub mod podcast;
+pub mod podcast_episode_detail;
 pub mod podcast_nostr_detail;
 pub mod podcast_rss_detail;
-pub mod podcast_episode_detail;
 pub mod podcast_trending;
+pub mod poll_new;
+pub mod poll_view;
+pub mod polls;
+pub mod privacy;
+pub mod terms;
+pub mod voice_message_detail;
+pub mod voice_message_new;
+pub mod voicemessages;
+pub mod webbookmarks;
 
 // Internet Radio (Kind 31237)
 pub mod radio;
 
-pub mod nips;
 pub mod nip_detail;
+pub mod nips;
 
 // Badges (NIP-58)
-pub mod badges;
 pub mod badge_detail;
 pub mod badge_new;
+pub mod badges;
 
 // Citations (NKBIP-03 Kinds 30-33)
 pub mod citations;
@@ -82,18 +82,18 @@ pub mod community;
 pub mod community_new;
 
 // Recipes
+pub mod recipe_chef;
+pub mod recipe_detail;
+pub mod recipe_fork;
+pub mod recipe_new;
 pub mod recipes;
 pub mod recipes_all;
-pub mod recipe_detail;
-pub mod recipe_new;
-pub mod recipe_fork;
 pub mod recipes_by_tag;
-pub mod recipe_chef;
 
 // Pin Boards (Kind 33889 Pinstr-compatible)
-pub mod pin_boards;
 pub mod pin_board_detail;
 pub mod pin_board_new;
+pub mod pin_boards;
 pub mod pin_new;
 pub mod user_pins;
 
@@ -104,29 +104,29 @@ pub mod wiki_detail;
 pub mod wiki_new;
 
 // Publications (NKBIP-01 Kind 30040/30041)
-pub mod publications;
 pub mod publication_detail;
 pub mod publication_new;
 pub mod publication_search;
+pub mod publications;
 
 // Calendar/Events (NIP-52 + NIP-53)
-pub mod events;
-pub mod event_detail;
 pub mod calendar;
 pub mod calendar_event_new;
+pub mod event_detail;
+pub mod events;
 
 // Shop/Marketplace (NIP-99)
 pub mod shop;
-pub mod shop_product;
-pub mod shop_product_new;
-pub mod shop_product_edit;
 pub mod shop_cart;
 pub mod shop_checkout;
-pub mod shop_orders;
-pub mod shop_merchant;
-pub mod shop_merchant_orders;
 pub mod shop_collection;
 pub mod shop_collection_new;
+pub mod shop_merchant;
+pub mod shop_merchant_orders;
+pub mod shop_orders;
+pub mod shop_product;
+pub mod shop_product_edit;
+pub mod shop_product_new;
 pub mod shop_search;
 
 // Blossom Media Management (BUD-01/02/04/05)
@@ -160,145 +160,148 @@ pub mod bible {
         rsx! { div { "Bible requires WASM target" } }
     }
 }
-pub mod code_repositories;
-pub mod code_snippets;
-pub mod code_snippet_detail;
-pub mod code_snippet_new;
 pub mod code_import;
-pub mod code_search;
-pub mod code_repo;
-pub mod code_repo_commits;
-pub mod code_repo_issues;
-pub mod code_repo_pulls;
 pub mod code_issue_detail;
 pub mod code_issue_new;
 pub mod code_pull_detail;
 pub mod code_pull_new;
+pub mod code_repo;
+pub mod code_repo_blob;
+pub mod code_repo_commits;
+pub mod code_repo_issues;
+pub mod code_repo_pulls;
 pub mod code_repo_settings;
 pub mod code_repo_tree;
-pub mod code_repo_blob;
+pub mod code_repositories;
+pub mod code_search;
+pub mod code_snippet_detail;
+pub mod code_snippet_new;
+pub mod code_snippets;
 
-use home::Home;
-use profile::Profile;
-use note::Note;
-use settings::Settings;
-use settings_blocklist::SettingsBlocklist;
-use settings_muted::SettingsMuted;
-use settings_relays::SettingsRelays;
-use notifications::Notifications;
-use bookmarks::Bookmarks;
-use dms::DMs;
-use explore::Explore;
-use trending::Trending;
-use hashtag::Hashtag;
-use nip19::Nip19Handler;
-use videos::Videos;
-use video_detail::VideoDetail;
-use videos_live::VideosLive;
-use videos_live_tag::VideosLiveTag;
-use live_stream_detail::LiveStreamDetail;
-use live_stream_new::LiveStreamNew;
-use articles::Articles;
-use article_detail::ArticleDetail;
-use music::{MusicHome, MusicRadio, MusicLeaderboard, MusicArtist, MusicAlbum, MusicSearch, MusicTrackNew, MusicPlaylistNew, MusicPlaylistDetail, MusicRssAlbum};
-use photos::Photos;
-use photo_detail::PhotoDetail;
-use voicemessages::VoiceMessages;
-use voice_message_new::VoiceMessageNew;
-use voice_message_detail::VoiceMessageDetail;
-use webbookmarks::WebBookmarks;
-use polls::Polls;
-use poll_view::PollView;
-use poll_new::PollNew;
-use cashu_wallet::CashuWallet;
-use note_new::NoteNew;
-use article_new::ArticleNew;
-use photo_new::PhotoNew;
-use video_new_landscape::VideoNewLandscape;
-use video_new_portrait::VideoNewPortrait;
-use lists::Lists;
-use list_detail::ListDetail;
-use dvm::DVM;
-use terms::Terms;
-use privacy::Privacy;
-use cookies::Cookies;
 use about::About;
-use search::Search;
-use podcast::PodcastHome;
-use podcast_nostr_detail::PodcastNostrDetail;
-use podcast_rss_detail::PodcastRssFeedDetail;
-use podcast_episode_detail::{PodcastNostrEpisodeDetail, PodcastRssEpisodeDetail};
-use podcast_trending::PodcastTrending;
-use radio::{RadioHome, RadioStation, RadioStationNew};
-use nips::{NipsHome, NipNew};
-use nip_detail::NipDetail;
-use badges::BadgesHome;
+use article_detail::ArticleDetail;
+use article_new::ArticleNew;
+use articles::Articles;
 use badge_detail::BadgeDetail;
 use badge_new::BadgeNew;
-use citations::{CitationsHome, CitationDetail};
+use badges::BadgesHome;
+use bible::{BibleChapter, BibleHome, BibleSearch};
+use blossom::BlossomPage;
+use bookmarks::Bookmarks;
+use calendar::Calendar;
+use calendar_event_new::CalendarEventNew;
+use cashu_wallet::CashuWallet;
+use citations::{CitationDetail, CitationsHome};
 use code::CodeHome;
 use code_explore::CodeExplore;
-use code_repositories::CodeRepositories;
-use code_snippets::CodeSnippets;
-use code_snippet_detail::CodeSnippetDetail;
-use code_snippet_new::CodeSnippetNew;
 use code_import::CodeImport;
-use code_search::CodeSearch;
-use code_repo::CodeRepo;
-use code_repo_commits::CodeRepoCommits;
-use code_repo_issues::CodeRepoIssues;
-use code_repo_pulls::CodeRepoPulls;
 use code_issue_detail::CodeIssueDetail;
 use code_issue_new::CodeIssueNew;
 use code_pull_detail::CodePullDetail;
 use code_pull_new::CodePullNew;
+use code_repo::CodeRepo;
+use code_repo_blob::CodeRepoBlob;
+use code_repo_commits::CodeRepoCommits;
+use code_repo_issues::CodeRepoIssues;
+use code_repo_pulls::CodeRepoPulls;
 use code_repo_settings::CodeRepoSettings;
 use code_repo_tree::CodeRepoTree;
-use code_repo_blob::CodeRepoBlob;
-use p2p::P2PHome;
-use p2p_order_detail::P2POrderDetail;
+use code_repositories::CodeRepositories;
+use code_search::CodeSearch;
+use code_snippet_detail::CodeSnippetDetail;
+use code_snippet_new::CodeSnippetNew;
+use code_snippets::CodeSnippets;
 use communities::Communities;
 use community::CommunityPage;
 use community_new::CommunityNew;
+use cookies::Cookies;
+use dms::DMs;
+use dvm::DVM;
+use event_detail::CalendarEventDetail;
+use events::Events;
+use explore::Explore;
+use hashtag::Hashtag;
+use highlights::Highlights;
+use home::Home;
+use list_detail::ListDetail;
+use lists::Lists;
+use live_stream_detail::LiveStreamDetail;
+use live_stream_new::LiveStreamNew;
+use music::{
+    MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail, MusicPlaylistNew,
+    MusicRadio, MusicRssAlbum, MusicSearch, MusicTrackNew,
+};
+use nip19::Nip19Handler;
+use nip_detail::NipDetail;
+use nips::{NipNew, NipsHome};
+use note::Note;
+use note_new::NoteNew;
+use notifications::Notifications;
+use p2p::P2PHome;
+use p2p_order_detail::P2POrderDetail;
+use photo_detail::PhotoDetail;
+use photo_new::PhotoNew;
+use photos::Photos;
+use pin_board_detail::PinBoardDetail;
+use pin_board_new::{PinBoardEdit, PinBoardNew};
+use pin_boards::PinBoardsHome;
+use pin_new::PinNew;
+use podcast::PodcastHome;
+use podcast_episode_detail::{PodcastNostrEpisodeDetail, PodcastRssEpisodeDetail};
+use podcast_nostr_detail::PodcastNostrDetail;
+use podcast_rss_detail::PodcastRssFeedDetail;
+use podcast_trending::PodcastTrending;
+use poll_new::PollNew;
+use poll_view::PollView;
+use polls::Polls;
+use privacy::Privacy;
+use profile::Profile;
+use publication_detail::PublicationDetail;
+use publication_new::PublicationNew;
+use publication_search::PublicationSearch;
+use publications::PublicationsHome;
+use radio::{RadioHome, RadioStation, RadioStationNew};
+use recipe_chef::RecipeChef;
+use recipe_detail::RecipeDetail;
+use recipe_fork::RecipeFork;
+use recipe_new::RecipeNew;
 use recipes::RecipesHome;
 use recipes_all::RecipesAll;
-use recipe_detail::RecipeDetail;
-use recipe_new::RecipeNew;
-use recipe_fork::RecipeFork;
 use recipes_by_tag::RecipesByTag;
-use recipe_chef::RecipeChef;
-use pin_boards::PinBoardsHome;
-use pin_board_detail::PinBoardDetail;
-use pin_board_new::{PinBoardNew, PinBoardEdit};
-use pin_new::PinNew;
+use search::Search;
+use settings::Settings;
+use settings_blocklist::SettingsBlocklist;
+use settings_muted::SettingsMuted;
+use settings_relays::SettingsRelays;
+use shop::ShopHome;
+use shop_cart::ShopCart;
+use shop_checkout::ShopCheckout;
+use shop_collection::ShopCollection;
+use shop_collection_new::ShopCollectionNew;
+use shop_merchant::ShopMerchant;
+use shop_merchant_orders::ShopMerchantOrders;
+use shop_orders::ShopOrders;
+use shop_product::ShopProductDetail;
+use shop_product_edit::ShopProductEdit;
+use shop_product_new::ShopProductNew;
+use shop_search::ShopSearch;
+use terms::Terms;
+use trending::Trending;
 use user_pins::UserPins;
+use video_detail::VideoDetail;
+use video_new_landscape::VideoNewLandscape;
+use video_new_portrait::VideoNewPortrait;
+use videos::Videos;
+use videos_live::VideosLive;
+use videos_live_tag::VideosLiveTag;
+use voice_message_detail::VoiceMessageDetail;
+use voice_message_new::VoiceMessageNew;
+use voicemessages::VoiceMessages;
+use webbookmarks::WebBookmarks;
 use wiki::WikiHome;
 use wiki_author::WikiAuthor;
 use wiki_detail::WikiDetail;
 use wiki_new::WikiNew;
-use publications::PublicationsHome;
-use publication_detail::PublicationDetail;
-use publication_new::PublicationNew;
-use publication_search::PublicationSearch;
-use events::Events;
-use event_detail::CalendarEventDetail;
-use calendar::Calendar;
-use calendar_event_new::CalendarEventNew;
-use shop::ShopHome;
-use shop_product::ShopProductDetail;
-use shop_product_new::ShopProductNew;
-use shop_product_edit::ShopProductEdit;
-use shop_cart::ShopCart;
-use shop_checkout::ShopCheckout;
-use shop_orders::ShopOrders;
-use shop_merchant::ShopMerchant;
-use shop_merchant_orders::ShopMerchantOrders;
-use shop_collection::ShopCollection;
-use shop_collection_new::ShopCollectionNew;
-use shop_search::ShopSearch;
-use blossom::BlossomPage;
-use bible::{BibleHome, BibleChapter, BibleSearch};
-use highlights::Highlights;
 
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -751,65 +754,153 @@ fn Layout() -> Element {
 
     // Check if we're on the DMs, Videos, Wallet, or Music pages (hide right sidebar)
     let is_dms_page = matches!(current_route, Route::DMs {});
-    let is_videos_page = matches!(current_route, Route::Videos {} | Route::VideoDetail { .. } | Route::VideosLive {} | Route::VideosLiveTag { .. } | Route::LiveStreamDetail { .. });
-    let is_wallet_page = matches!(current_route, Route::CashuWallet {});
-    let is_music_page = matches!(current_route, Route::MusicHome {} | Route::MusicRadio {} | Route::MusicLeaderboard {} | Route::MusicSearch { .. } | Route::MusicArtist { .. } | Route::MusicAlbum { .. } | Route::MusicRssAlbum { .. } | Route::MusicTrackNew {} | Route::MusicPlaylistNew {} | Route::MusicPlaylistDetail { .. });
-    let is_podcast_page = matches!(current_route, Route::PodcastHome {} | Route::PodcastTrending {} | Route::PodcastNostrDetail { .. } | Route::PodcastRssFeedDetail { .. } | Route::PodcastNostrEpisodeDetail { .. } | Route::PodcastRssEpisodeDetail { .. });
-    let is_radio_page = matches!(current_route, Route::RadioHome {} | Route::RadioStation { .. } | Route::RadioStationNew {});
-    let is_nips_page = matches!(current_route, Route::NipsHome {} | Route::NipDetail { .. } | Route::NipNew {});
-    let is_badges_page = matches!(current_route, Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {});
-    let is_code_page = matches!(current_route,
-        Route::CodeHome {} | Route::CodeExplore {} | Route::CodeRepositories {} |
-        Route::CodeSnippets {} | Route::CodeSnippetDetail { .. } | Route::CodeSnippetNew {} |
-        Route::CodeImport {} | Route::CodeSearch { .. } | Route::CodeRepo { .. } |
-        Route::CodeRepoCommits { .. } | Route::CodeRepoIssues { .. } | Route::CodeRepoPulls { .. } |
-        Route::CodeIssueNew { .. } | Route::CodePullNew { .. } | Route::CodeRepoSettings { .. } |
-        Route::CodeIssueDetail { .. } | Route::CodePullDetail { .. } |
-        Route::CodeRepoTree { .. } | Route::CodeRepoBlob { .. }
+    let is_videos_page = matches!(
+        current_route,
+        Route::Videos {}
+            | Route::VideoDetail { .. }
+            | Route::VideosLive {}
+            | Route::VideosLiveTag { .. }
+            | Route::LiveStreamDetail { .. }
     );
-    let is_p2p_page = matches!(current_route,
+    let is_wallet_page = matches!(current_route, Route::CashuWallet {});
+    let is_music_page = matches!(
+        current_route,
+        Route::MusicHome {}
+            | Route::MusicRadio {}
+            | Route::MusicLeaderboard {}
+            | Route::MusicSearch { .. }
+            | Route::MusicArtist { .. }
+            | Route::MusicAlbum { .. }
+            | Route::MusicRssAlbum { .. }
+            | Route::MusicTrackNew {}
+            | Route::MusicPlaylistNew {}
+            | Route::MusicPlaylistDetail { .. }
+    );
+    let is_podcast_page = matches!(
+        current_route,
+        Route::PodcastHome {}
+            | Route::PodcastTrending {}
+            | Route::PodcastNostrDetail { .. }
+            | Route::PodcastRssFeedDetail { .. }
+            | Route::PodcastNostrEpisodeDetail { .. }
+            | Route::PodcastRssEpisodeDetail { .. }
+    );
+    let is_radio_page = matches!(
+        current_route,
+        Route::RadioHome {} | Route::RadioStation { .. } | Route::RadioStationNew {}
+    );
+    let is_nips_page = matches!(
+        current_route,
+        Route::NipsHome {} | Route::NipDetail { .. } | Route::NipNew {}
+    );
+    let is_badges_page = matches!(
+        current_route,
+        Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {}
+    );
+    let is_code_page = matches!(
+        current_route,
+        Route::CodeHome {}
+            | Route::CodeExplore {}
+            | Route::CodeRepositories {}
+            | Route::CodeSnippets {}
+            | Route::CodeSnippetDetail { .. }
+            | Route::CodeSnippetNew {}
+            | Route::CodeImport {}
+            | Route::CodeSearch { .. }
+            | Route::CodeRepo { .. }
+            | Route::CodeRepoCommits { .. }
+            | Route::CodeRepoIssues { .. }
+            | Route::CodeRepoPulls { .. }
+            | Route::CodeIssueNew { .. }
+            | Route::CodePullNew { .. }
+            | Route::CodeRepoSettings { .. }
+            | Route::CodeIssueDetail { .. }
+            | Route::CodePullDetail { .. }
+            | Route::CodeRepoTree { .. }
+            | Route::CodeRepoBlob { .. }
+    );
+    let is_p2p_page = matches!(
+        current_route,
         Route::P2PHome {} | Route::P2POrderDetail { .. }
     );
-    let is_community_page = matches!(current_route,
+    let is_community_page = matches!(
+        current_route,
         Route::Communities {} | Route::CommunityPage { .. }
     );
-    let is_events_page = matches!(current_route,
+    let is_events_page = matches!(
+        current_route,
         Route::Events {} | Route::CalendarEventDetail { .. } | Route::Calendar {}
     );
-    let is_recipes_page = matches!(current_route,
-        Route::RecipesHome {} | Route::RecipesAll {} | Route::RecipeDetail { .. } | Route::RecipeNew {} |
-        Route::RecipeFork { .. } | Route::RecipesByTag { .. } | Route::RecipeChef { .. }
+    let is_recipes_page = matches!(
+        current_route,
+        Route::RecipesHome {}
+            | Route::RecipesAll {}
+            | Route::RecipeDetail { .. }
+            | Route::RecipeNew {}
+            | Route::RecipeFork { .. }
+            | Route::RecipesByTag { .. }
+            | Route::RecipeChef { .. }
     );
-    let is_pin_boards_page = matches!(current_route,
-        Route::PinBoardsHome {} | Route::PinBoardDetail { .. } | Route::PinBoardNew {} | Route::PinBoardEdit { .. } | Route::PinNew {} | Route::UserPins {}
+    let is_pin_boards_page = matches!(
+        current_route,
+        Route::PinBoardsHome {}
+            | Route::PinBoardDetail { .. }
+            | Route::PinBoardNew {}
+            | Route::PinBoardEdit { .. }
+            | Route::PinNew {}
+            | Route::UserPins {}
     );
-    let is_wiki_page = matches!(current_route,
-        Route::WikiHome {} | Route::WikiDetail { .. } | Route::WikiNew {} | Route::WikiAuthor { .. }
+    let is_wiki_page = matches!(
+        current_route,
+        Route::WikiHome {}
+            | Route::WikiDetail { .. }
+            | Route::WikiNew {}
+            | Route::WikiAuthor { .. }
     );
-    let is_publications_page = matches!(current_route,
-        Route::PublicationsHome {} | Route::PublicationDetail { .. } | Route::PublicationNew {} | Route::PublicationSearch { .. }
+    let is_publications_page = matches!(
+        current_route,
+        Route::PublicationsHome {}
+            | Route::PublicationDetail { .. }
+            | Route::PublicationNew {}
+            | Route::PublicationSearch { .. }
     );
-    let is_shop_page = matches!(current_route,
-        Route::ShopHome {} | Route::ShopProductDetail { .. } | Route::ShopProductNew {} |
-        Route::ShopProductEdit { .. } | Route::ShopCart {} | Route::ShopCheckout {} | Route::ShopOrders {} |
-        Route::ShopMerchant {} | Route::ShopMerchantOrders {} | Route::ShopCollection { .. } |
-        Route::ShopCollectionNew {} | Route::ShopSearch { .. }
+    let is_shop_page = matches!(
+        current_route,
+        Route::ShopHome {}
+            | Route::ShopProductDetail { .. }
+            | Route::ShopProductNew {}
+            | Route::ShopProductEdit { .. }
+            | Route::ShopCart {}
+            | Route::ShopCheckout {}
+            | Route::ShopOrders {}
+            | Route::ShopMerchant {}
+            | Route::ShopMerchantOrders {}
+            | Route::ShopCollection { .. }
+            | Route::ShopCollectionNew {}
+            | Route::ShopSearch { .. }
     );
     let is_blossom_page = matches!(current_route, Route::BlossomPage {});
-    let is_bible_page = matches!(current_route,
+    let is_bible_page = matches!(
+        current_route,
         Route::BibleHome {} | Route::BibleChapter { .. } | Route::BibleSearch {}
     );
-    let is_settings_page = matches!(current_route, Route::Settings {} | Route::SettingsBlocklist {} | Route::SettingsMuted {} | Route::SettingsRelays {});
+    let is_settings_page = matches!(
+        current_route,
+        Route::Settings {}
+            | Route::SettingsBlocklist {}
+            | Route::SettingsMuted {}
+            | Route::SettingsRelays {}
+    );
 
     // Check if we're on any creation pages (hide right sidebar for better editor space)
     let is_creation_page = matches!(
         current_route,
         Route::NoteNew { .. }
-        | Route::ArticleNew {}
-        | Route::PhotoNew {}
-        | Route::VideoNewLandscape {}
-        | Route::VideoNewPortrait {}
-        | Route::LiveStreamNew {}
+            | Route::ArticleNew {}
+            | Route::PhotoNew {}
+            | Route::VideoNewLandscape {}
+            | Route::VideoNewPortrait {}
+            | Route::LiveStreamNew {}
     );
 
     // Check if we're on home page for home button styling
@@ -817,11 +908,26 @@ fn Layout() -> Element {
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
 
     // Pages that use wide layout (full width, no max-width constraint)
-    let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page
-        || is_podcast_page || is_radio_page || is_nips_page || is_badges_page
-        || is_code_page || is_p2p_page || is_community_page || is_events_page
-        || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page
-        || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
+    let is_wide_page = is_dms_page
+        || is_videos_page
+        || is_wallet_page
+        || is_music_page
+        || is_podcast_page
+        || is_radio_page
+        || is_nips_page
+        || is_badges_page
+        || is_code_page
+        || is_p2p_page
+        || is_community_page
+        || is_events_page
+        || is_recipes_page
+        || is_pin_boards_page
+        || is_wiki_page
+        || is_publications_page
+        || is_shop_page
+        || is_blossom_page
+        || is_bible_page
+        || is_creation_page;
 
     // Check if music player is visible to add bottom padding
     let music_player_visible = {
@@ -1388,7 +1494,7 @@ fn NavLink(
     to: Route,
     icon: Element,
     label: &'static str,
-    #[props(default = None)] badge: Option<usize>
+    #[props(default = None)] badge: Option<usize>,
 ) -> Element {
     let current_route = use_route::<Route>();
 
@@ -1401,32 +1507,34 @@ fn NavLink(
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,
         (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => p1 == p2,
-        (Route::MusicHome {}, Route::MusicHome {}) |
-        (Route::MusicHome {}, Route::MusicRadio {}) |
-        (Route::MusicHome {}, Route::MusicLeaderboard {}) |
-        (Route::MusicHome {}, Route::MusicSearch { .. }) |
-        (Route::MusicHome {}, Route::MusicArtist { .. }) |
-        (Route::MusicHome {}, Route::MusicAlbum { .. }) |
-        (Route::MusicHome {}, Route::MusicRssAlbum { .. }) |
-        (Route::MusicHome {}, Route::MusicTrackNew {}) |
-        (Route::MusicHome {}, Route::MusicPlaylistNew {}) |
-        (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
+        (Route::MusicHome {}, Route::MusicHome {})
+        | (Route::MusicHome {}, Route::MusicRadio {})
+        | (Route::MusicHome {}, Route::MusicLeaderboard {})
+        | (Route::MusicHome {}, Route::MusicSearch { .. })
+        | (Route::MusicHome {}, Route::MusicArtist { .. })
+        | (Route::MusicHome {}, Route::MusicAlbum { .. })
+        | (Route::MusicHome {}, Route::MusicRssAlbum { .. })
+        | (Route::MusicHome {}, Route::MusicTrackNew {})
+        | (Route::MusicHome {}, Route::MusicPlaylistNew {})
+        | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => v1 == v2,
-        (Route::VideosLive {}, Route::VideosLive {}) |
-        (Route::VideosLive {}, Route::VideosLiveTag { .. }) |
-        (Route::VideosLive {}, Route::LiveStreamDetail { .. }) => true,
+        (Route::VideosLive {}, Route::VideosLive {})
+        | (Route::VideosLive {}, Route::VideosLiveTag { .. })
+        | (Route::VideosLive {}, Route::LiveStreamDetail { .. }) => true,
         (Route::VideosLiveTag { tag: t1 }, Route::VideosLiveTag { tag: t2 }) => t1 == t2,
-        (Route::LiveStreamDetail { note_id: n1 }, Route::LiveStreamDetail { note_id: n2 }) => n1 == n2,
+        (Route::LiveStreamDetail { note_id: n1 }, Route::LiveStreamDetail { note_id: n2 }) => {
+            n1 == n2
+        }
         (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
         (Route::CashuWallet {}, Route::CashuWallet {}) => true,
         (Route::Settings {}, Route::Settings {}) => true,
         (Route::BlossomPage {}, Route::BlossomPage {}) => true,
         (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
-        (Route::BibleHome {}, Route::BibleHome {}) |
-        (Route::BibleHome {}, Route::BibleChapter { .. }) |
-        (Route::BibleHome {}, Route::BibleSearch {}) => true,
+        (Route::BibleHome {}, Route::BibleHome {})
+        | (Route::BibleHome {}, Route::BibleChapter { .. })
+        | (Route::BibleHome {}, Route::BibleSearch {}) => true,
         (Route::Highlights {}, Route::Highlights {}) => true,
         _ => false,
     };
@@ -1457,9 +1565,15 @@ fn NavLink(
 fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: &str) -> Element {
     use crate::stores::sidebar_store::SidebarItem;
     match item {
-        SidebarItem::Home => rsx! { crate::components::icons::HomeIcon { class: class.to_string() } },
-        SidebarItem::Explore => rsx! { crate::components::icons::CompassIcon { class: class.to_string() } },
-        SidebarItem::Articles => rsx! { crate::components::icons::BookOpenIcon { class: class.to_string() } },
+        SidebarItem::Home => {
+            rsx! { crate::components::icons::HomeIcon { class: class.to_string() } }
+        }
+        SidebarItem::Explore => {
+            rsx! { crate::components::icons::CompassIcon { class: class.to_string() } }
+        }
+        SidebarItem::Articles => {
+            rsx! { crate::components::icons::BookOpenIcon { class: class.to_string() } }
+        }
         SidebarItem::Music => rsx! {
             svg {
                 class: "{class}",
@@ -1477,8 +1591,12 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
                 circle { cx: "18", cy: "16", r: "3" }
             }
         },
-        SidebarItem::Photos => rsx! { crate::components::icons::CameraIcon { class: class.to_string() } },
-        SidebarItem::Videos => rsx! { crate::components::icons::VideoIcon { class: class.to_string() } },
+        SidebarItem::Photos => {
+            rsx! { crate::components::icons::CameraIcon { class: class.to_string() } }
+        }
+        SidebarItem::Videos => {
+            rsx! { crate::components::icons::VideoIcon { class: class.to_string() } }
+        }
         SidebarItem::Live => rsx! {
             svg {
                 class: "{class}",
@@ -1492,11 +1610,21 @@ fn render_sidebar_icon(item: &crate::stores::sidebar_store::SidebarItem, class: 
                 path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
             }
         },
-        SidebarItem::Notifications => rsx! { crate::components::icons::BellIcon { class: class.to_string() } },
-        SidebarItem::Messages => rsx! { crate::components::icons::MailIcon { class: class.to_string() } },
-        SidebarItem::Bookmarks => rsx! { crate::components::icons::BookmarkIcon { class: class.to_string() } },
-        SidebarItem::Profile => rsx! { crate::components::icons::UserIcon { class: class.to_string() } },
-        SidebarItem::Settings => rsx! { crate::components::icons::SettingsIcon { class: class.to_string() } },
+        SidebarItem::Notifications => {
+            rsx! { crate::components::icons::BellIcon { class: class.to_string() } }
+        }
+        SidebarItem::Messages => {
+            rsx! { crate::components::icons::MailIcon { class: class.to_string() } }
+        }
+        SidebarItem::Bookmarks => {
+            rsx! { crate::components::icons::BookmarkIcon { class: class.to_string() } }
+        }
+        SidebarItem::Profile => {
+            rsx! { crate::components::icons::UserIcon { class: class.to_string() } }
+        }
+        SidebarItem::Settings => {
+            rsx! { crate::components::icons::SettingsIcon { class: class.to_string() } }
+        }
         SidebarItem::VoiceMessages => rsx! {
             svg {
                 class: "{class}",

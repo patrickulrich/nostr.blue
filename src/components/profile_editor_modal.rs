@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
-use crate::stores::{nostr_client, profiles, auth_store};
 use crate::components::MediaUploader;
+use crate::stores::{auth_store, nostr_client, profiles};
+use dioxus::prelude::*;
 use nostr_sdk::Metadata;
 
 #[derive(Props, Clone, PartialEq)]
@@ -97,7 +97,9 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
 
             // NIP-24: Add bot field to custom metadata if true
             if *is_bot.read() {
-                metadata.custom.insert("bot".to_string(), serde_json::Value::Bool(true));
+                metadata
+                    .custom
+                    .insert("bot".to_string(), serde_json::Value::Bool(true));
             }
 
             // NIP-24: Add birthday to custom metadata if any field is set
@@ -115,7 +117,10 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                 if let Some(d) = day {
                     birthday_obj.insert("day".to_string(), serde_json::Value::Number(d.into()));
                 }
-                metadata.custom.insert("birthday".to_string(), serde_json::Value::Object(birthday_obj));
+                metadata.custom.insert(
+                    "birthday".to_string(),
+                    serde_json::Value::Object(birthday_obj),
+                );
             }
 
             match nostr_client::publish_metadata(metadata).await {

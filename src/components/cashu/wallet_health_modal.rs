@@ -8,8 +8,8 @@ use dioxus::prelude::*;
 
 use crate::components::modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 use crate::stores::cashu::proof_recovery::{
-    self, StuckProofInfo, UrgencyLevel, WalletHealthStats,
-    RESERVED_TIMEOUT_SECS, PENDING_SPENT_TIMEOUT_DEFAULT,
+    self, StuckProofInfo, UrgencyLevel, WalletHealthStats, PENDING_SPENT_TIMEOUT_DEFAULT,
+    RESERVED_TIMEOUT_SECS,
 };
 use crate::stores::cashu::types::ProofState;
 use crate::utils::format_sats_with_separator;
@@ -79,11 +79,15 @@ fn group_by_transaction(proofs: &[StuckProofInfo]) -> Vec<ProofGroup> {
 
     // Sort by maximum urgency across all proofs in group (critical first)
     result.sort_by(|a, b| {
-        let a_max_urgency = a.proofs.iter()
+        let a_max_urgency = a
+            .proofs
+            .iter()
             .map(|p| p.urgency)
             .max()
             .unwrap_or(UrgencyLevel::Normal);
-        let b_max_urgency = b.proofs.iter()
+        let b_max_urgency = b
+            .proofs
+            .iter()
             .map(|p| p.urgency)
             .max()
             .unwrap_or(UrgencyLevel::Normal);
@@ -126,7 +130,7 @@ fn remaining_until_recovery(proofs: &[StuckProofInfo]) -> Option<u64> {
             };
             timeout.checked_sub(p.stuck_duration_secs)
         })
-        .min()  // Use min() to get earliest recovery time, not max()
+        .min() // Use min() to get earliest recovery time, not max()
 }
 
 // =============================================================================
@@ -244,7 +248,11 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                 let display = if result.errors.len() <= 3 {
                     result.errors.join(", ")
                 } else {
-                    format!("{} + {} more", result.errors[..3].join(", "), result.errors.len() - 3)
+                    format!(
+                        "{} + {} more",
+                        result.errors[..3].join(", "),
+                        result.errors.len() - 3
+                    )
                 };
                 format!(
                     "{} spent, recovery completed with errors: {}",
@@ -255,7 +263,11 @@ pub fn WalletHealthModal(open: Signal<bool>, on_close: EventHandler<()>) -> Elem
                 let display = if result.errors.len() <= 3 {
                     result.errors.join(", ")
                 } else {
-                    format!("{} + {} more", result.errors[..3].join(", "), result.errors.len() - 3)
+                    format!(
+                        "{} + {} more",
+                        result.errors[..3].join(", "),
+                        result.errors.len() - 3
+                    )
                 };
                 format!("Recovery completed with errors: {}", display)
             } else {

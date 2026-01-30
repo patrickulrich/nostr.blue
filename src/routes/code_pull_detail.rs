@@ -2,15 +2,17 @@
 //!
 //! View a single NIP-34 Git patch/PR (Kind 1617) with comments.
 
-use dioxus::prelude::*;
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_pull_request, fetch_pr_comments_by_id, publish_pr_comment_by_id, update_pr_status_by_id};
-use crate::utils::nip34::{PullRequest, GitComment, IssueStatus};
-use crate::utils::format_relative_time_or;
-use crate::utils::format::{truncate_commit, truncate_pubkey};
+use crate::services::git_hosting::{
+    fetch_pr_comments_by_id, fetch_pull_request, publish_pr_comment_by_id, update_pr_status_by_id,
+};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
+use crate::utils::format::{truncate_commit, truncate_pubkey};
+use crate::utils::format_relative_time_or;
+use crate::utils::nip34::{GitComment, IssueStatus, PullRequest};
+use dioxus::prelude::*;
 
 /// Pull request detail page component
 #[component]
@@ -131,9 +133,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let pr_id_for_comments = pr_id.clone();
     let comments = use_resource(move || {
         let id = pr_id_for_comments.clone();
-        async move {
-            fetch_pr_comments_by_id(&id).await
-        }
+        async move { fetch_pr_comments_by_id(&id).await }
     });
 
     let handle_status_change = {
@@ -147,7 +147,9 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         // Refresh would happen via cache update
                     }
                     Err(e) => {
-                        web_sys::console::error_1(&format!("Failed to update status: {}", e).into());
+                        web_sys::console::error_1(
+                            &format!("Failed to update status: {}", e).into(),
+                        );
                     }
                 }
                 is_updating_status.set(false);
@@ -580,4 +582,3 @@ fn LoadingSkeleton() -> Element {
         }
     }
 }
-

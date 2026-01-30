@@ -1,16 +1,15 @@
 //! Shop Cart - Shopping cart view with multi-merchant support
 
-use dioxus::prelude::*;
-use std::collections::HashMap;
-use crate::routes::Route;
-use crate::stores::shop_store::{
-    CART_ITEMS, CART_TOTAL_SATS,
-    remove_from_cart, update_cart_quantity, clear_cart, get_cart_count,
-};
-use crate::stores::profiles::{self, Profile};
 use crate::components::shop::{CartItemCard, CartSummary};
+use crate::routes::Route;
+use crate::stores::profiles::{self, Profile};
+use crate::stores::shop_store::{
+    clear_cart, get_cart_count, remove_from_cart, update_cart_quantity, CART_ITEMS, CART_TOTAL_SATS,
+};
 use crate::utils::format::{format_sats_with_separator, truncate_id};
 use crate::utils::nip99::CartItem;
+use dioxus::prelude::*;
+use std::collections::HashMap;
 
 /// Shopping cart page
 #[component]
@@ -23,7 +22,8 @@ pub fn ShopCart() -> Element {
     let merchant_groups: HashMap<String, Vec<CartItem>> = {
         let mut groups: HashMap<String, Vec<CartItem>> = HashMap::new();
         for item in cart_items.iter() {
-            groups.entry(item.product.pubkey.clone())
+            groups
+                .entry(item.product.pubkey.clone())
                 .or_default()
                 .push(item.clone());
         }
@@ -49,7 +49,10 @@ pub fn ShopCart() -> Element {
             let fetch_futures = pks.iter().map(|pk| {
                 let pk = pk.clone();
                 async move {
-                    profiles::fetch_profile(pk.clone()).await.ok().map(|p| (pk, p))
+                    profiles::fetch_profile(pk.clone())
+                        .await
+                        .ok()
+                        .map(|p| (pk, p))
                 }
             });
 
@@ -170,7 +173,8 @@ fn MerchantCartGroup(
     show_header: bool,
 ) -> Element {
     // Calculate subtotal for this merchant
-    let subtotal: u64 = items.iter()
+    let subtotal: u64 = items
+        .iter()
         .map(|item| {
             let price = if item.product.price.currency.eq_ignore_ascii_case("sats") {
                 item.product.price.amount as u64
@@ -182,9 +186,7 @@ fn MerchantCartGroup(
         .sum();
 
     // Check if merchant has Lightning (lud16)
-    let has_lightning = profile.as_ref()
-        .and_then(|p| p.lud16.as_ref())
-        .is_some();
+    let has_lightning = profile.as_ref().and_then(|p| p.lud16.as_ref()).is_some();
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg overflow-hidden",

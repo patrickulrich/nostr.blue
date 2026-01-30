@@ -1,9 +1,9 @@
-use nostr_sdk::prelude::*;
 use dioxus::prelude::ReadableExt;
+use nostr_sdk::prelude::*;
 use std::time::Duration;
 
-use crate::stores::nostr_client::{NOSTR_CLIENT, ensure_relays_ready};
 use super::search_relays::get_connected_search_relays;
+use crate::stores::nostr_client::{ensure_relays_ready, NOSTR_CLIENT};
 
 /// Result type for content search
 #[derive(Clone, Debug)]
@@ -58,7 +58,9 @@ pub async fn search_text_notes(
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
         // Route to specific search relays
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
 
     match fetch_result {
@@ -82,7 +84,11 @@ pub async fn search_text_notes(
             // Sort by relevance (descending), with contacts prioritized
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
 
-            log::debug!("Text note search for '{}' returned {} results", query, results.len());
+            log::debug!(
+                "Text note search for '{}' returned {} results",
+                query,
+                results.len()
+            );
             Ok(results)
         }
         Err(e) => {
@@ -126,7 +132,9 @@ pub async fn search_articles(
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
         // Route to specific search relays
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
 
     match fetch_result {
@@ -150,7 +158,11 @@ pub async fn search_articles(
             // Sort by relevance (descending)
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
 
-            log::debug!("Article search for '{}' returned {} results", query, results.len());
+            log::debug!(
+                "Article search for '{}' returned {} results",
+                query,
+                results.len()
+            );
             Ok(results)
         }
         Err(e) => {
@@ -194,7 +206,9 @@ pub async fn search_photos(
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
         // Route to specific search relays
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
 
     match fetch_result {
@@ -218,7 +232,11 @@ pub async fn search_photos(
             // Sort by relevance (descending)
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
 
-            log::debug!("Photo search for '{}' returned {} results", query, results.len());
+            log::debug!(
+                "Photo search for '{}' returned {} results",
+                query,
+                results.len()
+            );
             Ok(results)
         }
         Err(e) => {
@@ -262,7 +280,9 @@ pub async fn search_videos(
         client.fetch_events(filter, Duration::from_secs(5)).await
     } else {
         // Route to specific search relays
-        client.fetch_events_from(search_urls, filter, Duration::from_secs(5)).await
+        client
+            .fetch_events_from(search_urls, filter, Duration::from_secs(5))
+            .await
     };
 
     match fetch_result {
@@ -286,7 +306,11 @@ pub async fn search_videos(
             // Sort by relevance (descending)
             results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
 
-            log::debug!("Video search for '{}' returned {} results", query, results.len());
+            log::debug!(
+                "Video search for '{}' returned {} results",
+                query,
+                results.len()
+            );
             Ok(results)
         }
         Err(e) => {
@@ -307,7 +331,10 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         }
     };
 
-    match client.get_contact_list_public_keys(Duration::from_secs(5)).await {
+    match client
+        .get_contact_list_public_keys(Duration::from_secs(5))
+        .await
+    {
         Ok(pubkeys) => {
             log::debug!("Found {} contacts", pubkeys.len());
             pubkeys

@@ -3,11 +3,11 @@
 //! Functions for publishing profile metadata (NIP-01).
 
 use dioxus::prelude::ReadableExt;
-use nostr_sdk::prelude::*;
 use nostr::Url;
+use nostr_sdk::prelude::*;
 
-use super::{get_client, HAS_SIGNER};
 use super::types::PublishResult;
+use super::{get_client, HAS_SIGNER};
 
 // =============================================================================
 // Metadata Publishing
@@ -16,7 +16,9 @@ use super::types::PublishResult;
 /// Publish profile metadata (Kind 0) with relay feedback
 ///
 /// Updates the user's Nostr profile with the provided metadata
-pub async fn publish_metadata_tracked(metadata: Metadata) -> std::result::Result<PublishResult, String> {
+pub async fn publish_metadata_tracked(
+    metadata: Metadata,
+) -> std::result::Result<PublishResult, String> {
     // Use get_client() helper to avoid holding RwLock across await
     let client = get_client().ok_or("Client not initialized")?;
 
@@ -29,7 +31,9 @@ pub async fn publish_metadata_tracked(metadata: Metadata) -> std::result::Result
 
     // Build event and publish using gossip routing (client handles signing)
     let builder = EventBuilder::metadata(&metadata);
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish metadata: {}", e))?;
 
     let result = PublishResult::from_output(output);
@@ -73,11 +77,15 @@ pub async fn publish_metadata(metadata: Metadata) -> std::result::Result<String,
 
 /// Validate a picture/banner URL (http/https only, must have host)
 fn validate_picture_url(url: &str) -> std::result::Result<Url, String> {
-    let validated_url = Url::parse(url)
-        .map_err(|e| format!("Invalid URL: {}", e))?;
+    let validated_url = Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
     match validated_url.scheme() {
         "http" | "https" => {}
-        scheme => return Err(format!("Invalid URL scheme '{}': only http/https allowed", scheme)),
+        scheme => {
+            return Err(format!(
+                "Invalid URL scheme '{}': only http/https allowed",
+                scheme
+            ))
+        }
     }
     if validated_url.host().is_none() {
         return Err("Invalid URL: missing host".to_string());
@@ -93,8 +101,7 @@ fn validate_picture_url(url: &str) -> std::result::Result<Url, String> {
 ///
 /// Uses raw_metadata_json from cached Profile to preserve unknown fields during update.
 async fn update_profile_field(field: &str, url: String) -> std::result::Result<(), String> {
-    let pubkey_str = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
 
     // Get cached profile with raw JSON for merging
     let cached_profile = crate::stores::profiles::PROFILE_CACHE
@@ -109,18 +116,24 @@ async fn update_profile_field(field: &str, url: String) -> std::result::Result<(
     // Build updated metadata, preserving unknown fields via raw JSON merge
     let updated_metadata = if let Some(json) = cached_profile.raw_metadata_json {
         // Merge field into existing raw JSON to preserve custom fields
-        let mut value: serde_json::Value = serde_json::from_str(&json)
-            .map_err(|e| format!("Invalid metadata JSON: {}", e))?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&json).map_err(|e| format!("Invalid metadata JSON: {}", e))?;
         value[field] = serde_json::Value::String(url);
         serde_json::from_value(value)
             .map_err(|e| format!("Failed to parse updated metadata: {}", e))?
     } else {
         // Fallback: use current get_profile behavior (may lose custom fields)
-        let current_metadata = crate::stores::profiles::get_profile(&pubkey_str)
-            .ok_or("Profile not loaded")?;
+        let current_metadata =
+            crate::stores::profiles::get_profile(&pubkey_str).ok_or("Profile not loaded")?;
         match field {
-            "picture" => Metadata { picture: Some(url), ..current_metadata },
-            "banner" => Metadata { banner: Some(url), ..current_metadata },
+            "picture" => Metadata {
+                picture: Some(url),
+                ..current_metadata
+            },
+            "banner" => Metadata {
+                banner: Some(url),
+                ..current_metadata
+            },
             _ => return Err(format!("Unknown profile field: {}", field)),
         }
     };

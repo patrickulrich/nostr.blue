@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
-use crate::stores::nwc_store;
 use crate::components::icons::CheckIcon;
+use crate::stores::nwc_store;
+use dioxus::prelude::*;
 
 /// NWC setup modal for connecting wallet
 #[component]

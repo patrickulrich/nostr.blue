@@ -10,8 +10,8 @@
 #![allow(dead_code)]
 
 use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -124,12 +124,18 @@ pub static LOADING_EMBEDDINGS: GlobalSignal<bool> = GlobalSignal::new(|| false);
 
 /// Get embeddings for a source event
 pub fn get_cached_embeddings(source_event_id: &str) -> Vec<EmbeddingEvent> {
-    EMBEDDINGS_CACHE.read().get(source_event_id).cloned().unwrap_or_default()
+    EMBEDDINGS_CACHE
+        .read()
+        .get(source_event_id)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Cache embeddings for a source event
 pub fn cache_embeddings(source_event_id: &str, embeddings: Vec<EmbeddingEvent>) {
-    EMBEDDINGS_CACHE.write().insert(source_event_id.to_string(), embeddings);
+    EMBEDDINGS_CACHE
+        .write()
+        .insert(source_event_id.to_string(), embeddings);
 }
 
 /// Add a single embedding to cache
@@ -187,7 +193,8 @@ pub fn parse_embedding_event(event: &NostrEvent) -> Option<EmbeddingEvent> {
             }
             Some("vector") => {
                 if let Some(v) = slice.get(1) {
-                    vector = v.split(',')
+                    vector = v
+                        .split(',')
                         .filter_map(|s| s.trim().parse::<f32>().ok())
                         .collect();
                 }
@@ -247,9 +254,11 @@ pub fn parse_embedding_event(event: &NostrEvent) -> Option<EmbeddingEvent> {
 /// Returns None if the source_event_id is invalid hex
 pub fn embeddings_filter(source_event_id: &str) -> Option<Filter> {
     let event_id = EventId::from_hex(source_event_id).ok()?;
-    Some(Filter::new()
-        .kind(Kind::Custom(KIND_EMBEDDING))
-        .event(event_id))
+    Some(
+        Filter::new()
+            .kind(Kind::Custom(KIND_EMBEDDING))
+            .event(event_id),
+    )
 }
 
 /// Build filter for embeddings by author
@@ -280,7 +289,9 @@ pub fn recent_embeddings_filter(limit: usize) -> Filter {
 // ============================================================================
 
 /// Fetch embeddings for a source event
-pub async fn fetch_embeddings_for_event(source_event_id: &str) -> StdResult<Vec<EmbeddingEvent>, String> {
+pub async fn fetch_embeddings_for_event(
+    source_event_id: &str,
+) -> StdResult<Vec<EmbeddingEvent>, String> {
     // Check cache first
     let cached = get_cached_embeddings(source_event_id);
     if !cached.is_empty() {
@@ -296,23 +307,23 @@ pub async fn fetch_embeddings_for_event(source_event_id: &str) -> StdResult<Vec<
             return Err(format!("Invalid event ID: {}", source_event_id));
         }
     };
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     *LOADING_EMBEDDINGS.write() = false;
 
     match result {
         Ok(events) => {
-            let embeddings: Vec<EmbeddingEvent> = events
-                .iter()
-                .filter_map(parse_embedding_event)
-                .collect();
+            let embeddings: Vec<EmbeddingEvent> =
+                events.iter().filter_map(parse_embedding_event).collect();
 
             cache_embeddings(source_event_id, embeddings.clone());
 
-            log::info!("Fetched {} embeddings for event {}", embeddings.len(), source_event_id);
+            log::info!(
+                "Fetched {} embeddings for event {}",
+                embeddings.len(),
+                source_event_id
+            );
             Ok(embeddings)
         }
         Err(e) => {
@@ -323,26 +334,24 @@ pub async fn fetch_embeddings_for_event(source_event_id: &str) -> StdResult<Vec<
 }
 
 /// Fetch embeddings by author
-pub async fn fetch_embeddings_by_author(pubkey_hex: &str, limit: usize) -> StdResult<Vec<EmbeddingEvent>, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+pub async fn fetch_embeddings_by_author(
+    pubkey_hex: &str,
+    limit: usize,
+) -> StdResult<Vec<EmbeddingEvent>, String> {
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     *LOADING_EMBEDDINGS.write() = true;
 
     let filter = embeddings_by_author_filter(pubkey, limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     *LOADING_EMBEDDINGS.write() = false;
 
     match result {
         Ok(events) => {
-            let embeddings: Vec<EmbeddingEvent> = events
-                .iter()
-                .filter_map(parse_embedding_event)
-                .collect();
+            let embeddings: Vec<EmbeddingEvent> =
+                events.iter().filter_map(parse_embedding_event).collect();
 
             // Cache each embedding
             for embedding in &embeddings {
@@ -424,8 +433,7 @@ pub async fn publish_embedding(
     normalized: bool,
     source_text: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -435,7 +443,8 @@ pub async fn publish_embedding(
         .map_err(|e| format!("Invalid source event ID: {}", e))?;
 
     // Build vector string
-    let vector_str = vector.iter()
+    let vector_str = vector
+        .iter()
         .map(|f| f.to_string())
         .collect::<Vec<_>>()
         .join(",");
@@ -443,9 +452,15 @@ pub async fn publish_embedding(
     // Build tags
     let mut tags: Vec<Tag> = vec![
         Tag::event(source_id),
-        Tag::custom(TagKind::Custom("type".into()), vec![content_type.as_str().to_string()]),
+        Tag::custom(
+            TagKind::Custom("type".into()),
+            vec![content_type.as_str().to_string()],
+        ),
         Tag::custom(TagKind::Custom("vector".into()), vec![vector_str]),
-        Tag::custom(TagKind::Custom("dims".into()), vec![vector.len().to_string()]),
+        Tag::custom(
+            TagKind::Custom("dims".into()),
+            vec![vector.len().to_string()],
+        ),
     ];
 
     // Model tag with optional download link
@@ -456,11 +471,17 @@ pub async fn publish_embedding(
     tags.push(Tag::custom(TagKind::Custom("model".into()), model_values));
 
     if normalized {
-        tags.push(Tag::custom(TagKind::Custom("norm".into()), vec!["true".to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("norm".into()),
+            vec!["true".to_string()],
+        ));
     }
 
     if let Some(text) = source_text {
-        tags.push(Tag::custom(TagKind::Custom("source".into()), vec![text.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("source".into()),
+            vec![text.to_string()],
+        ));
     }
 
     // Add MIME tags
@@ -469,10 +490,11 @@ pub async fn publish_embedding(
     }
 
     // Build and publish (content is empty)
-    let builder = EventBuilder::new(Kind::Custom(KIND_EMBEDDING), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_EMBEDDING), "").tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish embedding: {}", e))?;
 
     log::info!("Embedding published: {}", output.id().to_hex());
@@ -519,10 +541,25 @@ mod tests {
 
     #[test]
     fn test_content_type_from_str() {
-        assert_eq!(EmbeddingContentType::from_str("text"), EmbeddingContentType::Text);
-        assert_eq!(EmbeddingContentType::from_str("image"), EmbeddingContentType::Image);
-        assert_eq!(EmbeddingContentType::from_str("audio"), EmbeddingContentType::Audio);
-        assert_eq!(EmbeddingContentType::from_str("video"), EmbeddingContentType::Video);
-        assert_eq!(EmbeddingContentType::from_str("unknown"), EmbeddingContentType::Text);
+        assert_eq!(
+            EmbeddingContentType::from_str("text"),
+            EmbeddingContentType::Text
+        );
+        assert_eq!(
+            EmbeddingContentType::from_str("image"),
+            EmbeddingContentType::Image
+        );
+        assert_eq!(
+            EmbeddingContentType::from_str("audio"),
+            EmbeddingContentType::Audio
+        );
+        assert_eq!(
+            EmbeddingContentType::from_str("video"),
+            EmbeddingContentType::Video
+        );
+        assert_eq!(
+            EmbeddingContentType::from_str("unknown"),
+            EmbeddingContentType::Text
+        );
     }
 }

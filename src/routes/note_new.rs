@@ -1,6 +1,6 @@
+use crate::components::{EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete};
+use crate::stores::{auth_store, nostr_client::publish_note};
 use dioxus::prelude::*;
-use crate::stores::{nostr_client::publish_note, auth_store};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -10,7 +10,8 @@ pub fn NoteNew(quote: Option<String>) -> Element {
 
     // Initialize content with quote reference if provided
     // Strip existing nostr: prefix to avoid double-prefix (nostr:nostr:...)
-    let initial_content = quote.as_ref()
+    let initial_content = quote
+        .as_ref()
         .map(|q| {
             let clean = q.strip_prefix("nostr:").unwrap_or(q);
             format!("\nnostr:{}", clean)
@@ -54,7 +55,9 @@ pub fn NoteNew(quote: Option<String>) -> Element {
                 Ok(event_id) => {
                     log::info!("Note published successfully: {}", event_id);
                     is_publishing.set(false);
-                    navigator.push(crate::routes::Route::Home { list: String::new() });
+                    navigator.push(crate::routes::Route::Home {
+                        list: String::new(),
+                    });
                 }
                 Err(e) => {
                     log::error!("Failed to publish note: {}", e);
@@ -100,7 +103,9 @@ pub fn NoteNew(quote: Option<String>) -> Element {
     // Redirect if not authenticated - effect must be called unconditionally
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home { list: String::new() });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
 

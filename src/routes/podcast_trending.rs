@@ -2,11 +2,11 @@
 //!
 //! Full page view of trending podcasts from Podcast Index API
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::podcast_index;
 use crate::stores::{nostr_client, podcast_subscription};
+use dioxus::prelude::*;
 
 /// Full trending podcasts page
 #[component]

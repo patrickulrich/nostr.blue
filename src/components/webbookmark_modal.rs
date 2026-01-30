@@ -1,7 +1,10 @@
+use crate::stores::webbookmarks::{
+    add_webbookmark, get_hashtags, get_image, get_published_at, get_title, get_url,
+    update_webbookmark,
+};
+use crate::utils::url_metadata::fetch_url_metadata;
 use dioxus::prelude::*;
 use nostr_sdk::Event as NostrEvent;
-use crate::stores::webbookmarks::{add_webbookmark, update_webbookmark, get_url, get_title, get_image, get_published_at, get_hashtags};
-use crate::utils::url_metadata::fetch_url_metadata;
 
 /// Mode for the bookmark modal (Add or Edit)
 #[derive(Clone, Copy, PartialEq)]
@@ -232,21 +235,31 @@ pub fn WebBookmarkModal(
                     add_webbookmark(
                         url,
                         if title.is_empty() { None } else { Some(title) },
-                        if description.is_empty() { None } else { Some(description) },
+                        if description.is_empty() {
+                            None
+                        } else {
+                            Some(description)
+                        },
                         if image.is_empty() { None } else { Some(image) },
                         published_ts,
                         hashtags,
-                    ).await
+                    )
+                    .await
                 }
                 BookmarkModalMode::Edit => {
                     update_webbookmark(
                         url,
                         if title.is_empty() { None } else { Some(title) },
-                        if description.is_empty() { None } else { Some(description) },
+                        if description.is_empty() {
+                            None
+                        } else {
+                            Some(description)
+                        },
                         if image.is_empty() { None } else { Some(image) },
                         published_ts,
                         hashtags,
-                    ).await
+                    )
+                    .await
                 }
             };
 

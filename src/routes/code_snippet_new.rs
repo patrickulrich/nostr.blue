@@ -2,11 +2,11 @@
 //!
 //! Create a new NIP-C0 code snippet (Kind 1337).
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::publish_snippet;
 use crate::stores::auth_store;
+use dioxus::prelude::*;
 
 /// Popular programming languages for the dropdown
 const LANGUAGES: &[(&str, &str)] = &[
@@ -91,18 +91,46 @@ pub fn CodeSnippetNew() -> Element {
 
             match publish_snippet(
                 &code_val,
-                if lang_val.is_empty() { None } else { Some(lang_val.as_str()) },
-                if name_val.is_empty() { None } else { Some(name_val.as_str()) },
-                if ext_val.is_empty() { None } else { Some(ext_val.as_str()) },
-                if desc_val.is_empty() { None } else { Some(desc_val.as_str()) },
+                if lang_val.is_empty() {
+                    None
+                } else {
+                    Some(lang_val.as_str())
+                },
+                if name_val.is_empty() {
+                    None
+                } else {
+                    Some(name_val.as_str())
+                },
+                if ext_val.is_empty() {
+                    None
+                } else {
+                    Some(ext_val.as_str())
+                },
+                if desc_val.is_empty() {
+                    None
+                } else {
+                    Some(desc_val.as_str())
+                },
                 None, // runtime
-                if license_val.is_empty() { None } else { Some(license_val.as_str()) },
+                if license_val.is_empty() {
+                    None
+                } else {
+                    Some(license_val.as_str())
+                },
                 &deps_list,
-                if repo_val.is_empty() { None } else { Some(repo_val.as_str()) },
-            ).await {
+                if repo_val.is_empty() {
+                    None
+                } else {
+                    Some(repo_val.as_str())
+                },
+            )
+            .await
+            {
                 Ok(event_id) => {
                     // Navigate to the new snippet
-                    nav.push(Route::CodeSnippetDetail { note_id: event_id.to_hex() });
+                    nav.push(Route::CodeSnippetDetail {
+                        note_id: event_id.to_hex(),
+                    });
                 }
                 Err(e) => {
                     error_message.set(Some(e));

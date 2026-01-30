@@ -2,11 +2,11 @@
 //!
 //! Functions for community NIP proposals - addressable events for custom NIPs.
 
-use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
-use super::fetching::{get_client, fetch_events_aggregated};
+use super::fetching::{fetch_events_aggregated, get_client};
 use super::signals::HAS_SIGNER;
 use super::types::PublishResult;
 
@@ -82,8 +82,7 @@ pub async fn fetch_custom_nip_by_naddr(
     use nostr::nips::nip19::Nip19;
 
     // Decode naddr to get coordinate
-    let nip19 = Nip19::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     match nip19 {
         Nip19::Coordinate(nip19_coord) => {
@@ -140,7 +139,7 @@ pub async fn publish_custom_nip_tracked(
         return Err("Title cannot be empty".to_string());
     }
 
-    use nostr::{EventBuilder, Kind, Tag, TagKind, SingleLetterTag, Alphabet};
+    use nostr::{Alphabet, EventBuilder, Kind, SingleLetterTag, Tag, TagKind};
 
     // Build event with required d-tag and optional tags
     // nostr-sdk NIP-31 pattern: Add alt tag for clients that don't understand custom kinds
@@ -157,7 +156,8 @@ pub async fn publish_custom_nip_tracked(
         ));
     }
 
-    let output = client.send_event_builder(builder)
+    let output = client
+        .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish custom NIP: {}", e))?;
 
@@ -209,19 +209,16 @@ pub fn generate_custom_nip_naddr(
         return Err("Identifier cannot be empty or whitespace".to_string());
     }
 
-    let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey)
-        .identifier(identifier);
+    let coordinate = Coordinate::new(Kind::Custom(KIND_CUSTOM_NIP), *pubkey).identifier(identifier);
 
     let mut failed_count = 0;
     let relay_urls: Vec<nostr::RelayUrl> = relays
         .iter()
-        .filter_map(|r| {
-            match nostr::RelayUrl::parse(r) {
-                Ok(url) => Some(url),
-                Err(_) => {
-                    failed_count += 1;
-                    None
-                }
+        .filter_map(|r| match nostr::RelayUrl::parse(r) {
+            Ok(url) => Some(url),
+            Err(_) => {
+                failed_count += 1;
+                None
             }
         })
         .collect();
@@ -232,7 +229,8 @@ pub fn generate_custom_nip_naddr(
 
     let nip19_coord = Nip19Coordinate::new(coordinate, relay_urls);
 
-    nip19_coord.to_bech32()
+    nip19_coord
+        .to_bech32()
         .map_err(|e| format!("Failed to generate naddr: {}", e))
 }
 
@@ -267,18 +265,17 @@ pub async fn search_custom_nips(
     if results.is_empty() {
         log::info!("NIP-50 search returned empty, trying client-side filter");
 
-        let fallback_filter = Filter::new()
-            .kind(Kind::Custom(KIND_CUSTOM_NIP))
-            .limit(200);
+        let fallback_filter = Filter::new().kind(Kind::Custom(KIND_CUSTOM_NIP)).limit(200);
 
         let all_events = fetch_events_aggregated(fallback_filter, timeout).await?;
         let query_lower = query.to_lowercase();
 
-        return Ok(all_events.into_iter()
+        return Ok(all_events
+            .into_iter()
             .filter(|e| {
                 // Cheap case-sensitive check first, then fall back to case-insensitive
-                let content_matches = e.content.contains(query) ||
-                    e.content.to_lowercase().contains(&query_lower);
+                let content_matches =
+                    e.content.contains(query) || e.content.to_lowercase().contains(&query_lower);
 
                 let title_matches = e.tags.iter().any(|tag| {
                     if let Some(nostr::TagStandard::Title(title)) = tag.as_standardized() {

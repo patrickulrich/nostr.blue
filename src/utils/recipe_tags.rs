@@ -207,35 +207,88 @@ pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
     TagSection {
         emoji: "🍽️",
         title: "Why are you cooking?",
-        tags: &["Easy", "Quick", "Breakfast", "Lunch", "Supper", "Dessert", "Snack", "Drinks"],
+        tags: &[
+            "Easy",
+            "Quick",
+            "Breakfast",
+            "Lunch",
+            "Supper",
+            "Dessert",
+            "Snack",
+            "Drinks",
+        ],
     },
     TagSection {
         emoji: "🌍",
         title: "Explore by culture",
         tags: &[
-            "American", "Asian", "Chinese", "French", "German", "Greek", "Indian", "Italian",
-            "Japanese", "Mexican", "Spanish", "Thai", "Turkish", "Vietnamese", "Mediterranean",
-            "Middle-Eastern", "Brazilian", "Filipino", "Lebanese",
+            "American",
+            "Asian",
+            "Chinese",
+            "French",
+            "German",
+            "Greek",
+            "Indian",
+            "Italian",
+            "Japanese",
+            "Mexican",
+            "Spanish",
+            "Thai",
+            "Turkish",
+            "Vietnamese",
+            "Mediterranean",
+            "Middle-Eastern",
+            "Brazilian",
+            "Filipino",
+            "Lebanese",
         ],
     },
     TagSection {
         emoji: "🥩",
         title: "Proteins",
-        tags: &["Beef", "Chicken", "Fish", "Lamb", "Pork", "Seafood", "Steak", "Turkey", "Duck", "Eggs", "Tofu"],
+        tags: &[
+            "Beef", "Chicken", "Fish", "Lamb", "Pork", "Seafood", "Steak", "Turkey", "Duck",
+            "Eggs", "Tofu",
+        ],
     },
     TagSection {
         emoji: "🥕",
         title: "Ingredients",
         tags: &[
-            "Apple", "Beans", "Bread", "Cheese", "Chocolate", "Coconut", "Corn", "Cream",
-            "Fruit", "Garlic", "Mushrooms", "Noodles", "Pasta", "Peppers", "Potato", "Rice",
-            "Spinach", "Tomato", "Vegetables",
+            "Apple",
+            "Beans",
+            "Bread",
+            "Cheese",
+            "Chocolate",
+            "Coconut",
+            "Corn",
+            "Cream",
+            "Fruit",
+            "Garlic",
+            "Mushrooms",
+            "Noodles",
+            "Pasta",
+            "Peppers",
+            "Potato",
+            "Rice",
+            "Spinach",
+            "Tomato",
+            "Vegetables",
         ],
     },
     TagSection {
         emoji: "🍳",
         title: "Meals",
-        tags: &["Pizza", "Pasta", "Soup", "Salad", "Sandwich", "Breakfast", "Lunch", "Supper"],
+        tags: &[
+            "Pizza",
+            "Pasta",
+            "Soup",
+            "Salad",
+            "Sandwich",
+            "Breakfast",
+            "Lunch",
+            "Supper",
+        ],
     },
     TagSection {
         emoji: "🔥",
@@ -269,7 +322,9 @@ pub static TAG_ALIASES: &[(&str, &str)] = &[
 /// Find a tag by name (case-insensitive)
 pub fn find_tag(name: &str) -> Option<&'static RecipeTag> {
     let name_lower = name.to_lowercase();
-    RECIPE_TAGS.iter().find(|t| t.name.to_lowercase() == name_lower)
+    RECIPE_TAGS
+        .iter()
+        .find(|t| t.name.to_lowercase() == name_lower)
 }
 
 /// Find a tag by slug
@@ -304,7 +359,8 @@ pub fn get_section_tags(section_title: &str) -> Option<Vec<&'static RecipeTag>> 
         .iter()
         .find(|s| s.title == section_title)
         .map(|section| {
-            section.tags
+            section
+                .tags
                 .iter()
                 .filter_map(|name| find_tag(name))
                 .collect()

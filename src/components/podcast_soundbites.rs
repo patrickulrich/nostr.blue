@@ -6,12 +6,12 @@
 //! - Duration display
 //! - Seek to soundbite position
 
-use dioxus::prelude::*;
-use crate::utils::podcast::Soundbite;
-use crate::utils::safe_duration_millis;
+use crate::components::icons;
 use crate::services::podcast_rss::format_duration;
 use crate::stores::music_player;
-use crate::components::icons;
+use crate::utils::podcast::Soundbite;
+use crate::utils::safe_duration_millis;
+use dioxus::prelude::*;
 
 // ============================================================================
 // Soundbites List Component
@@ -97,9 +97,10 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
     let mut is_playing = use_signal(|| false);
     let soundbite = props.soundbite.clone();
 
-    let title = soundbite.title.clone().unwrap_or_else(|| {
-        format!("Clip {}", props.index + 1)
-    });
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| format!("Clip {}", props.index + 1));
 
     let start_str = format_duration(soundbite.start_time as u64);
     let duration_str = format!("{}s", soundbite.duration as u32);
@@ -297,7 +298,10 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
     let item = &props.item;
     let soundbite = &item.soundbite;
 
-    let title = soundbite.title.clone().unwrap_or_else(|| "Clip".to_string());
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| "Clip".to_string());
     let duration_str = format!("{}s", soundbite.duration as u32);
 
     let handle_play = {
@@ -397,7 +401,10 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
 
 /// Share a soundbite (Web Share API or clipboard)
 fn share_soundbite(soundbite: &Soundbite, episode_title: Option<&str>) {
-    let title = soundbite.title.clone().unwrap_or_else(|| "Podcast clip".to_string());
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| "Podcast clip".to_string());
     let text = if let Some(ep) = episode_title {
         format!("{} - {}", title, ep)
     } else {
@@ -445,7 +452,10 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
     let mut is_playing = use_signal(|| false);
     let soundbite = props.soundbite.clone();
 
-    let title = soundbite.title.clone().unwrap_or_else(|| "Featured Clip".to_string());
+    let title = soundbite
+        .title
+        .clone()
+        .unwrap_or_else(|| "Featured Clip".to_string());
     let duration_str = format!("{} seconds", soundbite.duration as u32);
 
     let handle_play = {

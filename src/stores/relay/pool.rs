@@ -17,9 +17,9 @@ use crate::stores::relay::nip65::USER_RELAY_METADATA;
 fn is_relay_blocked(url: &str) -> bool {
     let blocked = super::nip65::BLOCKED_RELAYS.peek();
     let normalized = url.trim_end_matches('/');
-    blocked.iter().any(|blocked_url| {
-        blocked_url.trim_end_matches('/') == normalized
-    })
+    blocked
+        .iter()
+        .any(|blocked_url| blocked_url.trim_end_matches('/') == normalized)
 }
 
 /// Remove any connected relays that are in the blocked list
@@ -36,7 +36,10 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
     for (url, _) in relays {
         let url_str = url.to_string();
         let normalized = url_str.trim_end_matches('/');
-        if blocked.iter().any(|b| b.trim_end_matches('/') == normalized) {
+        if blocked
+            .iter()
+            .any(|b| b.trim_end_matches('/') == normalized)
+        {
             log::info!("Removing blocked relay from pool: {}", url_str);
             let _ = client.remove_relay(url).await;
         }
@@ -48,9 +51,14 @@ pub async fn remove_blocked_relays_from_pool(client: &Client) {
     let mut relays = data.write();
     relays.retain(|r| {
         let normalized = r.url.trim_end_matches('/');
-        !blocked.iter().any(|b| b.trim_end_matches('/') == normalized)
+        !blocked
+            .iter()
+            .any(|b| b.trim_end_matches('/') == normalized)
     });
-    log::debug!("Pruned blocked relays from RELAY_POOL, {} remaining", relays.len());
+    log::debug!(
+        "Pruned blocked relays from RELAY_POOL, {} remaining",
+        relays.len()
+    );
 }
 
 /// Default relays to connect to
@@ -86,7 +94,9 @@ pub async fn add_relay(client: &Client, relay_url: &str) -> std::result::Result<
 
     // Check if already exists to avoid duplicates
     let normalized_url = relay_url.trim_end_matches('/');
-    let exists = relays.iter().any(|r| r.url.trim_end_matches('/') == normalized_url);
+    let exists = relays
+        .iter()
+        .any(|r| r.url.trim_end_matches('/') == normalized_url);
     if !exists {
         relays.push(RelayInfo::with_flags(
             relay_url.to_string(),
@@ -120,7 +130,11 @@ pub async fn add_relay_with_opts(
 
     let url = RelayUrl::parse(relay_url).map_err(|e| format!("Invalid relay URL: {}", e))?;
 
-    client.pool().add_relay(url, opts).await.map_err(|e| e.to_string())?;
+    client
+        .pool()
+        .add_relay(url, opts)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Update relay pool state
     let store = RELAY_POOL.read();
@@ -129,7 +143,9 @@ pub async fn add_relay_with_opts(
 
     // Check if already exists to avoid duplicates
     let normalized_url = relay_url.trim_end_matches('/');
-    let exists = relays.iter().any(|r| r.url.trim_end_matches('/') == normalized_url);
+    let exists = relays
+        .iter()
+        .any(|r| r.url.trim_end_matches('/') == normalized_url);
     if !exists {
         relays.push(RelayInfo::with_flags(
             relay_url.to_string(),
@@ -213,7 +229,10 @@ pub async fn apply_relay_lists_to_client(client: Arc<Client>) -> std::result::Re
         ));
     }
 
-    log::info!("Updating RELAY_POOL with {} connected relays for UI", relay_infos.len());
+    log::info!(
+        "Updating RELAY_POOL with {} connected relays for UI",
+        relay_infos.len()
+    );
     RELAY_POOL.read().data().write().clone_from(&relay_infos);
 
     // Apply local relays (browser-only storage)

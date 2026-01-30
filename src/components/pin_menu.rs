@@ -1,15 +1,15 @@
 //! Pin Menu Component
 //! 3-dot menu for pin cards with actions like delete, copy link, pin to board, etc.
 
-use dioxus::prelude::*;
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::pin_board_item_selector::PinToBoardModal;
 use crate::components::ReportModal;
-use crate::stores::pin_boards_store::{Pin, PinReference, delete_pin};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{delete_pin, Pin, PinReference};
 use crate::utils::clipboard::copy_to_clipboard;
-use nostr_sdk::prelude::*;
+use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr_sdk::prelude::*;
 use std::time::Duration;
 
 /// Data passed when requesting to pin content to a board

@@ -1,10 +1,10 @@
 // Playlist Creation Page
 // Allows users to create Kind 34139 playlists on nostr
 
-use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_music};
 use crate::utils::slugify;
+use dioxus::prelude::*;
 
 #[component]
 pub fn MusicPlaylistNew() -> Element {
@@ -77,14 +77,19 @@ pub fn MusicPlaylistNew() -> Element {
         error_msg.set(None);
 
         spawn(async move {
-            let description = if description_val.is_empty() { None } else { Some(description_val) };
-            let image = if image_url_val.is_empty() { None } else { Some(image_url_val) };
+            let description = if description_val.is_empty() {
+                None
+            } else {
+                Some(description_val)
+            };
+            let image = if image_url_val.is_empty() {
+                None
+            } else {
+                Some(image_url_val)
+            };
 
             // Generate a unique d-tag based on title and timestamp
-            let d_tag = format!("{}-{}",
-                slugify(&title_val),
-                chrono::Utc::now().timestamp()
-            );
+            let d_tag = format!("{}-{}", slugify(&title_val), chrono::Utc::now().timestamp());
 
             match nostr_music::publish_playlist(
                 d_tag,
@@ -95,7 +100,9 @@ pub fn MusicPlaylistNew() -> Element {
                 categories_val,
                 is_public_val,
                 is_collaborative_val,
-            ).await {
+            )
+            .await
+            {
                 Ok(_event_id) => {
                     navigator.push(crate::routes::Route::MusicHome {});
                 }

@@ -1,12 +1,12 @@
 //! Recipes By Tag Page
 //! Browse recipes filtered by category tag
 
-use dioxus::prelude::*;
-use crate::stores::recipe_store::{self, CachedRecipe};
-use crate::stores::nostr_client;
 use crate::components::{RecipeCard, RecipeCardSkeleton};
-use crate::utils::recipe_tags::{find_tag_by_slug, CURATED_TAG_SECTIONS, RECIPE_TAGS};
 use crate::routes::Route;
+use crate::stores::nostr_client;
+use crate::stores::recipe_store::{self, CachedRecipe};
+use crate::utils::recipe_tags::{find_tag_by_slug, CURATED_TAG_SECTIONS, RECIPE_TAGS};
+use dioxus::prelude::*;
 
 #[component]
 pub fn RecipesByTag(tag: String) -> Element {
@@ -101,7 +101,11 @@ pub fn RecipesByTag(tag: String) -> Element {
 
     // Compute recipe count text for pluralization
     let recipe_count = recipes.read().len();
-    let recipe_text = if recipe_count == 1 { "recipe" } else { "recipes" };
+    let recipe_text = if recipe_count == 1 {
+        "recipe"
+    } else {
+        "recipes"
+    };
 
     rsx! {
         div {

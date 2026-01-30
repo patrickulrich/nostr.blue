@@ -2,13 +2,13 @@
 /// Stores user's sidebar layout preferences on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
-use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
+use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use strum::{EnumIter, IntoEnumIterator};
 
-use crate::stores::{auth_store, nostr_client};
 use crate::routes::Route;
+use crate::stores::{auth_store, nostr_client};
 
 /// State for NIP-78 data loading operations
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -163,7 +163,9 @@ impl SidebarItem {
     /// Note: Profile requires pubkey parameter, returns None if not available
     pub fn as_route(&self, pubkey: Option<&str>) -> Option<Route> {
         match self {
-            SidebarItem::Home => Some(Route::Home { list: String::new() }),
+            SidebarItem::Home => Some(Route::Home {
+                list: String::new(),
+            }),
             SidebarItem::Explore => Some(Route::Explore {}),
             SidebarItem::Articles => Some(Route::Articles {}),
             SidebarItem::Music => Some(Route::MusicHome {}),
@@ -173,7 +175,9 @@ impl SidebarItem {
             SidebarItem::Notifications => Some(Route::Notifications {}),
             SidebarItem::Messages => Some(Route::DMs {}),
             SidebarItem::Bookmarks => Some(Route::Bookmarks {}),
-            SidebarItem::Profile => pubkey.map(|pk| Route::Profile { pubkey: pk.to_string() }),
+            SidebarItem::Profile => pubkey.map(|pk| Route::Profile {
+                pubkey: pk.to_string(),
+            }),
             SidebarItem::Settings => Some(Route::Settings {}),
             SidebarItem::VoiceMessages => Some(Route::VoiceMessages {}),
             SidebarItem::Polls => Some(Route::Polls {}),
@@ -285,7 +289,8 @@ pub static SIDEBAR_STATE: GlobalSignal<Nip78LoadState> = Signal::global(Nip78Loa
 /// Get visible main sidebar items (up to slot count, filtered by auth)
 pub fn get_main_sidebar_items(is_authenticated: bool) -> Vec<SidebarItem> {
     let slot_count = *SIDEBAR_SLOT_COUNT.read();
-    SIDEBAR_ITEMS.read()
+    SIDEBAR_ITEMS
+        .read()
         .iter()
         .take(slot_count)
         .filter(|item| !item.requires_auth() || is_authenticated)
@@ -296,7 +301,8 @@ pub fn get_main_sidebar_items(is_authenticated: bool) -> Vec<SidebarItem> {
 /// Get visible More menu items (beyond slot count, filtered by auth)
 pub fn get_more_menu_items(is_authenticated: bool) -> Vec<SidebarItem> {
     let slot_count = *SIDEBAR_SLOT_COUNT.read();
-    SIDEBAR_ITEMS.read()
+    SIDEBAR_ITEMS
+        .read()
         .iter()
         .skip(slot_count)
         .filter(|item| !item.requires_auth() || is_authenticated)
@@ -331,7 +337,10 @@ fn cache_sidebar(data: &SidebarPreferencesData) {
 pub fn init_sidebar_from_cache() {
     if let Some(cached) = load_cached_sidebar() {
         if !cached.active_items.is_empty() {
-            log::info!("Initialized {} sidebar items from localStorage", cached.active_items.len());
+            log::info!(
+                "Initialized {} sidebar items from localStorage",
+                cached.active_items.len()
+            );
             *SIDEBAR_ITEMS.write() = cached.active_items;
             *SIDEBAR_SLOT_COUNT.write() = cached.main_sidebar_count;
         }
@@ -358,7 +367,10 @@ pub async fn load_sidebar_preferences() {
     // STEP 1: Try localStorage first for instant UI
     let mut loaded_from_cache = false;
     if let Some(cached) = load_cached_sidebar() {
-        log::info!("Loaded {} sidebar items from localStorage", cached.active_items.len());
+        log::info!(
+            "Loaded {} sidebar items from localStorage",
+            cached.active_items.len()
+        );
         *SIDEBAR_ITEMS.write() = cached.active_items;
         *SIDEBAR_SLOT_COUNT.write() = cached.main_sidebar_count;
         loaded_from_cache = true;
@@ -366,8 +378,14 @@ pub async fn load_sidebar_preferences() {
 
     // Not authenticated - use cache or defaults
     if !auth_store::is_authenticated() {
-        log::info!("Not authenticated, using {} sidebar",
-            if loaded_from_cache { "cached" } else { "default" });
+        log::info!(
+            "Not authenticated, using {} sidebar",
+            if loaded_from_cache {
+                "cached"
+            } else {
+                "default"
+            }
+        );
         *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;
     }
@@ -449,8 +467,10 @@ pub async fn load_sidebar_preferences() {
                 match serde_json::from_str::<SidebarPreferencesData>(&event.content) {
                     Ok(data) => {
                         if !data.active_items.is_empty() {
-                            log::info!("Loaded {} sidebar items from Nostr relays",
-                                data.active_items.len());
+                            log::info!(
+                                "Loaded {} sidebar items from Nostr relays",
+                                data.active_items.len()
+                            );
                             *SIDEBAR_ITEMS.write() = data.active_items.clone();
                             *SIDEBAR_SLOT_COUNT.write() = data.main_sidebar_count;
                             cache_sidebar(&data); // Update localStorage
@@ -488,8 +508,15 @@ pub async fn load_sidebar_preferences() {
 }
 
 /// Save sidebar preferences to Nostr relays (NIP-78)
-pub async fn save_sidebar_preferences(items: Vec<SidebarItem>, slot_count: usize) -> Result<(), String> {
-    log::info!("Saving {} sidebar items with {} main slots to Nostr (NIP-78)...", items.len(), slot_count);
+pub async fn save_sidebar_preferences(
+    items: Vec<SidebarItem>,
+    slot_count: usize,
+) -> Result<(), String> {
+    log::info!(
+        "Saving {} sidebar items with {} main slots to Nostr (NIP-78)...",
+        items.len(),
+        slot_count
+    );
 
     // Check if authenticated
     if !auth_store::is_authenticated() {
@@ -497,7 +524,8 @@ pub async fn save_sidebar_preferences(items: Vec<SidebarItem>, slot_count: usize
     }
 
     // Get client
-    let client = nostr_client::NOSTR_CLIENT.read()
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
@@ -517,11 +545,13 @@ pub async fn save_sidebar_preferences(items: Vec<SidebarItem>, slot_count: usize
         .map_err(|e| format!("Failed to serialize sidebar data: {}", e))?;
 
     // Build NIP-78 event (kind 30078 with 'd' tag)
-    let builder = EventBuilder::new(Kind::from(APP_DATA_KIND), content)
-        .tag(Tag::identifier(SIDEBAR_D_TAG));
+    let builder =
+        EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SIDEBAR_D_TAG));
 
     // Publish to relays
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish sidebar preferences: {}", e))?;
 
     log::info!("Sidebar preferences saved to Nostr successfully");

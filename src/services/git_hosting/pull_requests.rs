@@ -23,13 +23,11 @@ pub async fn fetch_pull_request(event_ref: &str) -> Result<PullRequest, String> 
     }
 
     // Decode event reference
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
 
     // Build filter
-    let filter = Filter::new()
-        .id(event_id)
-        .kind(Kind::GitPatch);
+    let filter = Filter::new().id(event_id).kind(Kind::GitPatch);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -52,22 +50,23 @@ pub async fn fetch_pull_request(event_ref: &str) -> Result<PullRequest, String> 
         update_pr_statuses(&status_events);
     }
 
-    get_cached_pr(&event_id.to_hex())
-        .ok_or_else(|| "Pull request not found".to_string())
+    get_cached_pr(&event_id.to_hex()).ok_or_else(|| "Pull request not found".to_string())
 }
 
 /// Fetch pull requests for a repository by naddr
 pub async fn fetch_repo_prs(naddr: &str) -> Result<Vec<PullRequest>, String> {
     use crate::utils::nip34::decode_naddr;
 
-    let coord = decode_naddr(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     fetch_repository_prs(&coord, 50).await
 }
 
 /// Fetch pull requests for a repository coordinate
-pub async fn fetch_repository_prs(coordinate: &Coordinate, limit: usize) -> Result<Vec<PullRequest>, String> {
+pub async fn fetch_repository_prs(
+    coordinate: &Coordinate,
+    limit: usize,
+) -> Result<Vec<PullRequest>, String> {
     let filter = Filter::new()
         .kind(Kind::GitPatch)
         .custom_tag(
@@ -101,10 +100,7 @@ pub async fn fetch_repository_prs(coordinate: &Coordinate, limit: usize) -> Resu
         }
     }
 
-    Ok(events
-        .iter()
-        .filter_map(PullRequest::from_event)
-        .collect())
+    Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 
 /// Search PRs by text (NIP-50)
@@ -120,10 +116,7 @@ pub async fn search_prs(query: &str, limit: usize) -> Result<Vec<PullRequest>, S
 
     cache_pr_events(&events);
 
-    Ok(events
-        .iter()
-        .filter_map(PullRequest::from_event)
-        .collect())
+    Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 
 /// Fetch pull requests by author
@@ -139,10 +132,7 @@ pub async fn fetch_user_prs(pubkey: &PublicKey, limit: usize) -> Result<Vec<Pull
 
     cache_pr_events(&events);
 
-    Ok(events
-        .iter()
-        .filter_map(PullRequest::from_event)
-        .collect())
+    Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 
 /// Publish a new patch/pull request
@@ -193,7 +183,9 @@ pub async fn publish_patch(
     }
 
     // Sign and publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish: {}", e))?;
 
     let event_id = *output.id();
@@ -217,10 +209,11 @@ pub async fn update_pr_status(pr_id: EventId, status: IssueStatus) -> Result<Eve
 
     let kind = status.to_kind();
 
-    let builder = EventBuilder::new(kind, "")
-        .tag(Tag::event(pr_id));
+    let builder = EventBuilder::new(kind, "").tag(Tag::event(pr_id));
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish status: {}", e))?;
 
     let event_id = *output.id();
@@ -249,12 +242,7 @@ pub async fn publish_pr_comment(
         return Err("No signer attached. Cannot publish events.".to_string());
     }
 
-    let comment_to = CommentTarget::event(
-        pr_id,
-        Kind::GitPatch,
-        Some(pr_author),
-        None,
-    );
+    let comment_to = CommentTarget::event(pr_id, Kind::GitPatch, Some(pr_author), None);
 
     let mut builder = EventBuilder::comment(content, comment_to, None);
 
@@ -263,7 +251,9 @@ pub async fn publish_pr_comment(
         builder = builder.tag(Tag::coordinate(coord.clone(), None));
     }
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish comment: {}", e))?;
 
     Ok(*output.id())
@@ -271,18 +261,13 @@ pub async fn publish_pr_comment(
 
 /// Fetch comments for a PR
 pub async fn fetch_pr_comments(pr_id: EventId) -> Result<Vec<GitComment>, String> {
-    let filter = Filter::new()
-        .kind(Kind::Comment)
-        .event(pr_id);
+    let filter = Filter::new().kind(Kind::Comment).event(pr_id);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch comments: {}", e))?;
 
-    Ok(events
-        .iter()
-        .filter_map(GitComment::from_event)
-        .collect())
+    Ok(events.iter().filter_map(GitComment::from_event).collect())
 }
 
 // String-based wrappers for route handlers
@@ -298,17 +283,27 @@ pub async fn publish_patch_by_naddr(
 ) -> Result<String, String> {
     use crate::utils::nip34::decode_naddr;
 
-    let coord = decode_naddr(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
-    let result = publish_patch(&coord, content, commit, parent_commit, is_cover_letter, labels).await?;
+    let result = publish_patch(
+        &coord,
+        content,
+        commit,
+        parent_commit,
+        is_cover_letter,
+        labels,
+    )
+    .await?;
     Ok(result.to_hex())
 }
 
 /// Update PR status by event ID string
-pub async fn update_pr_status_by_id(event_ref: &str, status: IssueStatus) -> Result<String, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+pub async fn update_pr_status_by_id(
+    event_ref: &str,
+    status: IssueStatus,
+) -> Result<String, String> {
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
 
     let result = update_pr_status(event_id, status).await?;
     Ok(result.to_hex())
@@ -322,11 +317,11 @@ pub async fn publish_pr_comment_by_id(
 ) -> Result<String, String> {
     use nostr_sdk::prelude::PublicKey;
 
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
 
-    let author = PublicKey::from_hex(author_hex)
-        .map_err(|e| format!("Invalid author pubkey: {}", e))?;
+    let author =
+        PublicKey::from_hex(author_hex).map_err(|e| format!("Invalid author pubkey: {}", e))?;
 
     let result = publish_pr_comment(event_id, author, None, content).await?;
     Ok(result.to_hex())
@@ -334,8 +329,8 @@ pub async fn publish_pr_comment_by_id(
 
 /// Fetch comments for PR by event ID string
 pub async fn fetch_pr_comments_by_id(event_ref: &str) -> Result<Vec<GitComment>, String> {
-    let event_id = decode_event_id(event_ref)
-        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let event_id =
+        decode_event_id(event_ref).map_err(|e| format!("Invalid event reference: {}", e))?;
 
     fetch_pr_comments(event_id).await
 }

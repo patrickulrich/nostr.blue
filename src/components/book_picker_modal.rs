@@ -1,15 +1,14 @@
 //! Book Picker Modal
 //! Select publications and book references to insert into wiki pages and publications
 
+use crate::components::icons::{BookOpenIcon, ChevronDownIcon, SearchIcon, XIcon};
+use crate::stores::publication_store::{
+    fetch_publications, get_all_cached_publications, search_publications, PublicationIndex,
+};
+use crate::utils::nkbip08::BookReference;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use gloo_timers::future::TimeoutFuture;
-use crate::stores::publication_store::{
-    PublicationIndex, search_publications, get_all_cached_publications,
-    fetch_publications,
-};
-use crate::utils::nkbip08::BookReference;
-use crate::components::icons::{XIcon, SearchIcon, BookOpenIcon, ChevronDownIcon};
 
 // ============================================================================
 // Input Validation Functions (Security Fix #1)
@@ -19,14 +18,18 @@ use crate::components::icons::{XIcon, SearchIcon, BookOpenIcon, ChevronDownIcon}
 /// Only lowercase letters, digits, and hyphens are allowed.
 fn is_valid_book_id(input: &str) -> bool {
     !input.is_empty()
-        && input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && input
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Validate book version input against allowed format.
 /// Only lowercase letters, digits, and hyphens are allowed (per NKBIP-08).
 fn is_valid_book_version(input: &str) -> bool {
     !input.is_empty()
-        && input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && input
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Validate book sections input against allowed format (per NKBIP-08 spec).
@@ -39,7 +42,10 @@ fn is_valid_book_sections(input: &str) -> bool {
     }
 
     // First check: all characters must be digits, commas, or hyphens (spec compliance)
-    if !input.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-') {
+    if !input
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == ',' || c == '-')
+    {
         return false;
     }
 
@@ -160,45 +166,42 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut publications_version = use_signal(|| 0usize);
 
     // Load publications when modal opens
-    use_effect(use_reactive(
-        &*props.show.read(),
-        move |is_shown| {
-            if is_shown {
-                loading.set(true);
-                fetch_error.set(None);
-                spawn(async move {
-                    match fetch_publications(100, None).await {
-                        Ok(_) => {
-                            fetch_error.set(None);
-                            // Bump version to trigger memo re-evaluation
-                            publications_version.set(publications_version() + 1);
-                        }
-                        Err(e) => {
-                            crate::utils::log_fetch_error("publications", e.clone());
-                            fetch_error.set(Some(format!("Failed to load publications: {}", e)));
-                        }
+    use_effect(use_reactive(&*props.show.read(), move |is_shown| {
+        if is_shown {
+            loading.set(true);
+            fetch_error.set(None);
+            spawn(async move {
+                match fetch_publications(100, None).await {
+                    Ok(_) => {
+                        fetch_error.set(None);
+                        // Bump version to trigger memo re-evaluation
+                        publications_version.set(publications_version() + 1);
                     }
-                    loading.set(false);
-                });
-                // Reset selection and validation errors when opening
-                selected_publication.set(None);
-                selected_chapter.set(None);
-                selected_sections.set(String::new());
-                selected_version.set(String::new());
-                version_error.set(false);
-                sections_error.set(false);
-                book_id_error.set(false);
-                search_query.set(String::new());
-                search_results.set(Vec::new());
-                // Cancel any stale search task and reset debounce state
-                is_searching.set(false);
-                if let Some(task) = search_task.take() {
-                    task.cancel();
+                    Err(e) => {
+                        crate::utils::log_fetch_error("publications", e.clone());
+                        fetch_error.set(Some(format!("Failed to load publications: {}", e)));
+                    }
                 }
-                debounce_counter.set(0);
+                loading.set(false);
+            });
+            // Reset selection and validation errors when opening
+            selected_publication.set(None);
+            selected_chapter.set(None);
+            selected_sections.set(String::new());
+            selected_version.set(String::new());
+            version_error.set(false);
+            sections_error.set(false);
+            book_id_error.set(false);
+            search_query.set(String::new());
+            search_results.set(Vec::new());
+            // Cancel any stale search task and reset debounce state
+            is_searching.set(false);
+            if let Some(task) = search_task.take() {
+                task.cancel();
             }
-        },
-    ));
+            debounce_counter.set(0);
+        }
+    }));
 
     // Handle search with 300ms debouncing to avoid excessive requests
     let mut handle_search = move |query: String| {
@@ -209,7 +212,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             search_results.set(Vec::new());
             is_searching.set(false);
             // Only clear search-related errors, preserve initial load errors
-            let should_clear = fetch_error.peek()
+            let should_clear = fetch_error
+                .peek()
                 .as_ref()
                 .map(|err| err.starts_with("Search failed:"))
                 .unwrap_or(false);
@@ -327,20 +331,26 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     });
 
     // Track overall validation state (for disabling Insert button)
-    let has_validation_error = use_memo(move || {
-        *version_error.read() || *sections_error.read() || *book_id_error.read()
-    });
+    let has_validation_error =
+        use_memo(move || *version_error.read() || *sections_error.read() || *book_id_error.read());
 
     // Generate markup preview
     let markup_preview = use_memo(move || {
-        book_reference.read().as_ref().map(|r| r.raw.clone()).unwrap_or_default()
+        book_reference
+            .read()
+            .as_ref()
+            .map(|r| r.raw.clone())
+            .unwrap_or_default()
     });
 
     // Close modal with search-in-progress warning
     let close_modal = move |_| {
         if *is_searching.read() {
             let confirmed = web_sys::window()
-                .and_then(|w| w.confirm_with_message("A search is in progress. Close anyway?").ok())
+                .and_then(|w| {
+                    w.confirm_with_message("A search is in progress. Close anyway?")
+                        .ok()
+                })
                 .unwrap_or(false);
             if !confirmed {
                 return;
@@ -370,10 +380,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         }
         if let Some(reference) = book_reference.read().clone() {
             let markup = reference.raw.clone();
-            props.on_select.call(BookSelection {
-                reference,
-                markup,
-            });
+            props.on_select.call(BookSelection { reference, markup });
             props.show.set(false);
         }
     };

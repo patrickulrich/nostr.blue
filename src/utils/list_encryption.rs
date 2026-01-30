@@ -19,7 +19,10 @@ pub async fn decrypt_private_tags(event: &Event) -> Result<Vec<Tag>, String> {
     }
 
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
 
     // Decrypt content (encrypted to self using author's pubkey)
     let decrypted = signer
@@ -64,7 +67,10 @@ pub async fn encrypt_private_tags(tags: &[Tag]) -> Result<String, String> {
     }
 
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     // Use cached pubkey - no need to call signer.get_public_key()
     let pubkey = nostr_client::get_cached_pubkey()?;
 
@@ -103,7 +109,10 @@ pub async fn add_person_to_list(
     // Get existing private tags - MUST succeed to prevent data loss
     let mut private_tags = decrypt_private_tags(list_event).await.map_err(|e| {
         log::error!("Failed to decrypt private tags: {}", e);
-        format!("Cannot modify list: failed to decrypt private members ({})", e)
+        format!(
+            "Cannot modify list: failed to decrypt private members ({})",
+            e
+        )
     })?;
 
     // Check for duplicates in both public and private
@@ -150,7 +159,10 @@ pub async fn add_person_to_list(
 }
 
 /// Remove a person from a list (checks both public and private members)
-pub async fn remove_person_from_list(list_event: &Event, person_pubkey: &str) -> Result<(), String> {
+pub async fn remove_person_from_list(
+    list_event: &Event,
+    person_pubkey: &str,
+) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
 
     let target_pubkey =
@@ -176,7 +188,10 @@ pub async fn remove_person_from_list(list_event: &Event, person_pubkey: &str) ->
         .await
         .map_err(|e| {
             log::error!("Failed to decrypt private tags: {}", e);
-            format!("Cannot modify list: failed to decrypt private members ({})", e)
+            format!(
+                "Cannot modify list: failed to decrypt private members ({})",
+                e
+            )
         })?
         .into_iter()
         .filter(|tag| {
@@ -222,7 +237,9 @@ pub async fn get_all_list_members(list_event: &Event) -> Result<Vec<PublicKey>, 
 /// Use this when you need to know if the member count is accurate or partial.
 /// If `private_decryption_succeeded` is false, the returned members are only
 /// the public ones (private members could not be decrypted).
-pub async fn get_all_list_members_with_status(list_event: &Event) -> Result<ListMembersResult, String> {
+pub async fn get_all_list_members_with_status(
+    list_event: &Event,
+) -> Result<ListMembersResult, String> {
     let mut members = Vec::new();
 
     // Extract public members from tags
@@ -241,7 +258,10 @@ pub async fn get_all_list_members_with_status(list_event: &Event) -> Result<List
     let (private_tags, decryption_succeeded) = match decrypt_private_tags(list_event).await {
         Ok(tags) => (tags, true),
         Err(e) => {
-            log::warn!("Failed to decrypt private members, showing public only: {}", e);
+            log::warn!(
+                "Failed to decrypt private members, showing public only: {}",
+                e
+            );
             (Vec::new(), false)
         }
     };
@@ -276,7 +296,10 @@ pub async fn create_people_list(
     is_private_default: bool,
 ) -> Result<Event, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
 
     let name = name.trim();
     if name.is_empty() {
@@ -344,4 +367,3 @@ pub async fn create_people_list(
     log::info!("Created new people list: {}", name);
     Ok(event)
 }
-

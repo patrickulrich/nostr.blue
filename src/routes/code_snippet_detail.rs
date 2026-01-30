@@ -2,13 +2,13 @@
 //!
 //! View a single NIP-C0 code snippet (Kind 1337).
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_snippet_by_id;
-use crate::utils::nip34::DisplaySnippet;
+use crate::stores::{nostr_client, profiles::PROFILE_CACHE};
 use crate::utils::format_relative_time_or;
-use crate::stores::{profiles::PROFILE_CACHE, nostr_client};
+use crate::utils::nip34::DisplaySnippet;
+use dioxus::prelude::*;
 
 /// Code snippet detail page component
 #[component]
@@ -142,9 +142,8 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
             let clipboard = navigator.clipboard();
             let code_to_copy = code_for_copy.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ = wasm_bindgen_futures::JsFuture::from(
-                    clipboard.write_text(&code_to_copy)
-                ).await;
+                let _ =
+                    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&code_to_copy)).await;
             });
         }
         copied.set(true);
@@ -426,4 +425,3 @@ fn LoadingSkeleton() -> Element {
         }
     }
 }
-

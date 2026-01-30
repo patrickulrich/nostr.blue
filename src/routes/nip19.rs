@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::routes::Route;
+use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 
 #[component]
@@ -93,127 +93,133 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
 
     // Handle nrelay (relay URL)
     if identifier.starts_with("nrelay") {
-        return Err("Relay URLs (nrelay) are not yet supported. Relay management coming soon.".to_string());
+        return Err(
+            "Relay URLs (nrelay) are not yet supported. Relay management coming soon.".to_string(),
+        );
     }
 
     // Use Nip19::from_bech32 for unified type detection
     match Nip19::from_bech32(identifier) {
-        Ok(nip19) => match nip19 {
-            Nip19::Pubkey(pubkey) => {
-                log::info!("Decoded npub: {}", pubkey);
-                Ok(Route::Profile {
-                    pubkey: pubkey.to_hex()
-                })
-            }
-            Nip19::Profile(profile) => {
-                log::info!("Decoded nprofile: {} with {} relay hints",
-                    profile.public_key,
-                    profile.relays.len()
-                );
-                // TODO: Could use relay hints to fetch profile data
-                Ok(Route::Profile {
-                    pubkey: profile.public_key.to_hex()
-                })
-            }
-            Nip19::EventId(event_id) => {
-                log::info!("Decoded note: {}", event_id);
-                Ok(Route::Note {
-                    note_id: event_id.to_hex(),
-                    from_voice: None,
-                })
-            }
-            Nip19::Event(nevent) => {
-                log::info!("Decoded nevent: {} with {} relay hints",
-                    nevent.event_id,
-                    nevent.relays.len()
-                );
-                // TODO: Could use relay hints to fetch the event
-                Ok(Route::Note {
-                    note_id: nevent.event_id.to_hex(),
-                    from_voice: None,
-                })
-            }
-            Nip19::Coordinate(coord) => {
-                log::info!("Decoded naddr: kind={} pubkey={} id={}",
-                    coord.coordinate.kind.as_u16(),
-                    coord.coordinate.public_key,
-                    coord.coordinate.identifier
-                );
-                // Route based on event kind
-                let kind = coord.coordinate.kind.as_u16();
-                match kind {
-                    // Long-form content (articles)
-                    30023 => Ok(Route::ArticleDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Badge definition
-                    30009 => Ok(Route::BadgeDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Live streams (kind 30311 uses note_id, not naddr - redirect to detail)
-                    30311 => {
-                        // Live stream events use note_id from event
-                        // For now, return error since we need to fetch the actual event
-                        Err("Live stream naddr routing requires event fetch. Please use the event ID directly.".to_string())
-                    },
-                    // Calendar events (NIP-52)
-                    31922 | 31923 => Ok(Route::CalendarEventDetail {
-                        naddr: identifier.to_string(),
-                        from: None
-                    }),
-                    // Music tracks - use MusicPlaylistDetail
-                    32123 => Ok(Route::MusicPlaylistDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Podcast shows
-                    30078 => Ok(Route::PodcastNostrDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Podcast episodes
-                    30054 => Ok(Route::PodcastNostrEpisodeDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Code repositories
-                    30617 => Ok(Route::CodeRepo {
-                        naddr: identifier.to_string()
-                    }),
-                    // P2P orders (NIP-69)
-                    38383 => Ok(Route::P2POrderDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Wiki articles (NIP-54)
-                    30818 => Ok(Route::WikiDetail {
-                        identifier: coord.coordinate.identifier.clone()
-                    }),
-                    // Publications (NKBIP-01)
-                    30040 => Ok(Route::PublicationDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Pin Boards
-                    33889 => Ok(Route::PinBoardDetail {
-                        naddr: identifier.to_string()
-                    }),
-                    // Generic fallback for unknown kinds
-                    _ => Err(format!(
-                        "Addressable event kind {} is not yet supported. naddr: {}",
-                        kind,
-                        identifier
-                    ))
+        Ok(nip19) => {
+            match nip19 {
+                Nip19::Pubkey(pubkey) => {
+                    log::info!("Decoded npub: {}", pubkey);
+                    Ok(Route::Profile {
+                        pubkey: pubkey.to_hex(),
+                    })
+                }
+                Nip19::Profile(profile) => {
+                    log::info!(
+                        "Decoded nprofile: {} with {} relay hints",
+                        profile.public_key,
+                        profile.relays.len()
+                    );
+                    // TODO: Could use relay hints to fetch profile data
+                    Ok(Route::Profile {
+                        pubkey: profile.public_key.to_hex(),
+                    })
+                }
+                Nip19::EventId(event_id) => {
+                    log::info!("Decoded note: {}", event_id);
+                    Ok(Route::Note {
+                        note_id: event_id.to_hex(),
+                        from_voice: None,
+                    })
+                }
+                Nip19::Event(nevent) => {
+                    log::info!(
+                        "Decoded nevent: {} with {} relay hints",
+                        nevent.event_id,
+                        nevent.relays.len()
+                    );
+                    // TODO: Could use relay hints to fetch the event
+                    Ok(Route::Note {
+                        note_id: nevent.event_id.to_hex(),
+                        from_voice: None,
+                    })
+                }
+                Nip19::Coordinate(coord) => {
+                    log::info!(
+                        "Decoded naddr: kind={} pubkey={} id={}",
+                        coord.coordinate.kind.as_u16(),
+                        coord.coordinate.public_key,
+                        coord.coordinate.identifier
+                    );
+                    // Route based on event kind
+                    let kind = coord.coordinate.kind.as_u16();
+                    match kind {
+                        // Long-form content (articles)
+                        30023 => Ok(Route::ArticleDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Badge definition
+                        30009 => Ok(Route::BadgeDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Live streams (kind 30311 uses note_id, not naddr - redirect to detail)
+                        30311 => {
+                            // Live stream events use note_id from event
+                            // For now, return error since we need to fetch the actual event
+                            Err("Live stream naddr routing requires event fetch. Please use the event ID directly.".to_string())
+                        }
+                        // Calendar events (NIP-52)
+                        31922 | 31923 => Ok(Route::CalendarEventDetail {
+                            naddr: identifier.to_string(),
+                            from: None,
+                        }),
+                        // Music tracks - use MusicPlaylistDetail
+                        32123 => Ok(Route::MusicPlaylistDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Podcast shows
+                        30078 => Ok(Route::PodcastNostrDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Podcast episodes
+                        30054 => Ok(Route::PodcastNostrEpisodeDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Code repositories
+                        30617 => Ok(Route::CodeRepo {
+                            naddr: identifier.to_string(),
+                        }),
+                        // P2P orders (NIP-69)
+                        38383 => Ok(Route::P2POrderDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Wiki articles (NIP-54)
+                        30818 => Ok(Route::WikiDetail {
+                            identifier: coord.coordinate.identifier.clone(),
+                        }),
+                        // Publications (NKBIP-01)
+                        30040 => Ok(Route::PublicationDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Pin Boards
+                        33889 => Ok(Route::PinBoardDetail {
+                            naddr: identifier.to_string(),
+                        }),
+                        // Generic fallback for unknown kinds
+                        _ => Err(format!(
+                            "Addressable event kind {} is not yet supported. naddr: {}",
+                            kind, identifier
+                        )),
+                    }
+                }
+                Nip19::Secret(_) => {
+                    // Should be caught earlier, but just in case
+                    Err("🔒 This is a private key (nsec)! Never share your private key with anyone.".to_string())
+                }
+                Nip19::EncryptedSecret(_) => {
+                    // Encrypted private key (ncryptsec)
+                    Err("🔐 This is an encrypted private key (ncryptsec). While encrypted, avoid pasting it into untrusted websites. Import it safely via Settings.".to_string())
                 }
             }
-            Nip19::Secret(_) => {
-                // Should be caught earlier, but just in case
-                Err("🔒 This is a private key (nsec)! Never share your private key with anyone.".to_string())
-            }
-            Nip19::EncryptedSecret(_) => {
-                // Encrypted private key (ncryptsec)
-                Err("🔐 This is an encrypted private key (ncryptsec). While encrypted, avoid pasting it into untrusted websites. Import it safely via Settings.".to_string())
-            }
-        },
+        }
         Err(e) => Err(format!(
             "Failed to decode NIP-19 identifier '{}...': {}",
             identifier.chars().take(20).collect::<String>(),
             e
-        ))
+        )),
     }
 }

@@ -28,20 +28,26 @@ impl UserList {
     /// Create a UserList from a Nostr event
     pub fn from_event(event: Event) -> Option<Self> {
         // Must have a 'd' tag (identifier)
-        let identifier = event.tags.iter()
+        let identifier = event
+            .tags
+            .iter()
             .find(|tag| tag.kind() == nostr_sdk::TagKind::d())
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())?;
 
         // Get name tag first (NIP-51 standard), then title tag as fallback (deprecated)
         // If neither exists, use identifier as fallback
-        let name = event.tags.iter()
+        let name = event
+            .tags
+            .iter()
             .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("name"))
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .or_else(|| {
                 // Fallback to deprecated "title" tag for backwards compatibility
-                event.tags.iter()
+                event
+                    .tags
+                    .iter()
                     .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
                     .and_then(|tag| tag.content())
                     .map(|s| s.to_string())
@@ -50,7 +56,9 @@ impl UserList {
             .unwrap_or_else(|| "Untitled List".to_string());
 
         // Get description tag
-        let description = event.tags.iter()
+        let description = event
+            .tags
+            .iter()
             .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("description"))
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
@@ -69,7 +77,7 @@ impl UserList {
             created_at: event.created_at.as_secs(),
             author: event.pubkey.to_string(),
             has_private_content,
-            total_member_count: None,  // Will be populated after decryption
+            total_member_count: None, // Will be populated after decryption
             event,
         })
     }
@@ -78,7 +86,12 @@ impl UserList {
 /// Hook to fetch all user lists (NIP-51)
 /// Returns (lists, loading, error, refresh)
 #[allow(clippy::type_complexity)]
-pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<String>>, Signal<u32>) {
+pub fn use_user_lists() -> (
+    Signal<Vec<UserList>>,
+    Signal<bool>,
+    Signal<Option<String>>,
+    Signal<u32>,
+) {
     let mut lists = use_signal(Vec::<UserList>::new);
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -98,7 +111,7 @@ pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<S
         // Don't fetch if client not initialized yet
         // Effect will re-run when CLIENT_INITIALIZED changes
         if !client_ready {
-            loading.set(false);  // Reset to avoid stuck spinner
+            loading.set(false); // Reset to avoid stuck spinner
             return;
         }
 
@@ -130,13 +143,13 @@ pub fn use_user_lists() -> (Signal<Vec<UserList>>, Signal<bool>, Signal<Option<S
 
 /// Fetch user lists from relays
 async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
-    let client = nostr_client::NOSTR_CLIENT.read()
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
 
-    let pubkey = PublicKey::parse(pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     log::info!("Fetching lists for {}", pubkey_str);
 
@@ -147,12 +160,14 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         .kinds(LIST_KINDS.iter().map(|&k| Kind::from(k)));
 
     // Fetch events
-    let events = client.fetch_events(filter, Duration::from_secs(10))
+    let events = client
+        .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
     // Parse events into UserList objects
-    let mut lists: Vec<UserList> = events.into_iter()
+    let mut lists: Vec<UserList> = events
+        .into_iter()
         .filter_map(UserList::from_event)
         .collect();
 
@@ -168,7 +183,8 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     // Private lists - concurrent decryption (nostr-sdk pattern: join_all)
     if *nostr_client::HAS_SIGNER.peek() {
         // Collect indices and events for private lists
-        let private_indices: Vec<usize> = lists.iter()
+        let private_indices: Vec<usize> = lists
+            .iter()
             .enumerate()
             .filter(|(_, list)| list.kind == NAMED_PEOPLE && list.has_private_content)
             .map(|(i, _)| i)
@@ -195,7 +211,11 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
                         }
                     }
                     Err(e) => {
-                        log::warn!("Failed to get members for list '{}': {}", lists[idx].name, e);
+                        log::warn!(
+                            "Failed to get members for list '{}': {}",
+                            lists[idx].name,
+                            e
+                        );
                         // Keep as None - will show public count with "+" indicator
                     }
                 }
@@ -215,7 +235,8 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
 pub async fn delete_list(event: &Event) -> Result<(), String> {
     use nostr_sdk::{EventBuilder, Kind, Tag, TagStandard};
 
-    let client = nostr_client::NOSTR_CLIENT.read()
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
@@ -238,7 +259,8 @@ pub async fn delete_list(event: &Event) -> Result<(), String> {
     let builder = EventBuilder::new(Kind::EventDeletion, "Deleted list").tags(tags);
 
     // Publish deletion event
-    client.send_event_builder(builder)
+    client
+        .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
 

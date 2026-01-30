@@ -1,10 +1,12 @@
-use dioxus::prelude::*;
 use dioxus::prelude::Event as DioxusEvent;
+use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 
-use crate::services::profile_search::{search_profiles, search_cached_profiles, get_contact_pubkeys, ProfileSearchResult};
 use crate::routes::Route;
+use crate::services::profile_search::{
+    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+};
 
 #[component]
 pub fn SearchInput() -> Element {

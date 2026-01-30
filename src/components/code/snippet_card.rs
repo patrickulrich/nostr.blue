@@ -2,9 +2,9 @@
 //!
 //! Displays NIP-C0 code snippets in cards for lists and feeds.
 
-use dioxus::prelude::*;
-use crate::utils::nip34::DisplaySnippet;
 use crate::routes::Route;
+use crate::utils::nip34::DisplaySnippet;
+use dioxus::prelude::*;
 
 /// Code snippet card component for lists
 #[component]
@@ -13,8 +13,14 @@ pub fn CodeSnippetCard(
     #[props(default = true)] show_author: bool,
     #[props(default = 10)] max_lines: usize,
 ) -> Element {
-    let language = snippet.language.clone().unwrap_or_else(|| "text".to_string());
-    let display_name = snippet.name.clone().unwrap_or_else(|| "Untitled".to_string());
+    let language = snippet
+        .language
+        .clone()
+        .unwrap_or_else(|| "text".to_string());
+    let display_name = snippet
+        .name
+        .clone()
+        .unwrap_or_else(|| "Untitled".to_string());
     let description = snippet.description.clone().unwrap_or_default();
 
     // Truncate code to max lines
@@ -114,7 +120,10 @@ pub fn CodeSnippetCard(
 /// Inline/embed version for rendering in notes
 #[component]
 pub fn CodeSnippetEmbed(snippet: DisplaySnippet) -> Element {
-    let language = snippet.language.clone().unwrap_or_else(|| "text".to_string());
+    let language = snippet
+        .language
+        .clone()
+        .unwrap_or_else(|| "text".to_string());
     let display_name = snippet.name.clone();
 
     // Show up to 15 lines inline

@@ -542,16 +542,14 @@ impl Product {
 
     /// Check if this is a digital product with delivery content
     pub fn has_digital_delivery(&self) -> bool {
-        self.format == ProductFormat::Digital &&
-            (self.download_url.is_some() || self.license_key.is_some())
+        self.format == ProductFormat::Digital
+            && (self.download_url.is_some() || self.license_key.is_some())
     }
 
     /// Get download info for display
     pub fn get_download_info(&self) -> Option<String> {
         if let Some(ref file_type) = self.file_type {
-            let size_str = self.file_size
-                .map(format_file_size)
-                .unwrap_or_default();
+            let size_str = self.file_size.map(format_file_size).unwrap_or_default();
             if size_str.is_empty() {
                 Some(file_type.clone())
             } else {
@@ -880,8 +878,7 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
     let license_key = get_tag_value(event, "license");
     let content_hash = parse_hash_tag(event, "sha256");
     let file_size = get_tag_value(event, "size").and_then(|s| s.parse().ok());
-    let file_type = get_tag_value(event, "type")
-        .or_else(|| get_tag_value(event, "mime"));
+    let file_type = get_tag_value(event, "type").or_else(|| get_tag_value(event, "mime"));
 
     Ok(Product {
         d_tag,
@@ -1247,8 +1244,8 @@ fn parse_hash_tag(event: &Event, algorithm: &str) -> Option<String> {
         .iter()
         .find(|t| {
             let slice = t.as_slice();
-            slice.first().map(|s| s.as_str()) == Some("hash") &&
-                slice.get(1).map(|s| s.as_str()) == Some(algorithm)
+            slice.first().map(|s| s.as_str()) == Some("hash")
+                && slice.get(1).map(|s| s.as_str()) == Some(algorithm)
         })
         .and_then(|t| t.as_slice().get(2).map(|s| s.to_string()))
 }

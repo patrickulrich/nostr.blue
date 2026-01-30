@@ -239,11 +239,7 @@ pub fn PeopleListMembersModal(props: PeopleListMembersModalProps) -> Element {
 
 /// Individual member row component
 #[component]
-fn MemberRow(
-    member: ListMember,
-    is_removing: bool,
-    on_remove: EventHandler<String>,
-) -> Element {
+fn MemberRow(member: ListMember, is_removing: bool, on_remove: EventHandler<String>) -> Element {
     let navigator = use_navigator();
     let pubkey = member.pubkey.clone();
     let pubkey_for_nav = member.pubkey.clone();

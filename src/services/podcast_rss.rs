@@ -11,11 +11,11 @@
 //!
 //! Reference: https://github.com/Podcastindex-org/podcast-namespace
 
+use crate::utils::podcast::{
+    ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
+};
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
-use crate::utils::podcast::{
-    ValueBlock, TranscriptRef, Soundbite, Person, FundingLink, ChaptersFile,
-};
 
 // ============================================================================
 // RSS Podcast Types
@@ -183,7 +183,12 @@ pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
         .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {} from {}: {}", response.status(), fetch_url, response.status_text()));
+        return Err(format!(
+            "HTTP {} from {}: {}",
+            response.status(),
+            fetch_url,
+            response.status_text()
+        ));
     }
 
     let xml = response
@@ -295,7 +300,8 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                             for attr in e.attributes().flatten() {
                                 let key = String::from_utf8_lossy(attr.key.as_ref());
                                 if key == "url" {
-                                    ep.chapters_url = Some(String::from_utf8_lossy(&attr.value).to_string());
+                                    ep.chapters_url =
+                                        Some(String::from_utf8_lossy(&attr.value).to_string());
                                 }
                             }
                         }
@@ -328,7 +334,8 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                     }
                     "podcast:alternateEnclosure" => {
                         if let Some(ref mut ep) = current_episode {
-                            ep.alternate_enclosures.push(parse_alternate_enclosure_element(e));
+                            ep.alternate_enclosures
+                                .push(parse_alternate_enclosure_element(e));
                         }
                     }
                     "itunes:image" | "podcast:image" => {
@@ -415,14 +422,16 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 let text = String::from_utf8_lossy(e.as_ref()).to_string();
                 if in_item {
                     if let Some(ref mut ep) = current_episode {
-                        if current_element == "description" || current_element == "content:encoded" {
+                        if current_element == "description" || current_element == "content:encoded"
+                        {
                             ep.description = Some(text);
                         }
                     }
                 } else if in_channel
-                    && (current_element == "description" || current_element == "content:encoded") {
-                        podcast.description = Some(text);
-                    }
+                    && (current_element == "description" || current_element == "content:encoded")
+                {
+                    podcast.description = Some(text);
+                }
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(format!("XML parsing error: {}", e)),
@@ -460,7 +469,11 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
         .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+        return Err(format!(
+            "HTTP {}: {}",
+            response.status(),
+            response.status_text()
+        ));
     }
 
     response
@@ -479,7 +492,11 @@ pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, Stri
         .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
 
     if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+        return Err(format!(
+            "HTTP {}: {}",
+            response.status(),
+            response.status_text()
+        ));
     }
 
     response

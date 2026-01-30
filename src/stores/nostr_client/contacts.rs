@@ -2,12 +2,14 @@
 //!
 //! Functions for managing contacts list (NIP-02).
 
-use std::time::Duration;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::time::Duration;
 
-use super::fetching::{get_client, fetch_events_aggregated_outbox};
-use super::signals::{HAS_SIGNER, get_contacts_cache, get_cache_generation, CachedContacts, invalidate_contacts_cache};
+use super::fetching::{fetch_events_aggregated_outbox, get_client};
+use super::signals::{
+    get_cache_generation, get_contacts_cache, invalidate_contacts_cache, CachedContacts, HAS_SIGNER,
+};
 use super::types::PublishResult;
 
 /// nostr-sdk pattern: Minimum interval between background refresh spawns (60 seconds)
@@ -29,7 +31,11 @@ pub struct EnrichedContact {
 impl EnrichedContact {
     /// Create a new contact with just a pubkey (no relay hint or petname)
     pub fn new(pubkey: String) -> Self {
-        Self { pubkey, relay_url: None, petname: None }
+        Self {
+            pubkey,
+            relay_url: None,
+            petname: None,
+        }
     }
 }
 
@@ -47,16 +53,21 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
 
     // Check cache first (5-minute TTL)
     {
-        let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut cache = get_contacts_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(ref mut cached) = *cache {
             if cached.pubkey == normalized_pubkey
-               && cached.cached_at.elapsed() < Duration::from_secs(300) {
+                && cached.cached_at.elapsed() < Duration::from_secs(300)
+            {
                 log::info!("Contacts cache hit ({} contacts)", cached.contacts.len());
                 // Extract pubkeys from enriched contacts for backward compat
-                let contacts: Vec<String> = cached.contacts.iter().map(|c| c.pubkey.clone()).collect();
+                let contacts: Vec<String> =
+                    cached.contacts.iter().map(|c| c.pubkey.clone()).collect();
 
                 // nostr-sdk pattern: Check cooldown before spawning background refresh
-                let should_refresh = cached.last_refresh_spawned
+                let should_refresh = cached
+                    .last_refresh_spawned
                     .map(|t| t.elapsed() >= Duration::from_secs(BACKGROUND_REFRESH_COOLDOWN_SECS))
                     .unwrap_or(true);
 
@@ -85,18 +96,26 @@ pub async fn fetch_contacts(pubkey_str: String) -> std::result::Result<Vec<Strin
 
 /// Internal: Fetch enriched contacts from relay with full NIP-02 data
 /// Parses p-tags per nostr-sdk pattern: ["p", pubkey, relay_hint?, petname?]
-async fn fetch_enriched_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<EnrichedContact>, String> {
+async fn fetch_enriched_contacts_from_relay(
+    pubkey_str: String,
+) -> std::result::Result<Vec<EnrichedContact>, String> {
     fetch_enriched_contacts_from_relay_impl(pubkey_str, None).await
 }
 
 /// Internal: Fetch enriched contacts with generation check for background refresh
 /// Dioxus pattern: Check generation before write to prevent stale overwrites (memory_cache.rs:45-88)
-async fn fetch_enriched_contacts_from_relay_with_gen(pubkey_str: String, start_gen: u64) -> std::result::Result<Vec<EnrichedContact>, String> {
+async fn fetch_enriched_contacts_from_relay_with_gen(
+    pubkey_str: String,
+    start_gen: u64,
+) -> std::result::Result<Vec<EnrichedContact>, String> {
     fetch_enriched_contacts_from_relay_impl(pubkey_str, Some(start_gen)).await
 }
 
 /// Internal implementation with optional generation check
-async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: Option<u64>) -> std::result::Result<Vec<EnrichedContact>, String> {
+async fn fetch_enriched_contacts_from_relay_impl(
+    pubkey_str: String,
+    start_gen: Option<u64>,
+) -> std::result::Result<Vec<EnrichedContact>, String> {
     // nostr-sdk pattern: Defensive normalization (may already be normalized by caller)
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_str)?;
 
@@ -104,15 +123,19 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
     debug_assert!(
         pubkey_str.eq_ignore_ascii_case(&normalized_pubkey) || pubkey_str.starts_with("npub"),
         "Unexpected pubkey format: input '{}' normalized to '{}'",
-        pubkey_str, normalized_pubkey
+        pubkey_str,
+        normalized_pubkey
     );
 
-    log::info!("Fetching enriched contacts from relay for: {}", normalized_pubkey);
+    log::info!(
+        "Fetching enriched contacts from relay for: {}",
+        normalized_pubkey
+    );
 
     // Parse pubkey (now guaranteed to be hex)
-    use nostr::{PublicKey, Filter, Kind};
-    let pubkey = PublicKey::from_hex(&normalized_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    use nostr::{Filter, Kind, PublicKey};
+    let pubkey =
+        PublicKey::from_hex(&normalized_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Create filter for kind 3 (contact list)
     let filter = Filter::new()
@@ -134,9 +157,11 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
 
                 // Parse full p-tags per NIP-02 format (nostr-sdk pattern)
                 // Format: ["p", pubkey, relay_hint?, petname?]
-                let contacts: Vec<EnrichedContact> = event.tags.iter()
+                let contacts: Vec<EnrichedContact> = event
+                    .tags
+                    .iter()
                     .filter_map(|tag| {
-                        let parts = tag.as_slice();  // Use slice directly
+                        let parts = tag.as_slice(); // Use slice directly
 
                         // nostr-sdk pattern: check tag type and minimum length
                         if parts.first().map(|s| s.as_str()) != Some("p") || parts.len() < 2 {
@@ -148,10 +173,14 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
                         // nostr-sdk pattern: try hex first (most common), then parse for npub
                         // Normalize to canonical lowercase hex for consistent comparisons
                         let normalized_pubkey = match nostr::PublicKey::from_hex(pubkey_str)
-                            .or_else(|_| nostr::PublicKey::parse(pubkey_str)) {
+                            .or_else(|_| nostr::PublicKey::parse(pubkey_str))
+                        {
                             Ok(pk) => pk.to_hex(), // Canonical lowercase hex
                             Err(_) => {
-                                log::debug!("Skipping invalid pubkey in contact p-tag: {}", pubkey_str);
+                                log::debug!(
+                                    "Skipping invalid pubkey in contact p-tag: {}",
+                                    pubkey_str
+                                );
                                 return None;
                             }
                         };
@@ -160,11 +189,13 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
                         Some(EnrichedContact {
                             pubkey: normalized_pubkey,
                             // Position 2: relay hint (nostr-sdk: tag_2)
-                            relay_url: parts.get(2)
+                            relay_url: parts
+                                .get(2)
                                 .filter(|s| !s.is_empty())
                                 .map(|s| s.to_string()),
                             // Position 3: petname/alias (nostr-sdk: tag_3)
-                            petname: parts.get(3)
+                            petname: parts
+                                .get(3)
                                 .filter(|s| !s.is_empty())
                                 .map(|s| s.to_string()),
                         })
@@ -177,14 +208,20 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
                 let current_gen = get_cache_generation();
                 if let Some(gen) = start_gen {
                     if gen != current_gen {
-                        log::debug!("Discarding stale background refresh (gen {} vs current {})", gen, current_gen);
-                        return Ok(contacts);  // Return results but don't cache
+                        log::debug!(
+                            "Discarding stale background refresh (gen {} vs current {})",
+                            gen,
+                            current_gen
+                        );
+                        return Ok(contacts); // Return results but don't cache
                     }
                 }
 
                 // Safe to cache - generation matches (or no generation check requested)
                 {
-                    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut cache = get_contacts_cache()
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     // Preserve last_refresh_spawned from existing cache entry to maintain cooldown tracking
                     let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
                     *cache = Some(CachedContacts {
@@ -204,14 +241,20 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
                 let current_gen = get_cache_generation();
                 if let Some(gen) = start_gen {
                     if gen != current_gen {
-                        log::debug!("Discarding stale background refresh (gen {} vs current {})", gen, current_gen);
+                        log::debug!(
+                            "Discarding stale background refresh (gen {} vs current {})",
+                            gen,
+                            current_gen
+                        );
                         return Ok(Vec::new());
                     }
                 }
 
                 // nostr-sdk cache pattern: Cache empty result to avoid repeated relay queries
                 {
-                    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut cache = get_contacts_cache()
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     // Preserve last_refresh_spawned from existing cache entry to maintain cooldown tracking
                     let existing_refresh = cache.as_ref().and_then(|c| c.last_refresh_spawned);
                     *cache = Some(CachedContacts {
@@ -234,7 +277,9 @@ async fn fetch_enriched_contacts_from_relay_impl(pubkey_str: String, start_gen: 
 
 /// Fetch contacts directly from relay, bypassing cache (backward compatible API)
 /// For enriched data with relay hints/petnames, use internal functions
-pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result::Result<Vec<String>, String> {
+pub(crate) async fn fetch_contacts_from_relay(
+    pubkey_str: String,
+) -> std::result::Result<Vec<String>, String> {
     let enriched = fetch_enriched_contacts_from_relay(pubkey_str).await?;
     Ok(enriched.iter().map(|c| c.pubkey.clone()).collect())
 }
@@ -245,7 +290,9 @@ pub(crate) async fn fetch_contacts_from_relay(pubkey_str: String) -> std::result
 
 /// Internal: Publish enriched contacts preserving relay hints and petnames
 /// Uses nostr-sdk EventBuilder::contact_list() pattern
-async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::result::Result<PublishResult, String> {
+async fn publish_enriched_contacts(
+    contacts: Vec<EnrichedContact>,
+) -> std::result::Result<PublishResult, String> {
     let client = get_client().ok_or("Client not initialized")?;
 
     if !*HAS_SIGNER.read() {
@@ -253,7 +300,10 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
     }
 
     let input_count = contacts.len();
-    log::info!("Publishing enriched contact list with {} contacts", input_count);
+    log::info!(
+        "Publishing enriched contact list with {} contacts",
+        input_count
+    );
 
     use nostr::PublicKey;
     use nostr_sdk::nips::nip02::Contact;
@@ -264,8 +314,7 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
         .into_iter()
         .filter_map(|c| {
             // Parse pubkey (nostr-sdk pattern: try hex first, then parse)
-            match PublicKey::from_hex(&c.pubkey)
-                .or_else(|_| PublicKey::parse(&c.pubkey)) {
+            match PublicKey::from_hex(&c.pubkey).or_else(|_| PublicKey::parse(&c.pubkey)) {
                 Ok(pk) => {
                     let mut contact = Contact::new(pk);
                     // Preserve relay hint if present
@@ -273,7 +322,11 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
                         match nostr::RelayUrl::parse(&relay) {
                             Ok(url) => contact.relay_url = Some(url),
                             Err(e) => {
-                                log::debug!("Invalid relay URL '{}' in contact, skipping: {}", relay, e);
+                                log::debug!(
+                                    "Invalid relay URL '{}' in contact, skipping: {}",
+                                    relay,
+                                    e
+                                );
                             }
                         }
                     }
@@ -299,11 +352,17 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
         );
     }
 
-    log::info!("Publishing {} valid contacts (dropped {} invalid)", contact_list.len(), input_count - contact_list.len());
+    log::info!(
+        "Publishing {} valid contacts (dropped {} invalid)",
+        contact_list.len(),
+        input_count - contact_list.len()
+    );
 
     let builder = nostr::EventBuilder::contact_list(contact_list);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish contact list: {}", e))?;
 
     let result = PublishResult::from_output(output);
@@ -329,11 +388,10 @@ async fn publish_enriched_contacts(contacts: Vec<EnrichedContact>) -> std::resul
 /// Note: This creates contacts without relay hints/petnames. For preserving
 /// existing metadata, use follow_user/unfollow_user which work with enriched data.
 #[allow(dead_code)]
-pub async fn publish_contacts_tracked(contacts: Vec<String>) -> std::result::Result<PublishResult, String> {
-    let enriched: Vec<EnrichedContact> = contacts
-        .into_iter()
-        .map(EnrichedContact::new)
-        .collect();
+pub async fn publish_contacts_tracked(
+    contacts: Vec<String>,
+) -> std::result::Result<PublishResult, String> {
+    let enriched: Vec<EnrichedContact> = contacts.into_iter().map(EnrichedContact::new).collect();
     publish_enriched_contacts(enriched).await
 }
 
@@ -357,8 +415,7 @@ pub async fn follow_user(pubkey_to_follow: String) -> std::result::Result<(), St
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_follow)?;
 
     // Get current user's pubkey
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     // Pre-publish invalidation: forces fresh relay fetch to avoid races with background refresher
     invalidate_contacts_cache();
@@ -389,8 +446,7 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey_to_unfollow)?;
 
     // Get current user's pubkey
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     // Invalidate cache and fetch directly from relay to avoid race with background refresher
     invalidate_contacts_cache();
@@ -401,8 +457,11 @@ pub async fn unfollow_user(pubkey_to_unfollow: String) -> std::result::Result<()
     contacts.retain(|c| c.pubkey != normalized_pubkey);
 
     if contacts.len() < original_len {
-        log::info!("Unfollowing user: {} (removed {} entries)",
-            normalized_pubkey, original_len - contacts.len());
+        log::info!(
+            "Unfollowing user: {} (removed {} entries)",
+            normalized_pubkey,
+            original_len - contacts.len()
+        );
 
         // Publish preserving remaining contacts' metadata
         publish_enriched_contacts(contacts).await?;
@@ -433,8 +492,7 @@ pub async fn is_following(pubkey: String) -> std::result::Result<bool, String> {
     // Normalize pubkey to canonical hex format
     let normalized_pubkey = crate::utils::nip19::normalize_pubkey(&pubkey)?;
 
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     let contacts = fetch_contacts(current_pubkey).await?;
     Ok(contacts.contains(&normalized_pubkey))

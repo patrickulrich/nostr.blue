@@ -1,7 +1,7 @@
 //! CartSummary component - displays cart totals
 
-use dioxus::prelude::*;
 use crate::utils::format::format_sats_with_separator;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct CartSummaryProps {

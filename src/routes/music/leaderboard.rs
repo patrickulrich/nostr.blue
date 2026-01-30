@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::stores::{nostr_client, music_player};
+use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{MusicTrack, KIND_MUSIC_VOTE};
 use crate::stores::nostr_music::TrackSource;
-use crate::services::wavlake::WavlakeAPI;
-use nostr_sdk::{Filter, Kind, TagKind, Timestamp, Alphabet};
+use crate::stores::{music_player, nostr_client};
+use dioxus::prelude::*;
+use nostr_sdk::{Alphabet, Filter, Kind, TagKind, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -246,7 +246,11 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
 
     let one_week_ago = Timestamp::now() - Duration::from_secs(7 * 24 * 60 * 60);
 
-    log::info!("Fetching vote events (kind {}) since {}", KIND_MUSIC_VOTE, one_week_ago.as_secs());
+    log::info!(
+        "Fetching vote events (kind {}) since {}",
+        KIND_MUSIC_VOTE,
+        one_week_ago.as_secs()
+    );
 
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_VOTE))
@@ -276,24 +280,28 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
 
     for event in events {
         // Extract cached metadata using correct TagKind variants
-        let title = event.tags
+        let title = event
+            .tags
             .find(TagKind::Title)
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let artist = event.tags
+        let artist = event
+            .tags
             .find(TagKind::custom("artist"))
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let image = event.tags
+        let image = event
+            .tags
             .find(TagKind::Image)
             .and_then(|t| t.content())
             .map(|s| s.to_string());
 
-        let source_kind = event.tags
+        let source_kind = event
+            .tags
             .find(TagKind::k())
             .and_then(|t| t.content())
             .map(|s| s.to_string());
@@ -301,13 +309,15 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         // Determine track reference based on source
         let track_ref = if source_kind.as_deref() == Some("wavlake") {
             // Wavlake track - look for track_id or parse from r tag
-            let track_id = event.tags
+            let track_id = event
+                .tags
                 .find(TagKind::custom("track_id"))
                 .and_then(|t| t.content())
                 .map(|s| s.to_string())
                 .or_else(|| {
                     // Try to extract from r tag URL
-                    event.tags
+                    event
+                        .tags
                         .find(TagKind::single_letter(Alphabet::R, false))
                         .and_then(|t| t.content())
                         .and_then(|url| url.split('/').next_back())
@@ -320,7 +330,8 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             }
         } else {
             // Nostr track - look for 'a' tag (coordinate)
-            let coordinate = event.tags
+            let coordinate = event
+                .tags
                 .find(TagKind::a())
                 .and_then(|t| t.content())
                 .map(|s| s.to_string());
@@ -341,7 +352,8 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         };
 
         // Keep only the latest vote per voter
-        latest_per_voter.entry(voter_pubkey)
+        latest_per_voter
+            .entry(voter_pubkey)
             .and_modify(|existing| {
                 if parsed.created_at > existing.created_at {
                     *existing = parsed.clone();
@@ -359,7 +371,8 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             TrackRef::Wavlake(id) => format!("wavlake:{}", id),
         };
 
-        vote_map.entry(track_key)
+        vote_map
+            .entry(track_key)
             .and_modify(|data| {
                 data.votes += 1;
                 data.voters.insert(voter_pubkey.clone());
@@ -379,7 +392,10 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
     sorted_votes.sort_by(|a, b| b.votes.cmp(&a.votes));
     let top_10 = sorted_votes.into_iter().take(10).collect::<Vec<_>>();
 
-    log::info!("Top {} tracks identified, resolving for playback...", top_10.len());
+    log::info!(
+        "Top {} tracks identified, resolving for playback...",
+        top_10.len()
+    );
 
     // Resolve tracks for playback
     let api = WavlakeAPI::new();
@@ -394,10 +410,13 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                     Err(e) => {
                         log::warn!("Failed to fetch Wavlake track {}: {}", track_id, e);
                         // Fallback returns None - no playable media_url available
-                        create_fallback_track(&vote_data, TrackSource::Wavlake {
-                            artist_id: String::new(),
-                            album_id: String::new(),
-                        })
+                        create_fallback_track(
+                            &vote_data,
+                            TrackSource::Wavlake {
+                                artist_id: String::new(),
+                                album_id: String::new(),
+                            },
+                        )
                     }
                 }
             }
@@ -410,7 +429,11 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                     let d_tag = parts[2..].join(":"); // Handle d-tags with colons
 
                     // Try to fetch the actual track first for proper playback
-                    match crate::stores::nostr_music::fetch_nostr_track_by_coordinate(&pubkey, &d_tag).await {
+                    match crate::stores::nostr_music::fetch_nostr_track_by_coordinate(
+                        &pubkey, &d_tag,
+                    )
+                    .await
+                    {
                         Ok(Some(nostr_track)) => {
                             log::info!("Successfully fetched Nostr track: {}", coordinate);
                             Some(MusicTrack::from(nostr_track))
@@ -418,20 +441,26 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                         Ok(None) => {
                             log::warn!("Nostr track not found: {}", coordinate);
                             // Fallback returns None - no playable media_url available
-                            create_fallback_track(&vote_data, TrackSource::Nostr {
-                                coordinate: coordinate.clone(),
-                                pubkey,
-                                d_tag,
-                            })
+                            create_fallback_track(
+                                &vote_data,
+                                TrackSource::Nostr {
+                                    coordinate: coordinate.clone(),
+                                    pubkey,
+                                    d_tag,
+                                },
+                            )
                         }
                         Err(e) => {
                             log::warn!("Failed to fetch Nostr track {}: {}", coordinate, e);
                             // Fallback returns None - no playable media_url available
-                            create_fallback_track(&vote_data, TrackSource::Nostr {
-                                coordinate: coordinate.clone(),
-                                pubkey,
-                                d_tag,
-                            })
+                            create_fallback_track(
+                                &vote_data,
+                                TrackSource::Nostr {
+                                    coordinate: coordinate.clone(),
+                                    pubkey,
+                                    d_tag,
+                                },
+                            )
                         }
                     }
                 } else {

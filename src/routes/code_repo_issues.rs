@@ -3,11 +3,11 @@
 //! View issues for a repository.
 //! Follows patterns from code_issue_detail.rs and gittr design.
 
-use dioxus::prelude::*;
 use crate::components::{icons, CodeIssueRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_issues;
 use crate::stores::nostr_client;
+use dioxus::prelude::*;
 
 /// Repository issues page component
 #[component]

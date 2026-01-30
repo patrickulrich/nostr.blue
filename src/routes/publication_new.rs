@@ -1,11 +1,11 @@
 //! Publication New/Edit Route
 //! Create NKBIP-01 publications (Kind 30040/30041)
 
-use dioxus::prelude::*;
-use crate::components::icons::{ArrowLeftIcon, AlertTriangleIcon, CheckIcon, PenSquareIcon};
+use crate::components::icons::{AlertTriangleIcon, ArrowLeftIcon, CheckIcon, PenSquareIcon};
+use crate::routes::Route;
 use crate::stores::publication_store::{self, PublicationType};
 use crate::stores::{auth_store, nostr_client};
-use crate::routes::Route;
+use dioxus::prelude::*;
 
 /// Publication creator/editor
 #[component]
@@ -57,9 +57,16 @@ pub fn PublicationNew() -> Element {
     // Auto-generate identifier from title
     use_effect(move || {
         if *auto_identifier.read() {
-            let normalized = title.read()
+            let normalized = title
+                .read()
                 .chars()
-                .map(|c| if c.is_alphanumeric() { c.to_lowercase().next().unwrap() } else { '-' })
+                .map(|c| {
+                    if c.is_alphanumeric() {
+                        c.to_lowercase().next().unwrap()
+                    } else {
+                        '-'
+                    }
+                })
                 .collect::<String>()
                 .split('-')
                 .filter(|s| !s.is_empty())
@@ -117,8 +124,16 @@ pub fn PublicationNew() -> Element {
             saving.set(true);
             error.set(None);
 
-            let summary_opt = if summary_val.trim().is_empty() { None } else { Some(summary_val.as_str()) };
-            let cover_opt = if cover_val.trim().is_empty() { None } else { Some(cover_val.as_str()) };
+            let summary_opt = if summary_val.trim().is_empty() {
+                None
+            } else {
+                Some(summary_val.as_str())
+            };
+            let cover_opt = if cover_val.trim().is_empty() {
+                None
+            } else {
+                Some(cover_val.as_str())
+            };
 
             // First publish all sections and collect their references
             let mut section_refs = Vec::new();
@@ -127,7 +142,9 @@ pub fn PublicationNew() -> Element {
                     &section.title,
                     &section.content,
                     Some(&format!("{}-{}", identifier_val, idx)),
-                ).await {
+                )
+                .await
+                {
                     Ok(address) => {
                         // Parse address to create SectionReference
                         section_refs.push(publication_store::SectionReference {
@@ -135,9 +152,13 @@ pub fn PublicationNew() -> Element {
                             relay_hint: None,
                             event_id: None,
                         });
-                    },
+                    }
                     Err(e) => {
-                        error.set(Some(format!("Failed to publish section {}: {}", idx + 1, e)));
+                        error.set(Some(format!(
+                            "Failed to publish section {}: {}",
+                            idx + 1,
+                            e
+                        )));
                         saving.set(false);
                         return;
                     }
@@ -152,7 +173,9 @@ pub fn PublicationNew() -> Element {
                 type_val,
                 &[], // Empty topics for now
                 &section_refs,
-            ).await {
+            )
+            .await
+            {
                 Ok(naddr) => {
                     log::info!("Published publication: {}", naddr);
                     nav.push(Route::PublicationDetail { naddr });

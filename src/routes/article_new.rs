@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use crate::components::icons::ArrowLeftIcon;
 use crate::components::{
     ArticleCoverUploader, ImageInsertData, ImageUploadDialog, MarkdownEditor, MentionSelection,
-    NostrMentionDialog, PublishConfirmDialog, PublishConfig,
+    NostrMentionDialog, PublishConfig, PublishConfirmDialog,
 };
 use crate::hooks::{calculate_multi_hash, use_unsaved_changes};
 use crate::stores::auth_store;
@@ -91,8 +91,10 @@ pub fn ArticleNew() -> Element {
     // Validation
     let title_chars = title.read().chars().count();
     let content_chars = content.read().chars().count();
-    let can_publish =
-        title_chars > 0 && content_chars > 0 && !identifier.read().is_empty() && !*is_publishing.read();
+    let can_publish = title_chars > 0
+        && content_chars > 0
+        && !identifier.read().is_empty()
+        && !*is_publishing.read();
 
     // Load drafts on mount
     use_effect(move || {
@@ -238,7 +240,9 @@ pub fn ArticleNew() -> Element {
         };
 
         if draft.title.is_empty() || draft.identifier.is_empty() {
-            error_message.set(Some("Title and identifier are required to save draft".to_string()));
+            error_message.set(Some(
+                "Title and identifier are required to save draft".to_string(),
+            ));
             return;
         }
 
@@ -325,22 +329,19 @@ pub fn ArticleNew() -> Element {
                             use nostr::prelude::*;
                             match crate::stores::nostr_client::get_cached_pubkey() {
                                 Ok(pubkey) => {
-                                    let coord = Coordinate::new(
-                                        Kind::LongFormTextNote,
-                                        pubkey,
-                                    ).identifier(identifier_val.clone());
+                                    let coord = Coordinate::new(Kind::LongFormTextNote, pubkey)
+                                        .identifier(identifier_val.clone());
                                     let nip19_coord = Nip19Coordinate::new(coord, vec![]);
                                     nip19_coord.to_bech32().unwrap_or_else(|_| event_id.clone())
                                 }
                                 Err(_) => event_id.clone(),
                             }
                         };
-                        let promo_content = format!(
-                            "New article: {}\n\nnostr:{}",
-                            title_val,
-                            naddr_str
-                        );
-                        if let Err(e) = crate::stores::nostr_client::publish_note(promo_content, vec![]).await {
+                        let promo_content =
+                            format!("New article: {}\n\nnostr:{}", title_val, naddr_str);
+                        if let Err(e) =
+                            crate::stores::nostr_client::publish_note(promo_content, vec![]).await
+                        {
                             log::warn!("Failed to create promotion note: {}", e);
                         }
                     }

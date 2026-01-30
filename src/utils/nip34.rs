@@ -150,8 +150,7 @@ impl Repository {
 
         let id = id?;
 
-        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, event.pubkey)
-            .identifier(&id);
+        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, event.pubkey).identifier(&id);
 
         // Create naddr for routing
         let naddr = Nip19Coordinate::new(coordinate, vec![])
@@ -194,29 +193,27 @@ impl Repository {
 
     /// Check if this is a GitHub repo
     pub fn is_github(&self) -> bool {
-        self.clone
-            .iter()
-            .any(|url| url.contains("github.com"))
+        self.clone.iter().any(|url| url.contains("github.com"))
     }
 
     /// Check if this is a GitLab repo
     pub fn is_gitlab(&self) -> bool {
-        self.clone
-            .iter()
-            .any(|url| url.contains("gitlab.com"))
+        self.clone.iter().any(|url| url.contains("gitlab.com"))
     }
 
     /// Check if this is a Codeberg repo
     pub fn is_codeberg(&self) -> bool {
-        self.clone
-            .iter()
-            .any(|url| url.contains("codeberg.org"))
+        self.clone.iter().any(|url| url.contains("codeberg.org"))
     }
 
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len()-4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -230,17 +227,20 @@ impl Repository {
     ///
     /// This follows NIP-34 convention for self-hosted git servers.
     pub fn extract_grasp_domains(&self) -> Vec<String> {
-        use std::collections::HashSet;
         use ::url::Url;
+        use std::collections::HashSet;
 
         // Extract domains from relay URLs (wss://domain)
-        let relay_domains: HashSet<String> = self.relays.iter()
+        let relay_domains: HashSet<String> = self
+            .relays
+            .iter()
             .filter_map(|r| Url::parse(r).ok())
             .filter_map(|u| u.domain().map(|d| d.to_string()))
             .collect();
 
         // Extract domains from clone URLs where domain also appears in relays
-        self.clone.iter()
+        self.clone
+            .iter()
             .filter_map(|url| Url::parse(url).ok())
             .filter_map(|u| u.domain().map(|d| d.to_string()))
             .filter(|domain| relay_domains.contains(domain))
@@ -284,10 +284,7 @@ impl Issue {
 
         for tag in event.tags.iter() {
             match tag.as_standardized() {
-                Some(TagStandard::Coordinate {
-                    coordinate,
-                    ..
-                }) => {
+                Some(TagStandard::Coordinate { coordinate, .. }) => {
                     repository = Some(coordinate.clone());
                 }
                 Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
@@ -333,7 +330,11 @@ impl Issue {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len()-4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -459,7 +460,11 @@ impl PullRequest {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len()-4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -504,19 +509,15 @@ impl GitComment {
         for tag in event.tags.iter() {
             match tag.as_standardized() {
                 Some(TagStandard::Event {
-                    event_id,
-                    marker,
-                    ..
-                }) => {
-                    match marker {
-                        Some(Marker::Root) => root_event_id = Some(event_id.to_hex()),
-                        Some(Marker::Reply) | None => {
-                            if target_event_id.is_none() {
-                                target_event_id = Some(event_id.to_hex());
-                            }
+                    event_id, marker, ..
+                }) => match marker {
+                    Some(Marker::Root) => root_event_id = Some(event_id.to_hex()),
+                    Some(Marker::Reply) | None => {
+                        if target_event_id.is_none() {
+                            target_event_id = Some(event_id.to_hex());
                         }
                     }
-                }
+                },
                 Some(TagStandard::Coordinate { coordinate, .. }) => {
                     repository = Some(coordinate.clone());
                 }
@@ -624,7 +625,11 @@ impl DisplaySnippet {
     /// Get truncated pubkey for display
     pub fn pubkey_display(&self) -> String {
         if self.pubkey.len() > 12 {
-            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len()-4..])
+            format!(
+                "{}...{}",
+                &self.pubkey[..6],
+                &self.pubkey[self.pubkey.len() - 4..]
+            )
         } else {
             self.pubkey.clone()
         }
@@ -678,7 +683,10 @@ impl DisplaySnippet {
 }
 
 /// Encode a repository coordinate to naddr bech32
-pub fn encode_repo_naddr(coordinate: &Coordinate, relay_hints: &[RelayUrl]) -> Result<String, Nip34Error> {
+pub fn encode_repo_naddr(
+    coordinate: &Coordinate,
+    relay_hints: &[RelayUrl],
+) -> Result<String, Nip34Error> {
     use nostr::nips::nip19::{Nip19Coordinate, ToBech32};
     let nip19 = Nip19Coordinate::new(coordinate.clone(), relay_hints.to_vec());
     nip19.to_bech32()
@@ -686,7 +694,7 @@ pub fn encode_repo_naddr(coordinate: &Coordinate, relay_hints: &[RelayUrl]) -> R
 
 /// Decode a repository naddr bech32 to coordinate
 pub fn decode_repo_naddr(naddr: &str) -> Result<(Coordinate, Vec<RelayUrl>), Nip34Error> {
-    use nostr::nips::nip19::{Nip19Coordinate, FromBech32};
+    use nostr::nips::nip19::{FromBech32, Nip19Coordinate};
     let decoded = Nip19Coordinate::from_bech32(naddr)?;
     let coordinate = Coordinate::new(decoded.coordinate.kind, decoded.coordinate.public_key)
         .identifier(decoded.coordinate.identifier);
@@ -707,8 +715,7 @@ pub fn encode_nevent(
     relay_hints: &[RelayUrl],
 ) -> Result<String, Nip34Error> {
     use nostr::nips::nip19::{Nip19Event, ToBech32};
-    let mut nevent = Nip19Event::new(event_id)
-        .relays(relay_hints.to_vec());
+    let mut nevent = Nip19Event::new(event_id).relays(relay_hints.to_vec());
     if let Some(pk) = author {
         nevent = nevent.author(pk);
     }
@@ -720,10 +727,17 @@ pub fn encode_nevent(
 
 /// Decode a nevent bech32 to event info
 #[allow(clippy::type_complexity)]
-pub fn decode_nevent(nevent: &str) -> Result<(EventId, Option<PublicKey>, Option<Kind>, Vec<RelayUrl>), Nip34Error> {
-    use nostr::nips::nip19::{Nip19Event, FromBech32};
+pub fn decode_nevent(
+    nevent: &str,
+) -> Result<(EventId, Option<PublicKey>, Option<Kind>, Vec<RelayUrl>), Nip34Error> {
+    use nostr::nips::nip19::{FromBech32, Nip19Event};
     let decoded = Nip19Event::from_bech32(nevent)?;
-    Ok((decoded.event_id, decoded.author, decoded.kind, decoded.relays))
+    Ok((
+        decoded.event_id,
+        decoded.author,
+        decoded.kind,
+        decoded.relays,
+    ))
 }
 
 /// Decode either note1 or nevent1 to EventId
@@ -745,10 +759,22 @@ mod tests {
 
     #[test]
     fn test_issue_status_from_kind() {
-        assert_eq!(IssueStatus::from_kind(Kind::GitStatusOpen), Some(IssueStatus::Open));
-        assert_eq!(IssueStatus::from_kind(Kind::GitStatusApplied), Some(IssueStatus::Applied));
-        assert_eq!(IssueStatus::from_kind(Kind::GitStatusClosed), Some(IssueStatus::Closed));
-        assert_eq!(IssueStatus::from_kind(Kind::GitStatusDraft), Some(IssueStatus::Draft));
+        assert_eq!(
+            IssueStatus::from_kind(Kind::GitStatusOpen),
+            Some(IssueStatus::Open)
+        );
+        assert_eq!(
+            IssueStatus::from_kind(Kind::GitStatusApplied),
+            Some(IssueStatus::Applied)
+        );
+        assert_eq!(
+            IssueStatus::from_kind(Kind::GitStatusClosed),
+            Some(IssueStatus::Closed)
+        );
+        assert_eq!(
+            IssueStatus::from_kind(Kind::GitStatusDraft),
+            Some(IssueStatus::Draft)
+        );
         assert_eq!(IssueStatus::from_kind(Kind::TextNote), None);
     }
 

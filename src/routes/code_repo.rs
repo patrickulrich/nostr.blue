@@ -3,16 +3,16 @@
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
 
-use dioxus::prelude::*;
+use crate::components::code::{ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
 use crate::components::icons;
-use crate::components::code::{RepoHeader, RepoActionBar, RepoTabNav, ReadmeViewer};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, fetch_readme};
-use crate::utils::nip34::Repository;
-use crate::utils::format_relative_time_or;
-use crate::utils::truncate_pubkey;
-use crate::stores::profiles::PROFILE_CACHE;
+use crate::services::git_hosting::{fetch_readme, fetch_repository};
 use crate::stores::nostr_client;
+use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::format_relative_time_or;
+use crate::utils::nip34::Repository;
+use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 
 /// Repository detail page component
 #[component]
@@ -153,9 +153,7 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
     let repo_for_fetch = repo.clone();
     let readme_resource: Resource<Result<String, String>> = use_resource(move || {
         let r = repo_for_fetch.clone();
-        async move {
-            fetch_readme(&r, None).await
-        }
+        async move { fetch_readme(&r, None).await }
     });
 
     rsx! {
@@ -376,4 +374,3 @@ fn LoadingSkeleton() -> Element {
         }
     }
 }
-

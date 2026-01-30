@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
+use crate::components::{PollOptionData, PollOptionList};
 use crate::stores::{auth_store, nostr_client};
-use crate::components::{PollOptionList, PollOptionData};
 use crate::utils::{generate_option_id, time::calculate_end_time};
-use nostr_sdk::nips::nip88::{PollType, PollOption};
+use dioxus::prelude::*;
+use nostr_sdk::nips::nip88::{PollOption, PollType};
 use once_cell::sync::Lazy;
 
 #[component]
@@ -15,16 +15,18 @@ pub fn PollNew() -> Element {
     // Form state
     let mut poll_question = use_signal(String::new);
     let mut poll_type = use_signal(|| PollType::SingleChoice);
-    let mut options = use_signal(|| vec![
-        PollOptionData {
-            id: generate_option_id(),
-            text: String::new(),
-        },
-        PollOptionData {
-            id: generate_option_id(),
-            text: String::new(),
-        },
-    ]);
+    let mut options = use_signal(|| {
+        vec![
+            PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            },
+            PollOptionData {
+                id: generate_option_id(),
+                text: String::new(),
+            },
+        ]
+    });
     let mut end_time_preset = use_signal(|| String::from("1day"));
     let mut custom_end_time = use_signal(String::new);
     let mut hashtags_input = use_signal(String::new);
@@ -39,11 +41,11 @@ pub fn PollNew() -> Element {
         let question = poll_question.read();
         let opts = options.read();
 
-        !question.trim().is_empty() &&
-        opts.len() >= 2 &&
-        opts.len() <= 10 &&
-        opts.iter().all(|opt| !opt.text.trim().is_empty()) &&
-        !*is_publishing.read()
+        !question.trim().is_empty()
+            && opts.len() >= 2
+            && opts.len() <= 10
+            && opts.iter().all(|opt| !opt.text.trim().is_empty())
+            && !*is_publishing.read()
     });
 
     // Handle close
@@ -100,7 +102,9 @@ pub fn PollNew() -> Element {
                 relays,
                 ends_at,
                 hashtags,
-            ).await {
+            )
+            .await
+            {
                 Ok(event_id) => {
                     log::info!("Poll published successfully: {}", event_id);
                     is_publishing.set(false);
@@ -118,7 +122,9 @@ pub fn PollNew() -> Element {
     // Redirect if not authenticated - hoist use_effect to maintain hook order
     use_effect(move || {
         if !*is_authenticated.read() {
-            nav_effect.push(crate::routes::Route::Home { list: String::new() });
+            nav_effect.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
 
@@ -383,9 +389,8 @@ pub fn PollNew() -> Element {
 }
 
 /// Cached compiled regex for hashtag extraction
-static HASHTAG_REGEX: Lazy<regex::Regex> = Lazy::new(|| {
-    regex::Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex")
-});
+static HASHTAG_REGEX: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new(r"#(\w+)").expect("Failed to compile hashtag regex"));
 
 /// Extract hashtags from question and additional input
 fn extract_hashtags(question: &str, additional: &str) -> Vec<String> {

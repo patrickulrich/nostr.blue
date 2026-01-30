@@ -6,16 +6,18 @@ use dioxus::prelude::*;
 use nostr_sdk::{EventId, Kind, PublicKey};
 
 use super::events::queue_event_for_retry;
-use super::types::PendingEventType;
 use super::internal::{create_ephemeral_wallet, get_or_create_wallet};
-use super::utils::normalize_mint_url;
 use super::mint_mgmt::get_mint_balance;
-use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map};
+use super::proofs::{
+    cdk_proof_to_proof_data, proof_data_to_cdk_proof, register_proofs_in_event_map,
+};
 use super::signals::{try_acquire_mint_lock, TRANSFER_PROGRESS, WALLET_TOKENS};
+use super::types::PendingEventType;
 use super::types::{
     ExtendedCashuProof, ExtendedTokenEvent, ProofData, TokenData, TransferProgress, TransferResult,
     WalletTokensStoreStoreExt,
 };
+use super::utils::normalize_mint_url;
 use crate::stores::{auth_store, nostr_client};
 
 /// Transfer tokens from one mint to another via Lightning
@@ -164,10 +166,7 @@ pub async fn transfer_between_mints(
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
-        let mint_tokens: Vec<_> = tokens
-            .iter()
-            .filter(|t| t.mint == source_mint)
-            .collect();
+        let mint_tokens: Vec<_> = tokens.iter().filter(|t| t.mint == source_mint).collect();
 
         let mut all_proofs = Vec::new();
         let mut event_ids = Vec::new();
@@ -185,16 +184,13 @@ pub async fn transfer_between_mints(
     // Create wallet with proofs and execute melt
     let wallet_with_proofs = create_ephemeral_wallet(&source_mint, all_proofs).await?;
 
-    let melted = wallet_with_proofs
-        .melt(&melt_quote.id)
-        .await
-        .map_err(|e| {
-            let error = format!("Failed to melt tokens: {}", e);
-            *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
-                error: error.clone(),
-            });
-            error
-        })?;
+    let melted = wallet_with_proofs.melt(&melt_quote.id).await.map_err(|e| {
+        let error = format!("Failed to melt tokens: {}", e);
+        *TRANSFER_PROGRESS.write() = Some(TransferProgress::Failed {
+            error: error.clone(),
+        });
+        error
+    })?;
 
     let paid = melted.state == cdk::nuts::MeltQuoteState::Paid;
     let fee_paid = u64::from(melted.fee_paid);
@@ -297,8 +293,7 @@ pub async fn transfer_between_mints(
         .as_nostr_signer();
 
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey =
-        PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let client = nostr_client::NOSTR_CLIENT
         .read()
@@ -350,7 +345,8 @@ pub async fn transfer_between_mints(
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(source_mint.clone()),
-                ).await;
+                )
+                .await;
                 source_new_event_id = Some(pending_id);
             }
         }
@@ -375,10 +371,8 @@ pub async fn transfer_between_mints(
 
     // Publish target mint token event (new proofs)
     let target_new_event_id: String = {
-        let proof_data: Vec<ProofData> = target_proofs
-            .iter()
-            .map(cdk_proof_to_proof_data)
-            .collect();
+        let proof_data: Vec<ProofData> =
+            target_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
         let extended_proofs: Vec<ExtendedCashuProof> = proof_data
             .iter()
@@ -417,7 +411,8 @@ pub async fn transfer_between_mints(
                     PendingEventType::TokenEvent,
                     Some(pending_id.clone()),
                     Some(target_mint.clone()),
-                ).await;
+                )
+                .await;
                 pending_id
             }
         }
@@ -439,8 +434,13 @@ pub async fn transfer_between_mints(
                 .map(cdk_proof_to_proof_data)
                 .collect();
 
-            let event_id = source_new_event_id
-                .unwrap_or_else(|| format!("local-{}-src-{:08x}", chrono::Utc::now().timestamp_millis(), rand::random::<u32>()));
+            let event_id = source_new_event_id.unwrap_or_else(|| {
+                format!(
+                    "local-{}-src-{:08x}",
+                    chrono::Utc::now().timestamp_millis(),
+                    rand::random::<u32>()
+                )
+            });
             tokens.push(TokenData {
                 event_id: event_id.clone(),
                 mint: source_mint.clone(),
@@ -454,10 +454,8 @@ pub async fn transfer_between_mints(
         }
 
         // Add new target tokens
-        let target_proof_data: Vec<ProofData> = target_proofs
-            .iter()
-            .map(cdk_proof_to_proof_data)
-            .collect();
+        let target_proof_data: Vec<ProofData> =
+            target_proofs.iter().map(cdk_proof_to_proof_data).collect();
 
         let target_event_id = target_new_event_id.clone();
         tokens.push(TokenData {
@@ -513,8 +511,12 @@ pub async fn estimate_transfer_fees(
     let source_mint = normalize_mint_url(&source_mint);
     let target_mint = normalize_mint_url(&target_mint);
 
-    log::info!("Estimating transfer fees: {} sats from {} to {}",
-        amount, source_mint, target_mint);
+    log::info!(
+        "Estimating transfer fees: {} sats from {} to {}",
+        amount,
+        source_mint,
+        target_mint
+    );
 
     if source_mint == target_mint {
         return Err("Source and target mints must be different".to_string());
@@ -528,21 +530,28 @@ pub async fn estimate_transfer_fees(
     let target_wallet = get_or_create_wallet(&target_mint).await?;
 
     // Create mint quote at target to get invoice amount
-    let mint_quote = target_wallet.mint_quote(Amount::from(amount), None).await
+    let mint_quote = target_wallet
+        .mint_quote(Amount::from(amount), None)
+        .await
         .map_err(|e| format!("Failed to create mint quote: {}", e))?;
 
     // Create wallet for source mint to get melt quote (fee estimate)
     let source_wallet = get_or_create_wallet(&source_mint).await?;
 
     // Create melt quote to see what fees would be
-    let melt_quote = source_wallet.melt_quote(mint_quote.request.clone(), None).await
+    let melt_quote = source_wallet
+        .melt_quote(mint_quote.request.clone(), None)
+        .await
         .map_err(|e| format!("Failed to create melt quote: {}", e))?;
 
     let fee_estimate = u64::from(melt_quote.fee_reserve);
     let total_needed = amount + fee_estimate;
 
-    log::info!("Transfer fee estimate: {} sats (total needed: {} sats)",
-        fee_estimate, total_needed);
+    log::info!(
+        "Transfer fee estimate: {} sats (total needed: {} sats)",
+        fee_estimate,
+        total_needed
+    );
 
     Ok((fee_estimate, amount))
 }

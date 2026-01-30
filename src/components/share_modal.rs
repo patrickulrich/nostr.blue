@@ -1,15 +1,15 @@
-use dioxus::prelude::*;
-use dioxus::html::input_data::keyboard_types::Key;
-use nostr_sdk::{Event as NostrEvent, EventBuilder, PublicKey, FromBech32};
-use std::sync::atomic::{AtomicU32, Ordering};
-use crate::stores::{nostr_client, dms};
-use crate::stores::nostr_client::HAS_SIGNER;
 use crate::components::icons::{
-    ShareIcon, CopyIcon, CheckIcon, MessageCircleIcon, SendIcon,
-    FileVideoIcon, Link2Icon, HashIcon, ArrowLeftIcon, CameraIcon, BarChartIcon
+    ArrowLeftIcon, BarChartIcon, CameraIcon, CheckIcon, CopyIcon, FileVideoIcon, HashIcon,
+    Link2Icon, MessageCircleIcon, SendIcon, ShareIcon,
 };
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, PollCreatorModal};
+use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
+use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::{dms, nostr_client};
 use crate::utils::clipboard::copy_to_clipboard;
+use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, PublicKey};
+use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
@@ -61,7 +61,8 @@ pub fn ShareModal(
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
                         if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
+                                as usize;
                         }
                     }
                 }
@@ -76,7 +77,9 @@ pub fn ShareModal(
         let mut utf8_index = 0;
         let mut utf16_count = 0;
         for c in text.chars() {
-            if utf16_count >= utf16_index { break; }
+            if utf16_count >= utf16_index {
+                break;
+            }
             utf16_count += c.len_utf16();
             utf8_index += c.len_utf8();
         }
@@ -94,7 +97,10 @@ pub fn ShareModal(
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                (0..=pos)
+                    .rev()
+                    .find(|&i| current.is_char_boundary(i))
+                    .unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
@@ -116,7 +122,10 @@ pub fn ShareModal(
                     let safe_pos = if current.is_char_boundary(pos) {
                         pos
                     } else {
-                        (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
+                        (0..=pos)
+                            .rev()
+                            .find(|&i| current.is_char_boundary(i))
+                            .unwrap_or(0)
                     };
                     if let Some(prev_char) = current[..safe_pos].chars().last() {
                         if !prev_char.is_whitespace() {
@@ -152,25 +161,28 @@ pub fn ShareModal(
     };
 
     // Extract video/content information
-    let content_title = event.tags.iter()
+    let content_title = event
+        .tags
+        .iter()
         .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
         .and_then(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
         .unwrap_or_else(|| "Check out this content".to_string());
 
     // Get MP4 URL from imeta tags
-    let video_mp4_url = event.tags.iter()
+    let video_mp4_url = event
+        .tags
+        .iter()
         .filter(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("imeta"))
         .filter_map(|tag| {
             // Parse imeta tag to find url
-            tag.as_slice().iter().skip(1)
-                .find_map(|part| {
-                    let s = part.as_str();
-                    if s.starts_with("url ") {
-                        Some(s.trim_start_matches("url ").to_string())
-                    } else {
-                        None
-                    }
-                })
+            tag.as_slice().iter().skip(1).find_map(|part| {
+                let s = part.as_str();
+                if s.starts_with("url ") {
+                    Some(s.trim_start_matches("url ").to_string())
+                } else {
+                    None
+                }
+            })
         })
         .next()
         .unwrap_or_default();
@@ -216,12 +228,20 @@ pub fn ShareModal(
                 // For addressable events use naddr, for regular events use nevent/note
                 let nip19_str = if event_for_async.kind.is_addressable() {
                     if let Some(coord) = event_for_async.coordinate() {
-                        coord.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                        coord
+                            .to_bech32()
+                            .unwrap_or_else(|_| event_for_async.id.to_hex())
                     } else {
-                        event_for_async.id.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                        event_for_async
+                            .id
+                            .to_bech32()
+                            .unwrap_or_else(|_| event_for_async.id.to_hex())
                     }
                 } else {
-                    event_for_async.id.to_bech32().unwrap_or_else(|_| event_for_async.id.to_hex())
+                    event_for_async
+                        .id
+                        .to_bech32()
+                        .unwrap_or_else(|_| event_for_async.id.to_hex())
                 };
 
                 // Set content_nip19 so the Nostr Event button remains enabled
@@ -235,27 +255,27 @@ pub fn ShareModal(
         move |_| {
             let url = content_url_copy.clone();
             spawn(async move {
-            match copy_to_clipboard(&url).await {
-                Ok(_) => {
-                    copied.set(true);
-                    log::info!("Link copied to clipboard");
-                    spawn(async move {
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-                        }
-                        copied.set(false);
-                    });
+                match copy_to_clipboard(&url).await {
+                    Ok(_) => {
+                        copied.set(true);
+                        log::info!("Link copied to clipboard");
+                        spawn(async move {
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                            }
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                            }
+                            copied.set(false);
+                        });
+                    }
+                    Err(e) => {
+                        log::error!("Failed to copy to clipboard: {:?}", e);
+                    }
                 }
-                Err(e) => {
-                    log::error!("Failed to copy to clipboard: {:?}", e);
-                }
-            }
-        });
+            });
         }
     };
 
@@ -327,15 +347,25 @@ pub fn ShareModal(
                     pubkey.to_hex()
                 } else {
                     log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                    dm_error.set(Some("Invalid recipient. Please enter a valid npub or hex public key.".to_string()));
+                    dm_error.set(Some(
+                        "Invalid recipient. Please enter a valid npub or hex public key."
+                            .to_string(),
+                    ));
                     is_publishing.set(false);
                     return;
                 };
 
-                let content_type = if is_recipe_clone { "recipe" }
-                    else if is_article_clone { "article" }
-                    else { "video" };
-                let message = format!("Check out this {} on nostr.blue: {}", content_type, content_url_clone);
+                let content_type = if is_recipe_clone {
+                    "recipe"
+                } else if is_article_clone {
+                    "article"
+                } else {
+                    "video"
+                };
+                let message = format!(
+                    "Check out this {} on nostr.blue: {}",
+                    content_type, content_url_clone
+                );
 
                 // Send DM using NIP-17
                 match dms::send_dm(recipient_hex.clone(), message).await {
@@ -763,4 +793,3 @@ pub fn ShareModal(
         }
     }
 }
-

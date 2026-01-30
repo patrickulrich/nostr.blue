@@ -1,12 +1,14 @@
 // Radio Station Detail Page
 // Displays a single radio station with full details and playback controls
-use dioxus::prelude::*;
-use crate::routes::Route;
 use crate::components::icons;
+use crate::routes::Route;
 use crate::stores::music_player::{self, MusicTrack, MUSIC_PLAYER};
 use crate::stores::nostr_client;
-use crate::utils::radio::{RadioStation as RadioStationData, fetch_station_by_naddr, get_ranked_stream_urls};
+use crate::utils::radio::{
+    fetch_station_by_naddr, get_ranked_stream_urls, RadioStation as RadioStationData,
+};
 use crate::utils::validation::is_valid_http_url;
+use dioxus::prelude::*;
 
 #[component]
 pub fn RadioStation(naddr: String) -> Element {
@@ -44,7 +46,11 @@ pub fn RadioStation(naddr: String) -> Element {
     }));
 
     // Check if this station is currently playing
-    let station_id = station.read().as_ref().map(|s| s.coordinate.clone()).unwrap_or_default();
+    let station_id = station
+        .read()
+        .as_ref()
+        .map(|s| s.coordinate.clone())
+        .unwrap_or_default();
     let station_id_for_memo = station_id.clone();
     let is_playing = use_memo(move || {
         let player_state = MUSIC_PLAYER.read();

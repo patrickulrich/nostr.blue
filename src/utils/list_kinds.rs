@@ -4,18 +4,13 @@
 //! Reference: https://github.com/nostr-protocol/nips/blob/master/51.md
 
 /// NIP-51 List kinds (parameterized replaceable events)
-pub const NAMED_PEOPLE: u16 = 30000;     // People list
-pub const NAMED_RELAYS: u16 = 30002;     // Relay list
-pub const NAMED_BOOKMARKS: u16 = 30003;  // Bookmark list
-pub const NAMED_CURATIONS: u16 = 30004;  // Curation list
+pub const NAMED_PEOPLE: u16 = 30000; // People list
+pub const NAMED_RELAYS: u16 = 30002; // Relay list
+pub const NAMED_BOOKMARKS: u16 = 30003; // Bookmark list
+pub const NAMED_CURATIONS: u16 = 30004; // Curation list
 
 /// All NIP-51 list kinds
-pub const LIST_KINDS: &[u16] = &[
-    NAMED_PEOPLE,
-    NAMED_RELAYS,
-    NAMED_BOOKMARKS,
-    NAMED_CURATIONS,
-];
+pub const LIST_KINDS: &[u16] = &[NAMED_PEOPLE, NAMED_RELAYS, NAMED_BOOKMARKS, NAMED_CURATIONS];
 
 /// Get human-readable list type name from kind
 pub fn get_list_type_name(kind: u16) -> &'static str {

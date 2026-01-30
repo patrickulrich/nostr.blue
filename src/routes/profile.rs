@@ -1,15 +1,18 @@
-use dioxus::prelude::*;
-use crate::stores::{nostr_client, auth_store, dms, pinned_notes};
-use crate::components::{NoteCard, ClientInitializing, ProfileEditorModal, PhotoCard, VideoCard, ArticleCard, ArticleCardSkeleton, PinnedNotesCarousel, ProfileBadgesSection, AddToPeopleListModal};
-use crate::utils::article_meta::{get_identifier, get_published_at};
-use crate::components::icons::{InfoIcon, MailIcon, ListIcon};
-use crate::components::dialog::{DialogRoot, DialogTitle, DialogDescription};
+use crate::components::dialog::{DialogDescription, DialogRoot, DialogTitle};
+use crate::components::icons::{InfoIcon, ListIcon, MailIcon};
+use crate::components::{
+    AddToPeopleListModal, ArticleCard, ArticleCardSkeleton, ClientInitializing, NoteCard,
+    PhotoCard, PinnedNotesCarousel, ProfileBadgesSection, ProfileEditorModal, VideoCard,
+};
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::services::profile_stats;
+use crate::stores::{auth_store, dms, nostr_client, pinned_notes};
+use crate::utils::article_meta::{get_identifier, get_published_at};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
+use dioxus::prelude::*;
+use nostr_sdk::nips::nip19::ToBech32;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
-use nostr_sdk::nips::nip19::ToBech32;
 use std::collections::HashMap;
 use std::time::Duration;
 use wasm_bindgen::JsCast;
@@ -82,16 +85,18 @@ fn dedupe_articles_by_address(articles: Vec<NostrEvent>) -> Vec<NostrEvent> {
 
     for article in articles {
         // Use d-tag identifier if present, otherwise fallback to event ID
-        let identifier = get_identifier(&article)
-            .unwrap_or_else(|| format!("id-{}", article.id.to_hex()));
+        let identifier =
+            get_identifier(&article).unwrap_or_else(|| format!("id-{}", article.id.to_hex()));
 
-        let address = format!("{}:{}:{}",
+        let address = format!(
+            "{}:{}:{}",
             article.kind.as_u16(),
             article.pubkey.to_hex(),
             identifier
         );
 
-        address_map.entry(address)
+        address_map
+            .entry(address)
             .and_modify(|existing| {
                 // Use published_at to determine which version to keep
                 if get_published_at(&article) > get_published_at(existing) {
@@ -165,7 +170,9 @@ pub fn Profile(pubkey: String) -> Element {
 
     // Check if this is own profile
     let auth = auth_store::AUTH_STATE.read();
-    let is_own_profile = auth.pubkey.as_ref()
+    let is_own_profile = auth
+        .pubkey
+        .as_ref()
         .and_then(|pk| PublicKey::parse(pk).ok())
         .and_then(|user_pk| parsed_pubkey.map(|profile_pk| user_pk == profile_pk))
         .unwrap_or(false);
@@ -189,275 +196,322 @@ pub fn Profile(pubkey: String) -> Element {
     }));
 
     // Fetch pinned notes for this profile
-    use_effect(use_reactive((&pubkey_for_pinned, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, client_initialized)| {
-        if !client_initialized {
-            return;
-        }
-
-        pinned_loading.set(true);
-
-        spawn(async move {
-            match pinned_notes::fetch_pinned_notes_for_user(&pubkey_str).await {
-                Ok((pin_ids, events)) => {
-                    // Sort events to match pin order (preserve the order user set)
-                    let mut sorted_events = Vec::new();
-                    for pin_id in pin_ids {
-                        if let Some(event) = events.iter().find(|e| e.id.to_hex() == pin_id) {
-                            sorted_events.push(event.clone());
-                        }
-                    }
-                    pinned_events.set(sorted_events);
-                }
-                Err(e) => {
-                    log::warn!("Failed to fetch pinned notes: {}", e);
-                    pinned_events.set(Vec::new());
-                }
-            }
-            pinned_loading.set(false);
-        });
-    }));
-
-    // Fetch profile metadata
-    use_effect(use_reactive((&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, client_initialized)| {
-
-        // Only load if client is initialized
-        if !client_initialized {
-            return;
-        }
-
-        spawn(async move {
-            loading.set(true);
-            error.set(None);
-
-            // Parse the public key
-            let public_key = match PublicKey::from_bech32(&pubkey_str)
-                .or_else(|_| PublicKey::from_hex(&pubkey_str)) {
-                Ok(pk) => pk,
-                Err(e) => {
-                    error.set(Some(format!("Invalid public key: {}", e)));
-                    loading.set(false);
-                    return;
-                }
-            };
-
-            // Get client for metadata fetching
-            let client = match nostr_client::get_client() {
-                Some(c) => c,
-                None => {
-                    error.set(Some("Client not initialized".to_string()));
-                    loading.set(false);
-                    return;
-                }
-            };
-
-            // 2-tier fetch: Check database first (instant), then fetch from relays if needed
-            // This matches the SDK-recommended pattern used in note_card.rs
-
-            // Tier 1: Check database cache first (instant, no network)
-            if let Ok(Some(metadata)) = client.database().metadata(public_key).await {
-                log::debug!("Loaded profile metadata from database cache");
-                profile_data.set(Some(metadata));
-                loading.set(false);
+    use_effect(use_reactive(
+        (
+            &pubkey_for_pinned,
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+        ),
+        move |(pubkey_str, client_initialized)| {
+            if !client_initialized {
                 return;
             }
 
-            // Tier 2: Not in cache, fetch from relays (with gossip routing)
-            match client.fetch_metadata(public_key, Duration::from_secs(5)).await {
-                Ok(Some(metadata)) => {
-                    log::debug!("Fetched profile metadata from relays");
-                    profile_data.set(Some(metadata));
+            pinned_loading.set(true);
+
+            spawn(async move {
+                match pinned_notes::fetch_pinned_notes_for_user(&pubkey_str).await {
+                    Ok((pin_ids, events)) => {
+                        // Sort events to match pin order (preserve the order user set)
+                        let mut sorted_events = Vec::new();
+                        for pin_id in pin_ids {
+                            if let Some(event) = events.iter().find(|e| e.id.to_hex() == pin_id) {
+                                sorted_events.push(event.clone());
+                            }
+                        }
+                        pinned_events.set(sorted_events);
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to fetch pinned notes: {}", e);
+                        pinned_events.set(Vec::new());
+                    }
                 }
-                Ok(None) => {
-                    log::debug!("No metadata found, using empty profile");
-                    // No metadata event found, use empty metadata
-                    profile_data.set(Some(nostr_sdk::Metadata::new()));
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch profile metadata: {}", e);
-                    // Still set empty metadata so profile can be viewed
-                    profile_data.set(Some(nostr_sdk::Metadata::new()));
-                }
+                pinned_loading.set(false);
+            });
+        },
+    ));
+
+    // Fetch profile metadata
+    use_effect(use_reactive(
+        (&pubkey, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pubkey_str, client_initialized)| {
+            // Only load if client is initialized
+            if !client_initialized {
+                return;
             }
 
-            loading.set(false);
-        });
-    }));
+            spawn(async move {
+                loading.set(true);
+                error.set(None);
+
+                // Parse the public key
+                let public_key = match PublicKey::from_bech32(&pubkey_str)
+                    .or_else(|_| PublicKey::from_hex(&pubkey_str))
+                {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error.set(Some(format!("Invalid public key: {}", e)));
+                        loading.set(false);
+                        return;
+                    }
+                };
+
+                // Get client for metadata fetching
+                let client = match nostr_client::get_client() {
+                    Some(c) => c,
+                    None => {
+                        error.set(Some("Client not initialized".to_string()));
+                        loading.set(false);
+                        return;
+                    }
+                };
+
+                // 2-tier fetch: Check database first (instant), then fetch from relays if needed
+                // This matches the SDK-recommended pattern used in note_card.rs
+
+                // Tier 1: Check database cache first (instant, no network)
+                if let Ok(Some(metadata)) = client.database().metadata(public_key).await {
+                    log::debug!("Loaded profile metadata from database cache");
+                    profile_data.set(Some(metadata));
+                    loading.set(false);
+                    return;
+                }
+
+                // Tier 2: Not in cache, fetch from relays (with gossip routing)
+                match client
+                    .fetch_metadata(public_key, Duration::from_secs(5))
+                    .await
+                {
+                    Ok(Some(metadata)) => {
+                        log::debug!("Fetched profile metadata from relays");
+                        profile_data.set(Some(metadata));
+                    }
+                    Ok(None) => {
+                        log::debug!("No metadata found, using empty profile");
+                        // No metadata event found, use empty metadata
+                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch profile metadata: {}", e);
+                        // Still set empty metadata so profile can be viewed
+                        profile_data.set(Some(nostr_sdk::Metadata::new()));
+                    }
+                }
+
+                loading.set(false);
+            });
+        },
+    ));
 
     // Fetch events based on active tab - TWO-PHASE LOADING for instant display
     // Phase 1: Load from DB instantly (cached data)
     // Phase 2: Fetch from relays in background (fresh data)
-    use_effect(use_reactive((&pubkey, &*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()), move |(pubkey_str, tab, client_initialized)| {
-        // Only load if client is initialized
-        if !client_initialized {
-            return;
-        }
-
-        // Check if this tab is already loaded
-        let already_loaded = tab_data.read().get(&tab).map(|d| d.loaded).unwrap_or(false);
-        if already_loaded {
-            // Tab already loaded, just update has_more signal for infinite scroll
-            let has_more = tab_data.read().get(&tab).map(|d| d.has_more).unwrap_or(true);
-            current_tab_has_more.set(has_more);
-            return;
-        }
-
-        loading_events.set(true);
-
-        // Clone for the spawned tasks
-        let pubkey_for_relay = pubkey_str.clone();
-        let tab_for_relay = tab.clone();
-
-        spawn(async move {
-            // ===== PHASE 1: Load from DB instantly =====
-            match load_tab_events_db(&pubkey_str, &tab, None).await {
-                Ok(db_outcome) => {
-                    let oldest_ts = db_outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
-                    // Always assume there might be more from relays
-                    let has_more = true;
-
-                    // Count posts for header (only for Posts tab)
-                    if matches!(tab, ProfileTab::Posts) {
-                        post_count.set(db_outcome.events.len());
-                    }
-
-                    // Show DB results immediately
-                    let mut data_map = tab_data.read().clone();
-                    data_map.insert(tab.clone(), TabData {
-                        events: db_outcome.events.clone(),
-                        oldest_timestamp: oldest_ts,
-                        has_more,
-                        loaded: true, // Mark as loaded so UI shows content
-                    });
-                    tab_data.set(data_map);
-                    current_tab_has_more.set(has_more);
-
-                    // Only stop loading if we have events to show
-                    // If DB is empty, keep skeleton visible until relay fetch completes
-                    if !db_outcome.events.is_empty() {
-                        loading_events.set(false);
-                    }
-
-                    log::info!("Phase 1 complete: showing {} events from DB instantly", db_outcome.events.len());
-
-                    // Prefetch metadata for DB results
-                    // Include original authors from reposts for better UX
-                    let db_events_for_metadata = expand_events_for_prefetch(&db_outcome.events);
-                    spawn(async move {
-                        prefetch_author_metadata(&db_events_for_metadata).await;
-                    });
-                }
-                Err(e) => {
-                    log::warn!("DB phase failed: {}, will try relays", e);
-                    // Don't set loading to false yet - relay fetch will provide data
-                }
+    use_effect(use_reactive(
+        (
+            &pubkey,
+            &*active_tab.read(),
+            &*nostr_client::CLIENT_INITIALIZED.read(),
+        ),
+        move |(pubkey_str, tab, client_initialized)| {
+            // Only load if client is initialized
+            if !client_initialized {
+                return;
             }
 
-            // ===== PHASE 2: Fetch from relays in background =====
+            // Check if this tab is already loaded
+            let already_loaded = tab_data.read().get(&tab).map(|d| d.loaded).unwrap_or(false);
+            if already_loaded {
+                // Tab already loaded, just update has_more signal for infinite scroll
+                let has_more = tab_data
+                    .read()
+                    .get(&tab)
+                    .map(|d| d.has_more)
+                    .unwrap_or(true);
+                current_tab_has_more.set(has_more);
+                return;
+            }
+
+            loading_events.set(true);
+
+            // Clone for the spawned tasks
+            let pubkey_for_relay = pubkey_str.clone();
+            let tab_for_relay = tab.clone();
+
             spawn(async move {
-                match load_tab_events_relays(&pubkey_for_relay, &tab_for_relay, None).await {
-                    Ok(relay_outcome) => {
-                        // Merge relay results with existing DB results
+                // ===== PHASE 1: Load from DB instantly =====
+                match load_tab_events_db(&pubkey_str, &tab, None).await {
+                    Ok(db_outcome) => {
+                        let oldest_ts = db_outcome.oldest_cursor.map(|ts| ts.saturating_sub(1));
+                        // Always assume there might be more from relays
+                        let has_more = true;
+
+                        // Count posts for header (only for Posts tab)
+                        if matches!(tab, ProfileTab::Posts) {
+                            post_count.set(db_outcome.events.len());
+                        }
+
+                        // Show DB results immediately
                         let mut data_map = tab_data.read().clone();
-                        let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
-
-                        // Build set of existing event IDs
-                        let existing_ids: std::collections::HashSet<_> = existing_data.events.iter()
-                            .map(|e| e.id)
-                            .collect();
-
-                        // Find new events from relay
-                        let new_events: Vec<_> = relay_outcome.events.into_iter()
-                            .filter(|e| !existing_ids.contains(&e.id))
-                            .collect();
-
-                        // Determine has_more based on raw relay count (before dedup), not new_events
-                        // If relay returned >= limit events, there may be more pages
-                        let has_more = relay_outcome.relay_count >= 100;
-
-                        if !new_events.is_empty() {
-                            log::info!("Phase 2: found {} new events from relays (has_more: {})", new_events.len(), has_more);
-
-                            // Merge and sort
-                            let mut merged = existing_data.events;
-                            merged.extend(new_events.clone());
-
-                            // For Articles tab, apply NIP-23 deduplication to keep only newest version
-                            if matches!(tab_for_relay, ProfileTab::Articles) {
-                                merged = dedupe_articles_by_address(merged);
-                            }
-
-                            // For Articles, sort by published_at to match displayed timestamps
-                            if matches!(tab_for_relay, ProfileTab::Articles) {
-                                merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
-                            } else {
-                                merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
-                            }
-
-                            // Update oldest cursor (use published_at for Articles)
-                            let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
-                                merged.last().map(|e| get_published_at(e).saturating_sub(1))
-                            } else {
-                                merged.last().map(|e| e.created_at.as_secs().saturating_sub(1))
-                            };
-
-                            // Update tab data
-                            data_map.insert(tab_for_relay.clone(), TabData {
-                                events: merged.clone(),
+                        data_map.insert(
+                            tab.clone(),
+                            TabData {
+                                events: db_outcome.events.clone(),
                                 oldest_timestamp: oldest_ts,
                                 has_more,
-                                loaded: true,
-                            });
-                            tab_data.set(data_map);
-                            current_tab_has_more.set(has_more);
+                                loaded: true, // Mark as loaded so UI shows content
+                            },
+                        );
+                        tab_data.set(data_map);
+                        current_tab_has_more.set(has_more);
 
-                            // Update post count if Posts tab
-                            if matches!(tab_for_relay, ProfileTab::Posts) {
-                                post_count.set(merged.len());
-                            }
-
-                            // Prefetch metadata for new events
-                            // Include original authors from reposts for better UX
-                            let events_for_prefetch = expand_events_for_prefetch(&new_events);
-                            spawn(async move {
-                                prefetch_author_metadata(&events_for_prefetch).await;
-                            });
-                        } else {
-                            log::info!("Phase 2: no new events from relays (all already in DB, has_more: {})", has_more);
-                            // Mark as loaded - use relay_count to determine if more pages exist
-                            let mut data_map = tab_data.read().clone();
-                            data_map.insert(tab_for_relay.clone(), TabData {
-                                events: existing_data.events,
-                                oldest_timestamp: existing_data.oldest_timestamp,
-                                has_more,
-                                loaded: true,
-                            });
-                            tab_data.set(data_map);
-                            current_tab_has_more.set(has_more);
+                        // Only stop loading if we have events to show
+                        // If DB is empty, keep skeleton visible until relay fetch completes
+                        if !db_outcome.events.is_empty() {
+                            loading_events.set(false);
                         }
+
+                        log::info!(
+                            "Phase 1 complete: showing {} events from DB instantly",
+                            db_outcome.events.len()
+                        );
+
+                        // Prefetch metadata for DB results
+                        // Include original authors from reposts for better UX
+                        let db_events_for_metadata = expand_events_for_prefetch(&db_outcome.events);
+                        spawn(async move {
+                            prefetch_author_metadata(&db_events_for_metadata).await;
+                        });
                     }
                     Err(e) => {
-                        log::warn!("Relay phase failed: {}, using DB results only", e);
-                        // Mark as loaded even on error to prevent infinite re-fetch loop
-                        let mut data_map = tab_data.read().clone();
-                        let existing_data = data_map.get(&tab_for_relay).cloned().unwrap_or_default();
-                        if !existing_data.loaded {
-                            data_map.insert(tab_for_relay.clone(), TabData {
-                                events: existing_data.events,
-                                oldest_timestamp: existing_data.oldest_timestamp,
-                                has_more: false,
-                                loaded: true,
-                            });
-                            tab_data.set(data_map);
-                            current_tab_has_more.set(false);
-                        }
+                        log::warn!("DB phase failed: {}, will try relays", e);
+                        // Don't set loading to false yet - relay fetch will provide data
                     }
                 }
 
-                // Ensure loading is false after both phases
-                loading_events.set(false);
+                // ===== PHASE 2: Fetch from relays in background =====
+                spawn(async move {
+                    match load_tab_events_relays(&pubkey_for_relay, &tab_for_relay, None).await {
+                        Ok(relay_outcome) => {
+                            // Merge relay results with existing DB results
+                            let mut data_map = tab_data.read().clone();
+                            let existing_data =
+                                data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+
+                            // Build set of existing event IDs
+                            let existing_ids: std::collections::HashSet<_> =
+                                existing_data.events.iter().map(|e| e.id).collect();
+
+                            // Find new events from relay
+                            let new_events: Vec<_> = relay_outcome
+                                .events
+                                .into_iter()
+                                .filter(|e| !existing_ids.contains(&e.id))
+                                .collect();
+
+                            // Determine has_more based on raw relay count (before dedup), not new_events
+                            // If relay returned >= limit events, there may be more pages
+                            let has_more = relay_outcome.relay_count >= 100;
+
+                            if !new_events.is_empty() {
+                                log::info!(
+                                    "Phase 2: found {} new events from relays (has_more: {})",
+                                    new_events.len(),
+                                    has_more
+                                );
+
+                                // Merge and sort
+                                let mut merged = existing_data.events;
+                                merged.extend(new_events.clone());
+
+                                // For Articles tab, apply NIP-23 deduplication to keep only newest version
+                                if matches!(tab_for_relay, ProfileTab::Articles) {
+                                    merged = dedupe_articles_by_address(merged);
+                                }
+
+                                // For Articles, sort by published_at to match displayed timestamps
+                                if matches!(tab_for_relay, ProfileTab::Articles) {
+                                    merged.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                                } else {
+                                    merged.sort_by_key(|e| std::cmp::Reverse(e.created_at));
+                                }
+
+                                // Update oldest cursor (use published_at for Articles)
+                                let oldest_ts = if matches!(tab_for_relay, ProfileTab::Articles) {
+                                    merged.last().map(|e| get_published_at(e).saturating_sub(1))
+                                } else {
+                                    merged
+                                        .last()
+                                        .map(|e| e.created_at.as_secs().saturating_sub(1))
+                                };
+
+                                // Update tab data
+                                data_map.insert(
+                                    tab_for_relay.clone(),
+                                    TabData {
+                                        events: merged.clone(),
+                                        oldest_timestamp: oldest_ts,
+                                        has_more,
+                                        loaded: true,
+                                    },
+                                );
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(has_more);
+
+                                // Update post count if Posts tab
+                                if matches!(tab_for_relay, ProfileTab::Posts) {
+                                    post_count.set(merged.len());
+                                }
+
+                                // Prefetch metadata for new events
+                                // Include original authors from reposts for better UX
+                                let events_for_prefetch = expand_events_for_prefetch(&new_events);
+                                spawn(async move {
+                                    prefetch_author_metadata(&events_for_prefetch).await;
+                                });
+                            } else {
+                                log::info!("Phase 2: no new events from relays (all already in DB, has_more: {})", has_more);
+                                // Mark as loaded - use relay_count to determine if more pages exist
+                                let mut data_map = tab_data.read().clone();
+                                data_map.insert(
+                                    tab_for_relay.clone(),
+                                    TabData {
+                                        events: existing_data.events,
+                                        oldest_timestamp: existing_data.oldest_timestamp,
+                                        has_more,
+                                        loaded: true,
+                                    },
+                                );
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(has_more);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Relay phase failed: {}, using DB results only", e);
+                            // Mark as loaded even on error to prevent infinite re-fetch loop
+                            let mut data_map = tab_data.read().clone();
+                            let existing_data =
+                                data_map.get(&tab_for_relay).cloned().unwrap_or_default();
+                            if !existing_data.loaded {
+                                data_map.insert(
+                                    tab_for_relay.clone(),
+                                    TabData {
+                                        events: existing_data.events,
+                                        oldest_timestamp: existing_data.oldest_timestamp,
+                                        has_more: false,
+                                        loaded: true,
+                                    },
+                                );
+                                tab_data.set(data_map);
+                                current_tab_has_more.set(false);
+                            }
+                        }
+                    }
+
+                    // Ensure loading is false after both phases
+                    loading_events.set(false);
+                });
             });
-        });
-    }));
+        },
+    ));
 
     // Check if following this user
     use_effect(use_reactive(&pubkey, move |pubkey_str| {
@@ -554,7 +608,12 @@ pub fn Profile(pubkey: String) -> Element {
             (tab_state.has_more, tab_state.oldest_timestamp)
         };
 
-        log::info!("load_more: has_more={}, loading={}, until={:?}", has_more, *loading_events.read(), until);
+        log::info!(
+            "load_more: has_more={}, loading={}, until={:?}",
+            has_more,
+            *loading_events.read(),
+            until
+        );
 
         if *loading_events.read() || !has_more {
             log::info!("load_more: bailing early");
@@ -574,7 +633,11 @@ pub fn Profile(pubkey: String) -> Element {
                     // If we got 0 events, we've hit the end
                     let has_more_val = !outcome.events.is_empty();
 
-                    log::info!("load_more: got {} new events, has_more={}", outcome.events.len(), has_more_val);
+                    log::info!(
+                        "load_more: got {} new events, has_more={}",
+                        outcome.events.len(),
+                        has_more_val
+                    );
 
                     // Append new events to the current tab's data - clone, modify, set to trigger reactivity
                     let mut data_map = tab_data.read().clone();
@@ -584,7 +647,8 @@ pub fn Profile(pubkey: String) -> Element {
                         // For Articles tab, deduplicate and re-sort after extending
                         if matches!(tab, ProfileTab::Articles) {
                             data.events = dedupe_articles_by_address(data.events.clone());
-                            data.events.sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
+                            data.events
+                                .sort_by_key(|e| std::cmp::Reverse(get_published_at(e)));
                         }
 
                         data.oldest_timestamp = oldest_ts;
@@ -625,12 +689,7 @@ pub fn Profile(pubkey: String) -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        current_tab_has_more,
-        loading_events
-    );
-
+    let sentinel_id = use_infinite_scroll(load_more, current_tab_has_more, loading_events);
 
     rsx! {
         div {
@@ -1572,7 +1631,11 @@ pub fn Profile(pubkey: String) -> Element {
 }
 
 #[component]
-fn ProfileTabButton(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
+fn ProfileTabButton(
+    label: &'static str,
+    active: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
     rsx! {
         button {
             class: "shrink-0 px-4 py-4 font-semibold hover:bg-accent transition relative",
@@ -1724,7 +1787,12 @@ fn VertsVideoCard(event: NostrEvent) -> Element {
 }
 
 /// Build a filter for the given tab type
-fn build_tab_filter(public_key: PublicKey, tab: &ProfileTab, until: Option<u64>, limit: usize) -> Filter {
+fn build_tab_filter(
+    public_key: PublicKey,
+    tab: &ProfileTab,
+    until: Option<u64>,
+    limit: usize,
+) -> Filter {
     let mut filter = match tab {
         ProfileTab::Posts => {
             // Include both text notes and reposts for the Posts tab
@@ -1733,42 +1801,30 @@ fn build_tab_filter(public_key: PublicKey, tab: &ProfileTab, until: Option<u64>,
                 .kinds(vec![Kind::TextNote, Kind::Repost])
                 .limit(limit)
         }
-        ProfileTab::Replies => {
-            Filter::new()
-                .author(public_key)
-                .kind(Kind::TextNote)
-                .limit(limit)
-        }
-        ProfileTab::Articles => {
-            Filter::new()
-                .author(public_key)
-                .kind(Kind::LongFormTextNote)
-                .limit(limit)
-        }
-        ProfileTab::Media(MediaSubTab::Photos) => {
-            Filter::new()
-                .author(public_key)
-                .kind(Kind::Custom(20))
-                .limit(limit)
-        }
-        ProfileTab::Media(MediaSubTab::Videos) => {
-            Filter::new()
-                .author(public_key)
-                .kind(Kind::Custom(21))
-                .limit(limit)
-        }
-        ProfileTab::Media(MediaSubTab::Verts) => {
-            Filter::new()
-                .author(public_key)
-                .kind(Kind::Custom(22))
-                .limit(limit)
-        }
-        ProfileTab::Likes => {
-            Filter::new()
-                .author(public_key)
-                .kind(Kind::Reaction)
-                .limit(limit)
-        }
+        ProfileTab::Replies => Filter::new()
+            .author(public_key)
+            .kind(Kind::TextNote)
+            .limit(limit),
+        ProfileTab::Articles => Filter::new()
+            .author(public_key)
+            .kind(Kind::LongFormTextNote)
+            .limit(limit),
+        ProfileTab::Media(MediaSubTab::Photos) => Filter::new()
+            .author(public_key)
+            .kind(Kind::Custom(20))
+            .limit(limit),
+        ProfileTab::Media(MediaSubTab::Videos) => Filter::new()
+            .author(public_key)
+            .kind(Kind::Custom(21))
+            .limit(limit),
+        ProfileTab::Media(MediaSubTab::Verts) => Filter::new()
+            .author(public_key)
+            .kind(Kind::Custom(22))
+            .limit(limit),
+        ProfileTab::Likes => Filter::new()
+            .author(public_key)
+            .kind(Kind::Reaction)
+            .limit(limit),
     };
 
     if let Some(until_ts) = until {
@@ -1784,7 +1840,8 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
         ProfileTab::Posts => {
             // Filter for posts only (no e-tags = not replies)
             // Reposts (kind 6) are always included - they have e-tags but aren't replies
-            events.into_iter()
+            events
+                .into_iter()
                 .filter(|e| {
                     // Always include reposts
                     if e.kind == Kind::Repost {
@@ -1798,7 +1855,8 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
         ProfileTab::Replies => {
             // Filter for replies only (with e-tags)
             // Exclude reposts - they're not replies
-            events.into_iter()
+            events
+                .into_iter()
                 .filter(|e| e.kind != Kind::Repost && e.tags.event_ids().next().is_some())
                 .collect()
         }
@@ -1812,7 +1870,11 @@ fn process_tab_events(events: Vec<NostrEvent>, tab: &ProfileTab) -> Vec<NostrEve
 }
 
 // Helper function to load events from DB only (instant, Phase 1)
-async fn load_tab_events_db(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+async fn load_tab_events_db(
+    pubkey: &str,
+    tab: &ProfileTab,
+    until: Option<u64>,
+) -> std::result::Result<LoadOutcome, String> {
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid public key: {}", e))?;
@@ -1854,7 +1916,11 @@ async fn load_tab_events_db(pubkey: &str, tab: &ProfileTab, until: Option<u64>) 
 }
 
 // Helper function to load events from relays (Phase 2, background)
-async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+async fn load_tab_events_relays(
+    pubkey: &str,
+    tab: &ProfileTab,
+    until: Option<u64>,
+) -> std::result::Result<LoadOutcome, String> {
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
         .map_err(|e| format!("Invalid public key: {}", e))?;
@@ -1866,7 +1932,8 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
 
     let filter = build_tab_filter(public_key, tab, until, 100);
 
-    let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
+    let events =
+        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
     let relay_count = events.len(); // Track raw count before processing
     let mut processed = process_tab_events(events, tab);
 
@@ -1887,7 +1954,12 @@ async fn load_tab_events_relays(pubkey: &str, tab: &ProfileTab, until: Option<u6
         processed.last().map(|e| e.created_at.as_secs())
     };
 
-    log::info!("Relay Phase: fetched {} {:?} events (raw: {})", processed.len(), tab, relay_count);
+    log::info!(
+        "Relay Phase: fetched {} {:?} events (raw: {})",
+        processed.len(),
+        tab,
+        relay_count
+    );
 
     Ok(LoadOutcome {
         events: processed,
@@ -1920,12 +1992,17 @@ where
     let relay_count = reactions.len(); // Track raw count for pagination
 
     if reactions.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
+        return Ok(LoadOutcome {
+            events: Vec::new(),
+            oldest_cursor: None,
+            relay_count: 0,
+        });
     }
 
     // Extract event IDs from reactions using SDK's event_ids()
     let mut liked_event_ids = Vec::new();
-    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut reaction_times: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
 
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
@@ -1935,7 +2012,11 @@ where
     }
 
     if liked_event_ids.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count });
+        return Ok(LoadOutcome {
+            events: Vec::new(),
+            oldest_cursor: None,
+            relay_count,
+        });
     }
 
     // Fetch liked events
@@ -1949,22 +2030,34 @@ where
         time_b.cmp(&time_a)
     });
 
-    let oldest_cursor = event_vec.last()
+    let oldest_cursor = event_vec
+        .last()
         .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
 
-    Ok(LoadOutcome { events: event_vec, oldest_cursor, relay_count })
+    Ok(LoadOutcome {
+        events: event_vec,
+        oldest_cursor,
+        relay_count,
+    })
 }
 
 // Special handling for Likes tab - DB phase
-async fn load_likes_db(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+async fn load_likes_db(
+    public_key: PublicKey,
+    until: Option<u64>,
+) -> std::result::Result<LoadOutcome, String> {
     load_likes_common(public_key, until, |filter| {
         nostr_client::fetch_profile_events_db(filter)
-    }).await
+    })
+    .await
 }
 
 // Special handling for Likes tab - Relay phase
 // Uses gossip for reactions (single author), connected relays for liked posts (many authors)
-async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+async fn load_likes_relays(
+    public_key: PublicKey,
+    until: Option<u64>,
+) -> std::result::Result<LoadOutcome, String> {
     const REACTIONS_LIMIT: usize = 50;
 
     // Step 1: Fetch user's reactions using gossip (single author - fast)
@@ -1977,7 +2070,8 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    let reactions = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
+    let reactions =
+        nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await?;
 
     // nostr-sdk pattern: full page = possibly more data
     // Report limit as relay_count when we got a full page to signal has_more
@@ -1988,12 +2082,17 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
     };
 
     if reactions.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
+        return Ok(LoadOutcome {
+            events: Vec::new(),
+            oldest_cursor: None,
+            relay_count: 0,
+        });
     }
 
     // Extract event IDs from reactions
     let mut liked_event_ids = Vec::new();
-    let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut reaction_times: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
 
     for reaction in reactions.iter() {
         for event_id in reaction.tags.event_ids() {
@@ -2003,29 +2102,37 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
     }
 
     if liked_event_ids.is_empty() {
-        return Ok(LoadOutcome { events: Vec::new(), oldest_cursor: None, relay_count: 0 });
+        return Ok(LoadOutcome {
+            events: Vec::new(),
+            oldest_cursor: None,
+            relay_count: 0,
+        });
     }
 
     // Step 2: Fetch liked events using connected relays (many authors - bypass gossip)
     let liked_filter = Filter::new().ids(liked_event_ids.clone()).limit(500);
-    let mut event_vec: Vec<NostrEvent> = nostr_client::fetch_events_from_connected_relays(
-        liked_filter, Duration::from_secs(10)
-    ).await?;
+    let mut event_vec: Vec<NostrEvent> =
+        nostr_client::fetch_events_from_connected_relays(liked_filter, Duration::from_secs(10))
+            .await?;
 
     // Step 2b: Gossip fallback for missing events (nostr-sdk BrokenDownFilters::Orphan pattern)
     let found_ids: std::collections::HashSet<_> = event_vec.iter().map(|e| e.id).collect();
-    let missing_ids: Vec<_> = liked_event_ids.iter()
+    let missing_ids: Vec<_> = liked_event_ids
+        .iter()
         .filter(|id| !found_ids.contains(id))
         .cloned()
         .collect();
 
     if !missing_ids.is_empty() {
-        log::info!("Fetching {} missing liked events via gossip fallback", missing_ids.len());
+        log::info!(
+            "Fetching {} missing liked events via gossip fallback",
+            missing_ids.len()
+        );
         let gossip_filter = Filter::new().ids(missing_ids).limit(100);
         // Use gossip (fetch_profile_events_from_relays) as fallback - same as SDK's Orphan handling
-        match nostr_client::fetch_profile_events_from_relays(
-            gossip_filter, Duration::from_secs(10)
-        ).await {
+        match nostr_client::fetch_profile_events_from_relays(gossip_filter, Duration::from_secs(10))
+            .await
+        {
             Ok(gossip_events) => {
                 let mut found_via_gossip = 0;
                 for event in gossip_events {
@@ -2046,18 +2153,27 @@ async fn load_likes_relays(public_key: PublicKey, until: Option<u64>) -> std::re
     event_vec.sort_by(|a, b| {
         let time_a = reaction_times.get(&a.id.to_hex()).copied().unwrap_or(0);
         let time_b = reaction_times.get(&b.id.to_hex()).copied().unwrap_or(0);
-        time_b.cmp(&time_a)  // Newest likes first
+        time_b.cmp(&time_a) // Newest likes first
     });
 
-    let oldest_cursor = event_vec.last()
+    let oldest_cursor = event_vec
+        .last()
         .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
 
-    Ok(LoadOutcome { events: event_vec, oldest_cursor, relay_count })
+    Ok(LoadOutcome {
+        events: event_vec,
+        oldest_cursor,
+        relay_count,
+    })
 }
 
 // Helper function to load events based on tab type (legacy - for pagination/load_more)
 // Fetches enough events to return approximately 50 items for the specific tab
-async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> std::result::Result<LoadOutcome, String> {
+async fn load_tab_events(
+    pubkey: &str,
+    tab: &ProfileTab,
+    until: Option<u64>,
+) -> std::result::Result<LoadOutcome, String> {
     // Parse the public key
     let public_key = PublicKey::from_bech32(pubkey)
         .or_else(|_| PublicKey::from_hex(pubkey))
@@ -2085,8 +2201,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 }
 
                 // Use relay fetch for pagination (DB already shown)
-                let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
+                let events =
+                    nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                        .await
+                        .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
                 let events_len = events.len();
                 if events_len == 0 {
@@ -2100,7 +2218,8 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
                 // Filter: keep all reposts, but for text notes only keep those without e-tags (not replies)
-                let posts: Vec<NostrEvent> = events.into_iter()
+                let posts: Vec<NostrEvent> = events
+                    .into_iter()
                     .filter(|e| e.kind == Kind::Repost || e.tags.event_ids().next().is_none())
                     .collect();
 
@@ -2125,7 +2244,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             let mut seen_ids = std::collections::HashSet::new();
             all_posts.retain(|e| seen_ids.insert(e.id));
 
-            log::info!("Loaded {} posts (fetched {} total events, hit_end={})", all_posts.len(), total_fetched, hit_end);
+            log::info!(
+                "Loaded {} posts (fetched {} total events, hit_end={})",
+                all_posts.len(),
+                total_fetched,
+                hit_end
+            );
 
             let oldest_cursor = all_posts.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -2153,8 +2277,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 }
 
                 // Use relay fetch for pagination (DB already shown in phase 1)
-                let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
+                let events =
+                    nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                        .await
+                        .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
                 let events_len = events.len();
                 if events_len == 0 {
@@ -2168,7 +2294,8 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
                 let oldest_event_ts = events.last().map(|e| e.created_at.as_secs());
 
                 // Filter for replies only (with e-tags) using SDK's event_ids()
-                let replies: Vec<NostrEvent> = events.into_iter()
+                let replies: Vec<NostrEvent> = events
+                    .into_iter()
                     .filter(|e| e.tags.event_ids().next().is_some())
                     .collect();
 
@@ -2191,7 +2318,12 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             let mut seen_ids = std::collections::HashSet::new();
             all_replies.retain(|e| seen_ids.insert(e.id));
 
-            log::info!("Loaded {} replies (fetched {} total events, hit_end={})", all_replies.len(), total_fetched, hit_end);
+            log::info!(
+                "Loaded {} replies (fetched {} total events, hit_end={})",
+                all_replies.len(),
+                total_fetched,
+                hit_end
+            );
 
             let oldest_cursor = all_replies.last().map(|e| e.created_at.as_secs());
             Ok(LoadOutcome {
@@ -2212,8 +2344,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             }
 
             // Use relay fetch for pagination
-            let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
             let relay_count = events.len();
             let event_vec: Vec<NostrEvent> = events.into_iter().collect();
@@ -2244,8 +2378,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             }
 
             // Use relay fetch for pagination
-            let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
@@ -2271,8 +2407,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             }
 
             // Use relay fetch for pagination
-            let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
@@ -2298,8 +2436,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             }
 
             // Use relay fetch for pagination
-            let events = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                .map_err(|e| format!("Failed to fetch events: {}", e))?;
+            let events =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch events: {}", e))?;
 
             let relay_count = events.len();
             let mut event_vec: Vec<NostrEvent> = events.into_iter().collect();
@@ -2325,8 +2465,10 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             }
 
             // Use relay fetch for pagination
-            let reactions = nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10)).await
-                .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
+            let reactions =
+                nostr_client::fetch_profile_events_from_relays(filter, Duration::from_secs(10))
+                    .await
+                    .map_err(|e| format!("Failed to fetch reactions: {}", e))?;
 
             let relay_count = reactions.len();
 
@@ -2356,17 +2498,20 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             }
 
             // Fetch the actual liked events
-            let liked_filter = Filter::new()
-                .ids(liked_event_ids)
-                .limit(500);
+            let liked_filter = Filter::new().ids(liked_event_ids).limit(500);
 
             // Use relay fetch for pagination
-            let liked_events = nostr_client::fetch_profile_events_from_relays(liked_filter, Duration::from_secs(10)).await
-                .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
+            let liked_events = nostr_client::fetch_profile_events_from_relays(
+                liked_filter,
+                Duration::from_secs(10),
+            )
+            .await
+            .map_err(|e| format!("Failed to fetch liked events: {}", e))?;
 
             // Sort by the reaction timestamp (when the user liked it), not the original event timestamp
             // Create a map of event_id -> reaction_timestamp for sorting using SDK's event_ids()
-            let mut reaction_times: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+            let mut reaction_times: std::collections::HashMap<String, u64> =
+                std::collections::HashMap::new();
             for reaction in reactions.iter() {
                 for event_id in reaction.tags.event_ids() {
                     reaction_times.insert(event_id.to_hex(), reaction.created_at.as_secs());
@@ -2384,7 +2529,8 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
             log::info!("Loaded {} liked events", event_vec.len());
 
             // Get the oldest reaction timestamp (not event.created_at) for pagination
-            let oldest_cursor = event_vec.last()
+            let oldest_cursor = event_vec
+                .last()
                 .and_then(|e| reaction_times.get(&e.id.to_hex()).copied());
 
             Ok(LoadOutcome {
@@ -2398,14 +2544,16 @@ async fn load_tab_events(pubkey: &str, tab: &ProfileTab, until: Option<u64>) -> 
 
 // Helper functions
 fn get_display_name(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
-    metadata.display_name
+    metadata
+        .display_name
         .clone()
         .or_else(|| metadata.name.clone())
         .unwrap_or_else(|| {
             // Generate from pubkey
-            if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey)) {
+            if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey))
+            {
                 let hex = pk.to_hex();
-                format!("{}...{}", &hex[..8], &hex[hex.len()-4..])
+                format!("{}...{}", &hex[..8], &hex[hex.len() - 4..])
             } else {
                 "Unknown".to_string()
             }
@@ -2417,7 +2565,7 @@ fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
         if let Ok(pk) = PublicKey::from_hex(pubkey).or_else(|_| PublicKey::from_bech32(pubkey)) {
             let npub = pk.to_bech32().expect("to_bech32 is infallible");
             if npub.len() > 18 {
-                format!("{}...{}", &npub[..12], &npub[npub.len()-6..])
+                format!("{}...{}", &npub[..12], &npub[npub.len() - 6..])
             } else {
                 npub
             }
@@ -2428,7 +2576,8 @@ fn get_username(metadata: &nostr_sdk::Metadata, pubkey: &str) -> String {
 }
 
 fn get_avatar_initial(metadata: &nostr_sdk::Metadata) -> String {
-    metadata.display_name
+    metadata
+        .display_name
         .as_ref()
         .or(metadata.name.as_ref())
         .and_then(|n| n.chars().next())

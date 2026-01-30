@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
+use crate::components::icons;
 use crate::routes::Route;
 use crate::services::wavlake::WavlakeTrack;
 use crate::stores::music_player::{self, MusicTrack};
-use crate::components::icons;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TrackCardProps {

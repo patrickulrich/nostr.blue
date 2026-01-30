@@ -295,12 +295,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .to_bech32()
             .unwrap_or_else(|_| result.event.id.to_hex());
         let uri = format!("nostr:{}", nevent);
-        let display_text = result
-            .event
-            .content
-            .chars()
-            .take(50)
-            .collect::<String>()
+        let display_text = result.event.content.chars().take(50).collect::<String>()
             + if result.event.content.len() > 50 {
                 "..."
             } else {
@@ -327,8 +322,8 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
             .map(String::from)
             .unwrap_or_default();
 
-        let coordinate = Coordinate::new(Kind::from(30023), result.event.pubkey)
-            .identifier(d_tag.clone());
+        let coordinate =
+            Coordinate::new(Kind::from(30023), result.event.pubkey).identifier(d_tag.clone());
 
         let naddr = Nip19Coordinate::new(coordinate, vec![])
             .to_bech32()

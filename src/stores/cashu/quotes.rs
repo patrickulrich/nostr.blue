@@ -182,8 +182,7 @@ pub fn cleanup_expired_mint_quotes() -> usize {
     log::info!("Cleaning up {} expired mint quotes", count);
 
     let mut data = PENDING_MINT_QUOTES.read().data();
-    data.write()
-        .retain(|q| !expired_ids.contains(&q.quote_id));
+    data.write().retain(|q| !expired_ids.contains(&q.quote_id));
 
     count
 }
@@ -207,8 +206,7 @@ pub fn cleanup_expired_melt_quotes() -> usize {
     log::info!("Cleaning up {} expired melt quotes", count);
 
     let mut data = PENDING_MELT_QUOTES.read().data();
-    data.write()
-        .retain(|q| !expired_ids.contains(&q.quote_id));
+    data.write().retain(|q| !expired_ids.contains(&q.quote_id));
 
     count
 }
@@ -292,8 +290,14 @@ pub fn get_quote_stats() -> QuoteStats {
     let mint_quotes = PENDING_MINT_QUOTES.read().data().read().clone();
     let melt_quotes = PENDING_MELT_QUOTES.read().data().read().clone();
 
-    let expired_mint = mint_quotes.iter().filter(|q| is_quote_expired(q.expiry)).count();
-    let expired_melt = melt_quotes.iter().filter(|q| is_quote_expired(q.expiry)).count();
+    let expired_mint = mint_quotes
+        .iter()
+        .filter(|q| is_quote_expired(q.expiry))
+        .count();
+    let expired_melt = melt_quotes
+        .iter()
+        .filter(|q| is_quote_expired(q.expiry))
+        .count();
 
     let expiring_mint = mint_quotes
         .iter()
@@ -327,7 +331,10 @@ mod tests {
         let now = now_secs();
 
         // Expired
-        assert_eq!(check_quote_validity(Some(now - 100)), QuoteValidity::Expired);
+        assert_eq!(
+            check_quote_validity(Some(now - 100)),
+            QuoteValidity::Expired
+        );
 
         // Expiring soon
         assert_eq!(

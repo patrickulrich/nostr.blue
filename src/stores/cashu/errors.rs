@@ -105,10 +105,7 @@ impl NutErrorCode {
     pub fn is_recoverable(&self) -> bool {
         matches!(
             self,
-            Self::TokenPending
-                | Self::QuotePending
-                | Self::LightningError
-                | Self::Unknown
+            Self::TokenPending | Self::QuotePending | Self::LightningError | Self::Unknown
         )
     }
 
@@ -132,7 +129,9 @@ impl fmt::Display for NutErrorCode {
             Self::QuoteNotPaid => write!(f, "Quote not paid (11006)"),
             Self::QuoteExpired => write!(f, "Quote expired (11007)"),
             Self::QuotePending => write!(f, "Quote pending (11008)"),
-            Self::BlindedMessageAlreadySigned => write!(f, "Blinded message already signed (11009)"),
+            Self::BlindedMessageAlreadySigned => {
+                write!(f, "Blinded message already signed (11009)")
+            }
             Self::AmountOutOfLimitRange => write!(f, "Amount out of limit range (11010)"),
             Self::DuplicateInputs => write!(f, "Duplicate inputs (11011)"),
             Self::DuplicateOutputs => write!(f, "Duplicate outputs (11012)"),
@@ -165,27 +164,49 @@ pub enum CashuWalletError {
     // ==========================================================================
     // Mint Errors
     // ==========================================================================
-    MintNotFound { mint_url: String },
-    MintConnection { mint_url: String, message: String },
-    MintOperationLocked { mint_url: String },
-    MintFeatureNotSupported { feature: String },
+    MintNotFound {
+        mint_url: String,
+    },
+    MintConnection {
+        mint_url: String,
+        message: String,
+    },
+    MintOperationLocked {
+        mint_url: String,
+    },
+    MintFeatureNotSupported {
+        feature: String,
+    },
 
     // ==========================================================================
     // Token Errors
     // ==========================================================================
-    InvalidToken { reason: String },
+    InvalidToken {
+        reason: String,
+    },
     TokenAlreadySpent,
     TokenPending,
-    InsufficientFunds { available: u64, required: u64 },
+    InsufficientFunds {
+        available: u64,
+        required: u64,
+    },
     NoSpendableProofs,
 
     // ==========================================================================
     // Quote Errors
     // ==========================================================================
-    QuoteNotFound { quote_id: String },
-    QuoteExpired { quote_id: String },
-    QuoteUnpaid { quote_id: String },
-    QuoteFailed { message: String },
+    QuoteNotFound {
+        quote_id: String,
+    },
+    QuoteExpired {
+        quote_id: String,
+    },
+    QuoteUnpaid {
+        quote_id: String,
+    },
+    QuoteFailed {
+        message: String,
+    },
 
     // ==========================================================================
     // DLEQ Verification Errors (NUT-12)
@@ -223,8 +244,13 @@ pub enum CashuWalletError {
     // ==========================================================================
     // Transaction Errors
     // ==========================================================================
-    TransactionNotFound { tx_id: u64 },
-    InvalidTransactionState { expected: String, actual: String },
+    TransactionNotFound {
+        tx_id: u64,
+    },
+    InvalidTransactionState {
+        expected: String,
+        actual: String,
+    },
 
     // ==========================================================================
     // Internal Errors
@@ -256,8 +282,15 @@ impl fmt::Display for CashuWalletError {
             Self::InvalidToken { reason } => write!(f, "Invalid token format: {}", reason),
             Self::TokenAlreadySpent => write!(f, "Token already spent"),
             Self::TokenPending => write!(f, "Token pending at mint"),
-            Self::InsufficientFunds { available, required } => {
-                write!(f, "Insufficient funds: available={}, required={}", available, required)
+            Self::InsufficientFunds {
+                available,
+                required,
+            } => {
+                write!(
+                    f,
+                    "Insufficient funds: available={}, required={}",
+                    available, required
+                )
             }
             Self::NoSpendableProofs => write!(f, "No spendable proofs available"),
 
@@ -266,11 +299,18 @@ impl fmt::Display for CashuWalletError {
             Self::QuoteUnpaid { quote_id } => write!(f, "Quote unpaid: {}", quote_id),
             Self::QuoteFailed { message } => write!(f, "Quote failed: {}", message),
 
-            Self::DleqProofMissing => write!(f, "Token does not contain DLEQ proofs for offline verification"),
-            Self::DleqVerificationFailed => write!(f, "DLEQ proof verification failed - invalid signature"),
+            Self::DleqProofMissing => write!(
+                f,
+                "Token does not contain DLEQ proofs for offline verification"
+            ),
+            Self::DleqVerificationFailed => {
+                write!(f, "DLEQ proof verification failed - invalid signature")
+            }
 
             Self::InvalidPubkey(msg) => write!(f, "Invalid pubkey format: {}", msg),
-            Self::P2PKConditionsNotMet(msg) => write!(f, "P2PK spending conditions not met: {}", msg),
+            Self::P2PKConditionsNotMet(msg) => {
+                write!(f, "P2PK spending conditions not met: {}", msg)
+            }
 
             Self::NostrPublish(msg) => write!(f, "Failed to publish Nostr event: {}", msg),
             Self::Encryption(msg) => write!(f, "Failed to encrypt content: {}", msg),
@@ -284,7 +324,11 @@ impl fmt::Display for CashuWalletError {
 
             Self::TransactionNotFound { tx_id } => write!(f, "Transaction not found: {}", tx_id),
             Self::InvalidTransactionState { expected, actual } => {
-                write!(f, "Transaction in invalid state: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Transaction in invalid state: expected {}, got {}",
+                    expected, actual
+                )
             }
 
             Self::Internal(msg) => write!(f, "Internal error: {}", msg),

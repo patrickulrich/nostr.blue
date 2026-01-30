@@ -1,12 +1,12 @@
 //! Fork/Edit Recipe Page
 //! Form for forking (copying) or editing an existing recipe
 
-use dioxus::prelude::*;
-use crate::stores::recipe_store::{self, CachedRecipe};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::auth_store;
-use crate::components::{RecipeForm, RecipeFormData, RecipeDetailViewSkeleton, ClientInitializing};
+use crate::components::{ClientInitializing, RecipeDetailViewSkeleton, RecipeForm, RecipeFormData};
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::recipe_store::{self, CachedRecipe};
+use dioxus::prelude::*;
 
 #[component]
 pub fn RecipeFork(naddr: String) -> Element {
@@ -59,7 +59,7 @@ pub fn RecipeFork(naddr: String) -> Element {
                     }
                 }
             });
-        }
+        },
     ));
 
     // Handle form submission
@@ -97,7 +97,8 @@ pub fn RecipeFork(naddr: String) -> Element {
                         &form_data.image_urls,
                         &content,
                         form_data.tags.clone(),
-                    ).await
+                    )
+                    .await
                 } else {
                     Err("Original recipe not found".to_string())
                 }
@@ -109,7 +110,8 @@ pub fn RecipeFork(naddr: String) -> Element {
                         &form_data.title,
                         &content,
                         form_data.tags.clone(),
-                    ).await
+                    )
+                    .await
                 } else {
                     Err("Original recipe not found".to_string())
                 }
@@ -129,7 +131,10 @@ pub fn RecipeFork(naddr: String) -> Element {
 
     // Prepare initial form data from original recipe
     let initial_data = use_memo(move || {
-        original_recipe.read().as_ref().map(RecipeFormData::from_cached_recipe)
+        original_recipe
+            .read()
+            .as_ref()
+            .map(RecipeFormData::from_cached_recipe)
     });
 
     rsx! {

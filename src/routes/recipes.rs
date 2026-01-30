@@ -1,17 +1,16 @@
 //! Recipes Explore Page
 //! Browse and discover recipes
 
-use dioxus::prelude::*;
-use crate::stores::recipe_store::{self, CachedRecipe, TagWithCount};
-use crate::stores::pin_boards_store::{self, Pinboard};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::components::{
-    CookbookCard, CookbookCardSkeleton, CreateCookbookModal,
-    DiscoverRecipeCard, DiscoverRecipeCardSkeleton,
-    RecipeTagChipExplore,
+    CookbookCard, CookbookCardSkeleton, CreateCookbookModal, DiscoverRecipeCard,
+    DiscoverRecipeCardSkeleton, RecipeTagChipExplore,
 };
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{self, Pinboard};
+use crate::stores::recipe_store::{self, CachedRecipe, TagWithCount};
+use dioxus::prelude::*;
 
 const PAGE_SIZE: usize = 24;
 
@@ -117,10 +116,8 @@ pub fn RecipesHome() -> Element {
 
                         // Deduplicate and append
                         let mut current = discover_recipes.peek().clone();
-                        let existing_ids: std::collections::HashSet<_> = current
-                            .iter()
-                            .map(|r| r.event.id.to_hex())
-                            .collect();
+                        let existing_ids: std::collections::HashSet<_> =
+                            current.iter().map(|r| r.event.id.to_hex()).collect();
 
                         for recipe in valid {
                             if !existing_ids.contains(&recipe.event.id.to_hex()) {
@@ -155,7 +152,10 @@ pub fn RecipesHome() -> Element {
             return;
         }
 
-        let version = search_version.with_mut(|v| { *v += 1; *v });
+        let version = search_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
         search_loading.set(true);
 
         spawn(async move {

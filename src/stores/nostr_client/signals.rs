@@ -5,11 +5,11 @@
 
 use dioxus::prelude::*;
 use nostr_sdk::Client;
-use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::stores::signer::SignerType;
 use super::contacts::EnrichedContact;
+use crate::stores::signer::SignerType;
 
 // =============================================================================
 // Core Client Signals
@@ -74,7 +74,9 @@ pub fn invalidate_contacts_cache() {
     // Dioxus pattern: Increment generation BEFORE clearing (memory_cache.rs)
     increment_cache_generation();
     // Use unwrap_or_else to recover from poisoned mutex instead of silently ignoring
-    let mut cache = get_contacts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cache = get_contacts_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *cache = None;
     log::debug!("Contacts cache invalidated (generation incremented)");
 }

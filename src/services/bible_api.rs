@@ -3,9 +3,9 @@
 //! This module is WASM-only as it uses web_sys::AbortController and gloo_net.
 //! (Gated in services/mod.rs)
 
-use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
 use gloo_timers::callback::Timeout;
+use serde::{Deserialize, Serialize};
 
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";
@@ -219,7 +219,10 @@ pub struct FootnoteVerseReference {
 
 /// Helper to perform HTTP GET request with timeout and abort controller
 /// Reduces code duplication across fetch_translations, fetch_books, fetch_chapter
-async fn fetch_with_timeout(url: &str, error_context: &str) -> Result<gloo_net::http::Response, String> {
+async fn fetch_with_timeout(
+    url: &str,
+    error_context: &str,
+) -> Result<gloo_net::http::Response, String> {
     // Create AbortController for proper request cancellation on timeout
     let controller = web_sys::AbortController::new()
         .map_err(|_| "Failed to create AbortController".to_string())?;
@@ -231,11 +234,7 @@ async fn fetch_with_timeout(url: &str, error_context: &str) -> Result<gloo_net::
         controller_for_timeout.abort();
     });
 
-    let response = match Request::get(url)
-        .abort_signal(Some(&signal))
-        .send()
-        .await
-    {
+    let response = match Request::get(url).abort_signal(Some(&signal)).send().await {
         Ok(resp) => {
             // Cancel timeout - request succeeded
             timeout.cancel();
@@ -276,7 +275,11 @@ pub async fn fetch_translations() -> Result<Vec<Translation>, String> {
 /// Fetch books for a specific translation
 pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
     // Percent-encode path segments to prevent URL corruption
-    let url = format!("{}/{}/books.json", BIBLE_API_BASE, urlencoding::encode(translation));
+    let url = format!(
+        "{}/{}/books.json",
+        BIBLE_API_BASE,
+        urlencoding::encode(translation)
+    );
     let response = fetch_with_timeout(&url, "fetch books").await?;
 
     let data: TranslationBooksResponse = response
@@ -288,7 +291,11 @@ pub async fn fetch_books(translation: &str) -> Result<Vec<Book>, String> {
 }
 
 /// Fetch a specific chapter
-pub async fn fetch_chapter(translation: &str, book: &str, chapter: u32) -> Result<ChapterResponse, String> {
+pub async fn fetch_chapter(
+    translation: &str,
+    book: &str,
+    chapter: u32,
+) -> Result<ChapterResponse, String> {
     // Percent-encode path segments to prevent URL corruption
     let url = format!(
         "{}/{}/{}/{}.json",
@@ -321,7 +328,12 @@ pub fn get_chapter_api_url(translation: &str, book: &str, chapter: u32) -> Strin
 
 /// Get the display reference for a verse (e.g., "John 3:16 (BSB)")
 #[allow(dead_code)]
-pub fn format_verse_reference(book_name: &str, chapter: u32, verse: u32, translation: &str) -> String {
+pub fn format_verse_reference(
+    book_name: &str,
+    chapter: u32,
+    verse: u32,
+    translation: &str,
+) -> String {
     format!("{} {}:{} ({})", book_name, chapter, verse, translation)
 }
 
@@ -337,7 +349,10 @@ pub fn format_verse_range_reference(
     if start_verse == end_verse {
         format_verse_reference(book_name, chapter, start_verse, translation)
     } else {
-        format!("{} {}:{}-{} ({})", book_name, chapter, start_verse, end_verse, translation)
+        format!(
+            "{} {}:{}-{} ({})",
+            book_name, chapter, start_verse, end_verse, translation
+        )
     }
 }
 

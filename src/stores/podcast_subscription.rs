@@ -7,7 +7,7 @@
 //! (via `a` tags referencing Kind 30078 podcast metadata).
 
 use dioxus::prelude::*;
-use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
+use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -49,7 +49,11 @@ pub struct PodcastSubscription {
 impl PodcastSubscription {
     /// Create a subscription from a Podcast Index GUID and optional numeric ID
     /// GUID is the primary identifier (NIP-73 compliant), ID is cached for API efficiency
-    pub fn from_rss(podcast_guid: String, podcast_id: Option<u64>, feed_url: Option<String>) -> Self {
+    pub fn from_rss(
+        podcast_guid: String,
+        podcast_id: Option<u64>,
+        feed_url: Option<String>,
+    ) -> Self {
         Self {
             podcast_guid: Some(podcast_guid),
             podcast_id,
@@ -230,7 +234,9 @@ pub async fn fetch_subscriptions() -> Result<Vec<PodcastSubscription>, String> {
         Err(e) => {
             let error_msg = format!("Fetch error: {}", e);
             log::warn!("Failed to fetch subscriptions: {}", e);
-            SUBSCRIPTIONS_ERROR.write().clone_from(&Some(error_msg.clone()));
+            SUBSCRIPTIONS_ERROR
+                .write()
+                .clone_from(&Some(error_msg.clone()));
             SUBSCRIPTIONS_LOADING.write().clone_from(&false);
             return Err(error_msg);
         }
@@ -271,7 +277,10 @@ fn parse_subscription_event(event: &nostr_sdk::Event) -> Vec<PodcastSubscription
             }
             // Nostr coordinate (a tag for Kind 30078)
             ["a", coordinate] => {
-                subscriptions.push(PodcastSubscription::from_nostr(coordinate.to_string(), None));
+                subscriptions.push(PodcastSubscription::from_nostr(
+                    coordinate.to_string(),
+                    None,
+                ));
             }
             ["a", coordinate, relay_hint] => {
                 subscriptions.push(PodcastSubscription::from_nostr(
@@ -299,7 +308,11 @@ pub async fn add_rss_subscription(
     podcast_id: Option<u64>,
     feed_url: Option<&str>,
 ) -> Result<(), String> {
-    log::info!("Adding RSS subscription: guid={}, id={:?}", podcast_guid, podcast_id);
+    log::info!(
+        "Adding RSS subscription: guid={}, id={:?}",
+        podcast_guid,
+        podcast_id
+    );
 
     // Check if already subscribed (by GUID)
     if is_subscribed(podcast_guid) {
@@ -324,7 +337,10 @@ pub async fn add_rss_subscription(
 }
 
 /// Add a Nostr podcast subscription
-pub async fn add_nostr_subscription(coordinate: &str, relay_hint: Option<&str>) -> Result<(), String> {
+pub async fn add_nostr_subscription(
+    coordinate: &str,
+    relay_hint: Option<&str>,
+) -> Result<(), String> {
     log::info!("Adding Nostr subscription: {}", coordinate);
 
     // Check if already subscribed
@@ -424,8 +440,7 @@ async fn publish_subscriptions(subscriptions: &[PodcastSubscription]) -> Result<
     }
 
     // Build NIP-51 event (Kind 30003 with d tag)
-    let builder = EventBuilder::new(Kind::from(LIST_KIND), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::from(LIST_KIND), "").tags(tags);
 
     // Publish to relays
     client
@@ -468,7 +483,10 @@ pub fn get_nostr_podcasts() -> Vec<String> {
 
 /// Check if subscribed to a feed/podcast
 pub fn is_subscribed(id: &str) -> bool {
-    SUBSCRIPTIONS.read().iter().any(|s| s.id().as_deref() == Some(id))
+    SUBSCRIPTIONS
+        .read()
+        .iter()
+        .any(|s| s.id().as_deref() == Some(id))
 }
 
 /// Check if currently loading

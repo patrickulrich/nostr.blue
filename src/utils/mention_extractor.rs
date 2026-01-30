@@ -39,10 +39,7 @@ pub fn extract_mentioned_pubkeys(content: &str) -> Vec<PublicKey> {
 ///
 /// For each mentioned public key, create a `["p", "<hex-pubkey>"]` tag
 pub fn create_mention_tags(pubkeys: &[PublicKey]) -> Vec<Tag> {
-    pubkeys
-        .iter()
-        .map(|pk| Tag::public_key(*pk))
-        .collect()
+    pubkeys.iter().map(|pk| Tag::public_key(*pk)).collect()
 }
 
 #[cfg(test)]

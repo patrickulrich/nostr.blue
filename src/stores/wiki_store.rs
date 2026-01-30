@@ -11,8 +11,8 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -20,16 +20,14 @@ use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
 
 use crate::utils::nip54::{
-    normalize_wiki_dtag, extract_wikilinks, wikilinks_to_tags,
-    WikiArticle, WikiRedirect, WikiMergeRequest,
-    parse_wiki_article, parse_wiki_redirect, parse_merge_request,
-    KIND_WIKI_ARTICLE, KIND_WIKI_REDIRECT, KIND_MERGE_REQUEST,
-    wiki_articles_filter as build_wiki_filter,
-    wiki_backlinks_filter as build_backlinks_filter,
+    extract_wikilinks, normalize_wiki_dtag, parse_merge_request, parse_wiki_article,
+    parse_wiki_redirect, wiki_articles_filter as build_wiki_filter,
+    wiki_backlinks_filter as build_backlinks_filter, wikilinks_to_tags, WikiArticle,
+    WikiMergeRequest, WikiRedirect, KIND_MERGE_REQUEST, KIND_WIKI_ARTICLE, KIND_WIKI_REDIRECT,
 };
 use crate::utils::nkbip06::{
-    generate_mime_tags, extract_mime_from_event, NostrMimeType,
-    build_mime_filter_tag, CATEGORY_ARTICLE, USE_WIKI,
+    build_mime_filter_tag, extract_mime_from_event, generate_mime_tags, NostrMimeType,
+    CATEGORY_ARTICLE, USE_WIKI,
 };
 
 // ============================================================================
@@ -95,12 +93,10 @@ pub static BACKLINKS_CACHE: GlobalSignal<HashMap<String, Vec<String>>> =
     GlobalSignal::new(HashMap::new);
 
 /// Redirects cache (source -> target identifier)
-pub static REDIRECTS_CACHE: GlobalSignal<HashMap<String, String>> =
-    GlobalSignal::new(HashMap::new);
+pub static REDIRECTS_CACHE: GlobalSignal<HashMap<String, String>> = GlobalSignal::new(HashMap::new);
 
 /// Recent wiki pages for browse view
-pub static RECENT_WIKI_PAGES: GlobalSignal<Vec<WikiMetadata>> =
-    GlobalSignal::new(Vec::new);
+pub static RECENT_WIKI_PAGES: GlobalSignal<Vec<WikiMetadata>> = GlobalSignal::new(Vec::new);
 
 /// Loading states
 pub static LOADING_WIKI: GlobalSignal<bool> = GlobalSignal::new(|| false);
@@ -122,7 +118,10 @@ pub fn get_cached_wiki_page(identifier: &str) -> Option<CachedWikiPage> {
 /// Get a wiki page by naddr
 pub fn get_cached_wiki_page_by_naddr(naddr: &str) -> Option<CachedWikiPage> {
     let cache = WIKI_CACHE.read();
-    cache.iter().find(|(_, p)| p.naddr == naddr).map(|(_, p)| p.clone())
+    cache
+        .iter()
+        .find(|(_, p)| p.naddr == naddr)
+        .map(|(_, p)| p.clone())
 }
 
 /// Cache a wiki page
@@ -142,7 +141,11 @@ pub fn cache_wiki_pages(pages: &[CachedWikiPage]) {
 /// Get backlinks for an identifier
 pub fn get_cached_backlinks(identifier: &str) -> Vec<String> {
     let normalized = normalize_wiki_dtag(identifier);
-    BACKLINKS_CACHE.read().get(&normalized).cloned().unwrap_or_default()
+    BACKLINKS_CACHE
+        .read()
+        .get(&normalized)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Cache backlinks for an identifier
@@ -161,7 +164,9 @@ pub fn get_redirect_target(identifier: &str) -> Option<String> {
 pub fn cache_redirect(source: &str, target: &str) {
     let source_normalized = normalize_wiki_dtag(source);
     let target_normalized = normalize_wiki_dtag(target);
-    REDIRECTS_CACHE.write().insert(source_normalized, target_normalized);
+    REDIRECTS_CACHE
+        .write()
+        .insert(source_normalized, target_normalized);
 }
 
 /// Get all cached wiki pages
@@ -192,7 +197,12 @@ pub fn parse_wiki_page_event(event: &NostrEvent) -> Option<CachedWikiPage> {
         .to_bech32()
         .ok()?;
 
-    let a_tag = format!("{}:{}:{}", KIND_WIKI_ARTICLE, event.pubkey.to_hex(), article.identifier);
+    let a_tag = format!(
+        "{}:{}:{}",
+        KIND_WIKI_ARTICLE,
+        event.pubkey.to_hex(),
+        article.identifier
+    );
 
     // Extract forward links from content
     let forward_links: Vec<String> = extract_wikilinks(&event.content)
@@ -336,30 +346,27 @@ pub fn wiki_pages_by_mime_category_filter(category: &str, use_case: &str, limit:
 // ============================================================================
 
 /// Fetch wiki pages with pagination
-pub async fn fetch_wiki_pages(limit: usize, until: Option<u64>) -> StdResult<Vec<CachedWikiPage>, String> {
+pub async fn fetch_wiki_pages(
+    limit: usize,
+    until: Option<u64>,
+) -> StdResult<Vec<CachedWikiPage>, String> {
     *LOADING_WIKI.write() = true;
 
     let filter = wiki_pages_filter_paginated(limit, until);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
 
     *LOADING_WIKI.write() = false;
 
     match result {
         Ok(events) => {
-            let pages: Vec<CachedWikiPage> = events
-                .iter()
-                .filter_map(parse_wiki_page_event)
-                .collect();
+            let pages: Vec<CachedWikiPage> =
+                events.iter().filter_map(parse_wiki_page_event).collect();
 
             cache_wiki_pages(&pages);
 
             // Update recent pages
-            let metadata: Vec<WikiMetadata> = pages.iter()
-                .map(extract_wiki_metadata)
-                .collect();
+            let metadata: Vec<WikiMetadata> = pages.iter().map(extract_wiki_metadata).collect();
             *RECENT_WIKI_PAGES.write() = metadata;
 
             *WIKI_STORE_INITIALIZED.write() = true;
@@ -375,7 +382,11 @@ pub async fn fetch_wiki_pages(limit: usize, until: Option<u64>) -> StdResult<Vec
 }
 
 /// Fetch a wiki page by identifier
-pub fn fetch_wiki_page_by_identifier(identifier: &str) -> std::pin::Pin<Box<dyn std::future::Future<Output = StdResult<Option<CachedWikiPage>, String>> + '_>> {
+pub fn fetch_wiki_page_by_identifier(
+    identifier: &str,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = StdResult<Option<CachedWikiPage>, String>> + '_>,
+> {
     Box::pin(async move {
         // Check cache first
         if let Some(page) = get_cached_wiki_page(identifier) {
@@ -387,29 +398,28 @@ pub fn fetch_wiki_page_by_identifier(identifier: &str) -> std::pin::Pin<Box<dyn 
             return fetch_wiki_page_by_identifier(&target).await;
         }
 
-    let filter = wiki_page_by_identifier_filter(identifier);
+        let filter = wiki_page_by_identifier_filter(identifier);
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+        let result =
+            crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+                .await;
 
-    match result {
-        Ok(events) => {
-            // Get the most recent version
-            if let Some(event) = events.iter().max_by_key(|e| e.created_at) {
-                if let Some(page) = parse_wiki_page_event(event) {
-                    cache_wiki_page(page.clone());
-                    return Ok(Some(page));
+        match result {
+            Ok(events) => {
+                // Get the most recent version
+                if let Some(event) = events.iter().max_by_key(|e| e.created_at) {
+                    if let Some(page) = parse_wiki_page_event(event) {
+                        cache_wiki_page(page.clone());
+                        return Ok(Some(page));
+                    }
                 }
+                Ok(None)
             }
-            Ok(None)
+            Err(e) => {
+                log::error!("Failed to fetch wiki page: {}", e);
+                Err(e)
+            }
         }
-        Err(e) => {
-            log::error!("Failed to fetch wiki page: {}", e);
-            Err(e)
-        }
-    }
     })
 }
 
@@ -421,8 +431,7 @@ pub async fn fetch_wiki_page_by_naddr(naddr: &str) -> StdResult<Option<CachedWik
     }
 
     // Parse naddr
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let identifier = coord.identifier;
     if identifier.is_empty() {
@@ -431,10 +440,8 @@ pub async fn fetch_wiki_page_by_naddr(naddr: &str) -> StdResult<Option<CachedWik
 
     let filter = wiki_page_by_coord_filter(coord.public_key, &identifier);
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     match result {
         Ok(events) => {
@@ -451,29 +458,27 @@ pub async fn fetch_wiki_page_by_naddr(naddr: &str) -> StdResult<Option<CachedWik
 }
 
 /// Fetch backlinks for a wiki page
-pub async fn fetch_wiki_backlinks(identifier: &str, limit: usize) -> StdResult<Vec<CachedWikiPage>, String> {
+pub async fn fetch_wiki_backlinks(
+    identifier: &str,
+    limit: usize,
+) -> StdResult<Vec<CachedWikiPage>, String> {
     *LOADING_BACKLINKS.write() = true;
 
     let filter = wiki_backlinks_filter(identifier, limit);
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     *LOADING_BACKLINKS.write() = false;
 
     match result {
         Ok(events) => {
-            let pages: Vec<CachedWikiPage> = events
-                .iter()
-                .filter_map(parse_wiki_page_event)
-                .collect();
+            let pages: Vec<CachedWikiPage> =
+                events.iter().filter_map(parse_wiki_page_event).collect();
 
             // Cache backlinks
-            let backlink_ids: Vec<String> = pages.iter()
-                .map(|p| p.article.identifier.clone())
-                .collect();
+            let backlink_ids: Vec<String> =
+                pages.iter().map(|p| p.article.identifier.clone()).collect();
             cache_backlinks(identifier, backlink_ids);
 
             cache_wiki_pages(&pages);
@@ -489,23 +494,21 @@ pub async fn fetch_wiki_backlinks(identifier: &str, limit: usize) -> StdResult<V
 }
 
 /// Fetch wiki pages by author
-pub async fn fetch_wiki_pages_by_author(pubkey_hex: &str, limit: usize) -> StdResult<Vec<CachedWikiPage>, String> {
-    let pubkey = PublicKey::from_hex(pubkey_hex)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+pub async fn fetch_wiki_pages_by_author(
+    pubkey_hex: &str,
+    limit: usize,
+) -> StdResult<Vec<CachedWikiPage>, String> {
+    let pubkey = PublicKey::from_hex(pubkey_hex).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = wiki_pages_by_author_filter(pubkey, limit);
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     match result {
         Ok(events) => {
-            let pages: Vec<CachedWikiPage> = events
-                .iter()
-                .filter_map(parse_wiki_page_event)
-                .collect();
+            let pages: Vec<CachedWikiPage> =
+                events.iter().filter_map(parse_wiki_page_event).collect();
 
             cache_wiki_pages(&pages);
             Ok(pages)
@@ -518,10 +521,8 @@ pub async fn fetch_wiki_pages_by_author(pubkey_hex: &str, limit: usize) -> StdRe
 pub async fn fetch_wiki_redirects(limit: usize) -> StdResult<Vec<WikiRedirect>, String> {
     let filter = wiki_redirects_filter(limit);
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     match result {
         Ok(events) => {
@@ -542,13 +543,14 @@ pub async fn fetch_wiki_redirects(limit: usize) -> StdResult<Vec<WikiRedirect>, 
 }
 
 /// Fetch merge requests for a wiki page
-pub async fn fetch_wiki_merge_requests(a_tag: &str, limit: usize) -> StdResult<Vec<WikiMergeRequest>, String> {
+pub async fn fetch_wiki_merge_requests(
+    a_tag: &str,
+    limit: usize,
+) -> StdResult<Vec<WikiMergeRequest>, String> {
     let filter = wiki_merge_requests_filter(a_tag, limit);
 
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10),
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await;
 
     match result {
         Ok(events) => {
@@ -557,7 +559,11 @@ pub async fn fetch_wiki_merge_requests(a_tag: &str, limit: usize) -> StdResult<V
                 .filter_map(|e| parse_merge_request(e).ok())
                 .collect();
 
-            log::info!("Fetched {} merge requests for {}", merge_requests.len(), a_tag);
+            log::info!(
+                "Fetched {} merge requests for {}",
+                merge_requests.len(),
+                a_tag
+            );
             Ok(merge_requests)
         }
         Err(e) => {
@@ -568,7 +574,10 @@ pub async fn fetch_wiki_merge_requests(a_tag: &str, limit: usize) -> StdResult<V
 }
 
 /// Search wiki pages by title, content, or identifier
-pub async fn search_wiki_pages(query: &str, limit: usize) -> StdResult<Vec<CachedWikiPage>, String> {
+pub async fn search_wiki_pages(
+    query: &str,
+    limit: usize,
+) -> StdResult<Vec<CachedWikiPage>, String> {
     let query_lower = query.to_lowercase();
     let query_normalized = normalize_wiki_dtag(query);
 
@@ -616,8 +625,7 @@ pub async fn publish_wiki_page(
     identifier: Option<&str>,
     summary: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -629,9 +637,7 @@ pub async fn publish_wiki_page(
         .unwrap_or_else(|| normalize_wiki_dtag(title));
 
     // Build tags
-    let mut tags: Vec<Tag> = vec![
-        Tag::identifier(&d_tag),
-    ];
+    let mut tags: Vec<Tag> = vec![Tag::identifier(&d_tag)];
 
     // Add MIME tags
     for mime_tag in generate_mime_tags(KIND_WIKI_ARTICLE) {
@@ -646,7 +652,10 @@ pub async fn publish_wiki_page(
 
     // Add summary
     if let Some(s) = summary {
-        tags.push(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
 
     // Extract and add wikilinks as w tags for backlink discovery
@@ -654,10 +663,11 @@ pub async fn publish_wiki_page(
     tags.extend(wikilinks_to_tags(&wikilinks));
 
     // Build and publish
-    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), content).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish wiki page: {}", e))?;
 
     log::info!("Wiki page published: {}", output.id().to_hex());
@@ -670,8 +680,7 @@ pub async fn fork_wiki_page(
     new_content: &str,
     summary: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -681,9 +690,7 @@ pub async fn fork_wiki_page(
     let d_tag = &original.article.identifier;
 
     // Build tags
-    let mut tags: Vec<Tag> = vec![
-        Tag::identifier(d_tag),
-    ];
+    let mut tags: Vec<Tag> = vec![Tag::identifier(d_tag)];
 
     // Add MIME tags
     for mime_tag in generate_mime_tags(KIND_WIKI_ARTICLE) {
@@ -697,7 +704,10 @@ pub async fn fork_wiki_page(
 
     // Add summary
     if let Some(s) = summary {
-        tags.push(Tag::custom(TagKind::Custom("summary".into()), vec![s.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("summary".into()),
+            vec![s.to_string()],
+        ));
     }
 
     // Add fork reference
@@ -712,10 +722,11 @@ pub async fn fork_wiki_page(
     tags.extend(wikilinks_to_tags(&wikilinks));
 
     // Build and publish
-    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), new_content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_ARTICLE), new_content).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to fork wiki page: {}", e))?;
 
     log::info!("Wiki page forked: {}", output.id().to_hex());
@@ -727,8 +738,7 @@ pub async fn publish_wiki_redirect(
     source_identifier: &str,
     target_identifier: &str,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -739,22 +749,24 @@ pub async fn publish_wiki_redirect(
 
     let tags: Vec<Tag> = vec![
         Tag::identifier(&source_normalized),
-        Tag::custom(
-            TagKind::Custom("w".into()),
-            vec![target_normalized.clone()],
-        ),
+        Tag::custom(TagKind::Custom("w".into()), vec![target_normalized.clone()]),
     ];
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_REDIRECT), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_WIKI_REDIRECT), "").tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish redirect: {}", e))?;
 
     // Cache the redirect
     cache_redirect(&source_normalized, &target_normalized);
 
-    log::info!("Wiki redirect published: {} -> {}", source_normalized, target_normalized);
+    log::info!(
+        "Wiki redirect published: {} -> {}",
+        source_normalized,
+        target_normalized
+    );
     Ok(output.id().to_hex())
 }
 
@@ -765,8 +777,7 @@ pub async fn publish_merge_request(
     source_event_id: &str,
     reason: Option<&str>,
 ) -> StdResult<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -786,10 +797,11 @@ pub async fn publish_merge_request(
 
     let content = reason.unwrap_or("");
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_MERGE_REQUEST), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_MERGE_REQUEST), content).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish merge request: {}", e))?;
 
     log::info!("Merge request published: {}", output.id().to_hex());

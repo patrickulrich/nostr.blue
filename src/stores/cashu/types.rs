@@ -23,7 +23,7 @@ pub fn default_unit() -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ProofState {
     #[default]
-    Unspent,      // Available for spending
+    Unspent, // Available for spending
     Pending,      // Receive operation in progress
     Reserved,     // Locked for current send operation (PreparedSend)
     PendingSpent, // Sent but not yet confirmed by mint
@@ -38,7 +38,10 @@ impl ProofState {
 
     /// Returns true if the proof is in any pending state
     pub fn is_pending(&self) -> bool {
-        matches!(self, ProofState::Pending | ProofState::Reserved | ProofState::PendingSpent)
+        matches!(
+            self,
+            ProofState::Pending | ProofState::Reserved | ProofState::PendingSpent
+        )
     }
 
     /// Returns true if the proof is spent
@@ -141,7 +144,10 @@ impl ReceiveOptions {
     }
 
     /// Convert to CDK's ReceiveOptions
-    pub fn to_cdk_options(&self, p2pk_signing_keys: Vec<cdk::nuts::SecretKey>) -> cdk::wallet::ReceiveOptions {
+    pub fn to_cdk_options(
+        &self,
+        p2pk_signing_keys: Vec<cdk::nuts::SecretKey>,
+    ) -> cdk::wallet::ReceiveOptions {
         cdk::wallet::ReceiveOptions {
             p2pk_signing_keys,
             preimages: self.preimages.clone(),
@@ -209,14 +215,14 @@ impl SendOptions {
 
     /// Convert to CDK's SendOptions
     pub fn to_cdk_options(&self) -> cdk::wallet::SendOptions {
-        use cdk::wallet::SendOptions as CdkSendOptions;
-        use cdk::nuts::SpendingConditions;
         use cdk::nuts::PublicKey;
+        use cdk::nuts::SpendingConditions;
+        use cdk::wallet::SendOptions as CdkSendOptions;
 
         let conditions = self.p2pk_pubkey.as_ref().and_then(|pk| {
-            PublicKey::from_hex(pk).ok().map(|key| {
-                SpendingConditions::new_p2pk(key, None)
-            })
+            PublicKey::from_hex(pk)
+                .ok()
+                .map(|key| SpendingConditions::new_p2pk(key, None))
         });
 
         CdkSendOptions {
@@ -488,7 +494,7 @@ pub struct ActiveTransaction {
 // =============================================================================
 
 // Re-export CDK quote state enums for direct use
-pub use cdk::nuts::{MintQuoteState, MeltQuoteState};
+pub use cdk::nuts::{MeltQuoteState, MintQuoteState};
 
 /// Mint quote information (lightning receive)
 /// Wraps CDK's quote response with mint_url context
@@ -803,10 +809,9 @@ impl WalletTokensStore {
     /// This is the primary balance computation - other methods delegate to this
     pub fn balance_breakdown(&self) -> (u64, u64) {
         // Use normal addition - wallet balances can't realistically overflow u64
-        self.data
-            .iter()
-            .flat_map(|token| &token.proofs)
-            .fold((0u64, 0u64), |(avail, pend), proof| {
+        self.data.iter().flat_map(|token| &token.proofs).fold(
+            (0u64, 0u64),
+            |(avail, pend), proof| {
                 if proof.state.is_spendable() {
                     (avail + proof.amount, pend)
                 } else if proof.state.is_pending() {
@@ -814,7 +819,8 @@ impl WalletTokensStore {
                 } else {
                     (avail, pend)
                 }
-            })
+            },
+        )
     }
 }
 
@@ -1051,7 +1057,10 @@ impl std::fmt::Debug for InFlightMeltRequest {
             .field("transaction_id", &self.transaction_id)
             .field("mint_url", &self.mint_url)
             .field("quote_id", &self.quote_id)
-            .field("proofs_used", &format!("<{} proofs, sensitive>", self.proofs_used.len()))
+            .field(
+                "proofs_used",
+                &format!("<{} proofs, sensitive>", self.proofs_used.len()),
+            )
             .field("amount", &self.amount)
             .field("fee_reserve", &self.fee_reserve)
             .field("created_at", &self.created_at)
@@ -1066,7 +1075,10 @@ impl std::fmt::Debug for InFlightSendRequest {
         f.debug_struct("InFlightSendRequest")
             .field("transaction_id", &self.transaction_id)
             .field("mint_url", &self.mint_url)
-            .field("proof_secrets", &format!("<{} secrets, sensitive>", self.proof_secrets.len()))
+            .field(
+                "proof_secrets",
+                &format!("<{} secrets, sensitive>", self.proof_secrets.len()),
+            )
             .field("amount", &self.amount)
             .field("operation_type", &self.operation_type)
             .field("created_at", &self.created_at)

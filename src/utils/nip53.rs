@@ -236,7 +236,11 @@ pub struct RoomPresence {
 /// Parse a Kind 30312 event into a MeetingSpace
 pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
     if event.kind.as_u16() != KIND_MEETING_SPACE {
-        return Err(format!("Expected kind {}, got {}", KIND_MEETING_SPACE, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_MEETING_SPACE,
+            event.kind.as_u16()
+        ));
     }
 
     let pubkey = event.pubkey.to_hex();
@@ -253,8 +257,7 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
         .and_then(|s| RoomStatus::from_str(&s))
         .unwrap_or_default();
 
-    let service_url = get_tag_value(event, "service")
-        .ok_or("Missing required 'service' tag")?;
+    let service_url = get_tag_value(event, "service").ok_or("Missing required 'service' tag")?;
     let endpoint_url = get_tag_value(event, "endpoint");
 
     let hashtags = get_all_tag_values(event, "t");
@@ -287,7 +290,11 @@ pub fn parse_meeting_space(event: &Event) -> Result<MeetingSpace, String> {
 /// Parse a Kind 30313 event into a MeetingRoomEvent
 pub fn parse_meeting_room_event(event: &Event) -> Result<MeetingRoomEvent, String> {
     if event.kind.as_u16() != KIND_MEETING_ROOM {
-        return Err(format!("Expected kind {}, got {}", KIND_MEETING_ROOM, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_MEETING_ROOM,
+            event.kind.as_u16()
+        ));
     }
 
     let pubkey = event.pubkey.to_hex();
@@ -314,10 +321,10 @@ pub fn parse_meeting_room_event(event: &Event) -> Result<MeetingRoomEvent, Strin
         .into_iter()
         .find(|c| c.starts_with("30312:"));
 
-    let current_participants = get_tag_value(event, "current_participants")
-        .and_then(|s| s.parse::<u32>().ok());
-    let total_participants = get_tag_value(event, "total_participants")
-        .and_then(|s| s.parse::<u32>().ok());
+    let current_participants =
+        get_tag_value(event, "current_participants").and_then(|s| s.parse::<u32>().ok());
+    let total_participants =
+        get_tag_value(event, "total_participants").and_then(|s| s.parse::<u32>().ok());
 
     let participants = parse_participants(event);
     let hashtags = get_all_tag_values(event, "t");
@@ -347,7 +354,11 @@ pub fn parse_meeting_room_event(event: &Event) -> Result<MeetingRoomEvent, Strin
 /// Parse a Kind 10312 event into a RoomPresence
 pub fn parse_room_presence(event: &Event) -> Result<RoomPresence, String> {
     if event.kind.as_u16() != KIND_ROOM_PRESENCE {
-        return Err(format!("Expected kind {}, got {}", KIND_ROOM_PRESENCE, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_ROOM_PRESENCE,
+            event.kind.as_u16()
+        ));
     }
 
     // Get room coordinate (a-tag)
@@ -409,13 +420,7 @@ fn get_relay_tag_values(event: &Event) -> Vec<String> {
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("relays"))
-        .map(|t| {
-            t.as_slice()
-                .iter()
-                .skip(1)
-                .map(|s| s.to_string())
-                .collect()
-        })
+        .map(|t| t.as_slice().iter().skip(1).map(|s| s.to_string()).collect())
         .unwrap_or_default()
 }
 
@@ -428,10 +433,24 @@ fn parse_participants(event: &Event) -> Vec<LiveParticipant> {
         .filter_map(|t| {
             let slice = t.as_slice();
             let pubkey = slice.get(1)?.to_string();
-            let relay_hint = slice.get(2).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            let proof = slice.get(4).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            Some(LiveParticipant { pubkey, relay_hint, role, proof })
+            let relay_hint = slice
+                .get(2)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            let role = slice
+                .get(3)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            let proof = slice
+                .get(4)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            Some(LiveParticipant {
+                pubkey,
+                relay_hint,
+                role,
+                proof,
+            })
         })
         .collect()
 }
@@ -631,8 +650,14 @@ pub fn extract_live_event_host(event: &Event, live_event: &LiveEvent) -> Option<
                     Some(pk) => pk,
                     None => continue,
                 };
-                let relay_url = tag_vec.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string());
-                let proof_str = tag_vec.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string());
+                let relay_url = tag_vec
+                    .get(2)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                let proof_str = tag_vec
+                    .get(4)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
 
                 // Try to parse pubkey
                 let parsed_pubkey = match PublicKey::parse(pubkey_str) {
@@ -641,8 +666,7 @@ pub fn extract_live_event_host(event: &Event, live_event: &LiveEvent) -> Option<
                 };
 
                 // Try to parse and verify proof
-                let proof_sig = proof_str.as_ref()
-                    .and_then(|p| Signature::from_str(p).ok());
+                let proof_sig = proof_str.as_ref().and_then(|p| Signature::from_str(p).ok());
                 let is_verified = verify_host_proof(event, &parsed_pubkey, proof_sig.as_ref());
 
                 return Some(ParsedLiveHost {
@@ -664,20 +688,18 @@ pub fn extract_live_event_host(event: &Event, live_event: &LiveEvent) -> Option<
 /// (`kind:pubkey:dTag`) by each `p`'s private key, encoded in hex."
 ///
 /// Returns true if proof is valid, false if missing or invalid.
-fn verify_host_proof(
-    event: &Event,
-    host_pubkey: &PublicKey,
-    proof: Option<&Signature>,
-) -> bool {
-    use sha2::{Sha256, Digest};
-    use nostr_sdk::secp256k1::{Secp256k1, Message, XOnlyPublicKey};
+fn verify_host_proof(event: &Event, host_pubkey: &PublicKey, proof: Option<&Signature>) -> bool {
+    use nostr_sdk::secp256k1::{Message, Secp256k1, XOnlyPublicKey};
+    use sha2::{Digest, Sha256};
 
     let Some(proof_sig) = proof else {
-        return false;  // No proof = unverified
+        return false; // No proof = unverified
     };
 
     // Get d tag from event
-    let d_tag = event.tags.iter()
+    let d_tag = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
         .and_then(|t| t.content())
         .unwrap_or("");

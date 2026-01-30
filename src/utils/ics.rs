@@ -3,7 +3,7 @@
 //! Provides functionality to import and export calendar events
 //! in the standard iCalendar format (RFC 5545).
 
-use crate::utils::nip52::{CalendarEvent, EventTime, CalendarEventType};
+use crate::utils::nip52::{CalendarEvent, CalendarEventType, EventTime};
 
 // ============================================================================
 // ICS Export
@@ -55,7 +55,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
     vevent.push_str(&format!("UID:{}\r\n", escape_ics_text(&event.coordinate)));
 
     // DTSTAMP - created timestamp
-    vevent.push_str(&format!("DTSTAMP:{}\r\n", format_timestamp(event.created_at)));
+    vevent.push_str(&format!(
+        "DTSTAMP:{}\r\n",
+        format_timestamp(event.created_at)
+    ));
 
     // DTSTART
     match &event.start {
@@ -65,7 +68,11 @@ fn format_vevent(event: &CalendarEvent) -> String {
         }
         EventTime::Timestamp(ts) => {
             if let Some(tz) = &event.start_tzid {
-                vevent.push_str(&format!("DTSTART;TZID={}:{}\r\n", tz, format_local_datetime(*ts)));
+                vevent.push_str(&format!(
+                    "DTSTART;TZID={}:{}\r\n",
+                    tz,
+                    format_local_datetime(*ts)
+                ));
             } else {
                 vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
             }
@@ -80,7 +87,11 @@ fn format_vevent(event: &CalendarEvent) -> String {
             }
             EventTime::Timestamp(ts) => {
                 if let Some(tz) = &event.end_tzid.as_ref().or(event.start_tzid.as_ref()) {
-                    vevent.push_str(&format!("DTEND;TZID={}:{}\r\n", tz, format_local_datetime(*ts)));
+                    vevent.push_str(&format!(
+                        "DTEND;TZID={}:{}\r\n",
+                        tz,
+                        format_local_datetime(*ts)
+                    ));
                 } else {
                     vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
                 }
@@ -110,7 +121,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
 
     // URL (naddr link)
     if !event.naddr.is_empty() {
-        vevent.push_str(&format!("URL:https://nostr.blue/events/{}\r\n", &event.naddr));
+        vevent.push_str(&format!(
+            "URL:https://nostr.blue/events/{}\r\n",
+            &event.naddr
+        ));
     }
 
     // CATEGORIES (hashtags)
@@ -126,7 +140,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
     }
 
     // X-NOSTR-COORDINATE custom property
-    vevent.push_str(&format!("X-NOSTR-COORDINATE:{}\r\n", escape_ics_text(&event.coordinate)));
+    vevent.push_str(&format!(
+        "X-NOSTR-COORDINATE:{}\r\n",
+        escape_ics_text(&event.coordinate)
+    ));
 
     // X-NOSTR-PUBKEY custom property
     vevent.push_str(&format!("X-NOSTR-PUBKEY:{}\r\n", &event.pubkey));
@@ -238,12 +255,9 @@ pub struct IcsEvent {
 /// ICS DateTime (either date-only or datetime)
 #[derive(Clone, Debug)]
 pub enum IcsDateTime {
-    Date(String),           // YYYYMMDD -> YYYY-MM-DD
-    DateTime(u64),          // Unix timestamp
-    DateTimeWithTz {
-        timestamp: u64,
-        timezone: String,
-    },
+    Date(String),  // YYYYMMDD -> YYYY-MM-DD
+    DateTime(u64), // Unix timestamp
+    DateTimeWithTz { timestamp: u64, timezone: String },
 }
 
 impl IcsDateTime {
@@ -430,7 +444,7 @@ fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     // Use JS Date for conversion
     let date = js_sys::Date::new_with_year_month_day_hr_min_sec(
         year as u32,
-        (month - 1) as i32,  // JS months are 0-indexed
+        (month - 1) as i32, // JS months are 0-indexed
         day as i32,
         hour as i32,
         minute as i32,
@@ -500,8 +514,14 @@ impl From<IcsEvent> for Option<IcsImportData> {
 
         let end = event.end.as_ref().map(|e| e.to_event_time());
 
-        let start_tzid = event.start.as_ref().and_then(|dt| dt.timezone().map(String::from));
-        let end_tzid = event.end.as_ref().and_then(|dt| dt.timezone().map(String::from));
+        let start_tzid = event
+            .start
+            .as_ref()
+            .and_then(|dt| dt.timezone().map(String::from));
+        let end_tzid = event
+            .end
+            .as_ref()
+            .and_then(|dt| dt.timezone().map(String::from));
 
         let locations = if event.location.is_empty() {
             vec![]
@@ -549,7 +569,12 @@ pub fn download_ics(filename: &str, content: &str) {
     parts.push(&wasm_bindgen::JsValue::from_str(content));
 
     let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"type".into(), &"text/calendar;charset=utf-8".into()).ok();
+    js_sys::Reflect::set(
+        &options,
+        &"type".into(),
+        &"text/calendar;charset=utf-8".into(),
+    )
+    .ok();
 
     let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options.unchecked_into())
         .expect("failed to create blob");
@@ -566,8 +591,7 @@ pub fn download_ics(filename: &str, content: &str) {
     a.set_attribute("download", filename).ok();
 
     // Trigger click via JS
-    let click_fn = js_sys::Reflect::get(&a, &"click".into())
-        .expect("no click method");
+    let click_fn = js_sys::Reflect::get(&a, &"click".into()).expect("no click method");
     let click_fn: js_sys::Function = click_fn.unchecked_into();
     click_fn.call0(&a).ok();
 

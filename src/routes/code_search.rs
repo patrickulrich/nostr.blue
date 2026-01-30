@@ -2,12 +2,14 @@
 //!
 //! Search repositories, issues, PRs, and code snippets.
 
-use dioxus::prelude::*;
-use crate::components::{icons, CodeRepoCard, CodeSnippetCard, CodeIssueRow, CodePullRow};
+use crate::components::{icons, CodeIssueRow, CodePullRow, CodeRepoCard, CodeSnippetCard};
 use crate::routes::Route;
-use crate::services::git_hosting::{search_repositories, search_snippets, search_issues, search_prs};
+use crate::services::git_hosting::{
+    search_issues, search_prs, search_repositories, search_snippets,
+};
 use crate::stores::nostr_client;
-use crate::utils::nip34::{Repository, DisplaySnippet, Issue, PullRequest};
+use crate::utils::nip34::{DisplaySnippet, Issue, PullRequest, Repository};
+use dioxus::prelude::*;
 
 /// Code search page component
 #[component]
@@ -74,10 +76,30 @@ pub fn CodeSearch(q: String) -> Element {
     };
 
     // Count results
-    let repo_count = repos.read().as_ref().and_then(|r| r.as_ref().ok()).map(|v| v.len()).unwrap_or(0);
-    let snippet_count = snippets.read().as_ref().and_then(|r| r.as_ref().ok()).map(|v| v.len()).unwrap_or(0);
-    let issue_count = issues.read().as_ref().and_then(|r| r.as_ref().ok()).map(|v| v.len()).unwrap_or(0);
-    let pr_count = prs.read().as_ref().and_then(|r| r.as_ref().ok()).map(|v| v.len()).unwrap_or(0);
+    let repo_count = repos
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let snippet_count = snippets
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let issue_count = issues
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let pr_count = prs
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|v| v.len())
+        .unwrap_or(0);
     let total_count = repo_count + snippet_count + issue_count + pr_count;
 
     rsx! {
@@ -340,7 +362,12 @@ enum SearchFilter {
 }
 
 #[component]
-fn FilterChip(label: &'static str, count: usize, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
+fn FilterChip(
+    label: &'static str,
+    count: usize,
+    active: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
     let class = if active {
         "px-3 py-1.5 text-sm rounded-full bg-primary text-primary-foreground flex items-center gap-2"
     } else {

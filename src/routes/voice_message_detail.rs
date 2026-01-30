@@ -1,9 +1,11 @@
-use dioxus::prelude::*;
+use crate::components::{
+    ClientInitializing, ThreadedComment, VoiceMessageCard, VoiceReplyComposer,
+};
 use crate::stores::nostr_client;
-use crate::components::{VoiceMessageCard, ThreadedComment, VoiceReplyComposer, ClientInitializing};
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
 use crate::stores::pending_comments::get_pending_comments;
-use nostr_sdk::{Event, Filter, Kind, EventId};
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, EventId, Filter, Kind};
 use std::time::Duration;
 
 #[component]
@@ -75,14 +77,24 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
 
                 log::info!("Fetching voice and text replies");
 
-                if let Ok(voice_replies) = nostr_client::fetch_events_aggregated(filter_voice_replies, Duration::from_secs(10)).await {
+                if let Ok(voice_replies) = nostr_client::fetch_events_aggregated(
+                    filter_voice_replies,
+                    Duration::from_secs(10),
+                )
+                .await
+                {
                     log::info!("Loaded {} voice replies", voice_replies.len());
                     all_replies.extend(voice_replies.into_iter());
                 } else {
                     log::warn!("Failed to fetch voice replies");
                 }
 
-                if let Ok(text_replies) = nostr_client::fetch_events_aggregated(filter_text_replies, Duration::from_secs(10)).await {
+                if let Ok(text_replies) = nostr_client::fetch_events_aggregated(
+                    filter_text_replies,
+                    Duration::from_secs(10),
+                )
+                .await
+                {
                     log::info!("Loaded {} text replies", text_replies.len());
                     all_replies.extend(text_replies.into_iter());
                 } else {
@@ -91,7 +103,8 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
 
                 // Deduplicate by event ID
                 let mut seen_ids = std::collections::HashSet::new();
-                let unique_replies: Vec<Event> = all_replies.into_iter()
+                let unique_replies: Vec<Event> = all_replies
+                    .into_iter()
                     .filter(|event| seen_ids.insert(event.id))
                     .collect();
 
@@ -359,8 +372,8 @@ async fn load_voice_message_by_id(voice_id: &str) -> Result<Event, String> {
     log::info!("Loading voice message by ID: {}", voice_id);
 
     // Parse the event ID (could be hex or note1...)
-    let event_id = EventId::parse(voice_id)
-        .map_err(|e| format!("Invalid voice message ID: {}", e))?;
+    let event_id =
+        EventId::parse(voice_id).map_err(|e| format!("Invalid voice message ID: {}", e))?;
 
     // Create filter for voice messages (both VoiceMessage and VoiceMessageReply)
     let filter = Filter::new()

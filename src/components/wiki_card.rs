@@ -1,17 +1,17 @@
 //! Wiki Card Component
 //! Display card for wiki pages (NIP-54 Kind 30818)
 
-use dioxus::prelude::*;
-use nostr_sdk::Timestamp;
-use crate::routes::Route;
-use crate::stores::wiki_store::{CachedWikiPage, WikiMetadata};
-use crate::stores::profiles;
-use crate::components::icons::{Link2Icon, FileVideoIcon};
 use crate::components::asciidoc_content::AsciiDocPreview;
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
-use crate::utils::time::format_relative_time_ex;
+use crate::components::icons::{FileVideoIcon, Link2Icon};
+use crate::routes::Route;
+use crate::stores::profiles;
+use crate::stores::wiki_store::{CachedWikiPage, WikiMetadata};
 use crate::utils::asciidoc::content_to_plain_text;
+use crate::utils::time::format_relative_time_ex;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::Timestamp;
 
 /// Wiki page card for feed display
 #[component]
@@ -29,7 +29,9 @@ pub fn WikiCard(page: CachedWikiPage) -> Element {
 
     let identifier = page.article.identifier.clone();
     let card_click = move |_| {
-        nav.push(Route::WikiDetail { identifier: identifier.clone() });
+        nav.push(Route::WikiDetail {
+            identifier: identifier.clone(),
+        });
     };
 
     // Format timestamp
@@ -141,7 +143,9 @@ pub fn WikiCardCompact(page: CachedWikiPage) -> Element {
 
     let identifier = page.article.identifier.clone();
     let card_click = move |_| {
-        nav.push(Route::WikiDetail { identifier: identifier.clone() });
+        nav.push(Route::WikiDetail {
+            identifier: identifier.clone(),
+        });
     };
 
     rsx! {
@@ -183,14 +187,15 @@ pub fn WikiCardCompact(page: CachedWikiPage) -> Element {
 #[component]
 pub fn WikiCardSearchResult(
     page: CachedWikiPage,
-    #[props(default = None)]
-    highlight: Option<String>,
+    #[props(default = None)] highlight: Option<String>,
 ) -> Element {
     let nav = use_navigator();
 
     let identifier = page.article.identifier.clone();
     let card_click = move |_| {
-        nav.push(Route::WikiDetail { identifier: identifier.clone() });
+        nav.push(Route::WikiDetail {
+            identifier: identifier.clone(),
+        });
     };
 
     rsx! {
@@ -258,11 +263,7 @@ pub fn WikiCardSkeleton() -> Element {
 
 /// Wiki page grid
 #[component]
-pub fn WikiGrid(
-    pages: Vec<CachedWikiPage>,
-    #[props(default = false)]
-    loading: bool,
-) -> Element {
+pub fn WikiGrid(pages: Vec<CachedWikiPage>, #[props(default = false)] loading: bool) -> Element {
     rsx! {
         div {
             class: "grid grid-cols-1 md:grid-cols-2 gap-4",

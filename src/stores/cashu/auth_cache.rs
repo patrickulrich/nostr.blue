@@ -6,8 +6,8 @@
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
 
-use std::collections::HashMap;
 use dioxus::prelude::*;
+use std::collections::HashMap;
 
 // Use CDK's BlindAuthToken type directly
 use cdk_common::BlindAuthToken;
@@ -81,7 +81,12 @@ impl BlindAuthCache {
     }
 
     /// Add multiple tokens for a mint
-    pub fn add_tokens(&mut self, mint_url: &str, tokens: Vec<BlindAuthToken>, expires_at: Option<u64>) {
+    pub fn add_tokens(
+        &mut self,
+        mint_url: &str,
+        tokens: Vec<BlindAuthToken>,
+        expires_at: Option<u64>,
+    ) {
         for token in tokens {
             self.add_token(mint_url, token, expires_at);
         }
@@ -164,8 +169,7 @@ pub const DEFAULT_TOKEN_TTL: u64 = 3600;
 pub const MIN_TOKEN_REQUEST: u32 = 5;
 
 /// Global blind auth token cache
-pub static BLIND_AUTH_CACHE: GlobalSignal<BlindAuthCache> =
-    GlobalSignal::new(BlindAuthCache::new);
+pub static BLIND_AUTH_CACHE: GlobalSignal<BlindAuthCache> = GlobalSignal::new(BlindAuthCache::new);
 
 // =============================================================================
 // Public API

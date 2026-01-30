@@ -1,14 +1,14 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32, JsonUtil};
-use crate::routes::Route;
-use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, ZapIcon};
+use crate::components::{ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
+use crate::routes::Route;
 use crate::stores::bookmarks;
+use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{MessageCircleIcon, BookmarkIcon, ZapIcon};
-use crate::components::{ZapModal, ReactionButton};
-use crate::utils::truncate_pubkey;
 use crate::utils::duration::format_duration_timecode_padded;
+use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, FromBech32, JsonUtil, Kind, PublicKey};
 use std::time::Duration;
 
 /// Skeleton loader for VideoCard - prevents layout shift during loading
@@ -147,7 +147,6 @@ pub fn get_video_title(event: &Event) -> Option<String> {
     None
 }
 
-
 #[component]
 pub fn VideoCard(event: Event) -> Element {
     let videos = parse_video_imeta_tags(&event);
@@ -193,7 +192,7 @@ pub fn VideoCard(event: Event) -> Element {
     if videos.is_empty() {
         return rsx! {
             div { class: "hidden" }
-        }
+        };
     }
 
     let first_video = &videos[0];
@@ -226,12 +225,18 @@ pub fn VideoCard(event: Event) -> Element {
 
             // Fetch both filter types and deduplicate by event ID
             let mut all_reply_ids = std::collections::HashSet::new();
-            if let Ok(events) = client.fetch_events(interaction_filter, Duration::from_secs(5)).await {
+            if let Ok(events) = client
+                .fetch_events(interaction_filter, Duration::from_secs(5))
+                .await
+            {
                 for event in events.iter() {
                     all_reply_ids.insert(event.id);
                 }
             }
-            if let Ok(events) = client.fetch_events(nip22_filter, Duration::from_secs(5)).await {
+            if let Ok(events) = client
+                .fetch_events(nip22_filter, Duration::from_secs(5))
+                .await
+            {
                 for event in events.iter() {
                     all_reply_ids.insert(event.id);
                 }
@@ -246,60 +251,84 @@ pub fn VideoCard(event: Event) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            if let Ok(zaps) = client
+                .fetch_events(zap_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
                 let mut user_has_zapped = false;
 
-                let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
-                    // Check if this zap is from the current user
-                    // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
-                    if let Some(ref user_pk) = current_user_pubkey {
-                        // Method 1: Try to get sender from uppercase "P" tag (most common)
-                        let mut zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                Some(tag_vec.get(1)?.as_str().to_string())
-                            } else {
-                                None
-                            }
-                        });
-
-                        // Method 2: Fallback - parse description tag (contains zap request JSON)
-                        if zap_sender_pubkey.is_none() {
-                            zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                let total_sats: u64 = zaps
+                    .iter()
+                    .filter_map(|zap_event| {
+                        // Check if this zap is from the current user
+                        // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
+                        if let Some(ref user_pk) = current_user_pubkey {
+                            // Method 1: Try to get sender from uppercase "P" tag (most common)
+                            let mut zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                        // The pubkey field in the zap request is the sender
-                                        return zap_request.get("pubkey")
-                                            .and_then(|p| p.as_str())
-                                            .map(|s| s.to_string());
-                                    }
+                                if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                    Some(tag_vec.get(1)?.as_str().to_string())
+                                } else {
+                                    None
                                 }
-                                None
                             });
-                        }
 
-                        if let Some(zap_sender) = zap_sender_pubkey {
-                            if zap_sender == *user_pk {
-                                user_has_zapped = true;
+                            // Method 2: Fallback - parse description tag (contains zap request JSON)
+                            if zap_sender_pubkey.is_none() {
+                                zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                                    let tag_vec = tag.clone().to_vec();
+                                    if tag_vec.first()?.as_str() == "description" {
+                                        let zap_request_json = tag_vec.get(1)?.as_str();
+                                        if let Ok(zap_request) =
+                                            serde_json::from_str::<serde_json::Value>(
+                                                zap_request_json,
+                                            )
+                                        {
+                                            // The pubkey field in the zap request is the sender
+                                            return zap_request
+                                                .get("pubkey")
+                                                .and_then(|p| p.as_str())
+                                                .map(|s| s.to_string());
+                                        }
+                                    }
+                                    None
+                                });
+                            }
+
+                            if let Some(zap_sender) = zap_sender_pubkey {
+                                if zap_sender == *user_pk {
+                                    user_has_zapped = true;
+                                }
                             }
                         }
-                    }
 
-                    zap_event.tags.iter().find_map(|tag| {
-                        let tag_vec = tag.clone().to_vec();
-                        if tag_vec.first()?.as_str() == "description" {
-                            let zap_request_json = tag_vec.get(1)?.as_str();
-                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
-                                    for tag_array in tags {
-                                        if let Some(tag_vals) = tag_array.as_array() {
-                                            if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                        return Some(millisats / 1000);
+                        zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "description" {
+                                let zap_request_json = tag_vec.get(1)?.as_str();
+                                if let Ok(zap_request) =
+                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                {
+                                    if let Some(tags) =
+                                        zap_request.get("tags").and_then(|t| t.as_array())
+                                    {
+                                        for tag_array in tags {
+                                            if let Some(tag_vals) = tag_array.as_array() {
+                                                if tag_vals.first().and_then(|v| v.as_str())
+                                                    == Some("amount")
+                                                {
+                                                    if let Some(amount_str) =
+                                                        tag_vals.get(1).and_then(|v| v.as_str())
+                                                    {
+                                                        if let Ok(millisats) =
+                                                            amount_str.parse::<u64>()
+                                                        {
+                                                            return Some(millisats / 1000);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -307,10 +336,10 @@ pub fn VideoCard(event: Event) -> Element {
                                     }
                                 }
                             }
-                        }
-                        None
+                            None
+                        })
                     })
-                }).sum();
+                    .sum();
 
                 zap_amount_sats.set(total_sats);
                 is_zapped.set(user_has_zapped);
@@ -322,7 +351,8 @@ pub fn VideoCard(event: Event) -> Element {
     use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
         spawn(async move {
             let pubkey = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
+                .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+            {
                 Ok(pk) => pk,
                 Err(_) => return,
             };
@@ -332,10 +362,7 @@ pub fn VideoCard(event: Event) -> Element {
                 None => return,
             };
 
-            let filter = Filter::new()
-                .author(pubkey)
-                .kind(Kind::Metadata)
-                .limit(1);
+            let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
 
             if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
                 if let Some(event) = events.into_iter().next() {
@@ -381,17 +408,23 @@ pub fn VideoCard(event: Event) -> Element {
 
     // Get author display info
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
-        metadata.display_name.clone()
+        metadata
+            .display_name
+            .clone()
             .or_else(|| metadata.name.clone())
             .unwrap_or_else(|| truncate_pubkey(&author_pubkey_display))
     } else {
         truncate_pubkey(&author_pubkey_display)
     };
 
-    let author_picture = author_metadata.read().as_ref()
+    let author_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
-    let formatted_duration = first_video.duration.map(|d| format_duration_timecode_padded(d as u64));
+    let formatted_duration = first_video
+        .duration
+        .map(|d| format_duration_timecode_padded(d as u64));
 
     rsx! {
         div {

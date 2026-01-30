@@ -1,13 +1,13 @@
-use dioxus::prelude::*;
-use dioxus::signals::ReadableExt;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, FromBech32};
 use crate::stores::nostr_client;
 use crate::utils::format::truncate_pubkey;
-use std::time::Duration;
+use chrono::{DateTime, Utc};
+use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use lru::LruCache;
+use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
-use lru::LruCache;
-use chrono::{DateTime, Utc};
+use std::time::Duration;
 
 /// Birthday information per NIP-24
 /// Each field is optional to allow partial dates
@@ -23,8 +23,18 @@ impl Birthday {
     #[allow(dead_code)]
     pub fn format_display(&self) -> Option<String> {
         let months = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ];
 
         match (self.month, self.day, self.year) {
@@ -88,12 +98,17 @@ impl Profile {
     /// Get the avatar URL, with Dicebear fallback
     pub fn get_avatar_url(&self) -> String {
         if let Some(picture) = &self.picture {
-            if !picture.trim().is_empty() && (picture.starts_with("http://") || picture.starts_with("https://")) {
+            if !picture.trim().is_empty()
+                && (picture.starts_with("http://") || picture.starts_with("https://"))
+            {
                 return picture.clone();
             }
         }
         // Dicebear identicon fallback
-        format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", self.pubkey)
+        format!(
+            "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+            self.pubkey
+        )
     }
 
     /// Get initials for avatar placeholder (first char of pubkey)
@@ -106,10 +121,20 @@ impl Profile {
                 let second = words[1].chars().next().unwrap_or('?');
                 return format!("{}{}", first, second).to_uppercase();
             } else if !words.is_empty() {
-                return words[0].chars().next().unwrap_or('?').to_uppercase().to_string();
+                return words[0]
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string();
             }
         }
-        self.pubkey.chars().next().unwrap_or('?').to_uppercase().to_string()
+        self.pubkey
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string()
     }
 }
 
@@ -206,7 +231,9 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                 let profile = parse_profile_event(&event)?;
 
                 // Cache the profile
-                PROFILE_CACHE.write().put(pubkey.to_string(), profile.clone());
+                PROFILE_CACHE
+                    .write()
+                    .put(pubkey.to_string(), profile.clone());
 
                 Ok(profile)
             } else {
@@ -228,7 +255,9 @@ async fn fetch_profile_from_relays(pubkey: &str) -> Result<Profile, String> {
                 };
 
                 // Cache the empty profile to avoid re-fetching
-                PROFILE_CACHE.write().put(pubkey.to_string(), profile.clone());
+                PROFILE_CACHE
+                    .write()
+                    .put(pubkey.to_string(), profile.clone());
 
                 Ok(profile)
             }
@@ -300,14 +329,46 @@ fn parse_profile_event(event: &Event) -> Result<Profile, String> {
 
     Ok(Profile {
         pubkey: event.pubkey.to_string(),
-        name: metadata.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        display_name: metadata.get("display_name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        about: metadata.get("about").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        picture: metadata.get("picture").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        banner: metadata.get("banner").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        nip05: metadata.get("nip05").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        lud16: metadata.get("lud16").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        website: metadata.get("website").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from),
+        name: metadata
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        display_name: metadata
+            .get("display_name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        about: metadata
+            .get("about")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        picture: metadata
+            .get("picture")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        banner: metadata
+            .get("banner")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        nip05: metadata
+            .get("nip05")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        lud16: metadata
+            .get("lud16")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        website: metadata
+            .get("website")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
         bot,
         birthday,
         fetched_at: Utc::now(),
@@ -323,7 +384,9 @@ pub fn get_cached_profile(pubkey: &str) -> Option<Profile> {
 
 /// Fetch multiple profiles in a single query (much more efficient than individual fetches)
 #[allow(dead_code)]
-pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String, Profile>, String> {
+pub async fn fetch_profiles_batch(
+    pubkeys: Vec<String>,
+) -> Result<HashMap<String, Profile>, String> {
     if pubkeys.is_empty() {
         return Ok(HashMap::new());
     }
@@ -350,7 +413,8 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
     log::info!("Batch fetching {} profiles", missing.len());
 
     // Parse all missing pubkeys
-    let authors: Vec<PublicKey> = missing.iter()
+    let authors: Vec<PublicKey> = missing
+        .iter()
         .filter_map(|pk| {
             PublicKey::from_bech32(pk)
                 .or_else(|_| PublicKey::from_hex(pk))
@@ -364,15 +428,15 @@ pub async fn fetch_profiles_batch(pubkeys: Vec<String>) -> Result<HashMap<String
 
     // Single query for all profiles using outbox routing for better discovery
     // This routes queries to each author's preferred write relays
-    let filter = Filter::new()
-        .kind(Kind::Metadata)
-        .authors(authors);
+    let filter = Filter::new().kind(Kind::Metadata).authors(authors);
 
     match nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             for event in events {
                 if let Ok(profile) = parse_profile_event(&event) {
-                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                    PROFILE_CACHE
+                        .write()
+                        .put(profile.pubkey.clone(), profile.clone());
                     results.insert(profile.pubkey.clone(), profile);
                 }
             }
@@ -403,7 +467,9 @@ pub async fn prefetch_profiles(pubkeys: Vec<String>) {
 /// 2. Use single lock for cache lookups
 /// 3. Query database directly before hitting relays
 /// 4. Only fetch from relays what's truly missing
-pub async fn fetch_profiles_batch_native(pubkeys: HashSet<PublicKey>) -> Result<HashMap<PublicKey, Profile>, String> {
+pub async fn fetch_profiles_batch_native(
+    pubkeys: HashSet<PublicKey>,
+) -> Result<HashMap<PublicKey, Profile>, String> {
     if pubkeys.is_empty() {
         return Ok(HashMap::new());
     }
@@ -447,25 +513,34 @@ pub async fn fetch_profiles_batch_native(pubkeys: HashSet<PublicKey>) -> Result<
             for event in database_events {
                 if let Ok(profile) = parse_profile_event(&event) {
                     let pk = event.pubkey;
-                    PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                    PROFILE_CACHE
+                        .write()
+                        .put(profile.pubkey.clone(), profile.clone());
                     results.insert(pk, profile);
                 }
             }
         }
         Err(e) => {
-            log::warn!("Database batch query failed: {}, will query relays for all", e);
+            log::warn!(
+                "Database batch query failed: {}, will query relays for all",
+                e
+            );
         }
     }
 
     // Identify profiles still missing (not in database)
     let found_pubkeys: HashSet<PublicKey> = results.keys().copied().collect();
-    let still_missing: Vec<PublicKey> = missing.into_iter()
+    let still_missing: Vec<PublicKey> = missing
+        .into_iter()
         .filter(|pk| !found_pubkeys.contains(pk))
         .collect();
 
     // Step 2: Only query relays for profiles not in database
     if !still_missing.is_empty() {
-        log::info!("Querying relays for {} profiles not in database", still_missing.len());
+        log::info!(
+            "Querying relays for {} profiles not in database",
+            still_missing.len()
+        );
 
         let filter = Filter::new()
             .kind(Kind::Metadata)
@@ -476,7 +551,9 @@ pub async fn fetch_profiles_batch_native(pubkeys: HashSet<PublicKey>) -> Result<
                 for event in events {
                     if let Ok(profile) = parse_profile_event(&event) {
                         let pk = event.pubkey;
-                        PROFILE_CACHE.write().put(profile.pubkey.clone(), profile.clone());
+                        PROFILE_CACHE
+                            .write()
+                            .put(profile.pubkey.clone(), profile.clone());
                         results.insert(pk, profile);
                     }
                 }

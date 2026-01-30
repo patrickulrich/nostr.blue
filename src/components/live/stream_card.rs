@@ -1,13 +1,13 @@
-use dioxus::prelude::*;
-use dioxus::events::MouseData;
-use nostr_sdk::{Event as NostrEvent, Timestamp, Kind};
-use nostr_sdk::prelude::{Coordinate, ToBech32};
+use crate::components::StreamStatus;
 use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
-use crate::components::StreamStatus;
-use crate::utils::nip53::{parse_nip53_live_event, extract_live_event_host};
+use crate::utils::nip53::{extract_live_event_host, parse_nip53_live_event};
 use crate::utils::truncate_pubkey;
+use dioxus::events::MouseData;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::{Coordinate, ToBech32};
+use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveStreamMeta {
@@ -32,7 +32,8 @@ pub struct LiveStreamMeta {
 pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let live_event = parse_nip53_live_event(event)?;
 
-    log::debug!("Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}",
+    log::debug!(
+        "Parsed LiveEvent: d_tag={}, title={:?}, streaming={:?}, status={:?}",
         live_event.id,
         live_event.title,
         live_event.streaming,
@@ -45,7 +46,9 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let host_verified = host.as_ref().map(|h| h.is_verified).unwrap_or(false);
 
     // Get raw status and apply stale check
-    let raw_status = live_event.status.as_ref()
+    let raw_status = live_event
+        .status
+        .as_ref()
         .map(StreamStatus::from)
         .unwrap_or(StreamStatus::Planned);
     let effective_status = StreamStatus::effective_status(raw_status, event.created_at);
@@ -55,14 +58,17 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         live_event.hashtags
     } else {
         // Fallback: manually extract "t" tags
-        event.tags.iter()
+        event
+            .tags
+            .iter()
             .filter(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("t"))
             .filter_map(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
             .collect()
     };
 
     // Extract relays from the stream event (used for chat subscriptions)
-    let relays: Vec<String> = live_event.relays
+    let relays: Vec<String> = live_event
+        .relays
         .iter()
         .map(|url| url.to_string())
         .collect();
@@ -89,12 +95,14 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
 pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let stream_meta = match parse_live_stream_event(&event) {
         Some(meta) => meta,
-        None => return rsx! { div { class: "hidden" } }
+        None => return rsx! { div { class: "hidden" } },
     };
 
     // Clone values for closures
     // Use host pubkey from p tag if available, otherwise fall back to event publisher
-    let author_pubkey = stream_meta.host_pubkey.clone()
+    let author_pubkey = stream_meta
+        .host_pubkey
+        .clone()
         .unwrap_or_else(|| event.pubkey.to_string());
     let author_pubkey_for_fetch = author_pubkey.clone();
     let author_pubkey_display = author_pubkey.clone();
@@ -102,37 +110,41 @@ pub fn LiveStreamCard(event: NostrEvent) -> Element {
     let created_at = event.created_at;
 
     // Create bech32 naddr for the livestream
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&stream_meta.d_tag);
-    let naddr = coord.to_bech32().unwrap_or_else(|_| {
-        format!("30311:{}:{}", event.pubkey, stream_meta.d_tag)
-    });
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
+    let naddr = coord
+        .to_bech32()
+        .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
 
     // Get author metadata from profile store (uses LRU cache + database, much faster)
-    let author_metadata = use_memo(move || {
-        profiles::get_profile(&author_pubkey_for_fetch)
-    });
+    let author_metadata = use_memo(move || profiles::get_profile(&author_pubkey_for_fetch));
 
     // Fetch author profile in background if not cached
-    use_effect(use_reactive((&author_pubkey_display, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
-        if !client_initialized {
-            return;
-        }
-        spawn(async move {
-            let _ = profiles::fetch_profile(pk).await;
-        });
-    }));
+    use_effect(use_reactive(
+        (&author_pubkey_display, &*CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if !client_initialized {
+                return;
+            }
+            spawn(async move {
+                let _ = profiles::fetch_profile(pk).await;
+            });
+        },
+    ));
 
     // Get author display info (using safe UTF-8 truncation)
     let author_name = if let Some(ref metadata) = *author_metadata.read() {
-        metadata.display_name.clone()
+        metadata
+            .display_name
+            .clone()
             .or_else(|| metadata.name.clone())
             .unwrap_or_else(|| truncate_pubkey(&author_pubkey_display))
     } else {
         truncate_pubkey(&author_pubkey_display)
     };
 
-    let author_picture = author_metadata.read().as_ref()
+    let author_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.as_ref().map(|u| u.to_string()));
 
     rsx! {

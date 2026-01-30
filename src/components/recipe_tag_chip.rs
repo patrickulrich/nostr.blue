@@ -1,9 +1,9 @@
 //! Recipe Tag Chip Component
 //! Displays a recipe category tag with optional emoji
 
-use dioxus::prelude::*;
 use crate::routes::Route;
 use crate::utils::recipe_tags::find_tag;
+use dioxus::prelude::*;
 
 /// A clickable tag chip for recipes with emoji support
 #[component]
@@ -62,11 +62,7 @@ pub fn RecipeTagChip(
 
 /// Small tag chip for use in cards
 #[component]
-pub fn RecipeTagChipSmall(
-    tag: String,
-    #[props(default = true)]
-    clickable: bool,
-) -> Element {
+pub fn RecipeTagChipSmall(tag: String, #[props(default = true)] clickable: bool) -> Element {
     let tag_info = find_tag(&tag);
     let emoji = tag_info.and_then(|t| t.emoji);
     let display = if let Some(e) = emoji {
@@ -97,10 +93,7 @@ pub fn RecipeTagChipSmall(
 
 /// Tag chip with remove button for form editing
 #[component]
-pub fn RecipeTagChipEditable(
-    tag: String,
-    on_remove: EventHandler<String>,
-) -> Element {
+pub fn RecipeTagChipEditable(tag: String, on_remove: EventHandler<String>) -> Element {
     let tag_info = find_tag(&tag);
     let emoji = tag_info.and_then(|t| t.emoji);
     let display = if let Some(e) = emoji {

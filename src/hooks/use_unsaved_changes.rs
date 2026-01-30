@@ -170,10 +170,9 @@ fn register_beforeunload(is_dirty: Signal<bool>) {
     });
 
     // Add new listener
-    if let Err(e) = window.add_event_listener_with_callback(
-        "beforeunload",
-        closure.as_ref().unchecked_ref(),
-    ) {
+    if let Err(e) =
+        window.add_event_listener_with_callback("beforeunload", closure.as_ref().unchecked_ref())
+    {
         log::warn!("Failed to add beforeunload listener: {:?}", e);
     }
 

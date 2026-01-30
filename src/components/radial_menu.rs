@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::components::icons::*;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct RadialMenuProps {
@@ -22,13 +22,13 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
 
     // Button positions (angle in degrees, then converted to radians)
     let positions = [
-        (180.0, "Note"),           // Left
-        (225.0, "Article"),        // Bottom-left
-        (270.0, "Photo"),          // Bottom
-        (315.0, "Video"),          // Bottom-right
-        (0.0, "Shorts"),           // Right
-        (135.0, "Voice"),          // Top-left
-        (90.0, "Poll"),            // Top
+        (180.0, "Note"),    // Left
+        (225.0, "Article"), // Bottom-left
+        (270.0, "Photo"),   // Bottom
+        (315.0, "Video"),   // Bottom-right
+        (0.0, "Shorts"),    // Right
+        (135.0, "Voice"),   // Top-left
+        (90.0, "Poll"),     // Top
     ];
 
     let calculate_position = |angle: f64| -> (i32, i32) {
@@ -38,7 +38,11 @@ pub fn RadialMenu(props: RadialMenuProps) -> Element {
         (x, y)
     };
 
-    let render_radial_button = |position: f64, icon: Element, color_class: &str, title: &str, on_click: EventHandler<()>| {
+    let render_radial_button = |position: f64,
+                                icon: Element,
+                                color_class: &str,
+                                title: &str,
+                                on_click: EventHandler<()>| {
         let (x, y) = calculate_position(position);
         rsx! {
             button {

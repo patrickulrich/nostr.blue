@@ -43,7 +43,10 @@ pub fn PwaUpdateBanner() -> Element {
 
         // Register the event listener
         window
-            .add_event_listener_with_callback("sw-update-available", callback.as_ref().unchecked_ref())
+            .add_event_listener_with_callback(
+                "sw-update-available",
+                callback.as_ref().unchecked_ref(),
+            )
             .ok();
 
         // Store callback for cleanup

@@ -87,7 +87,6 @@ pub fn ImageUploadDialog(props: ImageUploadDialogProps) -> Element {
         }
     };
 
-
     // Can insert if we have a URL
     let can_insert = !uploaded_url.read().is_empty();
     let has_image = !uploaded_url.read().is_empty();

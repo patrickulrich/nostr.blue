@@ -3,9 +3,9 @@
 //! Native SVG depth chart showing order liquidity distribution by premium percentage.
 //! Similar to RoboSats depth chart visualization.
 
-use dioxus::prelude::*;
-use crate::utils::nip69::{P2POrder, OrderType, OrderStatus};
 use crate::utils::format::format_sats_with_unit;
+use crate::utils::nip69::{OrderStatus, OrderType, P2POrder};
+use dioxus::prelude::*;
 
 /// Depth data for charting
 #[derive(Clone, Debug)]
@@ -58,14 +58,16 @@ fn compute_depth_data(orders: &[P2POrder]) -> DepthData {
     // Sort sell orders by premium ascending (lowest premium first = best deals for buyers)
     // Note: None premiums are treated as 0.0 via unwrap_or
     sell_orders.sort_by(|a, b| {
-        a.premium.unwrap_or(0.0)
+        a.premium
+            .unwrap_or(0.0)
             .partial_cmp(&b.premium.unwrap_or(0.0))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Sort buy orders by premium descending (best deals = highest premium first for sellers)
     buy_orders.sort_by(|a, b| {
-        b.premium.unwrap_or(0.0)
+        b.premium
+            .unwrap_or(0.0)
             .partial_cmp(&a.premium.unwrap_or(0.0))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
@@ -116,7 +118,13 @@ fn sats_to_y(sats: u64, max_sats: u64, height: f64, padding: f64) -> f64 {
 }
 
 /// Build SVG path for area fill
-fn build_area_path(data: &[(f64, u64)], width: f64, height: f64, padding: f64, max_sats: u64) -> String {
+fn build_area_path(
+    data: &[(f64, u64)],
+    width: f64,
+    height: f64,
+    padding: f64,
+    max_sats: u64,
+) -> String {
     if data.is_empty() {
         return String::new();
     }
@@ -128,7 +136,11 @@ fn build_area_path(data: &[(f64, u64)], width: f64, height: f64, padding: f64, m
     let mut path = format!("M {} {}", first_x, baseline);
 
     // Draw line to first point
-    path.push_str(&format!(" L {} {}", first_x, sats_to_y(data[0].1, max_sats, height, padding)));
+    path.push_str(&format!(
+        " L {} {}",
+        first_x,
+        sats_to_y(data[0].1, max_sats, height, padding)
+    ));
 
     // Draw through all points
     for (premium, cumulative) in data.iter().skip(1) {
@@ -159,12 +171,26 @@ pub fn P2PDepthChart(orders: Vec<P2POrder>) -> Element {
     let has_data = !depth_data.sells.is_empty() || !depth_data.buys.is_empty();
 
     // Build SVG paths
-    let sell_path = build_area_path(&depth_data.sells, width, height, padding, depth_data.max_cumulative);
-    let buy_path = build_area_path(&depth_data.buys, width, height, padding, depth_data.max_cumulative);
+    let sell_path = build_area_path(
+        &depth_data.sells,
+        width,
+        height,
+        padding,
+        depth_data.max_cumulative,
+    );
+    let buy_path = build_area_path(
+        &depth_data.buys,
+        width,
+        height,
+        padding,
+        depth_data.max_cumulative,
+    );
 
     // Y-axis tick values
     let y_ticks: Vec<u64> = if depth_data.max_cumulative > 0 {
-        (0..=4).map(|i| (depth_data.max_cumulative as f64 * i as f64 / 4.0) as u64).collect()
+        (0..=4)
+            .map(|i| (depth_data.max_cumulative as f64 * i as f64 / 4.0) as u64)
+            .collect()
     } else {
         vec![0]
     };

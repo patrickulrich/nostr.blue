@@ -3,8 +3,8 @@
 //! Used by both content_search and profile_search to avoid duplicate connections.
 //! Cache is keyed by pubkey to handle account switches properly.
 
-use std::collections::HashMap;
 use nostr_sdk::prelude::*;
+use std::collections::HashMap;
 
 use crate::stores::relay;
 
@@ -28,8 +28,8 @@ pub async fn get_connected_search_relays(client: &Client) -> Vec<String> {
     let lock = SEARCH_RELAYS_CACHE.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()));
 
     // Get current pubkey for cache key (use "anonymous" if not authenticated)
-    let cache_key = crate::stores::auth_store::get_pubkey()
-        .unwrap_or_else(|| "anonymous".to_string());
+    let cache_key =
+        crate::stores::auth_store::get_pubkey().unwrap_or_else(|| "anonymous".to_string());
 
     // Check if already connected for this user
     {

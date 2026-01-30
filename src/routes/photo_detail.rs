@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
+use crate::components::{ClientInitializing, CommentComposer, PhotoCard, ThreadedComment};
 use crate::stores::nostr_client;
-use crate::components::{PhotoCard, ThreadedComment, CommentComposer, ClientInitializing};
-use crate::utils::{build_thread_tree, merge_pending_into_tree};
 use crate::stores::pending_comments::get_pending_comments;
-use nostr_sdk::{Event, Filter, Kind, EventId};
+use crate::utils::{build_thread_tree, merge_pending_into_tree};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, EventId, Filter, Kind};
 use std::time::Duration;
 
 #[component]
@@ -76,15 +76,27 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                 // Fetch both filters and combine results
                 let mut all_comments = Vec::new();
 
-                if let Ok(upper_comments) = nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10)).await {
-                    log::info!("Loaded {} comments with uppercase E tags", upper_comments.len());
+                if let Ok(upper_comments) =
+                    nostr_client::fetch_events_aggregated(filter_upper, Duration::from_secs(10))
+                        .await
+                {
+                    log::info!(
+                        "Loaded {} comments with uppercase E tags",
+                        upper_comments.len()
+                    );
                     all_comments.extend(upper_comments.into_iter());
                 } else {
                     log::warn!("Failed to fetch comments with uppercase E tags");
                 }
 
-                if let Ok(lower_comments) = nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10)).await {
-                    log::info!("Loaded {} comments with lowercase e tags", lower_comments.len());
+                if let Ok(lower_comments) =
+                    nostr_client::fetch_events_aggregated(filter_lower, Duration::from_secs(10))
+                        .await
+                {
+                    log::info!(
+                        "Loaded {} comments with lowercase e tags",
+                        lower_comments.len()
+                    );
                     all_comments.extend(lower_comments.into_iter());
                 } else {
                     log::warn!("Failed to fetch comments with lowercase e tags");
@@ -92,7 +104,8 @@ pub fn PhotoDetail(photo_id: String) -> Element {
 
                 // Deduplicate by event ID
                 let mut seen_ids = std::collections::HashSet::new();
-                let unique_comments: Vec<Event> = all_comments.into_iter()
+                let unique_comments: Vec<Event> = all_comments
+                    .into_iter()
                     .filter(|event| seen_ids.insert(event.id))
                     .collect();
 
@@ -301,14 +314,10 @@ async fn load_photo_by_id(photo_id: &str) -> Result<Event, String> {
     log::info!("Loading photo by ID: {}", photo_id);
 
     // Parse the event ID (could be hex or note1...)
-    let event_id = EventId::parse(photo_id)
-        .map_err(|e| format!("Invalid photo ID: {}", e))?;
+    let event_id = EventId::parse(photo_id).map_err(|e| format!("Invalid photo ID: {}", e))?;
 
     // Create filter for this specific event
-    let filter = Filter::new()
-        .id(event_id)
-        .kind(Kind::Custom(20))
-        .limit(1);
+    let filter = Filter::new().id(event_id).kind(Kind::Custom(20)).limit(1);
 
     log::info!("Fetching photo event with filter: {:?}", filter);
 

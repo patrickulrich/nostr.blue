@@ -1,12 +1,19 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
-use crate::stores::cashu::{TokenData, MintInfoDisplay, WalletTokensStoreStoreExt, normalize_mint_url};
+use crate::stores::cashu::{
+    normalize_mint_url, MintInfoDisplay, TokenData, WalletTokensStoreStoreExt,
+};
 use crate::utils::format_sats_with_separator;
+use dioxus::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 #[component]
-fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: bool, on_toggle: EventHandler<()>) -> Element {
+fn MintRow(
+    mint_url: String,
+    tokens_for_mint: Rc<Vec<TokenData>>,
+    is_expanded: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     let mut is_cleaning = use_signal(|| false);
     let mut cleanup_message = use_signal(|| Option::<String>::None);
     let mut is_removing = use_signal(|| false);
@@ -18,14 +25,13 @@ fn MintRow(mint_url: String, tokens_for_mint: Rc<Vec<TokenData>>, is_expanded: b
     let mut mint_info_error = use_signal(|| Option::<String>::None);
 
     // Calculate total for this mint
-    let total_balance: u64 = tokens_for_mint.iter()
+    let total_balance: u64 = tokens_for_mint
+        .iter()
         .flat_map(|t| &t.proofs)
         .map(|p| p.amount)
         .sum();
 
-    let proof_count: usize = tokens_for_mint.iter()
-        .map(|t| t.proofs.len())
-        .sum();
+    let proof_count: usize = tokens_for_mint.iter().map(|t| t.proofs.len()).sum();
 
     rsx! {
         div {
@@ -477,7 +483,8 @@ pub fn TokenList() -> Element {
         let mut tokens_by_mint: HashMap<String, Vec<TokenData>> = HashMap::new();
         for token in tokens_data.iter() {
             let normalized_url = normalize_mint_url(&token.mint);
-            tokens_by_mint.entry(normalized_url)
+            tokens_by_mint
+                .entry(normalized_url)
                 .or_default()
                 .push(token.clone());
         }
@@ -556,7 +563,9 @@ fn shorten_mint_url(url: &str) -> String {
     if url.is_empty() {
         return "Unknown mint".to_string();
     }
-    let url = url.trim_start_matches("https://").trim_start_matches("http://");
+    let url = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     if url.is_empty() {
         return "Unknown mint".to_string();
     }

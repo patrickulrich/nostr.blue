@@ -12,8 +12,8 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -26,7 +26,7 @@ use crate::utils::format::truncate_pubkey;
 // ============================================================================
 
 pub const KIND_COMMUNITY_DEFINITION: u16 = 34550;
-pub const KIND_COMMUNITY_POST: u16 = 1111;  // NIP-22 comment
+pub const KIND_COMMUNITY_POST: u16 = 1111; // NIP-22 comment
 pub const KIND_APPROVAL: u16 = 4550;
 pub const KIND_REMOVAL: u16 = 4551;
 pub const KIND_APPROVED_MEMBERS: u16 = 34551;
@@ -45,25 +45,25 @@ const POST_CACHE_SIZE: usize = 500;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Community {
-    pub id: String,                    // Event ID hex
-    pub pubkey: String,                // Owner pubkey hex
-    pub d_tag: String,                 // Community identifier
+    pub id: String,     // Event ID hex
+    pub pubkey: String, // Owner pubkey hex
+    pub d_tag: String,  // Community identifier
     pub name: Option<String>,
     pub description: Option<String>,
     pub image: Option<String>,
     pub banner: Option<String>,
     pub rules: Option<String>,
-    pub moderators: Vec<String>,       // Pubkeys with "moderator" marker
-    pub a_tag: String,                 // "34550:pubkey:d_tag"
-    pub naddr: String,                 // bech32 encoded
+    pub moderators: Vec<String>, // Pubkeys with "moderator" marker
+    pub a_tag: String,           // "34550:pubkey:d_tag"
+    pub naddr: String,           // bech32 encoded
     pub created_at: u64,
     pub event: NostrEvent,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommunityPost {
-    pub id: String,                    // Event ID hex
-    pub pubkey: String,                // Author pubkey hex
+    pub id: String,     // Event ID hex
+    pub pubkey: String, // Author pubkey hex
     pub content: String,
     pub community_a_tag: String,       // Parent community
     pub parent_id: Option<String>,     // For replies (e-tag)
@@ -72,7 +72,7 @@ pub struct CommunityPost {
     pub created_at: u64,
     pub event: NostrEvent,
     pub approval_status: ApprovalStatus,
-    pub is_top_level: bool,            // True if A == a tags (top-level post)
+    pub is_top_level: bool, // True if A == a tags (top-level post)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,8 +110,8 @@ pub enum UserRole {
     Owner,
     Moderator,
     ApprovedMember,
-    Pending,     // Join request submitted, awaiting approval
-    Declined,    // Join request was declined
+    Pending,  // Join request submitted, awaiting approval
+    Declined, // Join request was declined
     Visitor,
 }
 
@@ -121,21 +121,28 @@ pub enum MembershipStatus {
     Owner,
     Moderator,
     Member,
-    Pending { request_id: String, requested_at: u64 },
-    Declined { reason: Option<String> },
-    Banned { reason: Option<String> },
+    Pending {
+        request_id: String,
+        requested_at: u64,
+    },
+    Declined {
+        reason: Option<String>,
+    },
+    Banned {
+        reason: Option<String>,
+    },
     None,
 }
 
 /// Join request event (kind 4552)
 #[derive(Clone, Debug, PartialEq)]
 pub struct JoinRequest {
-    pub id: String,                 // Event ID
-    pub community_a_tag: String,    // Community being joined
-    pub user_pubkey: String,        // Requesting user
-    pub reason: Option<String>,     // Join reason message
+    pub id: String,              // Event ID
+    pub community_a_tag: String, // Community being joined
+    pub user_pubkey: String,     // Requesting user
+    pub reason: Option<String>,  // Join reason message
     pub created_at: u64,
-    pub event: Option<NostrEvent>,  // Original event (optional, not available when self-submitted)
+    pub event: Option<NostrEvent>, // Original event (optional, not available when self-submitted)
 }
 
 /// Community with membership context (for display with role badges)
@@ -144,7 +151,7 @@ pub struct CommunityWithMembership {
     pub community: Community,
     pub membership_status: MembershipStatus,
     pub is_pinned: bool,
-    pub pending_request_count: Option<u32>,  // For moderators/owners
+    pub pending_request_count: Option<u32>, // For moderators/owners
 }
 
 // ============================================================================
@@ -164,8 +171,7 @@ pub static APPROVALS_CACHE: GlobalSignal<HashMap<String, Vec<Approval>>> =
     GlobalSignal::new(HashMap::new);
 
 /// Removals cache (keyed by post event_id -> Removal)
-pub static REMOVALS_CACHE: GlobalSignal<HashMap<String, Removal>> =
-    GlobalSignal::new(HashMap::new);
+pub static REMOVALS_CACHE: GlobalSignal<HashMap<String, Removal>> = GlobalSignal::new(HashMap::new);
 
 /// Approved members by community (a_tag -> Set of pubkeys)
 pub static APPROVED_MEMBERS_CACHE: GlobalSignal<HashMap<String, HashSet<String>>> =
@@ -214,7 +220,9 @@ pub fn get_cached_community_by_naddr(naddr: &str) -> Option<Community> {
 
 /// Cache a community
 pub fn cache_community(community: Community) {
-    COMMUNITIES_CACHE.write().put(community.a_tag.clone(), community);
+    COMMUNITIES_CACHE
+        .write()
+        .put(community.a_tag.clone(), community);
 }
 
 /// Cache multiple communities
@@ -255,14 +263,16 @@ pub fn get_all_cached_communities() -> Vec<Community> {
 
 /// Parse community definition (kind 34550)
 pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
-    use nostr_sdk::{TagKind, SingleLetterTag, Alphabet};
+    use nostr_sdk::{Alphabet, SingleLetterTag, TagKind};
 
     if event.kind.as_u16() != KIND_COMMUNITY_DEFINITION {
         return None;
     }
 
     // Extract d-tag (required)
-    let d_tag = event.tags.iter()
+    let d_tag = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)))
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
@@ -275,7 +285,9 @@ pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
     let rules = extract_tag_value(&event.tags, "rules");
 
     // Extract moderators (p-tags with "moderator" marker)
-    let moderators: Vec<String> = event.tags.iter()
+    let moderators: Vec<String> = event
+        .tags
+        .iter()
         .filter(|t| t.kind() == TagKind::p())
         .filter(|t| {
             let slice = t.as_slice();
@@ -285,7 +297,12 @@ pub fn parse_community_event(event: &NostrEvent) -> Option<Community> {
         .collect();
 
     // Build a_tag
-    let a_tag = format!("{}:{}:{}", KIND_COMMUNITY_DEFINITION, event.pubkey.to_hex(), d_tag);
+    let a_tag = format!(
+        "{}:{}:{}",
+        KIND_COMMUNITY_DEFINITION,
+        event.pubkey.to_hex(),
+        d_tag
+    );
 
     // Build naddr
     let naddr = match Coordinate::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), event.pubkey)
@@ -324,7 +341,9 @@ pub fn parse_community_post(event: &NostrEvent, community_a_tag: &str) -> Option
     let big_a_tag = extract_uppercase_tag(&event.tags, "A");
 
     // Extract lowercase a tag (parent scope)
-    let small_a_tag = event.tags.iter()
+    let small_a_tag = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::a())
         .and_then(|t| t.content())
         .map(|s| s.to_string());
@@ -336,18 +355,22 @@ pub fn parse_community_post(event: &NostrEvent, community_a_tag: &str) -> Option
     }
 
     // Determine if top-level (A == a or no parent event)
-    let is_top_level = big_a_tag == small_a_tag ||
-        event.tags.iter().all(|t| t.kind() != TagKind::e());
+    let is_top_level =
+        big_a_tag == small_a_tag || event.tags.iter().all(|t| t.kind() != TagKind::e());
 
     // Extract parent info for replies
-    let parent_id = event.tags.iter()
+    let parent_id = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::e())
         .and_then(|t| t.content())
         .map(|s| s.to_string());
 
     // For replies, get parent author from lowercase p tag
     let parent_pubkey = if !is_top_level {
-        event.tags.iter()
+        event
+            .tags
+            .iter()
             .filter(|t| t.kind() == TagKind::p())
             .last()
             .and_then(|t| t.content())
@@ -366,7 +389,7 @@ pub fn parse_community_post(event: &NostrEvent, community_a_tag: &str) -> Option
         kind,
         created_at: event.created_at.as_secs(),
         event: event.clone(),
-        approval_status: ApprovalStatus::Pending,  // Will be computed separately
+        approval_status: ApprovalStatus::Pending, // Will be computed separately
         is_top_level,
     })
 }
@@ -378,16 +401,21 @@ pub fn parse_approval_event(event: &NostrEvent) -> Option<(String, Approval)> {
     }
 
     // Get the post event ID from e tag
-    let post_id = event.tags.iter()
+    let post_id = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::e())
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
 
-    Some((post_id, Approval {
-        event_id: event.id.to_hex(),
-        moderator_pubkey: event.pubkey.to_hex(),
-        approved_at: event.created_at.as_secs(),
-    }))
+    Some((
+        post_id,
+        Approval {
+            event_id: event.id.to_hex(),
+            moderator_pubkey: event.pubkey.to_hex(),
+            approved_at: event.created_at.as_secs(),
+        },
+    ))
 }
 
 /// Parse removal event (kind 4551)
@@ -396,17 +424,26 @@ pub fn parse_removal_event(event: &NostrEvent) -> Option<(String, Removal)> {
         return None;
     }
 
-    let post_id = event.tags.iter()
+    let post_id = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::e())
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
 
-    Some((post_id, Removal {
-        event_id: event.id.to_hex(),
-        moderator_pubkey: event.pubkey.to_hex(),
-        removed_at: event.created_at.as_secs(),
-        reason: if event.content.is_empty() { None } else { Some(event.content.clone()) },
-    }))
+    Some((
+        post_id,
+        Removal {
+            event_id: event.id.to_hex(),
+            moderator_pubkey: event.pubkey.to_hex(),
+            removed_at: event.created_at.as_secs(),
+            reason: if event.content.is_empty() {
+                None
+            } else {
+                Some(event.content.clone())
+            },
+        },
+    ))
 }
 
 /// Helper to extract uppercase tags (A, K, P for NIP-22)
@@ -469,7 +506,9 @@ pub fn compute_approval_status(post: &CommunityPost, community: &Community) -> A
     match role {
         UserRole::Owner => ApprovalStatus::AutoApproved(AutoApprovalReason::Owner),
         UserRole::Moderator => ApprovalStatus::AutoApproved(AutoApprovalReason::Moderator),
-        UserRole::ApprovedMember => ApprovalStatus::AutoApproved(AutoApprovalReason::ApprovedMember),
+        UserRole::ApprovedMember => {
+            ApprovalStatus::AutoApproved(AutoApprovalReason::ApprovedMember)
+        }
         // Pending/Declined users are treated as visitors for approval purposes
         UserRole::Pending | UserRole::Declined | UserRole::Visitor => {
             // Check for removal first
@@ -482,10 +521,11 @@ pub fn compute_approval_status(post: &CommunityPost, community: &Community) -> A
             let approvals = APPROVALS_CACHE.read();
             if let Some(post_approvals) = approvals.get(&post.id) {
                 // Verify at least one approval is from a moderator/owner
-                let valid_approvals: Vec<_> = post_approvals.iter()
+                let valid_approvals: Vec<_> = post_approvals
+                    .iter()
                     .filter(|a| {
-                        community.pubkey == a.moderator_pubkey ||
-                        community.moderators.contains(&a.moderator_pubkey)
+                        community.pubkey == a.moderator_pubkey
+                            || community.moderators.contains(&a.moderator_pubkey)
                     })
                     .cloned()
                     .collect();
@@ -594,7 +634,8 @@ pub fn sort_communities_by_membership(
             // Get pending request count for moderators/owners
             let pending_request_count = match &membership_status {
                 MembershipStatus::Owner | MembershipStatus::Moderator => {
-                    PENDING_JOIN_REQUESTS_CACHE.read()
+                    PENDING_JOIN_REQUESTS_CACHE
+                        .read()
                         .get(&community.a_tag)
                         .map(|requests| requests.len() as u32)
                 }
@@ -670,7 +711,11 @@ pub fn community_by_coord_filter(pubkey: PublicKey, identifier: &str) -> Filter 
 
 /// Build filter for community posts (both kind 1111 and kind 1 for backwards compat)
 /// Uses uppercase A tag for NIP-22 root scope
-pub fn posts_filter_by_community(community_a_tag: &str, limit: usize, until: Option<u64>) -> Filter {
+pub fn posts_filter_by_community(
+    community_a_tag: &str,
+    limit: usize,
+    until: Option<u64>,
+) -> Filter {
     let mut filter = Filter::new()
         .kinds(vec![Kind::Comment, Kind::TextNote])
         .custom_tag(SingleLetterTag::uppercase(Alphabet::A), community_a_tag)
@@ -721,12 +766,18 @@ pub fn approved_members_filter(community_a_tag: &str) -> Filter {
     // Parse a_tag to get pubkey (use splitn to handle identifiers with colons)
     let parts: Vec<&str> = community_a_tag.splitn(3, ':').collect();
     if parts.len() != 3 {
-        return Filter::new().kind(Kind::Custom(KIND_APPROVED_MEMBERS)).limit(0);
+        return Filter::new()
+            .kind(Kind::Custom(KIND_APPROVED_MEMBERS))
+            .limit(0);
     }
 
     let pubkey = match PublicKey::from_hex(parts[1]) {
         Ok(pk) => pk,
-        Err(_) => return Filter::new().kind(Kind::Custom(KIND_APPROVED_MEMBERS)).limit(0),
+        Err(_) => {
+            return Filter::new()
+                .kind(Kind::Custom(KIND_APPROVED_MEMBERS))
+                .limit(0)
+        }
     };
 
     Filter::new()
@@ -745,19 +796,15 @@ pub async fn fetch_communities(limit: usize) -> std::result::Result<Vec<Communit
     *LOADING_COMMUNITIES.write() = true;
 
     let filter = communities_filter(limit);
-    let result = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(15)
-    ).await;
+    let result =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
 
     *LOADING_COMMUNITIES.write() = false;
 
     match result {
         Ok(events) => {
-            let communities: Vec<Community> = events
-                .iter()
-                .filter_map(parse_community_event)
-                .collect();
+            let communities: Vec<Community> =
+                events.iter().filter_map(parse_community_event).collect();
 
             // Cache communities
             cache_communities(&communities);
@@ -774,22 +821,22 @@ pub async fn fetch_communities(limit: usize) -> std::result::Result<Vec<Communit
 }
 
 /// Fetch a specific community by naddr
-pub async fn fetch_community_by_naddr(naddr: &str) -> std::result::Result<Option<Community>, String> {
+pub async fn fetch_community_by_naddr(
+    naddr: &str,
+) -> std::result::Result<Option<Community>, String> {
     // Check cache first
     if let Some(cached) = get_cached_community_by_naddr(naddr) {
         return Ok(Some(cached));
     }
 
     // Parse naddr
-    let coord = Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let filter = community_by_coord_filter(coord.public_key, &coord.identifier);
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10)
-    ).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     if let Some(event) = events.first() {
         if let Some(community) = parse_community_event(event) {
@@ -802,7 +849,9 @@ pub async fn fetch_community_by_naddr(naddr: &str) -> std::result::Result<Option
 }
 
 /// Fetch a specific community by a_tag
-pub async fn fetch_community_by_a_tag(a_tag: &str) -> std::result::Result<Option<Community>, String> {
+pub async fn fetch_community_by_a_tag(
+    a_tag: &str,
+) -> std::result::Result<Option<Community>, String> {
     // Check cache first
     if let Some(cached) = get_cached_community(a_tag) {
         return Ok(Some(cached));
@@ -814,16 +863,15 @@ pub async fn fetch_community_by_a_tag(a_tag: &str) -> std::result::Result<Option
         return Err("Invalid a_tag format".to_string());
     }
 
-    let pubkey = PublicKey::from_hex(parts[1])
-        .map_err(|e| format!("Invalid pubkey in a_tag: {}", e))?;
+    let pubkey =
+        PublicKey::from_hex(parts[1]).map_err(|e| format!("Invalid pubkey in a_tag: {}", e))?;
     let identifier = parts[2];
 
     let filter = community_by_coord_filter(pubkey, identifier);
 
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-        filter,
-        Duration::from_secs(10)
-    ).await?;
+    let events =
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+            .await?;
 
     if let Some(event) = events.first() {
         if let Some(community) = parse_community_event(event) {
@@ -851,8 +899,14 @@ pub async fn fetch_community_posts(
 
     let (posts_result, approvals_result, removals_result) = futures::join!(
         crate::stores::nostr_client::fetch_events_aggregated(posts_filter, Duration::from_secs(15)),
-        crate::stores::nostr_client::fetch_events_aggregated(approvals_filter, Duration::from_secs(10)),
-        crate::stores::nostr_client::fetch_events_aggregated(removals_filter, Duration::from_secs(5)),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            approvals_filter,
+            Duration::from_secs(10)
+        ),
+        crate::stores::nostr_client::fetch_events_aggregated(
+            removals_filter,
+            Duration::from_secs(5)
+        ),
     );
 
     *LOADING_POSTS.write() = false;
@@ -891,7 +945,12 @@ pub async fn fetch_community_posts(
 
     // Filter based on include_pending flag
     if !include_pending {
-        posts.retain(|p| !matches!(p.approval_status, ApprovalStatus::Pending | ApprovalStatus::Removed(_)));
+        posts.retain(|p| {
+            !matches!(
+                p.approval_status,
+                ApprovalStatus::Pending | ApprovalStatus::Removed(_)
+            )
+        });
     }
 
     // Sort by created_at (newest first)
@@ -900,12 +959,18 @@ pub async fn fetch_community_posts(
     // Cache posts
     cache_posts(&posts);
 
-    log::info!("Fetched {} posts for community {}", posts.len(), community.a_tag);
+    log::info!(
+        "Fetched {} posts for community {}",
+        posts.len(),
+        community.a_tag
+    );
     Ok(posts)
 }
 
 /// Fetch pending posts for moderation queue
-pub async fn fetch_pending_posts(community: &Community) -> std::result::Result<Vec<CommunityPost>, String> {
+pub async fn fetch_pending_posts(
+    community: &Community,
+) -> std::result::Result<Vec<CommunityPost>, String> {
     let all_posts = fetch_community_posts(community, 200, true, None).await?;
 
     Ok(all_posts
@@ -927,8 +992,7 @@ pub async fn create_community(
     rules: Option<&str>,
     moderators: Vec<String>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -940,7 +1004,10 @@ pub async fn create_community(
     ];
 
     if let Some(desc) = description {
-        tags.push(Tag::custom(TagKind::Custom("description".into()), vec![desc]));
+        tags.push(Tag::custom(
+            TagKind::Custom("description".into()),
+            vec![desc],
+        ));
     }
 
     if let Some(img) = image {
@@ -953,13 +1020,17 @@ pub async fn create_community(
 
     // Add moderators with "moderator" marker
     for mod_pubkey in moderators {
-        tags.push(Tag::custom(TagKind::p(), vec![mod_pubkey, "".to_string(), "moderator".to_string()]));
+        tags.push(Tag::custom(
+            TagKind::p(),
+            vec![mod_pubkey, "".to_string(), "moderator".to_string()],
+        ));
     }
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_COMMUNITY_DEFINITION), "").tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish community: {}", e))?;
 
     log::info!("Community created: {}", output.id().to_hex());
@@ -971,23 +1042,26 @@ pub async fn post_to_community(
     community: &Community,
     content: &str,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
     // Parse community coordinate
-    let coord = Coordinate::new(Kind::Custom(KIND_COMMUNITY_DEFINITION),
-        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?)
-        .identifier(&community.d_tag);
+    let coord = Coordinate::new(
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
 
     // Use EventBuilder::comment with CommentTarget::coordinate for NIP-22
     let target = CommentTarget::coordinate(Cow::Owned(coord), None);
     let builder = EventBuilder::comment(content, target, None);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish post: {}", e))?;
 
     log::info!("Community post published: {}", output.id().to_hex());
@@ -1000,17 +1074,18 @@ pub async fn reply_to_post(
     parent_post: &CommunityPost,
     content: &str,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
     // Parse community coordinate (root)
-    let community_coord = Coordinate::new(Kind::Custom(KIND_COMMUNITY_DEFINITION),
-        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?)
-        .identifier(&community.d_tag);
+    let community_coord = Coordinate::new(
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
 
     // Parse parent event ID
     let parent_id = EventId::from_hex(&parent_post.id)
@@ -1025,7 +1100,9 @@ pub async fn reply_to_post(
 
     let builder = EventBuilder::comment(content, parent_target, Some(root_target));
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish reply: {}", e))?;
 
     log::info!("Community reply published: {}", output.id().to_hex());
@@ -1037,29 +1114,28 @@ pub async fn approve_post(
     community: &Community,
     post: &CommunityPost,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
     // Verify caller is moderator/owner
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     if !can_moderate(&current_pubkey, community) {
         return Err("You are not a moderator of this community".to_string());
     }
 
     // Include the full post JSON in content (per NIP-72)
-    let post_json = serde_json::to_string(&post.event)
-        .unwrap_or_default();
+    let post_json = serde_json::to_string(&post.event).unwrap_or_default();
 
     // Build coordinate for community
-    let coord = Coordinate::new(Kind::Custom(KIND_COMMUNITY_DEFINITION),
-        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?)
-        .identifier(&community.d_tag);
+    let coord = Coordinate::new(
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
 
     let tags: Vec<Tag> = vec![
         Tag::coordinate(coord, None),
@@ -1068,10 +1144,11 @@ pub async fn approve_post(
         Tag::custom(TagKind::Custom("k".into()), vec![post.kind.to_string()]),
     ];
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_APPROVAL), &post_json)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_APPROVAL), &post_json).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to approve post: {}", e))?;
 
     log::info!("Post approved: {}", output.id().to_hex());
@@ -1084,16 +1161,14 @@ pub async fn remove_post(
     post: &CommunityPost,
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
     // Verify caller is moderator/owner
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     if !can_moderate(&current_pubkey, community) {
         return Err("You are not a moderator of this community".to_string());
@@ -1102,9 +1177,11 @@ pub async fn remove_post(
     let content = reason.unwrap_or("");
 
     // Build coordinate for community
-    let coord = Coordinate::new(Kind::Custom(KIND_COMMUNITY_DEFINITION),
-        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?)
-        .identifier(&community.d_tag);
+    let coord = Coordinate::new(
+        Kind::Custom(KIND_COMMUNITY_DEFINITION),
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
 
     let tags: Vec<Tag> = vec![
         Tag::coordinate(coord, None),
@@ -1113,10 +1190,11 @@ pub async fn remove_post(
         Tag::custom(TagKind::Custom("k".into()), vec![post.kind.to_string()]),
     ];
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_REMOVAL), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_REMOVAL), content).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to remove post: {}", e))?;
 
     log::info!("Post removed: {}", output.id().to_hex());
@@ -1129,15 +1207,15 @@ pub async fn remove_post(
 
 /// Fetch communities where user is owner, moderator, or approved member
 /// Used to show "Your Communities" at top of /communities page
-pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn fetch_user_communities(
+    user_pubkey: &str,
+) -> std::result::Result<Vec<Community>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     // Wait for at least one relay to be connected before fetching
     crate::stores::nostr_client::ensure_relays_ready(&client).await;
 
-    let pubkey = PublicKey::from_hex(user_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(user_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Filter 1: Communities where user is owner (author)
     let owned_filter = Filter::new()
@@ -1174,8 +1252,13 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     let member_events = member_result.unwrap_or_default(); // Approved member lists containing user
     let recent_events = recent_result.unwrap_or_default();
 
-    log::info!("User communities query: owned={}, mod_filter={}, member_lists={}, recent={}",
-        owned_events.len(), mod_events.len(), member_events.len(), recent_events.len());
+    log::info!(
+        "User communities query: owned={}, mod_filter={}, member_lists={}, recent={}",
+        owned_events.len(),
+        mod_events.len(),
+        member_events.len(),
+        recent_events.len()
+    );
 
     // Dedupe by a_tag and parse
     let mut seen = HashSet::new();
@@ -1195,10 +1278,14 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     for event in mod_events.into_iter() {
         if let Some(community) = parse_community_event(&event) {
             // Verify user is actually a moderator (has p-tag with "moderator" role)
-            if community.moderators.iter().any(|m| m.to_lowercase() == user_pk_str)
-                && seen.insert(community.a_tag.clone()) {
-                    communities.push(community);
-                }
+            if community
+                .moderators
+                .iter()
+                .any(|m| m.to_lowercase() == user_pk_str)
+                && seen.insert(community.a_tag.clone())
+            {
+                communities.push(community);
+            }
         }
     }
 
@@ -1206,40 +1293,62 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     // These are kind 34551 events with the community's a_tag in 'a' tag and user in p-tags
     let mut member_community_a_tags: HashSet<String> = HashSet::new();
     for event in member_events.into_iter() {
-        log::info!("Processing member list event {} (kind {})", event.id.to_hex(), event.kind.as_u16());
+        log::info!(
+            "Processing member list event {} (kind {})",
+            event.id.to_hex(),
+            event.kind.as_u16()
+        );
 
         // Log all tags for debugging
-        let tag_summary: Vec<String> = event.tags.iter()
+        let tag_summary: Vec<String> = event
+            .tags
+            .iter()
             .map(|t| format!("{}:{}", t.kind(), t.content().unwrap_or("(none)")))
             .collect();
         log::info!("  Event tags: {:?}", tag_summary);
 
         // Try 'a' tag first (standard approach)
-        if let Some(a_tag) = event.tags.iter()
+        if let Some(a_tag) = event
+            .tags
+            .iter()
             .find(|t| t.kind() == TagKind::a())
             .and_then(|t| t.content())
         {
             let a_tag_str = a_tag.to_string();
-            log::info!("Found community a_tag in approved member list: {}", a_tag_str);
+            log::info!(
+                "Found community a_tag in approved member list: {}",
+                a_tag_str
+            );
 
             // Verify it's a community definition (kind 34550)
             if a_tag_str.starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION)) {
                 member_community_a_tags.insert(a_tag_str.clone());
 
                 // Cache the approved members for this community
-                let members: HashSet<String> = event.tags.iter()
+                let members: HashSet<String> = event
+                    .tags
+                    .iter()
                     .filter(|t| t.kind() == TagKind::p())
                     .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                     .collect();
 
-                log::info!("Caching {} approved members for community {}", members.len(), &a_tag_str);
+                log::info!(
+                    "Caching {} approved members for community {}",
+                    members.len(),
+                    &a_tag_str
+                );
                 APPROVED_MEMBERS_CACHE.write().insert(a_tag_str, members);
             } else {
-                log::warn!("Approved member list has non-community a_tag: {}", a_tag_str);
+                log::warn!(
+                    "Approved member list has non-community a_tag: {}",
+                    a_tag_str
+                );
             }
         } else {
             // Try 'd' tag as fallback - some implementations use d tag with community identifier
-            if let Some(d_tag) = event.tags.iter()
+            if let Some(d_tag) = event
+                .tags
+                .iter()
                 .find(|t| t.kind() == TagKind::d())
                 .and_then(|t| t.content())
             {
@@ -1247,27 +1356,39 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
 
                 // The d_tag might be the community a_tag directly, or just an identifier
                 // Try to construct the a_tag if it looks like a community reference
-                let potential_a_tag = if d_tag.starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION)) {
-                    d_tag.to_string()
-                } else {
-                    // d_tag might just be the community name/identifier
-                    // We'd need to know the owner pubkey to construct the full a_tag
-                    // For now, skip these
-                    log::warn!("  d_tag '{}' doesn't look like a community a_tag", d_tag);
-                    continue;
-                };
+                let potential_a_tag =
+                    if d_tag.starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION)) {
+                        d_tag.to_string()
+                    } else {
+                        // d_tag might just be the community name/identifier
+                        // We'd need to know the owner pubkey to construct the full a_tag
+                        // For now, skip these
+                        log::warn!("  d_tag '{}' doesn't look like a community a_tag", d_tag);
+                        continue;
+                    };
 
                 member_community_a_tags.insert(potential_a_tag.clone());
 
-                let members: HashSet<String> = event.tags.iter()
+                let members: HashSet<String> = event
+                    .tags
+                    .iter()
                     .filter(|t| t.kind() == TagKind::p())
                     .filter_map(|t| t.content().map(|s| s.to_lowercase()))
                     .collect();
 
-                log::info!("Caching {} approved members from d_tag for {}", members.len(), &potential_a_tag);
-                APPROVED_MEMBERS_CACHE.write().insert(potential_a_tag, members);
+                log::info!(
+                    "Caching {} approved members from d_tag for {}",
+                    members.len(),
+                    &potential_a_tag
+                );
+                APPROVED_MEMBERS_CACHE
+                    .write()
+                    .insert(potential_a_tag, members);
             } else {
-                log::warn!("Approved member list event {} has no 'a' or 'd' tag", event.id.to_hex());
+                log::warn!(
+                    "Approved member list event {} has no 'a' or 'd' tag",
+                    event.id.to_hex()
+                );
             }
         }
     }
@@ -1275,9 +1396,11 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     // Fetch community definitions for communities where user is an approved member
     let member_community_count = member_community_a_tags.len();
     if !member_community_a_tags.is_empty() {
-        log::info!("Fetching {} communities where user is approved member: {:?}",
+        log::info!(
+            "Fetching {} communities where user is approved member: {:?}",
             member_community_count,
-            member_community_a_tags.iter().take(5).collect::<Vec<_>>());
+            member_community_a_tags.iter().take(5).collect::<Vec<_>>()
+        );
 
         for a_tag in member_community_a_tags {
             // Skip if we already have this community
@@ -1320,18 +1443,26 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
         if let Some(community) = parse_community_event(&event) {
             // Check if user is owner or moderator
             let is_owner = community.pubkey.to_lowercase() == user_pk_str;
-            let is_moderator = community.moderators.iter().any(|m| m.to_lowercase() == user_pk_str);
+            let is_moderator = community
+                .moderators
+                .iter()
+                .any(|m| m.to_lowercase() == user_pk_str);
 
             // Also check if user is in approved members cache
-            let is_member = APPROVED_MEMBERS_CACHE.read()
+            let is_member = APPROVED_MEMBERS_CACHE
+                .read()
                 .get(&community.a_tag)
                 .map(|members| members.contains(&user_pk_str))
                 .unwrap_or(false);
 
             if (is_owner || is_moderator || is_member) && seen.insert(community.a_tag.clone()) {
-                log::info!("Found user community from recent: {} (owner={}, mod={}, member={})",
+                log::info!(
+                    "Found user community from recent: {} (owner={}, mod={}, member={})",
                     community.name.as_ref().unwrap_or(&community.d_tag),
-                    is_owner, is_moderator, is_member);
+                    is_owner,
+                    is_moderator,
+                    is_member
+                );
                 communities.push(community);
             }
         }
@@ -1343,16 +1474,22 @@ pub async fn fetch_user_communities(user_pubkey: &str) -> std::result::Result<Ve
     // Cache communities
     cache_communities(&communities);
 
-    log::info!("Fetched {} user communities for {} ({} member communities attempted)",
-        communities.len(), truncate_pubkey(user_pubkey), member_community_count);
+    log::info!(
+        "Fetched {} user communities for {} ({} member communities attempted)",
+        communities.len(),
+        truncate_pubkey(user_pubkey),
+        member_community_count
+    );
     Ok(communities)
 }
 
 /// Search communities by name/description
 /// Tries NIP-50 search first, falls back to fetching all and filtering client-side
-pub async fn search_communities(query: &str, limit: usize) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn search_communities(
+    query: &str,
+    limit: usize,
+) -> std::result::Result<Vec<Community>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     let query_lower = query.to_lowercase();
 
@@ -1362,7 +1499,9 @@ pub async fn search_communities(query: &str, limit: usize) -> std::result::Resul
         .search(query)
         .limit(limit);
 
-    let search_result = client.fetch_events(search_filter, Duration::from_secs(5)).await;
+    let search_result = client
+        .fetch_events(search_filter, Duration::from_secs(5))
+        .await;
 
     // If NIP-50 returns results, use them
     if let Ok(events) = search_result {
@@ -1373,7 +1512,11 @@ pub async fn search_communities(query: &str, limit: usize) -> std::result::Resul
                 .collect();
 
             cache_communities(&communities);
-            log::info!("NIP-50 search returned {} communities for '{}'", communities.len(), query);
+            log::info!(
+                "NIP-50 search returned {} communities for '{}'",
+                communities.len(),
+                query
+            );
             return Ok(communities);
         }
     }
@@ -1381,9 +1524,11 @@ pub async fn search_communities(query: &str, limit: usize) -> std::result::Resul
     // Fallback: fetch more communities and filter client-side
     let fallback_filter = Filter::new()
         .kind(Kind::Custom(KIND_COMMUNITY_DEFINITION))
-        .limit(500);  // Fetch more for better client-side search
+        .limit(500); // Fetch more for better client-side search
 
-    let events = client.fetch_events(fallback_filter, Duration::from_secs(10)).await
+    let events = client
+        .fetch_events(fallback_filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Search fallback failed: {}", e))?;
 
     let mut communities: Vec<Community> = events
@@ -1391,22 +1536,40 @@ pub async fn search_communities(query: &str, limit: usize) -> std::result::Resul
         .filter_map(|e| parse_community_event(&e))
         .filter(|c| {
             // Match name or description
-            c.name.as_ref().map(|n| n.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
-            c.description.as_ref().map(|d| d.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
-            c.d_tag.to_lowercase().contains(&query_lower)
+            c.name
+                .as_ref()
+                .map(|n| n.to_lowercase().contains(&query_lower))
+                .unwrap_or(false)
+                || c.description
+                    .as_ref()
+                    .map(|d| d.to_lowercase().contains(&query_lower))
+                    .unwrap_or(false)
+                || c.d_tag.to_lowercase().contains(&query_lower)
         })
         .take(limit)
         .collect();
 
     // Sort by relevance (name match first, then description)
     communities.sort_by(|a, b| {
-        let a_name_match = a.name.as_ref().map(|n| n.to_lowercase().contains(&query_lower)).unwrap_or(false);
-        let b_name_match = b.name.as_ref().map(|n| n.to_lowercase().contains(&query_lower)).unwrap_or(false);
+        let a_name_match = a
+            .name
+            .as_ref()
+            .map(|n| n.to_lowercase().contains(&query_lower))
+            .unwrap_or(false);
+        let b_name_match = b
+            .name
+            .as_ref()
+            .map(|n| n.to_lowercase().contains(&query_lower))
+            .unwrap_or(false);
         b_name_match.cmp(&a_name_match)
     });
 
     cache_communities(&communities);
-    log::info!("Client-side search returned {} communities for '{}'", communities.len(), query);
+    log::info!(
+        "Client-side search returned {} communities for '{}'",
+        communities.len(),
+        query
+    );
     Ok(communities)
 }
 
@@ -1416,8 +1579,7 @@ pub async fn fetch_communities_page(
     limit: usize,
     until: Option<u64>,
 ) -> std::result::Result<Vec<Community>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     // Wait for at least one relay to be connected before fetching
     crate::stores::nostr_client::ensure_relays_ready(&client).await;
@@ -1431,7 +1593,9 @@ pub async fn fetch_communities_page(
         filter = filter.until(Timestamp::from(ts));
     }
 
-    let events = client.fetch_events(filter, Duration::from_secs(10)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch communities page: {}", e))?;
 
     let events_count = events.len();
@@ -1446,15 +1610,20 @@ pub async fn fetch_communities_page(
     // Cache communities
     cache_communities(&communities);
 
-    log::info!("fetch_communities_page: events={}, parsed={}, until={:?}",
-        events_count, communities.len(), until);
+    log::info!(
+        "fetch_communities_page: events={}, parsed={}, until={:?}",
+        events_count,
+        communities.len(),
+        until
+    );
     Ok(communities)
 }
 
 /// Fetch approved members list (kind 34551) for a community
-pub async fn fetch_approved_members(community: &Community) -> std::result::Result<HashSet<String>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn fetch_approved_members(
+    community: &Community,
+) -> std::result::Result<HashSet<String>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     let owner_pubkey = PublicKey::from_hex(&community.pubkey)
         .map_err(|e| format!("Invalid community pubkey: {}", e))?;
@@ -1466,7 +1635,9 @@ pub async fn fetch_approved_members(community: &Community) -> std::result::Resul
         .identifier(&community.d_tag)
         .limit(1);
 
-    let events = client.fetch_events(filter, Duration::from_secs(5)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(5))
+        .await
         .map_err(|e| format!("Failed to fetch approved members: {}", e))?;
 
     let mut members = HashSet::new();
@@ -1483,9 +1654,15 @@ pub async fn fetch_approved_members(community: &Community) -> std::result::Resul
     }
 
     // Update cache
-    APPROVED_MEMBERS_CACHE.write().insert(community.a_tag.clone(), members.clone());
+    APPROVED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.clone());
 
-    log::info!("Fetched {} approved members for {}", members.len(), community.a_tag);
+    log::info!(
+        "Fetched {} approved members for {}",
+        members.len(),
+        community.a_tag
+    );
     Ok(members)
 }
 
@@ -1494,16 +1671,14 @@ pub async fn update_approved_members(
     community: &Community,
     members: Vec<String>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
     // Verify caller is owner
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     if community.pubkey != current_pubkey {
         return Err("Only the community owner can update approved members".to_string());
@@ -1521,17 +1696,17 @@ pub async fn update_approved_members(
         }
     }
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_APPROVED_MEMBERS), "")
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_APPROVED_MEMBERS), "").tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to update approved members: {}", e))?;
 
     // Update cache
-    APPROVED_MEMBERS_CACHE.write().insert(
-        community.a_tag.clone(),
-        members.into_iter().collect()
-    );
+    APPROVED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.into_iter().collect());
 
     log::info!("Updated approved members: {}", output.id().to_hex());
     Ok(output.id().to_hex())
@@ -1548,7 +1723,9 @@ pub fn parse_join_request(event: &NostrEvent) -> Option<JoinRequest> {
     }
 
     // Extract community a_tag from the a tag
-    let community_a_tag = event.tags.iter()
+    let community_a_tag = event
+        .tags
+        .iter()
         .find(|t| t.kind() == TagKind::a())
         .and_then(|t| t.content())
         .map(|s| s.to_string())?;
@@ -1557,26 +1734,32 @@ pub fn parse_join_request(event: &NostrEvent) -> Option<JoinRequest> {
         id: event.id.to_hex(),
         community_a_tag,
         user_pubkey: event.pubkey.to_hex(),
-        reason: if event.content.is_empty() { None } else { Some(event.content.clone()) },
+        reason: if event.content.is_empty() {
+            None
+        } else {
+            Some(event.content.clone())
+        },
         created_at: event.created_at.as_secs(),
         event: Some(event.clone()),
     })
 }
 
 /// Fetch user's pending join requests across all communities
-pub async fn fetch_user_join_requests(user_pubkey: &str) -> std::result::Result<Vec<JoinRequest>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn fetch_user_join_requests(
+    user_pubkey: &str,
+) -> std::result::Result<Vec<JoinRequest>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
-    let pubkey = PublicKey::from_hex(user_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::from_hex(user_pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_JOIN_REQUEST))
         .author(pubkey)
         .limit(100);
 
-    let events = client.fetch_events(filter, Duration::from_secs(7)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(7))
+        .await
         .map_err(|e| format!("Failed to fetch join requests: {}", e))?;
 
     let requests: Vec<JoinRequest> = events
@@ -1595,9 +1778,10 @@ pub async fn fetch_user_join_requests(user_pubkey: &str) -> std::result::Result<
 }
 
 /// Fetch pending join requests for a community (for moderators)
-pub async fn fetch_community_join_requests(community: &Community) -> std::result::Result<Vec<JoinRequest>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn fetch_community_join_requests(
+    community: &Community,
+) -> std::result::Result<Vec<JoinRequest>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     // Filter by a_tag pointing to this community
     let filter = Filter::new()
@@ -1605,7 +1789,9 @@ pub async fn fetch_community_join_requests(community: &Community) -> std::result
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), &community.a_tag)
         .limit(200);
 
-    let events = client.fetch_events(filter, Duration::from_secs(7)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(7))
+        .await
         .map_err(|e| format!("Failed to fetch community join requests: {}", e))?;
 
     let requests: Vec<JoinRequest> = events
@@ -1625,17 +1811,29 @@ pub async fn fetch_community_join_requests(community: &Community) -> std::result
     let pending_requests: Vec<JoinRequest> = requests
         .into_iter()
         .filter(|r| {
-            let is_approved = approved_set.map(|s| s.contains(&r.user_pubkey)).unwrap_or(false);
-            let is_declined = declined_set.map(|s| s.contains(&r.user_pubkey)).unwrap_or(false);
-            let is_banned = banned_set.map(|s| s.contains(&r.user_pubkey)).unwrap_or(false);
+            let is_approved = approved_set
+                .map(|s| s.contains(&r.user_pubkey))
+                .unwrap_or(false);
+            let is_declined = declined_set
+                .map(|s| s.contains(&r.user_pubkey))
+                .unwrap_or(false);
+            let is_banned = banned_set
+                .map(|s| s.contains(&r.user_pubkey))
+                .unwrap_or(false);
             !is_approved && !is_declined && !is_banned
         })
         .collect();
 
     // Update cache
-    PENDING_JOIN_REQUESTS_CACHE.write().insert(community.a_tag.clone(), pending_requests.clone());
+    PENDING_JOIN_REQUESTS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), pending_requests.clone());
 
-    log::info!("Fetched {} pending join requests for {}", pending_requests.len(), community.a_tag);
+    log::info!(
+        "Fetched {} pending join requests for {}",
+        pending_requests.len(),
+        community.a_tag
+    );
     Ok(pending_requests)
 }
 
@@ -1644,15 +1842,13 @@ pub async fn submit_join_request(
     community: &Community,
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     // Check if already a member or has pending request
     let status = get_membership_status(&current_pubkey, community);
@@ -1672,8 +1868,9 @@ pub async fn submit_join_request(
     // Build coordinate for community
     let coord = Coordinate::new(
         Kind::Custom(KIND_COMMUNITY_DEFINITION),
-        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?
-    ).identifier(&community.d_tag);
+        PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?,
+    )
+    .identifier(&community.d_tag);
 
     let content = reason.unwrap_or("");
 
@@ -1682,10 +1879,11 @@ pub async fn submit_join_request(
         Tag::public_key(PublicKey::from_hex(&community.pubkey).map_err(|e| e.to_string())?),
     ];
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_JOIN_REQUEST), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_JOIN_REQUEST), content).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to submit join request: {}", e))?;
 
     let request_id = output.id().to_hex();
@@ -1699,7 +1897,9 @@ pub async fn submit_join_request(
         created_at: (js_sys::Date::now() / 1000.0) as u64,
         event: None, // Event not available when self-submitted
     };
-    USER_PENDING_REQUESTS.write().insert(community.a_tag.clone(), request);
+    USER_PENDING_REQUESTS
+        .write()
+        .insert(community.a_tag.clone(), request);
 
     log::info!("Join request submitted: {}", request_id);
     Ok(request_id)
@@ -1710,15 +1910,15 @@ pub async fn approve_join_request(
     community: &Community,
     request: &JoinRequest,
 ) -> std::result::Result<String, String> {
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     if !can_moderate(&current_pubkey, community) {
         return Err("You are not a moderator of this community".to_string());
     }
 
     // Get current approved members
-    let mut members: Vec<String> = APPROVED_MEMBERS_CACHE.read()
+    let mut members: Vec<String> = APPROVED_MEMBERS_CACHE
+        .read()
         .get(&community.a_tag)
         .map(|s| s.iter().cloned().collect())
         .unwrap_or_default();
@@ -1732,11 +1932,18 @@ pub async fn approve_join_request(
     let result = update_approved_members(community, members).await?;
 
     // Remove from pending requests cache
-    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE.write().get_mut(&community.a_tag) {
+    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE
+        .write()
+        .get_mut(&community.a_tag)
+    {
         requests.retain(|r| r.id != request.id);
     }
 
-    log::info!("Approved join request {} for user {}", request.id, request.user_pubkey);
+    log::info!(
+        "Approved join request {} for user {}",
+        request.id,
+        request.user_pubkey
+    );
     Ok(result)
 }
 
@@ -1746,22 +1953,21 @@ pub async fn decline_join_request(
     user_pubkey: &str,
     reason: Option<&str>,
 ) -> std::result::Result<String, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     if !*crate::stores::nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let current_pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not logged in")?;
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
 
     if !can_moderate(&current_pubkey, community) {
         return Err("You are not a moderator of this community".to_string());
     }
 
     // Get current declined members and add new one
-    let mut declined: Vec<String> = DECLINED_MEMBERS_CACHE.read()
+    let mut declined: Vec<String> = DECLINED_MEMBERS_CACHE
+        .read()
         .get(&community.a_tag)
         .map(|s| s.iter().cloned().collect())
         .unwrap_or_default();
@@ -1784,20 +1990,23 @@ pub async fn decline_join_request(
 
     let content = reason.unwrap_or("");
 
-    let builder = EventBuilder::new(Kind::Custom(KIND_DECLINED_MEMBERS), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_DECLINED_MEMBERS), content).tags(tags);
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to decline join request: {}", e))?;
 
     // Update cache
-    DECLINED_MEMBERS_CACHE.write().insert(
-        community.a_tag.clone(),
-        declined.into_iter().collect()
-    );
+    DECLINED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), declined.into_iter().collect());
 
     // Remove from pending requests cache
-    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE.write().get_mut(&community.a_tag) {
+    if let Some(requests) = PENDING_JOIN_REQUESTS_CACHE
+        .write()
+        .get_mut(&community.a_tag)
+    {
         requests.retain(|r| r.user_pubkey != user_pubkey);
     }
 
@@ -1806,9 +2015,10 @@ pub async fn decline_join_request(
 }
 
 /// Fetch declined members list for a community
-pub async fn fetch_declined_members(community: &Community) -> std::result::Result<HashSet<String>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn fetch_declined_members(
+    community: &Community,
+) -> std::result::Result<HashSet<String>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     let owner_pubkey = PublicKey::from_hex(&community.pubkey)
         .map_err(|e| format!("Invalid community pubkey: {}", e))?;
@@ -1819,7 +2029,9 @@ pub async fn fetch_declined_members(community: &Community) -> std::result::Resul
         .identifier(&community.d_tag)
         .limit(1);
 
-    let events = client.fetch_events(filter, Duration::from_secs(5)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(5))
+        .await
         .map_err(|e| format!("Failed to fetch declined members: {}", e))?;
 
     let mut members = HashSet::new();
@@ -1834,16 +2046,23 @@ pub async fn fetch_declined_members(community: &Community) -> std::result::Resul
         }
     }
 
-    DECLINED_MEMBERS_CACHE.write().insert(community.a_tag.clone(), members.clone());
+    DECLINED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.clone());
 
-    log::info!("Fetched {} declined members for {}", members.len(), community.a_tag);
+    log::info!(
+        "Fetched {} declined members for {}",
+        members.len(),
+        community.a_tag
+    );
     Ok(members)
 }
 
 /// Fetch banned members list for a community
-pub async fn fetch_banned_members(community: &Community) -> std::result::Result<HashSet<String>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+pub async fn fetch_banned_members(
+    community: &Community,
+) -> std::result::Result<HashSet<String>, String> {
+    let client = crate::stores::nostr_client::get_client().ok_or("Client not initialized")?;
 
     let owner_pubkey = PublicKey::from_hex(&community.pubkey)
         .map_err(|e| format!("Invalid community pubkey: {}", e))?;
@@ -1854,7 +2073,9 @@ pub async fn fetch_banned_members(community: &Community) -> std::result::Result<
         .identifier(&community.d_tag)
         .limit(1);
 
-    let events = client.fetch_events(filter, Duration::from_secs(5)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(5))
+        .await
         .map_err(|e| format!("Failed to fetch banned members: {}", e))?;
 
     let mut members = HashSet::new();
@@ -1869,9 +2090,15 @@ pub async fn fetch_banned_members(community: &Community) -> std::result::Result<
         }
     }
 
-    BANNED_MEMBERS_CACHE.write().insert(community.a_tag.clone(), members.clone());
+    BANNED_MEMBERS_CACHE
+        .write()
+        .insert(community.a_tag.clone(), members.clone());
 
-    log::info!("Fetched {} banned members for {}", members.len(), community.a_tag);
+    log::info!(
+        "Fetched {} banned members for {}",
+        members.len(),
+        community.a_tag
+    );
     Ok(members)
 }
 
@@ -1918,13 +2145,14 @@ pub fn build_community_thread_tree(posts: Vec<CommunityPost>) -> Vec<CommunityTh
 
         map.get(&parent_id)
             .map(|posts| {
-                posts.iter().map(|post| {
-                    CommunityThread {
+                posts
+                    .iter()
+                    .map(|post| CommunityThread {
                         post: post.clone(),
                         replies: build_tree(Some(post.id.clone()), map, depth + 1, max_depth),
                         depth,
-                    }
-                }).collect()
+                    })
+                    .collect()
             })
             .unwrap_or_default()
     }

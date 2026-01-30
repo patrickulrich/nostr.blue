@@ -1,12 +1,10 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
+use dioxus::prelude::*;
 
 const DEFAULT_MINT_URL: &str = "https://mint.minibits.cash/Bitcoin";
 
 #[component]
-pub fn CashuSetupWizard(
-    on_complete: EventHandler<()>,
-) -> Element {
+pub fn CashuSetupWizard(on_complete: EventHandler<()>) -> Element {
     let mut creating = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
 

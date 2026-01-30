@@ -11,9 +11,9 @@ use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
 
+use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 use crate::stores::nostr_client::{get_client, publish_reaction_tracked, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
-use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 
 /// Maximum reactions to fetch per event
 const MAX_REACTIONS_FETCH: usize = 500;
@@ -133,9 +133,12 @@ pub fn use_reaction(
                 ReactionEmoji::Unlike
             } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
                 // NIP-30 custom emoji - check if we have the URL
-                let shortcode = r[1..r.len()-1].to_string();
+                let shortcode = r[1..r.len() - 1].to_string();
                 if let Some(url) = c.user_reaction_url.as_ref() {
-                    ReactionEmoji::Custom { shortcode, url: url.clone() }
+                    ReactionEmoji::Custom {
+                        shortcode,
+                        url: url.clone(),
+                    }
                 } else {
                     // No URL available, fall back to showing shortcode as text
                     ReactionEmoji::Standard(r.clone())
@@ -150,12 +153,17 @@ pub fn use_reaction(
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
-    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| precomputed_user_reaction.clone());
+    let mut user_reaction: Signal<Option<ReactionEmoji>> =
+        use_signal(|| precomputed_user_reaction.clone());
 
     // Watch for late-arriving precomputed data (batch fetch may complete after component mount)
     // This handles the race condition where NoteCard renders before batch fetch completes
     use_effect(use_reactive(
-        &(precomputed_count, precomputed_is_liked, precomputed_user_reaction.clone()),
+        &(
+            precomputed_count,
+            precomputed_is_liked,
+            precomputed_user_reaction.clone(),
+        ),
         move |(count_opt, liked_opt, reaction_opt)| {
             // Update if precomputed has data that's >= current (batch may have more complete data)
             if let Some(count) = count_opt {
@@ -172,7 +180,7 @@ pub fn use_reaction(
             if let Some(reaction) = reaction_opt {
                 user_reaction.set(Some(reaction.clone()));
             }
-        }
+        },
     ));
 
     // Clone for effect
@@ -254,12 +262,15 @@ pub fn use_reaction(
                         if is_from_user {
                             user_liked = true;
                             user_unliked = false; // Reset - new positive reaction overrides previous unlike
-                            // Parse the user's reaction emoji
+                                                  // Parse the user's reaction emoji
                             if content == "+" {
                                 user_emoji = Some(ReactionEmoji::Like);
-                            } else if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
+                            } else if content.starts_with(':')
+                                && content.ends_with(':')
+                                && content.len() > 2
+                            {
                                 // Custom emoji - look for emoji tag
-                                let shortcode = &content[1..content.len()-1];
+                                let shortcode = &content[1..content.len() - 1];
                                 // Find emoji tag with matching shortcode (use as_slice for zero-copy access)
                                 let emoji_url = reaction.tags.iter().find_map(|tag| {
                                     let tag_slice = tag.as_slice();
@@ -354,7 +365,14 @@ pub fn use_reaction(
         let content_str = content.to_string();
 
         spawn(async move {
-            match publish_reaction_tracked(event_id_clone.clone(), event_author_clone, content_str, None).await {
+            match publish_reaction_tracked(
+                event_id_clone.clone(),
+                event_author_clone,
+                content_str,
+                None,
+            )
+            .await
+            {
                 Ok(result) => {
                     log::info!(
                         "{} event {}, reaction ID: {} ({}/{} relays)",
@@ -386,7 +404,11 @@ pub fn use_reaction(
                     state.set(ReactionState::Idle);
                 }
                 Err(e) => {
-                    log::error!("Failed to {} event: {}", if was_liked { "unlike" } else { "like" }, e);
+                    log::error!(
+                        "Failed to {} event: {}",
+                        if was_liked { "unlike" } else { "like" },
+                        e
+                    );
 
                     // Rollback optimistic update
                     is_liked.set(was_liked);
@@ -457,7 +479,14 @@ pub fn use_reaction(
         let event_author_clone = event_author_react.clone();
 
         spawn(async move {
-            match publish_reaction_tracked(event_id_clone.clone(), event_author_clone, content.clone(), emoji_tag).await {
+            match publish_reaction_tracked(
+                event_id_clone.clone(),
+                event_author_clone,
+                content.clone(),
+                emoji_tag,
+            )
+            .await
+            {
                 Ok(result) => {
                     log::info!(
                         "Reacted to event {} with '{}', reaction ID: {} ({}/{} relays)",
@@ -496,10 +525,7 @@ pub fn use_reaction(
                     like_count.set(prev_count);
                     user_reaction.set(prev_reaction);
 
-                    state.set(ReactionState::Error(format!(
-                        "Failed to react: {}",
-                        e
-                    )));
+                    state.set(ReactionState::Error(format!("Failed to react: {}", e)));
                 }
             }
         });

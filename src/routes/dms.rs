@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use dioxus_core::Task;
-use crate::stores::{auth_store, dms, nostr_client, profiles};
-use crate::stores::dms::ConversationMessage;
 use crate::routes::Route;
+use crate::stores::dms::ConversationMessage;
+use crate::stores::{auth_store, dms, nostr_client, profiles};
 use crate::utils::time;
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use dioxus_core::Task;
 use wasm_bindgen::prelude::*;
 
 /// Guard struct that cancels polling task on drop
@@ -58,50 +58,56 @@ pub fn DMs() -> Element {
     let mut new_dm_mode = use_signal(|| false);
 
     // Load DMs on mount and when client initializes
-    use_effect(use_reactive(&*nostr_client::CLIENT_INITIALIZED.read(), move |client_initialized| {
-        if !client_initialized {
-            log::debug!("Waiting for client initialization before loading DMs...");
-            return;
-        }
-
-        if !auth_store::is_authenticated() {
-            return;
-        }
-
-        loading.set(true);
-        error.set(None);
-
-        spawn(async move {
-            match dms::init_dms().await {
-                Ok(_) => {
-                    log::info!("DMs loaded successfully");
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                }
+    use_effect(use_reactive(
+        &*nostr_client::CLIENT_INITIALIZED.read(),
+        move |client_initialized| {
+            if !client_initialized {
+                log::debug!("Waiting for client initialization before loading DMs...");
+                return;
             }
-            loading.set(false);
-        });
-    }));
+
+            if !auth_store::is_authenticated() {
+                return;
+            }
+
+            loading.set(true);
+            error.set(None);
+
+            spawn(async move {
+                match dms::init_dms().await {
+                    Ok(_) => {
+                        log::info!("DMs loaded successfully");
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                    }
+                }
+                loading.set(false);
+            });
+        },
+    ));
 
     // Auto-refresh polling for conversation list (30 seconds)
-    use_effect(use_reactive(&*nostr_client::CLIENT_INITIALIZED.read(), move |client_initialized| {
-        if !client_initialized || !auth_store::is_authenticated() {
-            return;
-        }
-
-        spawn(async move {
-            loop {
-                gloo_timers::future::sleep(std::time::Duration::from_secs(30)).await;
-
-                // Only refresh if user is authenticated and page is visible
-                if auth_store::is_authenticated() && isPageVisible() {
-                    log::debug!("Auto-refreshing DMs...");
-                    let _ = dms::init_dms().await;
-                }
+    use_effect(use_reactive(
+        &*nostr_client::CLIENT_INITIALIZED.read(),
+        move |client_initialized| {
+            if !client_initialized || !auth_store::is_authenticated() {
+                return;
             }
-        });
-    }));
+
+            spawn(async move {
+                loop {
+                    gloo_timers::future::sleep(std::time::Duration::from_secs(30)).await;
+
+                    // Only refresh if user is authenticated and page is visible
+                    if auth_store::is_authenticated() && isPageVisible() {
+                        log::debug!("Auto-refreshing DMs...");
+                        let _ = dms::init_dms().await;
+                    }
+                }
+            });
+        },
+    ));
 
     // Manual refresh function
     let refresh_dms = move |_| {
@@ -308,7 +314,7 @@ pub fn DMs() -> Element {
 fn ConversationListItem(
     conversation: dms::Conversation,
     selected: bool,
-    on_select: EventHandler<String>
+    on_select: EventHandler<String>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let mut decrypted_preview = use_signal(|| "Loading...".to_string());
@@ -354,15 +360,26 @@ fn ConversationListItem(
 
     let preview = decrypted_preview.read().clone();
 
-    let display_name = profile.read().as_ref()
+    let display_name = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| truncate_pubkey(&conversation.pubkey));
 
-    let avatar_url = profile.read().as_ref()
+    let avatar_url = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_avatar_url())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", conversation.pubkey));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                conversation.pubkey
+            )
+        });
 
-    let time_ago = conversation.messages.last()
+    let time_ago = conversation
+        .messages
+        .last()
         .map(|m| time::format_relative_time(m.created_at()))
         .unwrap_or_else(|| "".to_string());
 
@@ -458,49 +475,52 @@ fn ConversationView(pubkey: String) -> Element {
     });
 
     // Real-time message polling (5-second interval)
-    use_effect(use_reactive((&pubkey_for_poll, &*nostr_client::CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
-        // Cancel previous polling task when conversation changes
-        if let Some(task) = poll_task.peek().as_ref() {
-            task.cancel();
-        }
-
-        // Don't start polling if client not initialized
-        if !client_initialized {
-            return;
-        }
-
-        let pk_clone = pk.clone();
-        let new_task = spawn(async move {
-            loop {
-                gloo_timers::future::TimeoutFuture::new(5000).await;
-
-                // Skip if page not visible (battery/resource optimization)
-                if !isPageVisible() {
-                    continue;
-                }
-
-                // Refresh conversation data from relays
-                if let Err(e) = dms::init_dms().await {
-                    log::warn!("DM poll refresh failed: {}", e);
-                    continue;
-                }
-
-                // Get updated conversation and decrypt
-                if let Some(conversation) = dms::get_conversation(&pk_clone) {
-                    let mut decrypted = Vec::new();
-                    for msg in conversation.messages {
-                        match dms::decrypt_dm(&msg).await {
-                            Ok(content) => decrypted.push((msg, content)),
-                            Err(_) => decrypted.push((msg, "[Failed to decrypt]".to_string())),
-                        }
-                    }
-                    decrypted_messages.set(decrypted);
-                }
+    use_effect(use_reactive(
+        (&pubkey_for_poll, &*nostr_client::CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            // Cancel previous polling task when conversation changes
+            if let Some(task) = poll_task.peek().as_ref() {
+                task.cancel();
             }
-        });
 
-        poll_task.set(Some(new_task));
-    }));
+            // Don't start polling if client not initialized
+            if !client_initialized {
+                return;
+            }
+
+            let pk_clone = pk.clone();
+            let new_task = spawn(async move {
+                loop {
+                    gloo_timers::future::TimeoutFuture::new(5000).await;
+
+                    // Skip if page not visible (battery/resource optimization)
+                    if !isPageVisible() {
+                        continue;
+                    }
+
+                    // Refresh conversation data from relays
+                    if let Err(e) = dms::init_dms().await {
+                        log::warn!("DM poll refresh failed: {}", e);
+                        continue;
+                    }
+
+                    // Get updated conversation and decrypt
+                    if let Some(conversation) = dms::get_conversation(&pk_clone) {
+                        let mut decrypted = Vec::new();
+                        for msg in conversation.messages {
+                            match dms::decrypt_dm(&msg).await {
+                                Ok(content) => decrypted.push((msg, content)),
+                                Err(_) => decrypted.push((msg, "[Failed to decrypt]".to_string())),
+                            }
+                        }
+                        decrypted_messages.set(decrypted);
+                    }
+                }
+            });
+
+            poll_task.set(Some(new_task));
+        },
+    ));
 
     // Cleanup polling task on unmount
     use_hook(move || PollTaskGuard { task: poll_task });
@@ -515,7 +535,10 @@ fn ConversationView(pubkey: String) -> Element {
             log::info!("Loading conversation for: {}", pk);
 
             if let Some(conversation) = dms::get_conversation(&pk) {
-                log::info!("Found {} messages in conversation", conversation.messages.len());
+                log::info!(
+                    "Found {} messages in conversation",
+                    conversation.messages.len()
+                );
                 let mut decrypted = Vec::new();
 
                 for msg in conversation.messages {
@@ -603,11 +626,15 @@ fn ConversationView(pubkey: String) -> Element {
                         // Note: success_rate() already returns 0-100, don't multiply again
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
-                        send_feedback.set(Some((true, format!("Sent to {:.0}% of relays ({}/{})",
-                            rate,
-                            result.success_count(),
-                            result.total_attempted()
-                        ))));
+                        send_feedback.set(Some((
+                            true,
+                            format!(
+                                "Sent to {:.0}% of relays ({}/{})",
+                                rate,
+                                result.success_count(),
+                                result.total_attempted()
+                            ),
+                        )));
 
                         // Auto-hide feedback after 3 seconds (only if version unchanged)
                         gloo_timers::future::TimeoutFuture::new(3000).await;
@@ -638,16 +665,24 @@ fn ConversationView(pubkey: String) -> Element {
         });
     };
 
-    let display_name = profile.read().as_ref()
+    let display_name = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| truncate_pubkey(&pubkey_for_display));
 
-    let avatar_url = profile.read().as_ref()
+    let avatar_url = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_avatar_url())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", pubkey_for_display));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                pubkey_for_display
+            )
+        });
 
-    let nip05 = profile.read().as_ref()
-        .and_then(|p| p.nip05.clone());
+    let nip05 = profile.read().as_ref().and_then(|p| p.nip05.clone());
 
     let container_id = messages_container_id.read().clone();
 
@@ -852,8 +887,7 @@ fn MessageBubble(
     is_mine: bool,
     timestamp: nostr_sdk::Timestamp,
     sender_pubkey: String,
-    #[props(default = "NIP-17".to_string())]
-    encryption_type: String
+    #[props(default = "NIP-17".to_string())] encryption_type: String,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
     let sender_pk = sender_pubkey.clone();
@@ -876,18 +910,34 @@ fn MessageBubble(
         if let Some(my_pubkey) = auth_store::get_pubkey() {
             profiles::get_cached_profile(&my_pubkey)
                 .map(|p| p.get_avatar_url())
-                .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", my_pubkey))
+                .unwrap_or_else(|| {
+                    format!(
+                        "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                        my_pubkey
+                    )
+                })
         } else {
             String::new()
         }
     } else {
-        profile.read().as_ref()
+        profile
+            .read()
+            .as_ref()
             .map(|p| p.get_avatar_url())
-            .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", sender_pk_for_avatar))
+            .unwrap_or_else(|| {
+                format!(
+                    "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                    sender_pk_for_avatar
+                )
+            })
     };
 
     let time_ago = time::format_relative_time(timestamp);
-    let alignment = if is_mine { "flex-row-reverse" } else { "flex-row" };
+    let alignment = if is_mine {
+        "flex-row-reverse"
+    } else {
+        "flex-row"
+    };
 
     // Different colors based on encryption type
     let bg_color = if is_mine {
@@ -943,10 +993,7 @@ fn MessageBubble(
 }
 
 #[component]
-fn NewDMComposer(
-    on_cancel: EventHandler<()>,
-    on_send: EventHandler<String>
-) -> Element {
+fn NewDMComposer(on_cancel: EventHandler<()>, on_send: EventHandler<String>) -> Element {
     let mut recipient_input = use_signal(String::new);
     let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);

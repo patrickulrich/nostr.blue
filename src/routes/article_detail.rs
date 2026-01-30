@@ -1,14 +1,17 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Filter, Kind};
+use crate::components::{
+    icons::*, ArticleContent, ClientInitializing, CommentComposer, ShareModal, ThreadedComment,
+};
 use crate::routes::Route;
 use crate::stores::bookmarks;
-use crate::components::{ArticleContent, icons::*, ThreadedComment, CommentComposer, ClientInitializing, ShareModal};
-use crate::utils::article_meta::{
-    get_title, get_summary, get_image, get_published_at,
-    get_hashtags, calculate_read_time
-};
-use crate::utils::{build_thread_tree, merge_pending_into_tree, format_relative_time_or, truncate_pubkey};
 use crate::stores::pending_comments::get_pending_comments;
+use crate::utils::article_meta::{
+    calculate_read_time, get_hashtags, get_image, get_published_at, get_summary, get_title,
+};
+use crate::utils::{
+    build_thread_tree, format_relative_time_or, merge_pending_into_tree, truncate_pubkey,
+};
+use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, Filter, Kind};
 use std::time::Duration;
 
 #[component]
@@ -55,8 +58,10 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     match crate::stores::nostr_client::fetch_event_by_coordinate(
                         nostr_sdk::Kind::LongFormTextNote.as_u16(),
                         pubkey.clone(),
-                        identifier
-                    ).await {
+                        identifier,
+                    )
+                    .await
+                    {
                         Ok(Some(event)) => {
                             article.set(Some(event.clone()));
                             loading.set(false);
@@ -67,7 +72,9 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                 profile_prefetch::prefetch_event_authors(&[event]).await;
 
                                 // Update author_metadata signal after prefetch
-                                if let Some(profile) = crate::stores::profiles::get_cached_profile(&pubkey) {
+                                if let Some(profile) =
+                                    crate::stores::profiles::get_cached_profile(&pubkey)
+                                {
                                     let mut metadata = nostr_sdk::Metadata::new();
                                     if let Some(name) = profile.name {
                                         metadata = metadata.name(name);
@@ -116,12 +123,14 @@ pub fn ArticleDetail(naddr: String) -> Element {
                 loading_comments.set(true);
 
                 // Fetch Kind 1111 (NIP-22 Comment) events that reference this article
-                let filter = Filter::new()
-                    .kind(Kind::Comment)
-                    .event(event_id)
-                    .limit(500);
+                let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
 
-                match crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                match crate::stores::nostr_client::fetch_events_aggregated(
+                    filter,
+                    Duration::from_secs(10),
+                )
+                .await
+                {
                     Ok(mut comment_events) => {
                         comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                         log::info!("Loaded {} NIP-22 comments", comment_events.len());
@@ -145,7 +154,8 @@ pub fn ArticleDetail(naddr: String) -> Element {
             let event_id = event.id;
 
             // Get current user pubkey to detect if they've liked
-            let current_user_pubkey = crate::stores::signer::SIGNER_INFO.read()
+            let current_user_pubkey = crate::stores::signer::SIGNER_INFO
+                .read()
                 .as_ref()
                 .map(|info| info.public_key.clone());
 
@@ -156,7 +166,12 @@ pub fn ArticleDetail(naddr: String) -> Element {
                     .event(event_id)
                     .limit(500);
 
-                match crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
+                match crate::stores::nostr_client::fetch_events_aggregated(
+                    filter,
+                    Duration::from_secs(10),
+                )
+                .await
+                {
                     Ok(reaction_events) => {
                         // Count likes (reactions with "+" or emoji content)
                         let mut likes = 0;
@@ -178,7 +193,11 @@ pub fn ArticleDetail(naddr: String) -> Element {
 
                         like_count.set(likes);
                         is_liked.set(user_has_liked);
-                        log::info!("Loaded {} reactions for article, user has liked: {}", likes, user_has_liked);
+                        log::info!(
+                            "Loaded {} reactions for article, user has liked: {}",
+                            likes,
+                            user_has_liked
+                        );
                     }
                     Err(e) => {
                         log::error!("Failed to fetch reactions: {}", e);
@@ -569,7 +588,7 @@ pub fn ArticleDetail(naddr: String) -> Element {
 
 /// Decode naddr to extract pubkey and identifier
 fn decode_naddr(naddr: &str) -> Result<(String, String), String> {
-    use nostr::nips::nip19::{Nip19Coordinate, FromBech32};
+    use nostr::nips::nip19::{FromBech32, Nip19Coordinate};
 
     // Decode naddr string to Nip19Coordinate
     // This preserves relay hints if present in the naddr
@@ -581,7 +600,10 @@ fn decode_naddr(naddr: &str) -> Result<(String, String), String> {
 
             // Log relay hints if present
             if !nip19_coord.relays.is_empty() {
-                log::debug!("Article naddr contains {} relay hints", nip19_coord.relays.len());
+                log::debug!(
+                    "Article naddr contains {} relay hints",
+                    nip19_coord.relays.len()
+                );
                 for relay in &nip19_coord.relays {
                     log::debug!("  Relay hint: {}", relay);
                 }
@@ -592,4 +614,3 @@ fn decode_naddr(naddr: &str) -> Result<(String, String), String> {
         Err(e) => Err(format!("Invalid naddr format: {}", e)),
     }
 }
-

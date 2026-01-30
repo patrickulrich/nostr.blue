@@ -1,14 +1,14 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
+use gloo_storage::{LocalStorage, Storage};
 use nostr::{Keys, PublicKey};
 use nostr_sdk::ToBech32;
-use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::stores::signer::{SignerType, set_signer as store_signer};
 use crate::stores::nostr_client;
+use crate::stores::signer::{set_signer as store_signer, SignerType};
 
 #[cfg(target_family = "wasm")]
 use nostr_browser_signer::BrowserSigner;
@@ -17,8 +17,7 @@ use nostr_connect::client::NostrConnect;
 use nostr_sdk::nips::nip46::NostrConnectURI;
 
 /// Authentication state
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AuthState {
     pub pubkey: Option<String>,
     pub is_authenticated: bool,
@@ -27,12 +26,11 @@ pub struct AuthState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum LoginMethod {
-    BrowserExtension,  // NIP-07
-    PrivateKey,        // nsec stored locally
-    ReadOnly,          // npub only
-    RemoteSigner,      // NIP-46 (nostr-connect)
+    BrowserExtension, // NIP-07
+    PrivateKey,       // nsec stored locally
+    ReadOnly,         // npub only
+    RemoteSigner,     // NIP-46 (nostr-connect)
 }
-
 
 /// Global authentication state
 pub static AUTH_STATE: GlobalSignal<AuthState> = Signal::global(AuthState::default);
@@ -40,8 +38,8 @@ pub static AUTH_STATE: GlobalSignal<AuthState> = Signal::global(AuthState::defau
 /// Global keys (if using private key login)
 static KEYS: GlobalSignal<Option<Keys>> = Signal::global(|| None);
 
-const STORAGE_KEY_NSEC: &str = "nostr_nsec";  // Legacy plaintext (for migration)
-const STORAGE_KEY_NCRYPTSEC: &str = "nostr_ncryptsec";  // NIP-49 encrypted key
+const STORAGE_KEY_NSEC: &str = "nostr_nsec"; // Legacy plaintext (for migration)
+const STORAGE_KEY_NCRYPTSEC: &str = "nostr_ncryptsec"; // NIP-49 encrypted key
 const STORAGE_KEY_NPUB: &str = "nostr_npub";
 const STORAGE_KEY_METHOD: &str = "nostr_login_method";
 const STORAGE_KEY_BUNKER_URI: &str = "nostr_bunker_uri";
@@ -61,7 +59,8 @@ pub struct PasswordPromptState {
 }
 
 /// Global password prompt state
-pub static PASSWORD_PROMPT: GlobalSignal<PasswordPromptState> = Signal::global(PasswordPromptState::default);
+pub static PASSWORD_PROMPT: GlobalSignal<PasswordPromptState> =
+    Signal::global(PasswordPromptState::default);
 
 /// Initialize authentication from stored credentials
 /// Note: This only loads the auth state from localStorage.
@@ -155,8 +154,11 @@ pub async fn restore_session_async() {
                     // Signal migration needed - UI will prompt for password to encrypt
                     *PASSWORD_PROMPT.write() = PasswordPromptState {
                         required: true,
-                        ncryptsec: None,  // None indicates migration mode
-                        error: Some("Your key needs to be encrypted for security. Please set a password.".to_string()),
+                        ncryptsec: None, // None indicates migration mode
+                        error: Some(
+                            "Your key needs to be encrypted for security. Please set a password."
+                                .to_string(),
+                        ),
                         loading: false,
                     };
                     log::info!("Legacy nsec found, migration to encrypted format needed");
@@ -175,7 +177,7 @@ pub async fn restore_session_async() {
                 // Try to restore remote signer session
                 if let (Ok(bunker_uri), Ok(app_keys_str)) = (
                     LocalStorage::get::<String>(STORAGE_KEY_BUNKER_URI),
-                    LocalStorage::get::<String>(STORAGE_KEY_APP_KEYS)
+                    LocalStorage::get::<String>(STORAGE_KEY_APP_KEYS),
                 ) {
                     match restore_nostr_connect(&bunker_uri, &app_keys_str).await {
                         Ok(nostr_connect) => {
@@ -186,10 +188,15 @@ pub async fn restore_session_async() {
                                         Ok(_) => {
                                             // Run post-login initialization
                                             run_post_login_init().await;
-                                            log::info!("Successfully restored remote signer session");
+                                            log::info!(
+                                                "Successfully restored remote signer session"
+                                            );
                                         }
                                         Err(e) => {
-                                            log::error!("Failed to set remote signer on client: {}", e);
+                                            log::error!(
+                                                "Failed to set remote signer on client: {}",
+                                                e
+                                            );
                                             clear_auth();
                                         }
                                     }
@@ -265,7 +272,10 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
     // Remove any legacy plaintext nsec
     LocalStorage::delete(STORAGE_KEY_NSEC);
 
-    log::info!("Successfully logged in with encrypted key, pubkey: {}", pubkey);
+    log::info!(
+        "Successfully logged in with encrypted key, pubkey: {}",
+        pubkey
+    );
 
     // Run post-login initialization
     run_post_login_init().await;
@@ -339,7 +349,8 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
 
         // Get public key from extension
         use nostr::signer::NostrSigner;
-        let pubkey = browser_signer.get_public_key()
+        let pubkey = browser_signer
+            .get_public_key()
             .await
             .map_err(|e| format!("Failed to get public key from extension: {}", e))?;
 
@@ -361,7 +372,10 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
         LocalStorage::set(STORAGE_KEY_METHOD, "extension").ok();
         LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
 
-        log::info!("Successfully logged in via browser extension with pubkey: {}", pubkey_str);
+        log::info!(
+            "Successfully logged in via browser extension with pubkey: {}",
+            pubkey_str
+        );
 
         // Run post-login initialization
         run_post_login_init().await;
@@ -416,12 +430,15 @@ fn get_or_create_app_keys() -> Result<Keys, String> {
 }
 
 /// Restore NostrConnect instance from stored credentials
-async fn restore_nostr_connect(bunker_uri: &str, app_keys_str: &str) -> Result<NostrConnect, String> {
+async fn restore_nostr_connect(
+    bunker_uri: &str,
+    app_keys_str: &str,
+) -> Result<NostrConnect, String> {
     let uri = NostrConnectURI::parse(bunker_uri)
         .map_err(|e| format!("Invalid stored bunker URI: {}", e))?;
 
-    let app_keys = Keys::parse(app_keys_str)
-        .map_err(|e| format!("Invalid stored app keys: {}", e))?;
+    let app_keys =
+        Keys::parse(app_keys_str).map_err(|e| format!("Invalid stored app keys: {}", e))?;
 
     let timeout = Duration::from_secs(120);
     let nostr_connect = NostrConnect::new(uri, app_keys, timeout, None)
@@ -429,7 +446,9 @@ async fn restore_nostr_connect(bunker_uri: &str, app_keys_str: &str) -> Result<N
 
     // Verify connection by getting public key
     use nostr::signer::NostrSigner;
-    nostr_connect.get_public_key().await
+    nostr_connect
+        .get_public_key()
+        .await
         .map_err(|e| format!("Remote signer not responding: {}", e))?;
 
     Ok(nostr_connect)
@@ -467,7 +486,10 @@ async fn run_post_login_init() {
             log::info!("Prefetching metadata for all contacts...");
             // Ensure relays are ready before making network calls
             crate::stores::nostr_client::ensure_relays_ready(&client).await;
-            match client.get_contact_list_metadata(std::time::Duration::from_secs(15)).await {
+            match client
+                .get_contact_list_metadata(std::time::Duration::from_secs(15))
+                .await
+            {
                 Ok(contacts) => {
                     log::info!("Prefetched metadata for {} contacts", contacts.len());
                 }
@@ -486,8 +508,8 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
     log::info!("Logging in with remote signer (NIP-46)...");
 
     // 1. Validate and parse bunker URI
-    let uri = NostrConnectURI::parse(bunker_uri)
-        .map_err(|e| format!("Invalid bunker URI: {}", e))?;
+    let uri =
+        NostrConnectURI::parse(bunker_uri).map_err(|e| format!("Invalid bunker URI: {}", e))?;
 
     // 2. Load or generate app keys
     let app_keys = get_or_create_app_keys()?;
@@ -499,17 +521,22 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
 
     // 4. Get public key from signer
     use nostr::signer::NostrSigner;
-    let public_key = nostr_connect.get_public_key().await
+    let public_key = nostr_connect
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get public key: {}", e))?;
 
-    let pubkey_str = public_key.to_bech32()
+    let pubkey_str = public_key
+        .to_bech32()
         .map_err(|e| format!("Failed to convert public key: {}", e))?;
 
     // 5. Store credentials in localStorage
     LocalStorage::set(STORAGE_KEY_BUNKER_URI, bunker_uri)
         .map_err(|e| format!("Failed to store bunker URI: {}", e))?;
 
-    let app_keys_bech32 = app_keys.secret_key().to_bech32()
+    let app_keys_bech32 = app_keys
+        .secret_key()
+        .to_bech32()
         .map_err(|e| format!("Failed to convert app keys: {}", e))?;
     LocalStorage::set(STORAGE_KEY_APP_KEYS, &app_keys_bech32)
         .map_err(|e| format!("Failed to store app keys: {}", e))?;
@@ -531,7 +558,10 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         login_method: Some(LoginMethod::RemoteSigner),
     };
 
-    log::info!("Successfully logged in via remote signer with pubkey: {}", pubkey_str);
+    log::info!(
+        "Successfully logged in via remote signer with pubkey: {}",
+        pubkey_str
+    );
 
     // 8. Run post-login initialization
     run_post_login_init().await;

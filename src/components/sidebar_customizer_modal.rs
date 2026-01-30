@@ -1,16 +1,15 @@
 //! Modal for customizing sidebar navigation layout
 //! Supports drag-to-reorder and moving items between active/available pools
 
-use dioxus::prelude::*;
-use crate::stores::sidebar_store::{
-    SidebarItem, SIDEBAR_ITEMS, SIDEBAR_SLOT_COUNT, DEFAULT_MAIN_SIDEBAR_SLOTS, MAX_MAIN_SIDEBAR_SLOTS,
-    save_sidebar_preferences, default_sidebar_items, get_available_items
-};
 use crate::components::icons::{
-    self as icons, HomeIcon, CompassIcon, BookOpenIcon, BellIcon, MailIcon,
-    BookmarkIcon, UserIcon, SettingsIcon, CameraIcon, VideoIcon, PinIcon,
-    ShoppingBagIcon,
+    self as icons, BellIcon, BookOpenIcon, BookmarkIcon, CameraIcon, CompassIcon, HomeIcon,
+    MailIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, VideoIcon,
 };
+use crate::stores::sidebar_store::{
+    default_sidebar_items, get_available_items, save_sidebar_preferences, SidebarItem,
+    DEFAULT_MAIN_SIDEBAR_SLOTS, MAX_MAIN_SIDEBAR_SLOTS, SIDEBAR_ITEMS, SIDEBAR_SLOT_COUNT,
+};
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SidebarCustomizerModalProps {
@@ -39,9 +38,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
     let mut is_touch_dragging = use_signal(|| false);
 
     // Compute available items (items not in active list)
-    let available_items = use_memo(move || {
-        get_available_items(&local_active_items.read())
-    });
+    let available_items = use_memo(move || get_available_items(&local_active_items.read()));
 
     // Remove item from active list (move to available)
     let mut remove_from_active = move |index: usize| {
@@ -76,7 +73,11 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
         local_active_items.with_mut(|items| {
             if from_idx != to_idx && from_idx < items.len() && to_idx <= items.len() {
                 let item = items.remove(from_idx);
-                let insert_idx = if from_idx < to_idx { to_idx - 1 } else { to_idx };
+                let insert_idx = if from_idx < to_idx {
+                    to_idx - 1
+                } else {
+                    to_idx
+                };
                 let insert_idx = insert_idx.min(items.len());
                 items.insert(insert_idx, item);
             }

@@ -1,13 +1,15 @@
 //! Publications Home Route
 //! Browse NKBIP-01 publications (Kind 30040)
 
+use crate::components::icons::{
+    BookOpenIcon, GridIcon, ListIcon, PenSquareIcon, RefreshIcon, SearchIcon,
+};
+use crate::components::{PublicationCardCompact, PublicationCardSkeleton, PublicationGrid};
+use crate::hooks::use_infinite_scroll;
+use crate::stores::publication_store::PublicationIndex;
+use crate::stores::{nostr_client, publication_store};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-use crate::components::{PublicationCardSkeleton, PublicationGrid, PublicationCardCompact};
-use crate::components::icons::{BookOpenIcon, SearchIcon, PenSquareIcon, RefreshIcon, GridIcon, ListIcon};
-use crate::hooks::use_infinite_scroll;
-use crate::stores::{publication_store, nostr_client};
-use crate::stores::publication_store::PublicationIndex;
 
 const PAGE_SIZE: usize = 24;
 
@@ -90,10 +92,8 @@ pub fn PublicationsHome() -> Element {
 
                         // Deduplicate and append
                         let mut current = publications.peek().clone();
-                        let existing_ids: HashSet<_> = current
-                            .iter()
-                            .map(|p| p.event.id.to_hex())
-                            .collect();
+                        let existing_ids: HashSet<_> =
+                            current.iter().map(|p| p.event.id.to_hex()).collect();
 
                         let mut added_count = 0;
                         for pub_item in fetched {
@@ -110,7 +110,11 @@ pub fn PublicationsHome() -> Element {
                             has_more.set(false);
                         }
 
-                        log::info!("Pagination: fetched {}, added {} unique publications", fetched_count, added_count);
+                        log::info!(
+                            "Pagination: fetched {}, added {} unique publications",
+                            fetched_count,
+                            added_count
+                        );
                     }
                 }
                 Err(e) => log::error!("Failed to load more publications: {}", e),

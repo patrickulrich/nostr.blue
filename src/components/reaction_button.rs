@@ -1,12 +1,12 @@
 //! Reaction button component with emoji picker
 //! Encapsulates the like button, reaction picker, and click-outside-to-close behavior
 
-use dioxus::prelude::*;
-use crate::hooks::{UseReaction, ReactionState, ReactionEmoji, format_count};
+use crate::components::icons::HeartIcon;
 use crate::components::InlineReactionPicker;
 use crate::components::ReactionDefaultsModal;
-use crate::components::icons::HeartIcon;
+use crate::hooks::{format_count, ReactionEmoji, ReactionState, UseReaction};
 use crate::stores::reactions_store::get_default_reaction;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ReactionButtonProps {
@@ -58,7 +58,10 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     };
 
     let button_class = if props.button_class.is_empty() {
-        format!("{} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded transition", base_class)
+        format!(
+            "{} hover:bg-red-500/10 gap-1 px-2 py-1.5 rounded transition",
+            base_class
+        )
     } else {
         format!("{} {}", base_class, props.button_class)
     };

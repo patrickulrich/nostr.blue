@@ -5,9 +5,11 @@
 use dioxus::prelude::*;
 use std::collections::BTreeMap;
 
-use crate::stores::calendar_store::UnifiedEvent;
 use crate::routes::Route;
-use crate::utils::date_helpers::{get_today, get_month_from_date, get_day_number, get_month_dates, get_event_date};
+use crate::stores::calendar_store::UnifiedEvent;
+use crate::utils::date_helpers::{
+    get_day_number, get_event_date, get_month_dates, get_month_from_date, get_today,
+};
 
 // ============================================================================
 // Constants
@@ -113,7 +115,9 @@ struct DayViewProps {
 #[component]
 fn DayView(props: DayViewProps) -> Element {
     // Filter events for this day - compute directly from props to ensure reactivity
-    let day_events: Vec<UnifiedEvent> = props.events.iter()
+    let day_events: Vec<UnifiedEvent> = props
+        .events
+        .iter()
         .filter(|e| get_event_date(e) == props.date)
         .cloned()
         .collect();
@@ -496,9 +500,29 @@ fn format_day_header(date: &str) -> String {
     let js_date = js_sys::Date::new_with_year_month_day(year, month - 1, day);
     let weekday = js_date.get_day() as usize;
 
-    const WEEKDAY_NAMES: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const MONTH_NAMES: [&str; 12] = ["January", "February", "March", "April", "May", "June",
-                       "July", "August", "September", "October", "November", "December"];
+    const WEEKDAY_NAMES: [&str; 7] = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+    const MONTH_NAMES: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
 
     let weekday_name = WEEKDAY_NAMES.get(weekday).unwrap_or(&"");
     let month_idx = month.saturating_sub(1) as usize;
@@ -543,10 +567,7 @@ fn get_week_dates(date: &str) -> Vec<String> {
 /// Position events for a day with overlap handling
 fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEvent> {
     // Filter to timed events only
-    let mut timed: Vec<_> = events.iter()
-        .filter(|e| !e.is_all_day())
-        .cloned()
-        .collect();
+    let mut timed: Vec<_> = events.iter().filter(|e| !e.is_all_day()).cloned().collect();
 
     if timed.is_empty() {
         return vec![];
@@ -568,7 +589,10 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
         let duration_minutes = get_event_duration(event);
 
         let top = (start_minutes / 60.0) * HOUR_HEIGHT_PX;
-        let height = f32::max((duration_minutes / 60.0) * HOUR_HEIGHT_PX, MIN_EVENT_HEIGHT_PX);
+        let height = f32::max(
+            (duration_minutes / 60.0) * HOUR_HEIGHT_PX,
+            MIN_EVENT_HEIGHT_PX,
+        );
 
         // Find column
         let mut placed = false;
@@ -656,7 +680,11 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
 
     // Update widths per cluster instead of globally
     for cluster in clusters {
-        let max_col = cluster.iter().map(|&i| positioned[i].position.column).max().unwrap_or(0);
+        let max_col = cluster
+            .iter()
+            .map(|&i| positioned[i].position.column)
+            .max()
+            .unwrap_or(0);
         let cluster_total = max_col + 1;
         let col_width = 95.0 / cluster_total as f32;
         for &i in &cluster {
@@ -686,7 +714,10 @@ fn get_event_duration(event: &UnifiedEvent) -> f32 {
 }
 
 /// Render all-day events section
-fn render_all_day_events(events: &[UnifiedEvent], on_click: Option<EventHandler<UnifiedEvent>>) -> Element {
+fn render_all_day_events(
+    events: &[UnifiedEvent],
+    on_click: Option<EventHandler<UnifiedEvent>>,
+) -> Element {
     let all_day: Vec<_> = events.iter().filter(|e| e.is_all_day()).collect();
 
     if all_day.is_empty() {
@@ -730,27 +761,26 @@ fn render_all_day_events(events: &[UnifiedEvent], on_click: Option<EventHandler<
 /// Get event color based on type (matches Event Types filter)
 fn get_event_color(event: &UnifiedEvent) -> &'static str {
     if event.is_private() {
-        "#a855f7"  // Purple for private events
+        "#a855f7" // Purple for private events
     } else if event.is_livestream() {
-        "#ef4444"  // Red for livestreams
+        "#ef4444" // Red for livestreams
     } else if event.is_all_day() {
-        "#4285f4"  // Blue for all-day events
+        "#4285f4" // Blue for all-day events
     } else {
-        "#34a853"  // Green for timed events
+        "#34a853" // Green for timed events
     }
 }
 
 /// Render a positioned event
-fn render_positioned_event(pe: &PositionedEvent, on_event_click: Option<EventHandler<UnifiedEvent>>) -> Element {
+fn render_positioned_event(
+    pe: &PositionedEvent,
+    on_event_click: Option<EventHandler<UnifiedEvent>>,
+) -> Element {
     let bg_color = get_event_color(&pe.event);
 
     let style = format!(
         "position: absolute; top: {}px; left: {}%; width: {}%; height: {}px; background-color: {};",
-        pe.position.top,
-        pe.position.left,
-        pe.position.width,
-        pe.position.height,
-        bg_color
+        pe.position.top, pe.position.left, pe.position.width, pe.position.height, bg_color
     );
 
     // Check for handler first - allows clicking private/unsigned events
@@ -799,9 +829,14 @@ fn render_positioned_event(pe: &PositionedEvent, on_event_click: Option<EventHan
 
     // No handler but has naddr - render Link for navigation
     let detail_route = if pe.event.is_livestream() {
-        Route::LiveStreamDetail { note_id: naddr.to_string() }
+        Route::LiveStreamDetail {
+            note_id: naddr.to_string(),
+        }
     } else {
-        Route::CalendarEventDetail { naddr: naddr.to_string(), from: Some("calendar".to_string()) }
+        Route::CalendarEventDetail {
+            naddr: naddr.to_string(),
+            from: Some("calendar".to_string()),
+        }
     };
 
     rsx! {
@@ -835,7 +870,13 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     let minutes = date.get_minutes();
 
     let am_pm = if hours >= 12 { "PM" } else { "AM" };
-    let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+    let hour_12 = if hours == 0 {
+        12
+    } else if hours > 12 {
+        hours - 12
+    } else {
+        hours
+    };
 
     if minutes == 0 {
         format!("{} {}", hour_12, am_pm)

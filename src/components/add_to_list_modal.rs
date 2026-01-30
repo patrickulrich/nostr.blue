@@ -1,11 +1,11 @@
-use dioxus::prelude::*;
 use crate::hooks::{use_user_lists, UserList};
 use crate::stores::nostr_client;
-use crate::utils::list_kinds::{get_item_count, NAMED_PEOPLE, NAMED_CURATIONS};
 use crate::utils::list_encryption::add_person_to_list;
-use nostr_sdk::{EventBuilder, Kind, Tag, EventId};
-use uuid::Uuid;
+use crate::utils::list_kinds::{get_item_count, NAMED_CURATIONS, NAMED_PEOPLE};
+use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
+use nostr_sdk::{EventBuilder, EventId, Kind, Tag};
+use uuid::Uuid;
 
 /// Mode for the add to list modal
 #[derive(Clone, PartialEq, Debug)]
@@ -636,12 +636,15 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
     }
 
     if name.len() > MAX_LIST_NAME_LENGTH {
-        return Err(format!("List name cannot exceed {} characters", MAX_LIST_NAME_LENGTH));
+        return Err(format!(
+            "List name cannot exceed {} characters",
+            MAX_LIST_NAME_LENGTH
+        ));
     }
 
     // Parse event ID
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Generate a unique identifier for the d tag (independent of the display name)
     // This prevents name collisions from overwriting existing lists
@@ -649,14 +652,16 @@ async fn create_new_curation_list(name: String, event_id: String) -> Result<(), 
 
     // Create curation list (kind 30004) with this event
     let tags = vec![
-        Tag::identifier(&unique_id),  // Use UUID for d tag to prevent collisions
-        Tag::custom(nostr_sdk::TagKind::Name, vec![name.to_string()]),  // Human-readable name
+        Tag::identifier(&unique_id), // Use UUID for d tag to prevent collisions
+        Tag::custom(nostr_sdk::TagKind::Name, vec![name.to_string()]), // Human-readable name
         Tag::event(target_event_id),
     ];
 
     let builder = EventBuilder::new(Kind::from(30004), "").tags(tags);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to create list: {}", e))?;
 
     log::info!("Created new curation list: {}", name);
@@ -672,10 +677,10 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     }
 
     // Parse IDs
-    let target_event_id = EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let list_id = EventId::from_hex(&list_event_id)
-        .map_err(|e| format!("Invalid list ID: {}", e))?;
+    let target_event_id =
+        EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
+    let list_id =
+        EventId::from_hex(&list_event_id).map_err(|e| format!("Invalid list ID: {}", e))?;
 
     // Fetch the existing list event with timeout
     let list_event = {
@@ -700,8 +705,11 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     // Check if event is already in the list (use normalized lowercase hex for comparison)
     let normalized_event_id = target_event_id.to_hex();
     let already_exists = tags.iter().any(|tag| {
-        tag.kind() == nostr_sdk::TagKind::e() &&
-        tag.content().map(|c| c.eq_ignore_ascii_case(&normalized_event_id)).unwrap_or(false)
+        tag.kind() == nostr_sdk::TagKind::e()
+            && tag
+                .content()
+                .map(|c| c.eq_ignore_ascii_case(&normalized_event_id))
+                .unwrap_or(false)
     });
 
     if already_exists {
@@ -714,7 +722,9 @@ async fn add_to_existing_list(list_event_id: String, event_id: String) -> Result
     // Publish updated list with preserved content
     let builder = EventBuilder::new(Kind::from(30004), existing_content).tags(tags);
 
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to update list: {}", e))?;
 
     log::info!("Added event to existing list");

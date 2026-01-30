@@ -1,15 +1,15 @@
+use crate::stores::{auth_store, nostr_client};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use nostr_blossom::prelude::*;
-use nostr_sdk::{Url, Filter, Kind, PublicKey, FromBech32, Tag, TagKind, Timestamp, EventBuilder};
-use sha2::{Sha256, Digest};
 use image::ImageFormat;
+use nostr_blossom::prelude::*;
+use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, PublicKey, Tag, TagKind, Timestamp, Url};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::time::Duration;
-use std::collections::{HashMap, HashSet};
-use serde::{Serialize, Deserialize};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use crate::stores::{nostr_client, auth_store};
 
 #[cfg(target_arch = "wasm32")]
 use gloo_storage::{LocalStorage, Storage};
@@ -48,7 +48,10 @@ fn save_servers_to_storage(_servers: &[String]) {
 pub fn load_servers_from_storage() -> Option<Vec<String>> {
     match LocalStorage::get::<Vec<String>>(BLOSSOM_SERVERS_STORAGE_KEY) {
         Ok(servers) if !servers.is_empty() => {
-            log::info!("Loaded {} blossom servers from local storage", servers.len());
+            log::info!(
+                "Loaded {} blossom servers from local storage",
+                servers.len()
+            );
             Some(servers)
         }
         Ok(_) => None,
@@ -72,7 +75,9 @@ pub struct BlossomServersStore {
 }
 
 pub static BLOSSOM_SERVERS: GlobalSignal<Store<BlossomServersStore>> = Signal::global(|| {
-    Store::new(BlossomServersStore { data: vec![DEFAULT_SERVER.to_string()] })
+    Store::new(BlossomServersStore {
+        data: vec![DEFAULT_SERVER.to_string()],
+    })
 });
 
 /// Track if servers have been loaded from Nostr
@@ -123,8 +128,8 @@ impl MediaFilter {
             MediaFilter::Audio => mime_type.starts_with("audio/"),
             MediaFilter::Files => {
                 !mime_type.starts_with("image/")
-                && !mime_type.starts_with("video/")
-                && !mime_type.starts_with("audio/")
+                    && !mime_type.starts_with("video/")
+                    && !mime_type.starts_with("audio/")
             }
         }
     }
@@ -194,11 +199,13 @@ pub const KIND_BLOSSOM_AUTH: u16 = 24242;
 /// Returns None if URL is invalid, cannot be parsed, or has no host
 fn get_url_origin(url_str: &str) -> Option<(String, String, Option<u16>)> {
     url::Url::parse(url_str).ok().and_then(|u| {
-        u.host_str().map(|host| (
-            u.scheme().to_string(),
-            host.to_string(),
-            u.port_or_known_default(),
-        ))
+        u.host_str().map(|host| {
+            (
+                u.scheme().to_string(),
+                host.to_string(),
+                u.port_or_known_default(),
+            )
+        })
     })
 }
 
@@ -235,7 +242,13 @@ pub fn remove_server(url: &str) {
 
 /// Get the first server from the list (primary upload target)
 pub fn get_primary_server() -> String {
-    let server = BLOSSOM_SERVERS.read().data().read().first().cloned().unwrap_or(DEFAULT_SERVER.to_string());
+    let server = BLOSSOM_SERVERS
+        .read()
+        .data()
+        .read()
+        .first()
+        .cloned()
+        .unwrap_or(DEFAULT_SERVER.to_string());
     log::debug!("get_primary_server returning: {}", server);
     server
 }
@@ -285,8 +298,17 @@ pub async fn upload_image(
     let is_video = content_type.starts_with("video/");
     let media_type = if is_video { "video" } else { "image" };
 
-    let quality_str = if is_video { String::new() } else { format!(", quality: {}%", quality) };
-    log::info!("Uploading {}: {} bytes{}", media_type, data.len(), quality_str);
+    let quality_str = if is_video {
+        String::new()
+    } else {
+        format!(", quality: {}%", quality)
+    };
+    log::info!(
+        "Uploading {}: {} bytes{}",
+        media_type,
+        data.len(),
+        quality_str
+    );
 
     // Reset progress
     UPLOAD_PROGRESS.write().replace(0.0);
@@ -318,7 +340,8 @@ pub async fn upload_image(
         format!("Upload {} via nostr.blue", media_type),
         50.0,
         server_url,
-    ).await
+    )
+    .await
 }
 
 /// Compress an image to the specified quality level
@@ -336,8 +359,7 @@ async fn compress_image(
     quality: u8,
 ) -> Result<Vec<u8>, String> {
     // Load image
-    let img = image::load_from_memory(&data)
-        .map_err(|e| format!("Failed to load image: {}", e))?;
+    let img = image::load_from_memory(&data).map_err(|e| format!("Failed to load image: {}", e))?;
 
     // Determine output format
     let format = if content_type.contains("png") {
@@ -390,8 +412,8 @@ async fn upload_blob_with_auth(
     server_url: Option<String>,
 ) -> Result<String, String> {
     // Get signer for authentication
-    let signer = nostr_client::get_signer()
-        .ok_or("Not authenticated. Please sign in to upload.")?;
+    let signer =
+        nostr_client::get_signer().ok_or("Not authenticated. Please sign in to upload.")?;
 
     UPLOAD_PROGRESS.write().replace(start_progress);
 
@@ -409,40 +431,44 @@ async fn upload_blob_with_auth(
     let auth_options = Some(BlossomAuthorizationOptions {
         content: Some(auth_content),
         expiration: None, // No expiration
-        action: None, // Default action (upload)
-        scope: None, // No specific scope restriction
+        action: None,     // Default action (upload)
+        scope: None,      // No specific scope restriction
     });
 
     // Upload with proper authentication based on signer type
     let descriptor = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            client
-                .upload_blob(data, Some(content_type), auth_options, Some(&keys))
-                .await
-                .map_err(|e| {
-                    UPLOAD_PROGRESS.write().replace(0.0);
-                    format!("Upload failed: {}", e)
-                })?
-        }
+        crate::stores::signer::SignerType::Keys(keys) => client
+            .upload_blob(data, Some(content_type), auth_options, Some(&keys))
+            .await
+            .map_err(|e| {
+                UPLOAD_PROGRESS.write().replace(0.0);
+                format!("Upload failed: {}", e)
+            })?,
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            client
-                .upload_blob(data, Some(content_type), auth_options, Some(browser_signer.as_ref()))
-                .await
-                .map_err(|e| {
-                    UPLOAD_PROGRESS.write().replace(0.0);
-                    format!("Upload failed: {}", e)
-                })?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            client
-                .upload_blob(data, Some(content_type), auth_options, Some(nostr_connect.as_ref()))
-                .await
-                .map_err(|e| {
-                    UPLOAD_PROGRESS.write().replace(0.0);
-                    format!("Upload failed: {}", e)
-                })?
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => client
+            .upload_blob(
+                data,
+                Some(content_type),
+                auth_options,
+                Some(browser_signer.as_ref()),
+            )
+            .await
+            .map_err(|e| {
+                UPLOAD_PROGRESS.write().replace(0.0);
+                format!("Upload failed: {}", e)
+            })?,
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => client
+            .upload_blob(
+                data,
+                Some(content_type),
+                auth_options,
+                Some(nostr_connect.as_ref()),
+            )
+            .await
+            .map_err(|e| {
+                UPLOAD_PROGRESS.write().replace(0.0);
+                format!("Upload failed: {}", e)
+            })?,
     };
 
     UPLOAD_PROGRESS.write().replace(100.0);
@@ -472,7 +498,11 @@ pub async fn upload_audio(
     content_type: String,
     server_url: Option<String>,
 ) -> Result<String, String> {
-    log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
+    log::info!(
+        "Uploading audio: {} bytes, type: {}",
+        data.len(),
+        content_type
+    );
 
     // Reset progress
     UPLOAD_PROGRESS.write().replace(0.0);
@@ -483,7 +513,8 @@ pub async fn upload_audio(
         "Upload voice message via nostr.blue".to_string(),
         25.0,
         server_url,
-    ).await
+    )
+    .await
 }
 
 /// Calculate SHA-256 hash of data
@@ -501,7 +532,10 @@ pub fn calculate_sha256(data: &[u8]) -> String {
 pub async fn fetch_user_servers() -> Result<Vec<String>, String> {
     // Check local storage first - user's local preferences take priority
     if let Some(local_servers) = load_servers_from_storage() {
-        log::info!("Using {} blossom servers from local storage (preferred order preserved)", local_servers.len());
+        log::info!(
+            "Using {} blossom servers from local storage (preferred order preserved)",
+            local_servers.len()
+        );
         set_servers(local_servers.clone());
         *SERVERS_LOADED.write() = true;
         return Ok(local_servers);
@@ -574,7 +608,10 @@ fn parse_server_tags(tags: &nostr_sdk::Tags) -> Vec<String> {
                             Some(s.to_string())
                         }
                         Ok(url) => {
-                            log::warn!("Invalid Blossom server scheme: {} (expected http/https)", url.scheme());
+                            log::warn!(
+                                "Invalid Blossom server scheme: {} (expected http/https)",
+                                url.scheme()
+                            );
                             None
                         }
                         Err(e) => {
@@ -613,29 +650,30 @@ pub async fn publish_user_servers() -> Result<String, String> {
     log::info!("Publishing {} Blossom servers to kind 10063", servers.len());
 
     // Build tags: ["server", "url"] for each server
-    let tags: Vec<Tag> = servers.iter()
+    let tags: Vec<Tag> = servers
+        .iter()
         .map(|url| Tag::custom(TagKind::Custom("server".into()), vec![url.clone()]))
         .collect();
 
     // Create kind 10063 event
-    let builder = nostr_sdk::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "")
-        .tags(tags);
+    let builder =
+        nostr_sdk::EventBuilder::new(Kind::from(KIND_USER_BLOSSOM_SERVERS), "").tags(tags);
 
     // Sign and publish
     let event = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            builder.sign(&keys).await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
+        crate::stores::signer::SignerType::Keys(keys) => builder
+            .sign(&keys)
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            builder.sign(browser_signer.as_ref()).await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            builder.sign(nostr_connect.as_ref()).await
-                .map_err(|e| format!("Failed to sign event: {}", e))?
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
+            .sign(browser_signer.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
+            .sign(nostr_connect.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign event: {}", e))?,
     };
 
     nostr_client::ensure_relays_ready(&client).await;
@@ -643,7 +681,8 @@ pub async fn publish_user_servers() -> Result<String, String> {
     // Verify at least one relay is connected before publishing
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
     let relays = client.relays().await;
-    let connected_count = relays.values()
+    let connected_count = relays
+        .values()
         .filter(|r| r.status() == PoolRelayStatus::Connected)
         .count();
     if connected_count == 0 {
@@ -691,8 +730,7 @@ pub async fn get_auth_header(
     sha256: Option<&str>,
     content: &str,
 ) -> Result<String, String> {
-    let signer = nostr_client::get_signer()
-        .ok_or("Not authenticated. Please sign in.")?;
+    let signer = nostr_client::get_signer().ok_or("Not authenticated. Please sign in.")?;
 
     // Build tags for the auth event
     let mut tags: Vec<Tag> = vec![
@@ -708,35 +746,40 @@ pub async fn get_auth_header(
             if !h.is_empty() {
                 // Validate: must be exactly 64 hex characters (BUD-01 spec)
                 if h.len() != 64 {
-                    return Err(format!("Invalid SHA256 hash length: {} (expected 64)", h.len()));
+                    return Err(format!(
+                        "Invalid SHA256 hash length: {} (expected 64)",
+                        h.len()
+                    ));
                 }
                 if !h.chars().all(|c| c.is_ascii_hexdigit()) {
                     return Err("Invalid SHA256 hash: contains non-hex characters".to_string());
                 }
-                tags.push(Tag::custom(TagKind::Custom("x".into()), vec![h.to_string()]));
+                tags.push(Tag::custom(
+                    TagKind::Custom("x".into()),
+                    vec![h.to_string()],
+                ));
             }
         }
     }
 
     // Create the event builder
-    let builder = EventBuilder::new(Kind::from(KIND_BLOSSOM_AUTH), content)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::from(KIND_BLOSSOM_AUTH), content).tags(tags);
 
     // Sign the event based on signer type
     let event = match signer {
-        crate::stores::signer::SignerType::Keys(keys) => {
-            builder.sign(&keys).await
-                .map_err(|e| format!("Failed to sign auth event: {}", e))?
-        }
+        crate::stores::signer::SignerType::Keys(keys) => builder
+            .sign(&keys)
+            .await
+            .map_err(|e| format!("Failed to sign auth event: {}", e))?,
         #[cfg(target_family = "wasm")]
-        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => {
-            builder.sign(browser_signer.as_ref()).await
-                .map_err(|e| format!("Failed to sign auth event: {}", e))?
-        }
-        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
-            builder.sign(nostr_connect.as_ref()).await
-                .map_err(|e| format!("Failed to sign auth event: {}", e))?
-        }
+        crate::stores::signer::SignerType::BrowserExtension(browser_signer) => builder
+            .sign(browser_signer.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign auth event: {}", e))?,
+        crate::stores::signer::SignerType::NostrConnect(nostr_connect) => builder
+            .sign(nostr_connect.as_ref())
+            .await
+            .map_err(|e| format!("Failed to sign auth event: {}", e))?,
     };
 
     // Serialize and base64 encode
@@ -770,8 +813,7 @@ pub async fn list_files() -> Result<Vec<MediaItem>, String> {
 
 /// Inner implementation of list_files that can fail without leaving loading state stuck
 async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
     let pubkey = PublicKey::from_bech32(&pubkey_str)
         .or_else(|_| PublicKey::from_hex(&pubkey_str))
@@ -833,14 +875,19 @@ async fn list_files_inner() -> Result<Vec<MediaItem>, String> {
                         }
                     } else {
                         // New file
-                        all_items.insert(blob.sha256.clone(), MediaItem {
-                            sha256: blob.sha256,
-                            mime_type: blob.mime_type.unwrap_or_else(|| "application/octet-stream".to_string()),
-                            url: blob.url,
-                            size: blob.size,
-                            uploaded: blob.uploaded,
-                            mirrors: vec![],
-                        });
+                        all_items.insert(
+                            blob.sha256.clone(),
+                            MediaItem {
+                                sha256: blob.sha256,
+                                mime_type: blob
+                                    .mime_type
+                                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+                                url: blob.url,
+                                size: blob.size,
+                                uploaded: blob.uploaded,
+                                mirrors: vec![],
+                            },
+                        );
                     }
                 }
             }
@@ -1050,15 +1097,13 @@ pub async fn mirror_file(
     target_servers: Option<Vec<String>>,
 ) -> Result<Vec<String>, String> {
     // Validate source_url scheme
-    let source_parsed = url::Url::parse(source_url)
-        .map_err(|_| "Invalid source URL")?;
+    let source_parsed = url::Url::parse(source_url).map_err(|_| "Invalid source URL")?;
 
     if source_parsed.scheme() != "http" && source_parsed.scheme() != "https" {
         return Err("Source URL must use http or https scheme".to_string());
     }
 
-    let source_origin = get_url_origin(source_url)
-        .ok_or("Could not parse source URL origin")?;
+    let source_origin = get_url_origin(source_url).ok_or("Could not parse source URL origin")?;
 
     // Build set of allowed origins from:
     // 1. Configured blossom servers
@@ -1118,7 +1163,8 @@ pub async fn mirror_file(
                 if new_url_origin.as_ref() != server_origin.as_ref() {
                     log::warn!(
                         "Rejecting mirror response with mismatched origin: expected {:?}, got {:?}",
-                        server_origin, new_url_origin
+                        server_origin,
+                        new_url_origin
                     );
                     continue; // Skip this server, try next
                 }
@@ -1155,7 +1201,11 @@ struct MirrorResponse {
 
 /// Internal helper to mirror file to a single server
 #[allow(unused_variables)]
-async fn mirror_to_server(mirror_url: &str, source_url: &str, auth_header: &str) -> Result<String, String> {
+async fn mirror_to_server(
+    mirror_url: &str,
+    source_url: &str,
+    auth_header: &str,
+) -> Result<String, String> {
     #[cfg(target_arch = "wasm32")]
     {
         use gloo_net::http::Request;
@@ -1249,10 +1299,8 @@ pub fn is_fully_mirrored(item: &MediaItem) -> bool {
     }
 
     // Collect configured server origins (only valid ones)
-    let configured_origins: HashSet<(String, String, Option<u16>)> = servers
-        .iter()
-        .filter_map(|s| get_url_origin(s))
-        .collect();
+    let configured_origins: HashSet<(String, String, Option<u16>)> =
+        servers.iter().filter_map(|s| get_url_origin(s)).collect();
 
     // If we couldn't parse any configured servers, return false (can't determine)
     if configured_origins.is_empty() {
@@ -1273,19 +1321,31 @@ pub fn get_media_counts() -> HashMap<MediaFilter, usize> {
     counts.insert(MediaFilter::All, items.len());
     counts.insert(
         MediaFilter::Images,
-        items.iter().filter(|i| MediaFilter::Images.matches(&i.mime_type)).count(),
+        items
+            .iter()
+            .filter(|i| MediaFilter::Images.matches(&i.mime_type))
+            .count(),
     );
     counts.insert(
         MediaFilter::Videos,
-        items.iter().filter(|i| MediaFilter::Videos.matches(&i.mime_type)).count(),
+        items
+            .iter()
+            .filter(|i| MediaFilter::Videos.matches(&i.mime_type))
+            .count(),
     );
     counts.insert(
         MediaFilter::Audio,
-        items.iter().filter(|i| MediaFilter::Audio.matches(&i.mime_type)).count(),
+        items
+            .iter()
+            .filter(|i| MediaFilter::Audio.matches(&i.mime_type))
+            .count(),
     );
     counts.insert(
         MediaFilter::Files,
-        items.iter().filter(|i| MediaFilter::Files.matches(&i.mime_type)).count(),
+        items
+            .iter()
+            .filter(|i| MediaFilter::Files.matches(&i.mime_type))
+            .count(),
     );
 
     counts

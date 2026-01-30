@@ -1,10 +1,10 @@
-use nostr_sdk::prelude::*;
 use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
 use std::time::Duration;
 
+use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::NOSTR_CLIENT;
 use crate::stores::profiles::PROFILE_CACHE;
-use super::search_relays::get_connected_search_relays;
 
 /// Result type for profile search
 #[derive(Clone, Debug)]
@@ -35,7 +35,7 @@ impl ProfileSearchResult {
         }
         // Fallback to truncated pubkey
         let hex = self.pubkey.to_hex();
-        format!("{}...{}", &hex[..8], &hex[hex.len()-8..])
+        format!("{}...{}", &hex[..8], &hex[hex.len() - 8..])
     }
 
     /// Get the username (name field) or None
@@ -76,11 +76,15 @@ pub fn search_cached_profiles(
         };
 
         // Check if name or display_name matches
-        let name_match = profile.name.as_ref()
+        let name_match = profile
+            .name
+            .as_ref()
             .map(|n| n.to_lowercase().contains(&query_lower))
             .unwrap_or(false);
 
-        let display_name_match = profile.display_name.as_ref()
+        let display_name_match = profile
+            .display_name
+            .as_ref()
             .map(|d| d.to_lowercase().contains(&query_lower))
             .unwrap_or(false);
 
@@ -143,7 +147,11 @@ pub fn search_cached_profiles(
     // Limit results
     results.truncate(limit);
 
-    log::debug!("Cached profile search for '{}' returned {} results", query, results.len());
+    log::debug!(
+        "Cached profile search for '{}' returned {} results",
+        query,
+        results.len()
+    );
     results
 }
 
@@ -173,7 +181,10 @@ pub async fn search_profiles(
     };
 
     // Fetch contact list
-    let contact_pubkeys = match client.get_contact_list_public_keys(Duration::from_secs(5)).await {
+    let contact_pubkeys = match client
+        .get_contact_list_public_keys(Duration::from_secs(5))
+        .await
+    {
         Ok(pubkeys) => {
             log::debug!("Found {} contacts", pubkeys.len());
             pubkeys
@@ -193,10 +204,7 @@ pub async fn search_profiles(
         log::debug!("Querying relays for profiles matching: {}", query);
 
         // Try NIP-50 search first
-        let filter = Filter::new()
-            .kind(Kind::Metadata)
-            .search(query)
-            .limit(20);
+        let filter = Filter::new().kind(Kind::Metadata).search(query).limit(20);
 
         // Ensure search relays are in pool and connected before fetching
         let search_urls = get_connected_search_relays(&client).await;
@@ -205,7 +213,9 @@ pub async fn search_profiles(
             client.fetch_events(filter, Duration::from_secs(3)).await
         } else {
             // Route to specific search relays
-            client.fetch_events_from(search_urls, filter, Duration::from_secs(3)).await
+            client
+                .fetch_events_from(search_urls, filter, Duration::from_secs(3))
+                .await
         };
 
         match fetch_result {
@@ -223,11 +233,15 @@ pub async fn search_profiles(
                         }
 
                         // Check if matches query
-                        let name_match = metadata.name.as_ref()
+                        let name_match = metadata
+                            .name
+                            .as_ref()
                             .map(|n| n.to_lowercase().contains(&query_lower))
                             .unwrap_or(false);
 
-                        let display_name_match = metadata.display_name.as_ref()
+                        let display_name_match = metadata
+                            .display_name
+                            .as_ref()
                             .map(|d| d.to_lowercase().contains(&query_lower))
                             .unwrap_or(false);
 
@@ -275,7 +289,11 @@ pub async fn search_profiles(
     // Limit results
     results.truncate(limit);
 
-    log::debug!("Profile search for '{}' returned {} results", query, results.len());
+    log::debug!(
+        "Profile search for '{}' returned {} results",
+        query,
+        results.len()
+    );
     Ok(results)
 }
 
@@ -287,7 +305,10 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         None => return Vec::new(),
     };
 
-    match client.get_contact_list_public_keys(Duration::from_secs(5)).await {
+    match client
+        .get_contact_list_public_keys(Duration::from_secs(5))
+        .await
+    {
         Ok(pubkeys) => pubkeys,
         Err(e) => {
             log::warn!("Failed to fetch contact list: {}", e);
@@ -307,7 +328,9 @@ pub async fn get_user_relays() -> Vec<String> {
 
     // Get connected relays from the pool
     let relays = client.pool().relays().await;
-    let relay_urls: Vec<String> = relays.into_keys().map(|url| url.to_string())
+    let relay_urls: Vec<String> = relays
+        .into_keys()
+        .map(|url| url.to_string())
         .take(3) // Limit to 3 relay hints
         .collect();
 

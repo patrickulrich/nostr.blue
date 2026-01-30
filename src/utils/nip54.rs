@@ -129,7 +129,10 @@ pub fn extract_wikilinks(content: &str) -> Vec<WikiLink> {
     WIKILINK_REGEX
         .captures_iter(content)
         .map(|cap| {
-            let raw = cap.get(0).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let raw = cap
+                .get(0)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let target_raw = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let display = cap.get(2).map(|m| m.as_str().to_string());
 
@@ -174,10 +177,7 @@ pub fn render_wikilinks_to_html(content: &str) -> String {
     WIKILINK_REGEX
         .replace_all(content, |caps: &regex::Captures| {
             let target_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let display = caps
-                .get(2)
-                .map(|m| m.as_str())
-                .unwrap_or(target_raw);
+            let display = caps.get(2).map(|m| m.as_str()).unwrap_or(target_raw);
             let target = normalize_wiki_dtag(target_raw);
 
             format!(
@@ -189,7 +189,6 @@ pub fn render_wikilinks_to_html(content: &str) -> String {
         })
         .to_string()
 }
-
 
 // ============================================================================
 // Wiki Event Structures
@@ -223,7 +222,6 @@ pub struct WikiArticle {
     /// Created timestamp
     pub created_at: u64,
 }
-
 
 /// A wiki redirect parsed from a Kind 30819 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -303,8 +301,8 @@ pub fn parse_wiki_article(event: &Event) -> Result<WikiArticle, String> {
         .collect();
 
     // Check for fork/defer markers
-    let fork_source = get_tag_with_marker(event, "a", "fork")
-        .or_else(|| get_tag_with_marker(event, "e", "fork"));
+    let fork_source =
+        get_tag_with_marker(event, "a", "fork").or_else(|| get_tag_with_marker(event, "e", "fork"));
     let defer_to = get_tag_with_marker(event, "a", "defer")
         .or_else(|| get_tag_with_marker(event, "e", "defer"));
 
@@ -407,7 +405,6 @@ pub fn build_wiki_naddr(pubkey: &str, identifier: &str) -> Option<String> {
     nip19.to_bech32().ok()
 }
 
-
 // ============================================================================
 // Filter Builders
 // ============================================================================
@@ -487,7 +484,10 @@ mod tests {
     #[test]
     fn test_normalize_wiki_dtag() {
         assert_eq!(normalize_wiki_dtag("Hello World!"), "hello-world");
-        assert_eq!(normalize_wiki_dtag("Bitcoin & Lightning"), "bitcoin-lightning");
+        assert_eq!(
+            normalize_wiki_dtag("Bitcoin & Lightning"),
+            "bitcoin-lightning"
+        );
         assert_eq!(normalize_wiki_dtag("NIP-54"), "nip");
         assert_eq!(normalize_wiki_dtag("  Spaces  "), "spaces");
         assert_eq!(normalize_wiki_dtag("CamelCase"), "camelcase");

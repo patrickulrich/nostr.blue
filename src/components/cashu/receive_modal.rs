@@ -1,12 +1,10 @@
-use dioxus::prelude::*;
-use dioxus_core::Task;
 use crate::stores::cashu;
 use crate::stores::cashu::{ReceiveTokensOptions, TokenPreview};
+use dioxus::prelude::*;
+use dioxus_core::Task;
 
 #[component]
-pub fn CashuReceiveModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuReceiveModal(on_close: EventHandler<()>) -> Element {
     let mut token_string = use_signal(String::new);
     let mut is_receiving = use_signal(|| false);
     let mut is_previewing = use_signal(|| false);
@@ -84,7 +82,7 @@ pub fn CashuReceiveModal(
         spawn(async move {
             let options = ReceiveTokensOptions {
                 verify_dleq: should_verify_dleq,
-                preimages: vec![],  // No HTLC preimages for normal receive
+                preimages: vec![], // No HTLC preimages for normal receive
             };
 
             match cashu::receive_tokens_with_options(token, options).await {

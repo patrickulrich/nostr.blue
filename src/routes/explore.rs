@@ -9,11 +9,16 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 
-use crate::stores::{nostr_client, dvm_store};
-use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
-use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
-use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle, fetch_interaction_counts_batch, stream_interaction_counts};
+use crate::components::{ClientInitializing, DvmSelectorModal, NoteCard};
 use crate::hooks::use_mute_block_cache;
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
+    InteractionStreamHandle,
+};
+use crate::stores::dvm_store::{
+    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS, SELECTED_DVM_PROVIDER,
+};
+use crate::stores::{dvm_store, nostr_client};
 
 /// Main Explore page component - DVM-powered content discovery
 #[component]
@@ -100,7 +105,9 @@ pub fn Explore() -> Element {
                         event_ids,
                         interaction_counts,
                         Some(600), // 10 minute idle timeout
-                    ).await {
+                    )
+                    .await
+                    {
                         interaction_stream_handle.set(Some(handle));
                     }
                 }
@@ -115,7 +122,8 @@ pub fn Explore() -> Element {
     let current_provider_name = {
         let providers = DVM_PROVIDERS.read();
         if let Some(pubkey) = selected_provider {
-            providers.iter()
+            providers
+                .iter()
                 .find(|p| p.pubkey == pubkey)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "Selected DVM".to_string())
@@ -271,4 +279,3 @@ pub fn Explore() -> Element {
         }
     }
 }
-

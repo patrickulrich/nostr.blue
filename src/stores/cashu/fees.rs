@@ -162,7 +162,12 @@ pub async fn estimate_p2pk_send_fee(
         0
     };
 
-    Ok(FeeEstimate::new(base_fee, witness_fee, proof_count, fee_ppk))
+    Ok(FeeEstimate::new(
+        base_fee,
+        witness_fee,
+        proof_count,
+        fee_ppk,
+    ))
 }
 
 /// Estimate fee for multisig P2PK
@@ -214,7 +219,12 @@ pub async fn estimate_p2pk_receive_fee(
         0
     };
 
-    Ok(FeeEstimate::new(base_fee, witness_fee, proof_count, fee_ppk))
+    Ok(FeeEstimate::new(
+        base_fee,
+        witness_fee,
+        proof_count,
+        fee_ppk,
+    ))
 }
 
 // =============================================================================
@@ -338,9 +348,16 @@ mod tests {
     #[test]
     fn test_p2pk_witness_size() {
         assert_eq!(P2pkComplexity::None.witness_size(), 0);
-        assert_eq!(P2pkComplexity::SingleSig.witness_size(), P2PK_WITNESS_OVERHEAD);
         assert_eq!(
-            P2pkComplexity::MultiSig { required: 2, total: 3 }.witness_size(),
+            P2pkComplexity::SingleSig.witness_size(),
+            P2PK_WITNESS_OVERHEAD
+        );
+        assert_eq!(
+            P2pkComplexity::MultiSig {
+                required: 2,
+                total: 3
+            }
+            .witness_size(),
             P2PK_WITNESS_OVERHEAD + MULTISIG_SIGNATURE_OVERHEAD
         );
     }

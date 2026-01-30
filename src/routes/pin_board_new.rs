@@ -1,13 +1,11 @@
 //! Create/Edit Pinboard Page
 //! Simplified form for creating and editing pinboards (Kind 30067)
 
-use dioxus::prelude::*;
-use crate::stores::pin_boards_store::{
-    self, Pinboard, PinboardInput,
-};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::components::{MediaUploader, ClientInitializing};
+use crate::components::{ClientInitializing, MediaUploader};
 use crate::routes::Route;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{self, Pinboard, PinboardInput};
+use dioxus::prelude::*;
 
 // ============================================================================
 // Create New Board Page
@@ -40,7 +38,8 @@ pub fn PinBoardNew() -> Element {
         is_submitting.set(true);
 
         // Parse tags
-        let tags: Vec<String> = tags_input.read()
+        let tags: Vec<String> = tags_input
+            .read()
             .split(',')
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
@@ -48,7 +47,11 @@ pub fn PinBoardNew() -> Element {
 
         let input = PinboardInput {
             title: title.read().clone(),
-            description: if description.read().is_empty() { None } else { Some(description.read().clone()) },
+            description: if description.read().is_empty() {
+                None
+            } else {
+                Some(description.read().clone())
+            },
             image: image_url.read().clone(),
             tags,
             collaborative: *collaborative.read(),
@@ -354,7 +357,8 @@ pub fn PinBoardEdit(naddr: String) -> Element {
         is_submitting.set(true);
 
         // Parse tags
-        let tags: Vec<String> = tags_input.read()
+        let tags: Vec<String> = tags_input
+            .read()
             .split(',')
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
@@ -362,7 +366,11 @@ pub fn PinBoardEdit(naddr: String) -> Element {
 
         let input = PinboardInput {
             title: title.read().clone(),
-            description: if description.read().is_empty() { None } else { Some(description.read().clone()) },
+            description: if description.read().is_empty() {
+                None
+            } else {
+                Some(description.read().clone())
+            },
             image: image_url.read().clone(),
             tags,
             collaborative: *collaborative.read(),

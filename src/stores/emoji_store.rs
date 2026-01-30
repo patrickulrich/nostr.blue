@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
-use dioxus_stores::Store;
 use dioxus::signals::ReadableExt;
-use nostr_sdk::{Filter, Kind, Timestamp, PublicKey};
+use dioxus_stores::Store;
+use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 
 /// Custom emoji from Nostr (NIP-30 format)
 #[derive(Clone, Debug, PartialEq)]
@@ -32,8 +32,10 @@ pub struct EmojiSetsStore {
     pub data: Vec<EmojiSet>,
 }
 
-pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> = Signal::global(|| Store::new(CustomEmojisStore::default()));
-pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> = Signal::global(|| Store::new(EmojiSetsStore::default()));
+pub static CUSTOM_EMOJIS: GlobalSignal<Store<CustomEmojisStore>> =
+    Signal::global(|| Store::new(CustomEmojisStore::default()));
+pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> =
+    Signal::global(|| Store::new(EmojiSetsStore::default()));
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
 
 // Recent emojis (persisted to localStorage)
@@ -56,22 +58,27 @@ pub fn load_recent_emojis() -> Option<Vec<String>> {
         serde_json::from_str(&value).ok()
     }
     #[cfg(not(target_arch = "wasm32"))]
-    { None }
+    {
+        None
+    }
 }
 
 /// Save an emoji to recents (moves to front if already exists)
 pub fn save_recent_emoji(emoji: String) {
     let mut recent = RECENT_EMOJIS.write();
-    recent.retain(|e| e != &emoji);  // Remove if exists
-    recent.insert(0, emoji);         // Add to front
-    recent.truncate(MAX_RECENT);     // Keep max
+    recent.retain(|e| e != &emoji); // Remove if exists
+    recent.insert(0, emoji); // Add to front
+    recent.truncate(MAX_RECENT); // Keep max
 
     // Persist to localStorage
     #[cfg(target_arch = "wasm32")]
     {
         use web_sys::window;
         if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-            let _ = storage.set_item(RECENT_EMOJIS_KEY, &serde_json::to_string(&*recent).unwrap_or_default());
+            let _ = storage.set_item(
+                RECENT_EMOJIS_KEY,
+                &serde_json::to_string(&*recent).unwrap_or_default(),
+            );
         }
     }
 }
@@ -106,11 +113,15 @@ pub async fn fetch_custom_emojis(pubkey: String) {
     // Fetch from relays to populate local database
     let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
         emoji_list_filter.clone(),
-        std::time::Duration::from_secs(5)
-    ).await;
+        std::time::Duration::from_secs(5),
+    )
+    .await;
 
     if let Err(e) = fetch_result {
-        log::warn!("Failed to fetch emoji list from relays: {}, will try local DB", e);
+        log::warn!(
+            "Failed to fetch emoji list from relays: {}, will try local DB",
+            e
+        );
     }
 
     // Now query the local database which should have the fetched events
@@ -146,8 +157,11 @@ pub async fn fetch_custom_emojis(pubkey: String) {
         }
     }
 
-    log::info!("Found {} direct emojis and {} emoji set references",
-               custom_emojis.len(), emoji_set_refs.len());
+    log::info!(
+        "Found {} direct emojis and {} emoji set references",
+        custom_emojis.len(),
+        emoji_set_refs.len()
+    );
 
     // Parse emoji set references and fetch them
     let mut emoji_sets = Vec::new();
@@ -177,11 +191,16 @@ pub async fn fetch_custom_emojis(pubkey: String) {
             // Fetch from relays to populate local database
             let fetch_result = crate::stores::nostr_client::fetch_events_aggregated(
                 set_filter.clone(),
-                std::time::Duration::from_secs(5)
-            ).await;
+                std::time::Duration::from_secs(5),
+            )
+            .await;
 
             if let Err(e) = fetch_result {
-                log::warn!("Failed to fetch emoji set {} from relays: {}, will try local DB", identifier, e);
+                log::warn!(
+                    "Failed to fetch emoji set {} from relays: {}, will try local DB",
+                    identifier,
+                    e
+                );
             }
 
             // Now query the local database which should have the fetched events

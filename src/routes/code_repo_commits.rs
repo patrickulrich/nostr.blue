@@ -2,7 +2,6 @@
 //!
 //! View commit history for a repository.
 
-use dioxus::prelude::*;
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{
@@ -11,6 +10,7 @@ use crate::services::git_hosting::{
 };
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
+use dioxus::prelude::*;
 
 /// Repository commits page component
 #[component]
@@ -45,7 +45,9 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 }
                 // If no GitHub URL found
                 if commits_result.read().is_none() {
-                    commits_result.set(Some(Err("No GitHub URL found for this repository".to_string())));
+                    commits_result.set(Some(Err(
+                        "No GitHub URL found for this repository".to_string()
+                    )));
                 }
             }
 

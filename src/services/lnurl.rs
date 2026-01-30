@@ -1,6 +1,6 @@
-use nostr_sdk::{Event, EventBuilder, EventId, PublicKey, RelayUrl, JsonUtil};
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip57::ZapRequestData;
+use nostr_sdk::{Event, EventBuilder, EventId, JsonUtil, PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
 
 /// LNURL Pay Response
@@ -37,7 +37,10 @@ pub enum SuccessAction {
     #[serde(rename = "message")]
     Message { message: String },
     #[serde(rename = "url")]
-    Url { url: String, description: Option<String> },
+    Url {
+        url: String,
+        description: Option<String>,
+    },
 }
 
 /// Error type for LNURL operations
@@ -62,7 +65,9 @@ impl std::fmt::Display for LnUrlError {
             LnUrlError::UntrustedDomain(e) => write!(f, "Untrusted LNURL domain: {}", e),
             LnUrlError::FetchError(e) => write!(f, "Fetch error: {}", e),
             LnUrlError::ParseError(e) => write!(f, "Parse error: {}", e),
-            LnUrlError::NostrNotSupported => write!(f, "LNURL endpoint does not support Nostr zaps"),
+            LnUrlError::NostrNotSupported => {
+                write!(f, "LNURL endpoint does not support Nostr zaps")
+            }
             LnUrlError::InvalidAmount => write!(f, "Invalid zap amount"),
         }
     }
@@ -88,13 +93,12 @@ fn validate_url(url: &str) -> Result<(), LnUrlError> {
     }
 
     // Parse URL to extract host
-    let parsed = url::Url::parse(url).map_err(|e| {
-        LnUrlError::InvalidUrl(format!("Failed to parse URL: {}", e))
-    })?;
+    let parsed = url::Url::parse(url)
+        .map_err(|e| LnUrlError::InvalidUrl(format!("Failed to parse URL: {}", e)))?;
 
-    let host = parsed.host_str().ok_or_else(|| {
-        LnUrlError::InvalidUrl("URL has no host".to_string())
-    })?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| LnUrlError::InvalidUrl("URL has no host".to_string()))?;
 
     // Block localhost and private/non-routable addresses
     // This mitigates DNS rebinding attacks where an attacker's domain resolves
@@ -177,22 +181,23 @@ pub fn lud16_to_url(lud16: &str) -> Result<String, LnUrlError> {
     let username = parts[0];
     let domain = parts[1];
 
-    Ok(format!("https://{}/.well-known/lnurlp/{}", domain, username))
+    Ok(format!(
+        "https://{}/.well-known/lnurlp/{}",
+        domain, username
+    ))
 }
 
 /// Decode lud06 (bech32-encoded LNURL) to URL
 pub fn decode_lud06(lud06: &str) -> Result<String, LnUrlError> {
     // Decode bech32
-    let (hrp, data) = bech32::decode(lud06)
-        .map_err(|e| LnUrlError::InvalidLud06(e.to_string()))?;
+    let (hrp, data) = bech32::decode(lud06).map_err(|e| LnUrlError::InvalidLud06(e.to_string()))?;
 
     if hrp.as_str() != "lnurl" {
         return Err(LnUrlError::InvalidLud06("Invalid HRP".to_string()));
     }
 
     // Convert to string
-    let url = String::from_utf8(data)
-        .map_err(|e| LnUrlError::InvalidLud06(e.to_string()))?;
+    let url = String::from_utf8(data).map_err(|e| LnUrlError::InvalidLud06(e.to_string()))?;
 
     Ok(url)
 }
@@ -202,10 +207,15 @@ pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlEr
     validate_url(url)?;
 
     let client = create_http_client()?;
-    let response = client.get(url).send().await
+    let response = client
+        .get(url)
+        .send()
+        .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
-    let pay_info: LnUrlPayResponse = response.json().await
+    let pay_info: LnUrlPayResponse = response
+        .json()
+        .await
         .map_err(|e| LnUrlError::ParseError(e.to_string()))?;
 
     if !pay_info.allows_nostr {
@@ -216,13 +226,18 @@ pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlEr
 }
 
 /// Get LNURL pay info from lightning address (lud16 or lud06)
-pub async fn get_lnurl_pay_info(lud16: Option<&str>, lud06: Option<&str>) -> Result<LnUrlPayResponse, LnUrlError> {
+pub async fn get_lnurl_pay_info(
+    lud16: Option<&str>,
+    lud06: Option<&str>,
+) -> Result<LnUrlPayResponse, LnUrlError> {
     let url = if let Some(lud16) = lud16 {
         lud16_to_url(lud16)?
     } else if let Some(lud06) = lud06 {
         decode_lud06(lud06)?
     } else {
-        return Err(LnUrlError::InvalidLud16("No lightning address provided".to_string()));
+        return Err(LnUrlError::InvalidLud16(
+            "No lightning address provided".to_string(),
+        ));
     };
 
     fetch_lnurl_pay_info(&url).await
@@ -239,8 +254,7 @@ pub fn create_zap_request_unsigned(
     event_id: Option<EventId>,
     event_coordinate: Option<Coordinate>,
 ) -> EventBuilder {
-    let mut data = ZapRequestData::new(recipient_pubkey, relays)
-        .amount(amount_msats);
+    let mut data = ZapRequestData::new(recipient_pubkey, relays).amount(amount_msats);
 
     if let Some(msg) = message {
         data = data.message(msg);
@@ -272,7 +286,10 @@ pub async fn request_zap_invoice(
     let nostr_param = urlencoding::encode(&zap_request_json);
 
     // Build the request URL with query parameters
-    let mut url = format!("{}?amount={}&nostr={}", callback_url, amount_msats, nostr_param);
+    let mut url = format!(
+        "{}?amount={}&nostr={}",
+        callback_url, amount_msats, nostr_param
+    );
 
     if let Some(lnurl_value) = lnurl {
         url.push_str(&format!("&lnurl={}", urlencoding::encode(lnurl_value)));
@@ -280,10 +297,15 @@ pub async fn request_zap_invoice(
 
     // Make the request with timeout
     let client = create_http_client()?;
-    let response = client.get(&url).send().await
+    let response = client
+        .get(&url)
+        .send()
+        .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
-    let invoice: LnUrlInvoiceResponse = response.json().await
+    let invoice: LnUrlInvoiceResponse = response
+        .json()
+        .await
         .map_err(|e| LnUrlError::ParseError(e.to_string()))?;
 
     Ok(invoice)
@@ -320,10 +342,15 @@ pub async fn fetch_lnurl_pay_info_simple(url: &str) -> Result<LnUrlPayResponse, 
     validate_url(url)?;
 
     let client = create_http_client()?;
-    let response = client.get(url).send().await
+    let response = client
+        .get(url)
+        .send()
+        .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
-    let pay_info: LnUrlPayResponse = response.json().await
+    let pay_info: LnUrlPayResponse = response
+        .json()
+        .await
         .map_err(|e| LnUrlError::ParseError(e.to_string()))?;
 
     // Don't require allows_nostr for simple payments
@@ -349,10 +376,15 @@ pub async fn request_simple_invoice(
 
     // Make the request with timeout
     let client = create_http_client()?;
-    let response = client.get(&url).send().await
+    let response = client
+        .get(&url)
+        .send()
+        .await
         .map_err(|e| LnUrlError::FetchError(e.to_string()))?;
 
-    let invoice: LnUrlInvoiceResponse = response.json().await
+    let invoice: LnUrlInvoiceResponse = response
+        .json()
+        .await
         .map_err(|e| LnUrlError::ParseError(e.to_string()))?;
 
     Ok(invoice)
@@ -360,7 +392,11 @@ pub async fn request_simple_invoice(
 
 /// Get a Lightning invoice from a lud16 address for a specific amount
 /// Returns the bolt11 invoice string
-pub async fn get_invoice_from_lud16(lud16: &str, amount_sats: u64, comment: Option<&str>) -> Result<String, LnUrlError> {
+pub async fn get_invoice_from_lud16(
+    lud16: &str,
+    amount_sats: u64,
+    comment: Option<&str>,
+) -> Result<String, LnUrlError> {
     // Validate amount
     if amount_sats == 0 {
         return Err(LnUrlError::InvalidAmount);
@@ -381,7 +417,8 @@ pub async fn get_invoice_from_lud16(lud16: &str, amount_sats: u64, comment: Opti
     }
 
     // Request invoice
-    let invoice_response = request_simple_invoice(&pay_info.callback, amount_msats, comment).await?;
+    let invoice_response =
+        request_simple_invoice(&pay_info.callback, amount_msats, comment).await?;
 
     Ok(invoice_response.pr)
 }

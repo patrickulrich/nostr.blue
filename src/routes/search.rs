@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 
-use crate::services::content_search::{
-    search_text_notes, search_articles, search_photos, search_videos, get_contact_pubkeys,
-    ContentSearchResult,
-};
 use crate::components::{NoteCard, NoteCardSkeleton, PhotoCard, VideoCard};
 use crate::hooks::use_mute_block_cache;
+use crate::services::content_search::{
+    get_contact_pubkeys, search_articles, search_photos, search_text_notes, search_videos,
+    ContentSearchResult,
+};
 use crate::stores::nostr_client;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -70,7 +70,7 @@ pub fn Search(q: String) -> Element {
         // Reading at start creates subscription - effect re-runs when this changes
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
-            return;  // Early return - effect will re-run when signal changes
+            return; // Early return - effect will re-run when signal changes
         }
 
         spawn(async move {
@@ -155,12 +155,10 @@ pub fn Search(q: String) -> Element {
             }
             SortOrder::FollowingFirst => {
                 // Sort by following status first (following = true comes first), then by date (newest)
-                sorted.sort_by(|a, b| {
-                    match (a.is_from_contact, b.is_from_contact) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => b.event.created_at.cmp(&a.event.created_at),
-                    }
+                sorted.sort_by(|a, b| match (a.is_from_contact, b.is_from_contact) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => b.event.created_at.cmp(&a.event.created_at),
                 });
             }
         }

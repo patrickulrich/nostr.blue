@@ -1,11 +1,11 @@
 #[cfg(target_arch = "wasm32")]
-use nostr_sdk::prelude::*;
-#[cfg(target_arch = "wasm32")]
-use nostr_sdk::FromBech32;
+use nostr::util::BoxedFuture;
 #[cfg(target_arch = "wasm32")]
 use nostr_relay_pool::policy::{AdmitPolicy, AdmitStatus, PolicyError};
 #[cfg(target_arch = "wasm32")]
-use nostr::util::BoxedFuture;
+use nostr_sdk::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use nostr_sdk::FromBech32;
 
 /// Custom admission policy for nostr.blue
 ///
@@ -42,22 +42,14 @@ impl AdmitPolicy for NostrBlueAdmissionPolicy {
             // 2. Validate event signature
             // This ensures the event hasn't been tampered with and was signed by the claimed author
             if let Err(e) = event.verify() {
-                log::warn!(
-                    "Rejected event {} with invalid signature: {}",
-                    event.id,
-                    e
-                );
+                log::warn!("Rejected event {} with invalid signature: {}", event.id, e);
                 return Ok(AdmitStatus::rejected("Invalid event signature"));
             }
 
             // 3. Check for expired events (NIP-40)
             // Events with an `expiration` tag should be rejected if past their expiration time
             if event.is_expired() {
-                log::debug!(
-                    "Rejected expired event {} from {}",
-                    event.id,
-                    event.pubkey
-                );
+                log::debug!("Rejected expired event {} from {}", event.id, event.pubkey);
                 return Ok(AdmitStatus::rejected("Event has expired (NIP-40)"));
             }
 

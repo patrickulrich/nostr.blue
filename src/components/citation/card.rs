@@ -2,12 +2,12 @@
 //! Displays a citation in a card format with type badge, title, author, and metadata
 //! Supports Internal (kind 30), External (kind 31), Hardcopy (kind 32), and Prompt (kind 33)
 
-use dioxus::prelude::*;
-use url::Url;
+use crate::components::content_menu::{ContentMenu, ContentMenuType};
+use crate::components::icons::ExternalLinkIcon;
 use crate::stores::citation_store::CachedCitation;
 use crate::utils::nkbip03::{Citation, CitationType};
-use crate::components::icons::ExternalLinkIcon;
-use crate::components::content_menu::{ContentMenu, ContentMenuType};
+use dioxus::prelude::*;
+use url::Url;
 
 /// Styling information for citation types
 pub struct CitationStyle {
@@ -231,7 +231,7 @@ pub fn CitationCardCompact(
                 .or_else(|_| Url::parse(&format!("https://{}", c.url)))
                 .ok()
                 .and_then(|u| u.host_str().map(|h| h.to_string()))
-        },
+        }
         Citation::Hardcopy(c) => c.published_by.clone(),
         Citation::Prompt(c) => Some(c.llm.clone()),
         Citation::Internal(_) => Some("Nostr".to_string()),

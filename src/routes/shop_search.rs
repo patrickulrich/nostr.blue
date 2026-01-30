@@ -1,13 +1,12 @@
 //! Shop Search - Search marketplace products
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::utils::nip99::{Product, ProductFormat};
-use crate::stores::shop_store::{
-    search_products, CART_ITEMS,
-    ShopFilterState, filter_products, sort_products, ProductSortBy,
-};
 use crate::components::shop::{ProductCard, ProductCardSkeleton};
+use crate::routes::Route;
+use crate::stores::shop_store::{
+    filter_products, search_products, sort_products, ProductSortBy, ShopFilterState, CART_ITEMS,
+};
+use crate::utils::nip99::{Product, ProductFormat};
+use dioxus::prelude::*;
 
 /// Product search page
 #[component]
@@ -56,7 +55,11 @@ pub fn ShopSearch(q: String) -> Element {
         ShopFilterState {
             min_price_sats: *min_price.read(),
             max_price_sats: *max_price.read(),
-            category: if cat.is_empty() { None } else { Some(cat.clone()) },
+            category: if cat.is_empty() {
+                None
+            } else {
+                Some(cat.clone())
+            },
             format: if digital {
                 Some(ProductFormat::Digital)
             } else if physical {

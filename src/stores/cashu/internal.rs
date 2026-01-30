@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
-use dioxus::prelude::*;
 use cdk::nuts::{CurrencyUnit, State};
 use cdk::Wallet;
 use cdk_common::database::WalletDatabase;
+use dioxus::prelude::*;
 
 use super::proofs::proof_data_to_cdk_proof;
 use super::signals::{SHARED_LOCALSTORE, WALLET_STATE, WALLET_TOKENS};
@@ -129,9 +129,8 @@ pub(crate) async fn create_ephemeral_wallet(
         // CDK best practice: Validate proof format before injection
         // to prevent malformed proofs from causing mid-operation failures
         for (idx, proof) in proofs.iter().enumerate() {
-            validate_proof_format(proof).map_err(|e| {
-                format!("Invalid proof at index {}: {}", idx, e)
-            })?;
+            validate_proof_format(proof)
+                .map_err(|e| format!("Invalid proof at index {}: {}", idx, e))?;
         }
 
         let mint_url_parsed: CdkMintUrl = mint_url
@@ -187,7 +186,14 @@ pub(crate) async fn create_ephemeral_wallet(
 
             let proof_infos: Vec<_> = new_proofs
                 .into_iter()
-                .map(|p| ProofInfo::new(p, mint_url_parsed.clone(), State::Unspent, CurrencyUnit::Sat))
+                .map(|p| {
+                    ProofInfo::new(
+                        p,
+                        mint_url_parsed.clone(),
+                        State::Unspent,
+                        CurrencyUnit::Sat,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("Failed to create proof info: {}", e))?;
 
@@ -281,9 +287,7 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
 // Re-export error detection helpers from errors module to avoid duplication.
 // The canonical implementations live in errors.rs.
 pub(crate) use super::errors::{
-    is_token_already_spent_error,
-    is_token_spent_error_string,
-    is_insufficient_funds_error_string,
+    is_insufficient_funds_error_string, is_token_already_spent_error, is_token_spent_error_string,
 };
 
 // =============================================================================
@@ -359,11 +363,7 @@ pub(crate) async fn validate_proofs_with_mint(
         return Ok(proofs);
     }
 
-    log::debug!(
-        "Validating {} proofs with mint: {}",
-        proofs.len(),
-        mint_url
-    );
+    log::debug!("Validating {} proofs with mint: {}", proofs.len(), mint_url);
 
     // Create wallet with proofs to check
     let wallet = create_ephemeral_wallet(mint_url, proofs.clone()).await?;
@@ -428,7 +428,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         let store = WALLET_TOKENS.read();
         let data = store.data();
         let tokens = data.read();
-        let mint_tokens: Vec<_> = tokens.iter().filter(|t| mint_matches(&t.mint, mint_url)).collect();
+        let mint_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| mint_matches(&t.mint, mint_url))
+            .collect();
 
         if mint_tokens.is_empty() {
             log::info!("No proofs to check");
@@ -520,8 +523,7 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         .as_nostr_signer();
 
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey =
-        PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let client = crate::stores::nostr_client::NOSTR_CLIENT
         .read()
@@ -561,7 +563,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
         match client.send_event_builder(builder).await {
             Ok(event_output) => {
                 new_event_id = Some(event_output.id().to_hex());
-                log::info!("Published cleanup token event: {}", new_event_id.as_ref().unwrap());
+                log::info!(
+                    "Published cleanup token event: {}",
+                    new_event_id.as_ref().unwrap()
+                );
             }
             Err(e) => {
                 log::warn!("Failed to publish cleanup token event: {}", e);
@@ -593,7 +598,10 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
 
             match client.send_event_builder(deletion_builder.clone()).await {
                 Ok(_) => {
-                    log::info!("Published deletion event for {} token events", valid_event_ids.len());
+                    log::info!(
+                        "Published deletion event for {} token events",
+                        valid_event_ids.len()
+                    );
                 }
                 Err(e) => {
                     log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
@@ -603,7 +611,8 @@ pub(crate) async fn cleanup_spent_proofs_internal(mint_url: &str) -> Result<(usi
                         super::types::PendingEventType::DeletionEvent,
                         None,
                         None,
-                    ).await;
+                    )
+                    .await;
                 }
             }
         }
@@ -711,7 +720,10 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
     // Log x-only pubkeys for debugging P2PK matching
     for key in &keys {
         let xonly = key.public_key().x_only_public_key();
-        log::debug!("P2PK signing key x-only pubkey: {}", hex::encode(xonly.serialize()));
+        log::debug!(
+            "P2PK signing key x-only pubkey: {}",
+            hex::encode(xonly.serialize())
+        );
     }
 
     log::debug!(
@@ -727,7 +739,9 @@ pub(crate) async fn collect_p2pk_signing_keys() -> Vec<cdk::nuts::SecretKey> {
 /// compressed secp256k1 public keys. Per BIP340 convention, x-only pubkeys
 /// implicitly represent the point with even Y parity, so we try 02 prefix first.
 /// Falls back to 03 (odd parity) if even fails validation.
-pub(crate) fn nostr_pubkey_to_cdk_pubkey(nostr_pubkey: &str) -> Result<cdk::nuts::PublicKey, String> {
+pub(crate) fn nostr_pubkey_to_cdk_pubkey(
+    nostr_pubkey: &str,
+) -> Result<cdk::nuts::PublicKey, String> {
     // Parse the Nostr pubkey (supports npub, hex, NIP-21)
     let parsed = nostr_sdk::PublicKey::parse(nostr_pubkey)
         .map_err(|e| format!("Invalid Nostr pubkey: {}", e))?;
@@ -826,21 +840,17 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
         let proof_infos: Vec<ProofInfo> = token
             .proofs
             .iter()
-            .filter_map(|p| {
-                match proof_data_to_cdk_proof(p) {
-                    Ok(cdk_proof) => {
-                        ProofInfo::new(
-                            cdk_proof,
-                            mint_url.clone(),
-                            State::Unspent,
-                            CurrencyUnit::Sat,
-                        )
-                        .ok()
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to convert proof: {}", e);
-                        None
-                    }
+            .filter_map(|p| match proof_data_to_cdk_proof(p) {
+                Ok(cdk_proof) => ProofInfo::new(
+                    cdk_proof,
+                    mint_url.clone(),
+                    State::Unspent,
+                    CurrencyUnit::Sat,
+                )
+                .ok(),
+                Err(e) => {
+                    log::warn!("Failed to convert proof: {}", e);
+                    None
                 }
             })
             .collect();
@@ -873,9 +883,9 @@ pub(crate) async fn inject_nip60_proofs_to_cdk() -> Result<(), String> {
 // Atomic Recovery Wrapper (CDK pattern: try_proof_operation_or_reclaim)
 // =============================================================================
 
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 
 /// Per-mint recovery state - combines lock flag and pending queue atomically
 /// CDK pattern: single lock per wallet, but we need per-mint for parallel recovery
@@ -934,7 +944,11 @@ where
 
                 if state.in_recovery {
                     // Recovery already running - queue proofs atomically
-                    log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs.len());
+                    log::debug!(
+                        "Recovery in progress for {}, queuing {} proofs",
+                        mint_url,
+                        proofs.len()
+                    );
                     state.pending_proofs.extend(proofs);
                     None
                 } else {
@@ -949,7 +963,9 @@ where
 
                 // Sync initial proofs with mint (CDK pattern: batch in chunks of 100)
                 for chunk in proofs.chunks(BATCH_PROOF_SIZE) {
-                    if let Err(sync_err) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
+                    if let Err(sync_err) =
+                        sync_proofs_with_mint_after_failure(mint_url, chunk).await
+                    {
                         log::warn!("Failed to sync proof states for {}: {}", mint_url, sync_err);
                     }
                 }
@@ -976,7 +992,11 @@ where
                         break;
                     }
 
-                    log::info!("Processing {} queued proofs for {}", queued_proofs.len(), mint_url);
+                    log::info!(
+                        "Processing {} queued proofs for {}",
+                        queued_proofs.len(),
+                        mint_url
+                    );
                     // CDK pattern: batch in chunks of 100
                     for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
                         if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {
@@ -1087,7 +1107,11 @@ pub(crate) async fn try_swap_or_recover(
 
                 if state.in_recovery {
                     // Recovery already running - queue proofs atomically
-                    log::debug!("Recovery in progress for {}, queuing {} proofs", mint_url, proofs_clone.len());
+                    log::debug!(
+                        "Recovery in progress for {}, queuing {} proofs",
+                        mint_url,
+                        proofs_clone.len()
+                    );
                     state.pending_proofs.extend(proofs_clone);
                     None
                 } else {
@@ -1128,7 +1152,11 @@ pub(crate) async fn try_swap_or_recover(
                         break;
                     }
 
-                    log::info!("Processing {} queued proofs for {}", queued_proofs.len(), mint_url);
+                    log::info!(
+                        "Processing {} queued proofs for {}",
+                        queued_proofs.len(),
+                        mint_url
+                    );
                     // CDK pattern: batch in chunks of 100
                     for chunk in queued_proofs.chunks(BATCH_PROOF_SIZE) {
                         if let Err(e) = sync_proofs_with_mint_after_failure(mint_url, chunk).await {

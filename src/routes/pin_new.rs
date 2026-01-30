@@ -2,16 +2,14 @@
 //! Allows users to create pins by entering a URL, nostr event ID, or address
 //! Features metadata fetch preview and collaborative board support
 
-use dioxus::prelude::*;
-use nostr_sdk::prelude::*;
-use crate::stores::pin_boards_store::{
-    self, Pinboard, PinContentType, PinReference, PinInput,
-};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::utils::nip73::ExternalContentId;
-use crate::utils::pin_metadata::{self, PinPreviewMetadata};
 use crate::components::{ClientInitializing, MediaUploader};
 use crate::routes::Route;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{self, PinContentType, PinInput, PinReference, Pinboard};
+use crate::utils::nip73::ExternalContentId;
+use crate::utils::pin_metadata::{self, PinPreviewMetadata};
+use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
 
 /// Fetch state for metadata preview
 #[derive(Clone, Debug, PartialEq)]
@@ -285,9 +283,7 @@ pub fn PinNew() -> Element {
     let mut error = use_signal(|| None::<String>);
 
     // Detect input type reactively
-    let detected_type = use_memo(move || {
-        DetectedInputType::detect(&reference_input.read())
-    });
+    let detected_type = use_memo(move || DetectedInputType::detect(&reference_input.read()));
 
     // Fetch user's boards on mount
     use_effect(move || {
@@ -317,12 +313,8 @@ pub fn PinNew() -> Element {
 
         spawn(async move {
             let result = match current_type {
-                DetectedInputType::Url(url) => {
-                    pin_metadata::fetch_url_preview(&url).await
-                }
-                DetectedInputType::EventId(id) => {
-                    pin_metadata::fetch_event_preview(&id).await
-                }
+                DetectedInputType::Url(url) => pin_metadata::fetch_url_preview(&url).await,
+                DetectedInputType::EventId(id) => pin_metadata::fetch_event_preview(&id).await,
                 DetectedInputType::Address(addr) => {
                     pin_metadata::fetch_address_preview(&addr).await
                 }
@@ -376,7 +368,9 @@ pub fn PinNew() -> Element {
         let pin_reference = match current_type.to_pin_reference() {
             Some(r) => r,
             None => {
-                error.set(Some("Please enter a valid URL, nostr event, or address".to_string()));
+                error.set(Some(
+                    "Please enter a valid URL, nostr event, or address".to_string(),
+                ));
                 return;
             }
         };
@@ -385,7 +379,8 @@ pub fn PinNew() -> Element {
         is_submitting.set(true);
 
         // Parse tags
-        let tags: Vec<String> = tags_input.read()
+        let tags: Vec<String> = tags_input
+            .read()
             .split(',')
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
@@ -395,11 +390,17 @@ pub fn PinNew() -> Element {
         let mut all_boards = selected_board_addrs.read().clone();
         all_boards.extend(other_boards.read().clone());
 
-        let pin_title = if title.read().is_empty() { None } else { Some(title.read().clone()) };
+        let pin_title = if title.read().is_empty() {
+            None
+        } else {
+            Some(title.read().clone())
+        };
         let pin_comment = comment.read().clone();
 
         // Use custom image if set, otherwise use fetched metadata image
-        let pin_image = custom_image_url.read().clone()
+        let pin_image = custom_image_url
+            .read()
+            .clone()
             .or_else(|| fetched_metadata.read().image.clone());
 
         let input = PinInput {
@@ -972,11 +973,7 @@ pub fn PinNew() -> Element {
 
 /// Board checkbox component
 #[component]
-fn BoardCheckbox(
-    board: Pinboard,
-    is_selected: bool,
-    on_toggle: EventHandler<String>,
-) -> Element {
+fn BoardCheckbox(board: Pinboard, is_selected: bool, on_toggle: EventHandler<String>) -> Element {
     let a_tag = board.a_tag.clone();
 
     rsx! {

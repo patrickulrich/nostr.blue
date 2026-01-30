@@ -8,12 +8,12 @@
 //! - Auto-scroll to current cue (podverse-inspired)
 //! - Search/filter functionality
 
-use dioxus::prelude::*;
-use crate::utils::podcast::TranscriptRef;
+use crate::components::icons;
 use crate::services::podcast_index::fetch_transcript_proxied;
 use crate::services::podcast_rss::format_duration;
 use crate::stores::music_player;
-use crate::components::icons;
+use crate::utils::podcast::TranscriptRef;
+use dioxus::prelude::*;
 
 // ============================================================================
 // Transcript Types
@@ -220,16 +220,27 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
     let filtered_indices: Vec<usize> = if search_text.is_empty() {
         (0..props.cues.len()).collect()
     } else {
-        props.cues.iter().enumerate()
+        props
+            .cues
+            .iter()
+            .enumerate()
             .filter(|(_, cue)| {
-                cue.text.to_lowercase().contains(&search_text) ||
-                cue.speaker.as_ref().map(|s| s.to_lowercase().contains(&search_text)).unwrap_or(false)
+                cue.text.to_lowercase().contains(&search_text)
+                    || cue
+                        .speaker
+                        .as_ref()
+                        .map(|s| s.to_lowercase().contains(&search_text))
+                        .unwrap_or(false)
             })
             .map(|(idx, _)| idx)
             .collect()
     };
 
-    let match_count = if search_text.is_empty() { 0 } else { filtered_indices.len() };
+    let match_count = if search_text.is_empty() {
+        0
+    } else {
+        filtered_indices.len()
+    };
 
     // Auto-scroll effect - scroll current cue into view
     // Subscribes to both auto_scroll_enabled and current_idx_signal
@@ -272,7 +283,11 @@ fn TranscriptView(props: TranscriptViewProps) -> Element {
         };
     }
 
-    let max_height = if props.compact { "max-h-48" } else { "max-h-96" };
+    let max_height = if props.compact {
+        "max-h-48"
+    } else {
+        "max-h-96"
+    };
 
     rsx! {
         div {
@@ -549,7 +564,11 @@ struct HighlightedTextProps {
 
 #[component]
 fn HighlightedText(props: HighlightedTextProps) -> Element {
-    let base_class = if props.is_current { "text-sm text-foreground" } else { "text-sm text-muted-foreground" };
+    let base_class = if props.is_current {
+        "text-sm text-foreground"
+    } else {
+        "text-sm text-muted-foreground"
+    };
 
     if props.highlight.is_empty() {
         return rsx! {
@@ -705,7 +724,8 @@ fn parse_vtt(content: &str) -> Vec<TranscriptCue> {
             let parts: Vec<&str> = line.split("-->").collect();
             if parts.len() >= 2 {
                 let start_time = parse_vtt_timestamp(parts[0].trim());
-                let end_time = parse_vtt_timestamp(parts[1].split_whitespace().next().unwrap_or(""));
+                let end_time =
+                    parse_vtt_timestamp(parts[1].split_whitespace().next().unwrap_or(""));
 
                 // Collect text lines until empty line
                 let mut text_lines = Vec::new();

@@ -10,9 +10,8 @@ pub use search::BibleSearch;
 use dioxus::prelude::*;
 
 use crate::stores::bible_store::{
-    self, Book, ENGLISH_TRANSLATIONS, CURRENT_BOOKS, CURRENT_TRANSLATION,
-    LOADING_TRANSLATIONS, LOADING_BOOKS, BIBLE_STORE_INITIALIZED,
-    split_books_by_testament,
+    self, split_books_by_testament, Book, BIBLE_STORE_INITIALIZED, CURRENT_BOOKS,
+    CURRENT_TRANSLATION, ENGLISH_TRANSLATIONS, LOADING_BOOKS, LOADING_TRANSLATIONS,
 };
 
 /// Bible Home Page - Book/Chapter picker

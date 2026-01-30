@@ -66,7 +66,11 @@ pub async fn get_relay_score(client: &Client, url: &str) -> f64 {
             // Guard against NaN - fall back to 0.0 if not finite
             let live_score = {
                 let rate = stats.success_rate();
-                if rate.is_finite() { rate } else { 0.0 }
+                if rate.is_finite() {
+                    rate
+                } else {
+                    0.0
+                }
             };
 
             // Boost for currently connected relays
@@ -137,23 +141,30 @@ pub async fn persist_relay_stats(client: &Client) {
         let stats = relay.stats();
 
         // Get or create snapshot
-        let mut snapshot = snapshots.remove(&url_str).unwrap_or_else(|| RelayScoreSnapshot {
-            url: url_str.clone(),
-            ..Default::default()
-        });
+        let mut snapshot = snapshots
+            .remove(&url_str)
+            .unwrap_or_else(|| RelayScoreSnapshot {
+                url: url_str.clone(),
+                ..Default::default()
+            });
 
         // Update with current stats
         // Guard against NaN/Inf - fall back to 0.0 if not finite
         snapshot.lifetime_success_rate = {
             let rate = stats.success_rate();
-            if rate.is_finite() { rate } else { 0.0 }
+            if rate.is_finite() {
+                rate
+            } else {
+                0.0
+            }
         };
         snapshot.total_bytes_transferred = stats.bytes_sent() + stats.bytes_received();
 
         // Update connected time if currently connected
         if relay.is_connected() {
             // Only count as new connection if there was a gap (>60s since last seen)
-            let is_new_connection = snapshot.last_seen_connected
+            let is_new_connection = snapshot
+                .last_seen_connected
                 .map(|last| now_ms.saturating_sub(last) > 60_000)
                 .unwrap_or(true);
 
@@ -204,7 +215,10 @@ pub fn get_score_stats() -> Option<(usize, f64)> {
         return None;
     }
 
-    let avg_score: f64 = snapshots.values().map(|s| s.lifetime_success_rate).sum::<f64>()
+    let avg_score: f64 = snapshots
+        .values()
+        .map(|s| s.lifetime_success_rate)
+        .sum::<f64>()
         / snapshots.len() as f64;
 
     Some((snapshots.len(), avg_score))

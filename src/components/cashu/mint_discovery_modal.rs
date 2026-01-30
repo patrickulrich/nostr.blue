@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::DiscoveredMint;
 use crate::utils::format::truncate_pubkey;
+use dioxus::prelude::*;
 
 #[component]
 pub fn CashuMintDiscoveryModal(
@@ -54,15 +54,19 @@ pub fn CashuMintDiscoveryModal(
 
     // Precompute display names for discovered mints to avoid URL parsing on every render
     let mints_with_display = use_memo(move || {
-        discovered_mints.read().iter().map(|mint| {
-            let display_name = mint.name.clone().unwrap_or_else(|| {
-                url::Url::parse(&mint.url)
-                    .ok()
-                    .and_then(|u| u.host_str().map(|h| h.to_string()))
-                    .unwrap_or_else(|| mint.url.clone())
-            });
-            (mint.clone(), display_name)
-        }).collect::<Vec<_>>()
+        discovered_mints
+            .read()
+            .iter()
+            .map(|mint| {
+                let display_name = mint.name.clone().unwrap_or_else(|| {
+                    url::Url::parse(&mint.url)
+                        .ok()
+                        .and_then(|u| u.host_str().map(|h| h.to_string()))
+                        .unwrap_or_else(|| mint.url.clone())
+                });
+                (mint.clone(), display_name)
+            })
+            .collect::<Vec<_>>()
     });
 
     rsx! {
@@ -343,4 +347,3 @@ pub fn CashuMintDiscoveryModal(
         }
     }
 }
-

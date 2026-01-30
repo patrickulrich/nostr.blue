@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
-use cdk::nuts::{PaymentRequest, TransportType};
 use crate::stores::cashu;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
+use cdk::nuts::{PaymentRequest, TransportType};
+use dioxus::prelude::*;
 
 #[derive(Clone)]
 enum PayState {
@@ -29,9 +29,7 @@ impl PartialEq for PayState {
 }
 
 #[component]
-pub fn CashuPayRequestModal(
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
     let mut request_input = use_signal(String::new);
     let mut custom_amount = use_signal(String::new);
     let mut pay_state = use_signal(|| PayState::Input);
@@ -59,7 +57,9 @@ pub fn CashuPayRequestModal(
         let input = request_input.read().trim().to_string();
 
         if input.is_empty() {
-            pay_state.set(PayState::Error { message: "Please enter a payment request".to_string() });
+            pay_state.set(PayState::Error {
+                message: "Please enter a payment request".to_string(),
+            });
             return;
         }
 
@@ -89,7 +89,9 @@ pub fn CashuPayRequestModal(
             match custom_amt_str.parse::<u64>() {
                 Ok(a) if a > 0 => Some(a),
                 _ => {
-                    pay_state.set(PayState::Error { message: "Invalid custom amount".to_string() });
+                    pay_state.set(PayState::Error {
+                        message: "Invalid custom amount".to_string(),
+                    });
                     return;
                 }
             }

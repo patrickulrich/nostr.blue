@@ -5,19 +5,22 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 
-use crate::stores::bible_store::{
-    self, ChapterContent, VerseContent,
-};
-use crate::services::bible_api::verse_to_plain_text;
-use crate::stores::auth_store;
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
 use crate::components::HighlightModal;
+use crate::services::bible_api::verse_to_plain_text;
+use crate::stores::auth_store;
+use crate::stores::bible_store::{self, ChapterContent, VerseContent};
 
 /// Build a HashMap mapping verse numbers to plain text for efficient lookup
 fn build_verse_text_map(content: &[ChapterContent]) -> HashMap<u32, String> {
-    content.iter()
+    content
+        .iter()
         .filter_map(|c| {
-            if let ChapterContent::Verse { number, content: verse_content } = c {
+            if let ChapterContent::Verse {
+                number,
+                content: verse_content,
+            } = c
+            {
                 Some((*number, verse_to_plain_text(verse_content)))
             } else {
                 None
@@ -84,7 +87,9 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
     let mut loaded_key = use_signal(String::new);
 
     // Chapter data signal
-    let mut chapter_data: Signal<Option<Result<crate::services::bible_api::ChapterResponse, String>>> = use_signal(|| None);
+    let mut chapter_data: Signal<
+        Option<Result<crate::services::bible_api::ChapterResponse, String>>,
+    > = use_signal(|| None);
 
     // Load chapter if key changed - check during render with fresh prop values
     // This pattern works because we compare current props against stored state each render
@@ -103,7 +108,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         let t = translation.clone();
         let b = book.clone();
         let c = chapter;
-        let request_key = current_key.clone();  // Capture for verification (nostr-sdk double-check pattern)
+        let request_key = current_key.clone(); // Capture for verification (nostr-sdk double-check pattern)
 
         // Spawn the async load
         spawn(async move {
@@ -111,7 +116,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
 
             // Double-check guard: only update if still the latest request
             if *loaded_key.peek() != request_key {
-                return;  // Navigation happened, discard stale result
+                return; // Navigation happened, discard stale result
             }
 
             // Set chapter data immediately so content renders
@@ -188,7 +193,10 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     let reference = if first == last {
                         format!("{} {}:{} ({})", book_name, chapter, first, translation)
                     } else {
-                        format!("{} {}:{}-{} ({})", book_name, chapter, first, last, translation)
+                        format!(
+                            "{} {}:{}-{} ({})",
+                            book_name, chapter, first, last, translation
+                        )
                     };
                     let full_text = format!("{}\n\u{2014} {}", text_parts.join(" "), reference);
 
@@ -204,8 +212,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
 
                         // Check if Clipboard API is available (requires HTTPS or localhost)
                         let navigator = window.navigator();
-                        let clipboard_exists = js_sys::Reflect::has(&navigator, &"clipboard".into())
-                            .unwrap_or(false);
+                        let clipboard_exists =
+                            js_sys::Reflect::has(&navigator, &"clipboard".into()).unwrap_or(false);
 
                         if !clipboard_exists {
                             log::warn!("Clipboard API unavailable (requires HTTPS or localhost)");
@@ -254,7 +262,10 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 let reference = if first == last {
                     format!("{} {}:{} ({})", book_name, chapter, first, translation)
                 } else {
-                    format!("{} {}:{}-{} ({})", book_name, chapter, first, last, translation)
+                    format!(
+                        "{} {}:{}-{} ({})",
+                        book_name, chapter, first, last, translation
+                    )
                 };
 
                 let verse_text = text_parts.join(" ");

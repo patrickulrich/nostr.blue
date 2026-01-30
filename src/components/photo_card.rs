@@ -1,13 +1,13 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event, PublicKey, Filter, Kind, FromBech32};
-use crate::routes::Route;
-use crate::stores::nostr_client::{publish_note_tracked, publish_repost, get_client, HAS_SIGNER};
+use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ZapIcon};
+use crate::components::{ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
+use crate::routes::Route;
 use crate::stores::bookmarks;
+use crate::stores::nostr_client::{get_client, publish_note_tracked, publish_repost, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
-use crate::components::icons::{MessageCircleIcon, Repeat2Icon, BookmarkIcon, ZapIcon};
-use crate::components::{ZapModal, ReactionButton};
-use crate::utils::{format_sats_compact, format_relative_time_or, truncate_pubkey};
+use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
 use std::time::Duration;
 
 /// Skeleton loader for PhotoCard - prevents layout shift during loading
@@ -202,7 +202,7 @@ pub fn PhotoCard(event: Event) -> Element {
     if images.is_empty() {
         return rsx! {
             div { class: "hidden" }
-        }
+        };
     }
 
     // Fetch counts - only run once per event_id
@@ -238,23 +238,33 @@ pub fn PhotoCard(event: Event) -> Element {
             // Fetch both and combine
             let mut all_replies = Vec::new();
 
-            if let Ok(lower_replies) = client.fetch_events(reply_filter_lower, Duration::from_secs(5)).await {
+            if let Ok(lower_replies) = client
+                .fetch_events(reply_filter_lower, Duration::from_secs(5))
+                .await
+            {
                 all_replies.extend(lower_replies.into_iter());
             }
 
-            if let Ok(upper_replies) = client.fetch_events(reply_filter_upper, Duration::from_secs(5)).await {
+            if let Ok(upper_replies) = client
+                .fetch_events(reply_filter_upper, Duration::from_secs(5))
+                .await
+            {
                 all_replies.extend(upper_replies.into_iter());
             }
 
             // Deduplicate by event ID and count by kind
             let mut seen_ids = std::collections::HashSet::new();
-            let unique_events: Vec<_> = all_replies.into_iter()
+            let unique_events: Vec<_> = all_replies
+                .into_iter()
                 .filter(|event| seen_ids.insert(event.id))
                 .collect();
 
             // Count replies (TextNote, Comment) and reposts separately
             // Also check if current user has reposted
-            let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            let current_user_pubkey = SIGNER_INFO
+                .read()
+                .as_ref()
+                .map(|info| info.public_key.clone());
             let mut replies = 0usize;
             let mut reposts = 0usize;
             let mut user_has_reposted = false;
@@ -287,64 +297,88 @@ pub fn PhotoCard(event: Event) -> Element {
                 .event(event_id_parsed)
                 .limit(500);
 
-            if let Ok(zaps) = client.fetch_events(zap_filter, Duration::from_secs(5)).await {
-                let current_user_pubkey = SIGNER_INFO.read().as_ref().map(|info| info.public_key.clone());
+            if let Ok(zaps) = client
+                .fetch_events(zap_filter, Duration::from_secs(5))
+                .await
+            {
+                let current_user_pubkey = SIGNER_INFO
+                    .read()
+                    .as_ref()
+                    .map(|info| info.public_key.clone());
                 let mut user_has_zapped = false;
 
-                let total_sats: u64 = zaps.iter().filter_map(|zap_event| {
-                    // Check if this zap is from the current user
-                    // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
-                    if let Some(ref user_pk) = current_user_pubkey {
-                        // Method 1: Try to get sender from uppercase "P" tag (most common)
-                        let mut zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
-                                Some(tag_vec.get(1)?.as_str().to_string())
-                            } else {
-                                None
-                            }
-                        });
-
-                        // Method 2: Fallback - parse description tag (contains zap request JSON)
-                        if zap_sender_pubkey.is_none() {
-                            zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                let total_sats: u64 = zaps
+                    .iter()
+                    .filter_map(|zap_event| {
+                        // Check if this zap is from the current user
+                        // Per NIP-57: The uppercase P tag contains the pubkey of the zap sender
+                        if let Some(ref user_pk) = current_user_pubkey {
+                            // Method 1: Try to get sender from uppercase "P" tag (most common)
+                            let mut zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
                                 let tag_vec = tag.clone().to_vec();
-                                if tag_vec.first()?.as_str() == "description" {
-                                    let zap_request_json = tag_vec.get(1)?.as_str();
-                                    if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                        // The pubkey field in the zap request is the sender
-                                        return zap_request.get("pubkey")
-                                            .and_then(|p| p.as_str())
-                                            .map(|s| s.to_string());
-                                    }
+                                if tag_vec.len() >= 2 && tag_vec.first()?.as_str() == "P" {
+                                    Some(tag_vec.get(1)?.as_str().to_string())
+                                } else {
+                                    None
                                 }
-                                None
                             });
-                        }
 
-                        if let Some(zap_sender) = zap_sender_pubkey {
-                            if zap_sender == *user_pk {
-                                user_has_zapped = true;
+                            // Method 2: Fallback - parse description tag (contains zap request JSON)
+                            if zap_sender_pubkey.is_none() {
+                                zap_sender_pubkey = zap_event.tags.iter().find_map(|tag| {
+                                    let tag_vec = tag.clone().to_vec();
+                                    if tag_vec.first()?.as_str() == "description" {
+                                        let zap_request_json = tag_vec.get(1)?.as_str();
+                                        if let Ok(zap_request) =
+                                            serde_json::from_str::<serde_json::Value>(
+                                                zap_request_json,
+                                            )
+                                        {
+                                            // The pubkey field in the zap request is the sender
+                                            return zap_request
+                                                .get("pubkey")
+                                                .and_then(|p| p.as_str())
+                                                .map(|s| s.to_string());
+                                        }
+                                    }
+                                    None
+                                });
+                            }
+
+                            if let Some(zap_sender) = zap_sender_pubkey {
+                                if zap_sender == *user_pk {
+                                    user_has_zapped = true;
+                                }
                             }
                         }
-                    }
 
-                    // Look for the description tag which contains the zap request
-                    zap_event.tags.iter().find_map(|tag| {
-                        let tag_vec = tag.clone().to_vec();
-                        if tag_vec.first()?.as_str() == "description" {
-                            // Parse the JSON zap request
-                            let zap_request_json = tag_vec.get(1)?.as_str();
-                            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
-                                // Find the amount tag in the zap request
-                                if let Some(tags) = zap_request.get("tags").and_then(|t| t.as_array()) {
-                                    for tag_array in tags {
-                                        if let Some(tag_vals) = tag_array.as_array() {
-                                            if tag_vals.first().and_then(|v| v.as_str()) == Some("amount") {
-                                                if let Some(amount_str) = tag_vals.get(1).and_then(|v| v.as_str()) {
-                                                    // Amount is in millisats, convert to sats
-                                                    if let Ok(millisats) = amount_str.parse::<u64>() {
-                                                        return Some(millisats / 1000);
+                        // Look for the description tag which contains the zap request
+                        zap_event.tags.iter().find_map(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            if tag_vec.first()?.as_str() == "description" {
+                                // Parse the JSON zap request
+                                let zap_request_json = tag_vec.get(1)?.as_str();
+                                if let Ok(zap_request) =
+                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
+                                {
+                                    // Find the amount tag in the zap request
+                                    if let Some(tags) =
+                                        zap_request.get("tags").and_then(|t| t.as_array())
+                                    {
+                                        for tag_array in tags {
+                                            if let Some(tag_vals) = tag_array.as_array() {
+                                                if tag_vals.first().and_then(|v| v.as_str())
+                                                    == Some("amount")
+                                                {
+                                                    if let Some(amount_str) =
+                                                        tag_vals.get(1).and_then(|v| v.as_str())
+                                                    {
+                                                        // Amount is in millisats, convert to sats
+                                                        if let Ok(millisats) =
+                                                            amount_str.parse::<u64>()
+                                                        {
+                                                            return Some(millisats / 1000);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -352,10 +386,10 @@ pub fn PhotoCard(event: Event) -> Element {
                                     }
                                 }
                             }
-                        }
-                        None
+                            None
+                        })
                     })
-                }).sum();
+                    .sum();
 
                 zap_amount_sats.set(total_sats);
                 is_zapped.set(user_has_zapped);
@@ -367,7 +401,8 @@ pub fn PhotoCard(event: Event) -> Element {
     use_effect(use_reactive(&author_pubkey_for_fetch, move |pubkey_str| {
         spawn(async move {
             let pubkey = match PublicKey::from_hex(&pubkey_str)
-                .or_else(|_| PublicKey::from_bech32(&pubkey_str)) {
+                .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+            {
                 Ok(pk) => pk,
                 Err(_) => return,
             };
@@ -377,14 +412,13 @@ pub fn PhotoCard(event: Event) -> Element {
                 None => return,
             };
 
-            let filter = Filter::new()
-                .author(pubkey)
-                .kind(Kind::Metadata)
-                .limit(1);
+            let filter = Filter::new().author(pubkey).kind(Kind::Metadata).limit(1);
 
             if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await {
                 if let Some(event) = events.into_iter().next() {
-                    if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
+                    if let Ok(metadata) =
+                        serde_json::from_str::<nostr_sdk::Metadata>(&event.content)
+                    {
                         author_metadata.set(Some(metadata));
                     }
                 }
@@ -396,11 +430,15 @@ pub fn PhotoCard(event: Event) -> Element {
     let timestamp = format_relative_time_or(created_at.as_secs(), "just now");
 
     // Get display name and picture from metadata
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let picture_url = author_metadata.read().as_ref()
+    let picture_url = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
     // Navigation to photo detail page

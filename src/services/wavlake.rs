@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
+use serde::{Deserialize, Serialize};
 
 /// Wavlake API base URL
 const WAVLAKE_API_BASE: &str = "https://wavlake.com/api/v1";
@@ -327,8 +327,14 @@ impl WavlakeAPI {
         if !response.ok() {
             let status = response.status();
             let status_text = response.status_text();
-            let body = response.text().await.unwrap_or_else(|_| "Unable to read body".to_string());
-            let error_msg = format!("LNURL fetch failed: {} {}. Body: {}", status, status_text, body);
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read body".to_string());
+            let error_msg = format!(
+                "LNURL fetch failed: {} {}. Body: {}",
+                status, status_text, body
+            );
             log::error!("{}", error_msg);
             return Err(error_msg);
         }

@@ -2,16 +2,31 @@
 //!
 //! Browse and discover NIP-C0 code snippets (Kind 1337).
 
-use dioxus::prelude::*;
-use crate::components::{CodeSnippetCard, icons};
+use crate::components::{icons, CodeSnippetCard};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_recent_snippets;
 use crate::stores::nostr_client;
 use crate::utils::nip34::DisplaySnippet;
+use dioxus::prelude::*;
 
 /// Languages for filtering
 const POPULAR_LANGUAGES: &[&str] = &[
-    "rust", "javascript", "typescript", "python", "go", "java", "c", "cpp", "ruby", "php", "swift", "kotlin", "bash", "sql", "html", "css"
+    "rust",
+    "javascript",
+    "typescript",
+    "python",
+    "go",
+    "java",
+    "c",
+    "cpp",
+    "ruby",
+    "php",
+    "swift",
+    "kotlin",
+    "bash",
+    "sql",
+    "html",
+    "css",
 ];
 
 /// Code snippets browse page component

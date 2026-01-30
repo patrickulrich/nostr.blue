@@ -1,21 +1,24 @@
 //! Community Detail Page
 //! Displays a single community with threaded posts, moderation queue, and about info
 
-use dioxus::prelude::*;
-use crate::stores::community_store::{
-    Community, CommunityPost, CommunityThread, fetch_community_by_a_tag, fetch_community_posts,
-    fetch_pending_posts, get_user_role, can_moderate, UserRole, MembershipStatus,
-    build_community_thread_tree, flatten_thread_tree, get_membership_status,
-};
-use crate::stores::auth_store;
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
-use crate::services::aggregation::{fetch_interaction_counts_batch, InteractionCounts, stream_interaction_counts, InteractionStreamHandle};
 use crate::components::{
-    CommunityPostCard, CommunityPostCardSkeleton, CommunityPostComposerInline,
-    UserRoleBadge, JoinButton, ClientInitializing,
+    ClientInitializing, CommunityPostCard, CommunityPostCardSkeleton, CommunityPostComposerInline,
+    JoinButton, UserRoleBadge,
 };
 use crate::hooks::use_infinite_scroll;
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
+    InteractionStreamHandle,
+};
+use crate::stores::auth_store;
+use crate::stores::community_store::{
+    build_community_thread_tree, can_moderate, fetch_community_by_a_tag, fetch_community_posts,
+    fetch_pending_posts, flatten_thread_tree, get_membership_status, get_user_role, Community,
+    CommunityPost, CommunityThread, MembershipStatus, UserRole,
+};
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::profiles::{fetch_profiles_batch, get_cached_profile};
+use dioxus::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 /// Community page tabs
@@ -44,7 +47,8 @@ pub fn CommunityPage(a_tag: String) -> Element {
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
 
     // Track interaction stream handle for cleanup (Dioxus pattern: store full handle for task cancellation)
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
+    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> =
+        use_signal(|| None);
 
     // Pagination state
     let mut oldest_timestamp = use_signal(|| None::<u64>);
@@ -60,7 +64,9 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
     // Compute user role
     let user_role = use_memo(move || {
-        if let (Some(comm), Some(pk)) = (community.read().as_ref(), current_pubkey_for_role.as_ref()) {
+        if let (Some(comm), Some(pk)) =
+            (community.read().as_ref(), current_pubkey_for_role.as_ref())
+        {
             get_user_role(pk, comm)
         } else {
             UserRole::Visitor
@@ -69,7 +75,8 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
     // Check if user can moderate
     let is_moderator = use_memo(move || {
-        if let (Some(comm), Some(pk)) = (community.read().as_ref(), current_pubkey_for_mod.as_ref()) {
+        if let (Some(comm), Some(pk)) = (community.read().as_ref(), current_pubkey_for_mod.as_ref())
+        {
             can_moderate(pk, comm)
         } else {
             false
@@ -78,7 +85,9 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
     // Compute membership status for JoinButton
     let membership_status = use_memo(move || {
-        if let (Some(comm), Some(pk)) = (community.read().as_ref(), auth_store::get_pubkey().as_ref()) {
+        if let (Some(comm), Some(pk)) =
+            (community.read().as_ref(), auth_store::get_pubkey().as_ref())
+        {
             get_membership_status(pk, comm)
         } else {
             MembershipStatus::None
@@ -173,7 +182,12 @@ pub fn CommunityPage(a_tag: String) -> Element {
 
                         if !event_ids.is_empty() {
                             spawn(async move {
-                                match fetch_interaction_counts_batch(event_ids.clone(), std::time::Duration::from_secs(5)).await {
+                                match fetch_interaction_counts_batch(
+                                    event_ids.clone(),
+                                    std::time::Duration::from_secs(5),
+                                )
+                                .await
+                                {
                                     Ok(counts) => {
                                         interaction_counts.set(counts);
 
@@ -183,7 +197,9 @@ pub fn CommunityPage(a_tag: String) -> Element {
                                             event_ids,
                                             interaction_counts,
                                             Some(600), // 10 minute idle timeout
-                                        ).await {
+                                        )
+                                        .await
+                                        {
                                             interaction_stream_handle.set(Some(handle));
                                         }
                                     }

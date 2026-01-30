@@ -1,13 +1,13 @@
 //! Add to Cookbook Modal
 //! Modal for adding a recipe to an existing cookbook or creating a new one
 
-use dioxus::prelude::*;
-use nostr_sdk::{nips::nip01::Coordinate, FromBech32};
-use crate::stores::pin_boards_store::{self, Pinboard, PinboardInput, PinInput, PinReference};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{self, PinInput, PinReference, Pinboard, PinboardInput};
 use crate::utils::validation::is_valid_http_url;
+use dioxus::prelude::*;
+use nostr_sdk::{nips::nip01::Coordinate, FromBech32};
 
 /// Modal for adding a recipe to a cookbook
 #[component]
@@ -86,7 +86,9 @@ pub fn AddToCookbookModal(
                 }
                 Err(e) => {
                     log::error!("Failed to fetch user cookbooks: {}", e);
-                    fetch_error.set(Some("Failed to load cookbooks. Please try again.".to_string()));
+                    fetch_error.set(Some(
+                        "Failed to load cookbooks. Please try again.".to_string(),
+                    ));
                     has_loaded.set(false); // Allow retry
                 }
             }
@@ -148,7 +150,9 @@ pub fn AddToCookbookModal(
             return;
         }
         if title_val.chars().count() > 100 {
-            error.set(Some("Cookbook name must be 100 characters or less".to_string()));
+            error.set(Some(
+                "Cookbook name must be 100 characters or less".to_string(),
+            ));
             return;
         }
 
@@ -228,7 +232,9 @@ pub fn AddToCookbookModal(
                             {
                                 let task = spawn(async move {
                                     gloo_timers::future::TimeoutFuture::new(1500).await;
-                                    navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                                    navigator.push(Route::PinBoardDetail {
+                                        naddr: cookbook_naddr,
+                                    });
                                 });
                                 navigation_task.set(Some(task));
                             }
@@ -237,7 +243,10 @@ pub fn AddToCookbookModal(
                         Err(e) => {
                             // Cookbook created but pin failed - store cookbook info for retry
                             log::error!("Failed to add recipe to new cookbook: {}", e);
-                            error.set(Some(format!("Cookbook created but failed to add recipe: {}", e)));
+                            error.set(Some(format!(
+                                "Cookbook created but failed to add recipe: {}",
+                                e
+                            )));
                             pending_pin_cookbook.set(Some((cookbook_naddr, board_a_tag_for_retry)));
                             is_submitting.set(false);
                         }
@@ -287,7 +296,9 @@ pub fn AddToCookbookModal(
                     {
                         let task = spawn(async move {
                             gloo_timers::future::TimeoutFuture::new(1500).await;
-                            navigator.push(Route::PinBoardDetail { naddr: cookbook_naddr });
+                            navigator.push(Route::PinBoardDetail {
+                                naddr: cookbook_naddr,
+                            });
                         });
                         navigation_task.set(Some(task));
                     }

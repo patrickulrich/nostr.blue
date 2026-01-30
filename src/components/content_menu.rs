@@ -2,14 +2,14 @@
 //! A reusable dropdown menu for Wiki, Recipe, Publication, and other content types
 //! Similar to NoteMenu but designed for addressable events with naddr
 
-use dioxus::prelude::*;
-use nostr_sdk::nips::nip19::ToBech32;
 use crate::components::icons::MoreHorizontalIcon;
-use crate::components::{ReportModal, AddToListModal};
 use crate::components::pin_board_item_selector::PinToBoardModal;
-use crate::stores::pin_boards_store::{PinContentType, PinReference};
+use crate::components::{AddToListModal, ReportModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{PinContentType, PinReference};
+use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr_sdk::nips::nip19::ToBech32;
 use std::time::Duration;
 
 /// Content type for the menu - determines labels and behavior
@@ -100,7 +100,11 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     // Pre-compute the normalized naddr for both rendering check and onclick handler
     // Strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
     let clean_naddr: String = if naddr.to_ascii_lowercase().starts_with("nostr:") {
-        naddr.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr).to_string()
+        naddr
+            .split_once(':')
+            .map(|(_, rest)| rest)
+            .unwrap_or(&naddr)
+            .to_string()
     } else {
         naddr.clone()
     };
@@ -129,7 +133,9 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let content_name = content_type.display_name();
     // Use provided title or fall back to generic content type name
     // Filter out empty/whitespace-only titles
-    let pin_title = props.title.clone()
+    let pin_title = props
+        .title
+        .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| content_name.to_string());
 

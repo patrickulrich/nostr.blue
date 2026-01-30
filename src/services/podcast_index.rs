@@ -40,7 +40,10 @@ async fn authenticated_get<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T,
         return Err(format!("API error {}: {}", status, body));
     }
 
-    response.json().await.map_err(|e| format!("Parse error: {}", e))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))
 }
 
 // ============================================================================
@@ -258,14 +261,22 @@ pub struct SoundbiteInfo {
 /// Search podcasts by term
 pub async fn search_podcasts(query: &str, max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
-    let url = format!("{}/search/byterm?q={}&max={}", API_BASE, urlencoding::encode(query), max);
+    let url = format!(
+        "{}/search/byterm?q={}&max={}",
+        API_BASE,
+        urlencoding::encode(query),
+        max
+    );
 
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
 }
 
 /// Get trending podcasts
-pub async fn get_trending(max: Option<u32>, category: Option<&str>) -> Result<Vec<PodcastFeed>, String> {
+pub async fn get_trending(
+    max: Option<u32>,
+    category: Option<&str>,
+) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
     let mut url = format!("{}/podcasts/trending?max={}", API_BASE, max);
 
@@ -287,7 +298,11 @@ pub async fn get_categories() -> Result<Vec<Category>, String> {
 
 /// Get podcast by feed URL
 pub async fn get_podcast_by_url(feed_url: &str) -> Result<PodcastFeed, String> {
-    let url = format!("{}/podcasts/byfeedurl?url={}", API_BASE, urlencoding::encode(feed_url));
+    let url = format!(
+        "{}/podcasts/byfeedurl?url={}",
+        API_BASE,
+        urlencoding::encode(feed_url)
+    );
 
     #[derive(Deserialize)]
     struct SingleFeedResponse {
@@ -313,7 +328,11 @@ pub async fn get_podcast_by_id(feed_id: u64) -> Result<PodcastFeed, String> {
 
 /// Get podcast by podcast GUID (NIP-73 podcast:guid: format)
 pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
-    let url = format!("{}/podcasts/byguid?guid={}", API_BASE, urlencoding::encode(guid));
+    let url = format!(
+        "{}/podcasts/byguid?guid={}",
+        API_BASE,
+        urlencoding::encode(guid)
+    );
 
     #[derive(Deserialize)]
     struct SingleFeedResponse {
@@ -326,8 +345,15 @@ pub async fn get_podcast_by_guid(guid: &str) -> Result<PodcastFeed, String> {
 
 /// Get episode by episode GUID (NIP-73 podcast:item:guid: format)
 /// Optionally provide the podcast GUID for more reliable lookups
-pub async fn get_episode_by_guid(guid: &str, podcast_guid: Option<&str>) -> Result<(Episode, Option<PodcastFeed>), String> {
-    let mut url = format!("{}/episodes/byguid?guid={}&fulltext", API_BASE, urlencoding::encode(guid));
+pub async fn get_episode_by_guid(
+    guid: &str,
+    podcast_guid: Option<&str>,
+) -> Result<(Episode, Option<PodcastFeed>), String> {
+    let mut url = format!(
+        "{}/episodes/byguid?guid={}&fulltext",
+        API_BASE,
+        urlencoding::encode(guid)
+    );
     if let Some(pg) = podcast_guid {
         url.push_str(&format!("&podcastguid={}", urlencoding::encode(pg)));
     }
@@ -358,17 +384,27 @@ pub async fn get_episode_by_guid(guid: &str, podcast_guid: Option<&str>) -> Resu
 
 /// Get episodes by podcast GUID
 #[allow(dead_code)]
-pub async fn get_episodes_by_podcast_guid(podcast_guid: &str, max: Option<u32>) -> Result<Vec<Episode>, String> {
+pub async fn get_episodes_by_podcast_guid(
+    podcast_guid: &str,
+    max: Option<u32>,
+) -> Result<Vec<Episode>, String> {
     let max = max.unwrap_or(20);
-    let url = format!("{}/episodes/bypodcastguid?guid={}&max={}&fulltext",
-        API_BASE, urlencoding::encode(podcast_guid), max);
+    let url = format!(
+        "{}/episodes/bypodcastguid?guid={}&max={}&fulltext",
+        API_BASE,
+        urlencoding::encode(podcast_guid),
+        max
+    );
 
     let data: ApiResponse<EpisodesData> = authenticated_get(&url).await?;
     Ok(data.data.items)
 }
 
 /// Get episodes by feed ID
-pub async fn get_episodes_by_feed_id(feed_id: u64, max: Option<u32>) -> Result<Vec<Episode>, String> {
+pub async fn get_episodes_by_feed_id(
+    feed_id: u64,
+    max: Option<u32>,
+) -> Result<Vec<Episode>, String> {
     let max = max.unwrap_or(20);
     let url = format!("{}/episodes/byfeedid?id={}&max={}", API_BASE, feed_id, max);
 
@@ -408,9 +444,17 @@ pub async fn get_live_episodes(max: Option<u32>) -> Result<Vec<Episode>, String>
 
 /// Get podcasts by medium type (podcast, music, video, film, etc.)
 #[allow(dead_code)]
-pub async fn get_podcasts_by_medium(medium: &str, max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
+pub async fn get_podcasts_by_medium(
+    medium: &str,
+    max: Option<u32>,
+) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
-    let url = format!("{}/podcasts/bymedium?medium={}&max={}", API_BASE, urlencoding::encode(medium), max);
+    let url = format!(
+        "{}/podcasts/bymedium?medium={}&max={}",
+        API_BASE,
+        urlencoding::encode(medium),
+        max
+    );
 
     let data: ApiResponse<TrendingData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
@@ -424,7 +468,12 @@ pub async fn get_music_albums(max: Option<u32>) -> Result<Vec<PodcastFeed>, Stri
 /// Search for music feeds specifically using the dedicated /search/music/byterm endpoint
 pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFeed>, String> {
     let max = max.unwrap_or(20);
-    let url = format!("{}/search/music/byterm?q={}&max={}", API_BASE, urlencoding::encode(query), max);
+    let url = format!(
+        "{}/search/music/byterm?q={}&max={}",
+        API_BASE,
+        urlencoding::encode(query),
+        max
+    );
 
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
@@ -438,10 +487,16 @@ pub async fn search_music(query: &str, max: Option<u32>) -> Result<Vec<PodcastFe
 ///
 /// Validates the input URL, builds the proxy URL, handles NIP-98 authentication,
 /// sets up request cancellation via AbortController, and parses the JSON response.
-async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(url: &str, resource_type: &str) -> Result<T, String> {
+async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
+    url: &str,
+    resource_type: &str,
+) -> Result<T, String> {
     // Validate input URL before proxying
     if parse_http_url(url).is_none() {
-        return Err(format!("Invalid {} URL - must be http or https", resource_type));
+        return Err(format!(
+            "Invalid {} URL - must be http or https",
+            resource_type
+        ));
     }
 
     let proxy_url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(url));
@@ -450,8 +505,8 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(url: &str, resource_type:
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET).await?;
 
     // Create AbortController for proper request cancellation on timeout
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController")?;
+    let controller =
+        web_sys::AbortController::new().map_err(|_| "Failed to create AbortController")?;
     let signal = controller.signal();
 
     // Set up abort timeout - controller is cloned for the closure
@@ -477,7 +532,10 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(url: &str, resource_type:
     if !response.ok() {
         let status = response.status();
         // Don't include raw response body in error - could leak sensitive info
-        return Err(format!("{} fetch failed with status {}", resource_type, status));
+        return Err(format!(
+            "{} fetch failed with status {}",
+            resource_type, status
+        ));
     }
 
     response
@@ -490,7 +548,10 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(url: &str, resource_type:
 async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, String> {
     // Validate input URL before proxying
     if parse_http_url(url).is_none() {
-        return Err(format!("Invalid {} URL - must be http or https", resource_type));
+        return Err(format!(
+            "Invalid {} URL - must be http or https",
+            resource_type
+        ));
     }
 
     let proxy_url = format!("{}/proxy/fetch?url={}", API_BASE, urlencoding::encode(url));
@@ -499,8 +560,8 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET).await?;
 
     // Create AbortController for proper request cancellation on timeout
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController")?;
+    let controller =
+        web_sys::AbortController::new().map_err(|_| "Failed to create AbortController")?;
     let signal = controller.signal();
 
     // Set up abort timeout - controller is cloned for the closure
@@ -526,7 +587,10 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
     if !response.ok() {
         let status = response.status();
         // Don't include raw response body in error - could leak sensitive info
-        return Err(format!("{} fetch failed with status {}", resource_type, status));
+        return Err(format!(
+            "{} fetch failed with status {}",
+            resource_type, status
+        ));
     }
 
     response
@@ -539,7 +603,9 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
 ///
 /// This proxies the request through our worker to bypass browser CORS restrictions
 /// when fetching chapters from external podcast hosts.
-pub async fn fetch_chapters_proxied(chapters_url: &str) -> Result<crate::utils::podcast::ChaptersFile, String> {
+pub async fn fetch_chapters_proxied(
+    chapters_url: &str,
+) -> Result<crate::utils::podcast::ChaptersFile, String> {
     fetch_via_proxy(chapters_url, "chapters").await
 }
 

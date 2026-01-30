@@ -2,17 +2,15 @@
 //!
 //! Displays NIP-34 Git issues in cards.
 
-use dioxus::prelude::*;
-use crate::utils::nip34::Issue;
-use crate::routes::Route;
-use super::status_badge::{CodeStatusBadge, BadgeSize};
+use super::status_badge::{BadgeSize, CodeStatusBadge};
 use crate::components::icons::CommentIcon;
+use crate::routes::Route;
+use crate::utils::nip34::Issue;
+use dioxus::prelude::*;
 
 /// Issue card component for lists
 #[component]
-pub fn CodeIssueCard(
-    issue: Issue,
-) -> Element {
+pub fn CodeIssueCard(issue: Issue) -> Element {
     let title = issue.display_title();
 
     rsx! {

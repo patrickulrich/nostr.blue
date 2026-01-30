@@ -4,8 +4,8 @@
 //! Uses `use_resource` for automatic cancellation when the naddr changes.
 
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, FromBech32};
 use nostr_sdk::nips::nip19::Nip19;
+use nostr_sdk::{Event as NostrEvent, FromBech32};
 
 use crate::stores::nostr_client;
 
@@ -77,7 +77,8 @@ pub fn use_fetch_event_by_coordinate_with_message(
     }));
 
     // use_resource auto-tracks naddr_signal reads and re-runs when it changes
-    let resource = use_resource(move || async move { fetch_event_by_coordinate(&naddr_signal()).await });
+    let resource =
+        use_resource(move || async move { fetch_event_by_coordinate(&naddr_signal()).await });
     UseFetchEventByCoordinate {
         resource,
         not_found_message,

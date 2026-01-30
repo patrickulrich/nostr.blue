@@ -2,14 +2,13 @@
 //! Modal for selecting which board(s) to pin content to
 //! Creates Kind 39067 pin events
 
-use dioxus::prelude::*;
-use dioxus::html::input_data::keyboard_types::Key;
-use crate::stores::pin_boards_store::{
-    Pinboard, PinContentType, PinReference, PinInput,
-    publish_pin, fetch_my_pinboards,
-};
-use crate::stores::nostr_client::HAS_SIGNER;
 use crate::routes::Route;
+use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::pin_boards_store::{
+    fetch_my_pinboards, publish_pin, PinContentType, PinInput, PinReference, Pinboard,
+};
+use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
 
 /// Props for PinToBoardModal
 #[derive(Props, Clone, PartialEq)]
@@ -320,11 +319,7 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
 
 /// Board option row component (checkbox style)
 #[component]
-fn BoardOption(
-    board: Pinboard,
-    is_selected: bool,
-    on_toggle: EventHandler<String>,
-) -> Element {
+fn BoardOption(board: Pinboard, is_selected: bool, on_toggle: EventHandler<String>) -> Element {
     let a_tag = board.a_tag.clone();
 
     rsx! {

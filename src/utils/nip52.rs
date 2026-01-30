@@ -190,9 +190,7 @@ impl EventTime {
                     None
                 }
             }
-            CalendarEventType::TimeBased => {
-                s.parse::<u64>().ok().map(EventTime::Timestamp)
-            }
+            CalendarEventType::TimeBased => s.parse::<u64>().ok().map(EventTime::Timestamp),
         }
     }
 
@@ -465,12 +463,11 @@ pub fn parse_calendar_event(event: &Event) -> Result<CalendarEvent, String> {
         .ok_or_else(|| format!("Invalid start time format: {}", start_str))?;
 
     // End time - optional
-    let end = get_tag_value(event, "end")
-        .and_then(|s| EventTime::parse(&s, event_type));
+    let end = get_tag_value(event, "end").and_then(|s| EventTime::parse(&s, event_type));
 
     // Timezones
-    let start_tzid = get_tag_value(event, "start_tzid")
-        .or_else(|| get_tag_value(event, "timezone"));
+    let start_tzid =
+        get_tag_value(event, "start_tzid").or_else(|| get_tag_value(event, "timezone"));
     let end_tzid = get_tag_value(event, "end_tzid");
 
     // Content fields
@@ -530,7 +527,11 @@ pub fn parse_calendar_event(event: &Event) -> Result<CalendarEvent, String> {
 /// Parse a Kind 31925 event into a CalendarRsvp
 pub fn parse_calendar_rsvp(event: &Event) -> Result<CalendarRsvp, String> {
     if event.kind.as_u16() != KIND_CALENDAR_RSVP {
-        return Err(format!("Expected kind {}, got {}", KIND_CALENDAR_RSVP, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_CALENDAR_RSVP,
+            event.kind.as_u16()
+        ));
     }
 
     let pubkey = event.pubkey.to_hex();
@@ -577,7 +578,11 @@ pub fn parse_calendar_rsvp(event: &Event) -> Result<CalendarRsvp, String> {
 /// Parse a Kind 31924 event into a Calendar
 pub fn parse_calendar(event: &Event) -> Result<Calendar, String> {
     if event.kind.as_u16() != KIND_CALENDAR {
-        return Err(format!("Expected kind {}, got {}", KIND_CALENDAR, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_CALENDAR,
+            event.kind.as_u16()
+        ));
     }
 
     let pubkey = event.pubkey.to_hex();
@@ -612,7 +617,11 @@ pub fn parse_calendar(event: &Event) -> Result<Calendar, String> {
 /// Parse a Kind 31926 event into an AvailabilityTemplate
 pub fn parse_availability_template(event: &Event) -> Result<AvailabilityTemplate, String> {
     if event.kind.as_u16() != KIND_AVAILABILITY_TEMPLATE {
-        return Err(format!("Expected kind {}, got {}", KIND_AVAILABILITY_TEMPLATE, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_AVAILABILITY_TEMPLATE,
+            event.kind.as_u16()
+        ));
     }
 
     let pubkey = event.pubkey.to_hex();
@@ -628,26 +637,25 @@ pub fn parse_availability_template(event: &Event) -> Result<AvailabilityTemplate
         .and_then(|s| parse_iso_duration_minutes(&s))
         .ok_or("Missing or invalid 'duration' tag")?;
 
-    let interval_minutes = get_tag_value(event, "interval")
-        .and_then(|s| parse_iso_duration_minutes(&s));
+    let interval_minutes =
+        get_tag_value(event, "interval").and_then(|s| parse_iso_duration_minutes(&s));
 
-    let buffer_before = get_tag_value(event, "buffer_before")
-        .and_then(|s| parse_iso_duration_minutes(&s));
+    let buffer_before =
+        get_tag_value(event, "buffer_before").and_then(|s| parse_iso_duration_minutes(&s));
 
-    let buffer_after = get_tag_value(event, "buffer_after")
-        .and_then(|s| parse_iso_duration_minutes(&s));
+    let buffer_after =
+        get_tag_value(event, "buffer_after").and_then(|s| parse_iso_duration_minutes(&s));
 
     let timezone = get_tag_value(event, "tzid");
 
     // Parse P{d}D format for days
-    let min_notice_days = get_tag_value(event, "min_notice")
-        .and_then(|s| parse_iso_duration_days(&s));
+    let min_notice_days =
+        get_tag_value(event, "min_notice").and_then(|s| parse_iso_duration_days(&s));
 
-    let max_advance_days = get_tag_value(event, "max_advance")
-        .and_then(|s| parse_iso_duration_days(&s));
+    let max_advance_days =
+        get_tag_value(event, "max_advance").and_then(|s| parse_iso_duration_days(&s));
 
-    let amount_sats = get_tag_value(event, "amount")
-        .and_then(|s| s.parse::<u64>().ok());
+    let amount_sats = get_tag_value(event, "amount").and_then(|s| s.parse::<u64>().ok());
 
     // Parse schedule entries ["sch", day, start, end]
     let schedule = parse_schedule_entries(event);
@@ -675,7 +683,11 @@ pub fn parse_availability_template(event: &Event) -> Result<AvailabilityTemplate
 /// Parse a Kind 31927 event into an AvailabilityBlock
 pub fn parse_availability_block(event: &Event) -> Result<AvailabilityBlock, String> {
     if event.kind.as_u16() != KIND_AVAILABILITY_BLOCK {
-        return Err(format!("Expected kind {}, got {}", KIND_AVAILABILITY_BLOCK, event.kind.as_u16()));
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_AVAILABILITY_BLOCK,
+            event.kind.as_u16()
+        ));
     }
 
     let pubkey = event.pubkey.to_hex();
@@ -751,9 +763,19 @@ fn parse_participants(event: &Event) -> Vec<EventParticipant> {
         .filter_map(|t| {
             let slice = t.as_slice();
             let pubkey = slice.get(1)?.to_string();
-            let relay_hint = slice.get(2).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            Some(EventParticipant { pubkey, relay_hint, role })
+            let relay_hint = slice
+                .get(2)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            let role = slice
+                .get(3)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
+            Some(EventParticipant {
+                pubkey,
+                relay_hint,
+                role,
+            })
         })
         .collect()
 }
@@ -769,7 +791,11 @@ fn parse_schedule_entries(event: &Event) -> Vec<ScheduleEntry> {
             let day = slice.get(1)?.to_string();
             let start_time = slice.get(2)?.to_string();
             let end_time = slice.get(3)?.to_string();
-            Some(ScheduleEntry { day, start_time, end_time })
+            Some(ScheduleEntry {
+                day,
+                start_time,
+                end_time,
+            })
         })
         .collect()
 }
@@ -777,7 +803,7 @@ fn parse_schedule_entries(event: &Event) -> Vec<ScheduleEntry> {
 /// Parse ISO-8601 duration in minutes (PT{m}M format)
 fn parse_iso_duration_minutes(s: &str) -> Option<u32> {
     if s.starts_with("PT") && s.ends_with("M") {
-        let num_str = &s[2..s.len()-1];
+        let num_str = &s[2..s.len() - 1];
         num_str.parse::<u32>().ok()
     } else {
         None
@@ -787,7 +813,7 @@ fn parse_iso_duration_minutes(s: &str) -> Option<u32> {
 /// Parse ISO-8601 duration in days (P{d}D format)
 fn parse_iso_duration_days(s: &str) -> Option<u32> {
     if s.starts_with("P") && s.ends_with("D") {
-        let num_str = &s[1..s.len()-1];
+        let num_str = &s[1..s.len() - 1];
         num_str.parse::<u32>().ok()
     } else {
         None
@@ -840,11 +866,22 @@ fn is_leap_year(year: i32) -> bool {
 
 /// Online location patterns for detection
 const ONLINE_PATTERNS: &[&str] = &[
-    "http://", "https://", "www.",
-    "zoom.us", "meet.google", "teams.microsoft",
-    "discord", "jitsi", "webex", "gotomeeting",
-    "whereby", "gather.town", "meet.jit.si",
-    "online", "virtual", "remote",
+    "http://",
+    "https://",
+    "www.",
+    "zoom.us",
+    "meet.google",
+    "teams.microsoft",
+    "discord",
+    "jitsi",
+    "webex",
+    "gotomeeting",
+    "whereby",
+    "gather.town",
+    "meet.jit.si",
+    "online",
+    "virtual",
+    "remote",
 ];
 
 /// Check if a location string represents an online/virtual location
@@ -865,15 +902,27 @@ mod tests {
     fn test_rsvp_status_from_str() {
         assert_eq!(RsvpStatus::from_str("accepted"), Some(RsvpStatus::Accepted));
         assert_eq!(RsvpStatus::from_str("DECLINED"), Some(RsvpStatus::Declined));
-        assert_eq!(RsvpStatus::from_str("tentative"), Some(RsvpStatus::Tentative));
+        assert_eq!(
+            RsvpStatus::from_str("tentative"),
+            Some(RsvpStatus::Tentative)
+        );
         assert_eq!(RsvpStatus::from_str("invalid"), None);
     }
 
     #[test]
     fn test_free_busy_from_rsvp_status() {
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Accepted), FreeBusy::Busy);
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Declined), FreeBusy::Free);
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Tentative), FreeBusy::Free);
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Accepted),
+            FreeBusy::Busy
+        );
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Declined),
+            FreeBusy::Free
+        );
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Tentative),
+            FreeBusy::Free
+        );
     }
 
     #[test]
@@ -920,8 +969,14 @@ mod tests {
 
     #[test]
     fn test_calendar_event_type() {
-        assert_eq!(CalendarEventType::from_kind(31922), Some(CalendarEventType::DateBased));
-        assert_eq!(CalendarEventType::from_kind(31923), Some(CalendarEventType::TimeBased));
+        assert_eq!(
+            CalendarEventType::from_kind(31922),
+            Some(CalendarEventType::DateBased)
+        );
+        assert_eq!(
+            CalendarEventType::from_kind(31923),
+            Some(CalendarEventType::TimeBased)
+        );
         assert_eq!(CalendarEventType::from_kind(12345), None);
     }
 

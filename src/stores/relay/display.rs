@@ -87,7 +87,11 @@ pub async fn get_relay_display_info(client: &Client) -> Vec<RelayDisplayInfo> {
             successful_connections: stats.success(),
             success_rate: {
                 let rate = stats.success_rate();
-                if rate.is_finite() { rate * 100.0 } else { 0.0 }
+                if rate.is_finite() {
+                    rate * 100.0
+                } else {
+                    0.0
+                }
             },
         });
     }

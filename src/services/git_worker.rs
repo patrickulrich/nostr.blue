@@ -194,8 +194,7 @@ impl GitWorkerManager {
 
     /// Internal: call worker and await result
     async fn call_worker(script: &str) -> Result<JsValue, String> {
-        let promise =
-            js_sys::eval(script).map_err(|e| format!("Eval failed: {:?}", e))?;
+        let promise = js_sys::eval(script).map_err(|e| format!("Eval failed: {:?}", e))?;
         let promise = js_sys::Promise::from(promise);
         wasm_bindgen_futures::JsFuture::from(promise)
             .await

@@ -4,8 +4,8 @@
 //! Uses pulldown-cmark for parsing and ammonia for sanitization.
 //! Styled to match gittr's readme-section.tsx pattern.
 
-use dioxus::prelude::*;
 use crate::utils::markdown::render_markdown;
+use dioxus::prelude::*;
 
 /// README viewer with loading/error states
 #[component]

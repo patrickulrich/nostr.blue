@@ -2,12 +2,12 @@
 //! Recipe card for the Discover New section with author avatar in top-left
 //! Matches ~/frontend TrendingRecipeCard.svelte (w-56 h-72)
 
-use dioxus::prelude::*;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::stores::recipe_store::CachedRecipe;
 use crate::utils::truncate_pubkey;
 use crate::utils::validation::{css_safe_url, is_valid_http_url};
+use dioxus::prelude::*;
 
 /// Fallback image for recipes without a valid image URL
 #[component]
@@ -37,19 +37,26 @@ pub fn DiscoverRecipeCard(recipe: CachedRecipe) -> Element {
     let author_metadata = use_author_metadata(author_pubkey.clone());
 
     // Filter out empty/whitespace-only names before use
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| {
-            m.display_name.as_ref()
+            m.display_name
+                .as_ref()
                 .filter(|s| !s.trim().is_empty())
                 .or(m.name.as_ref().filter(|s| !s.trim().is_empty()))
                 .cloned()
         })
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_ascii_uppercase();
 

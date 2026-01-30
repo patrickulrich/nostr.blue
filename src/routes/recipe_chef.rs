@@ -1,14 +1,14 @@
 //! Recipe Chef Profile Page
 //! Displays a chef's profile and their recipes
 
+use crate::components::{RecipeCard, RecipeCardSkeleton};
+use crate::hooks::use_author_metadata;
+use crate::routes::Route;
+use crate::stores::nostr_client;
+use crate::stores::recipe_store::{self, CachedRecipe};
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-use crate::hooks::use_author_metadata;
-use crate::stores::recipe_store::{self, CachedRecipe};
-use crate::stores::nostr_client;
-use crate::components::{RecipeCard, RecipeCardSkeleton};
-use crate::routes::Route;
-use crate::utils::truncate_pubkey;
 
 #[component]
 pub fn RecipeChef(npub: String) -> Element {
@@ -37,9 +37,7 @@ pub fn RecipeChef(npub: String) -> Element {
     });
 
     // Fetch chef metadata using the reusable hook
-    let chef_metadata = use_author_metadata(
-        pubkey_hex.read().clone().unwrap_or_default()
-    );
+    let chef_metadata = use_author_metadata(pubkey_hex.read().clone().unwrap_or_default());
 
     // Fetch recipes on mount
     use_effect(move || {
@@ -109,28 +107,39 @@ pub fn RecipeChef(npub: String) -> Element {
     };
 
     // Display values
-    let display_name = chef_metadata.read().as_ref()
+    let display_name = chef_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
-            pubkey_hex.read().clone()
+            pubkey_hex
+                .read()
+                .clone()
                 .map(|pk| truncate_pubkey(&pk))
                 .unwrap_or_else(|| "Unknown Chef".to_string())
         });
 
-    let profile_picture = chef_metadata.read().as_ref()
+    let profile_picture = chef_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone());
 
-    let bio = chef_metadata.read().as_ref()
-        .and_then(|m| m.about.clone());
+    let bio = chef_metadata.read().as_ref().and_then(|m| m.about.clone());
 
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
 
     // Compute recipe count text for pluralization
     let chef_recipe_count = recipes.read().len();
-    let chef_recipe_text = if chef_recipe_count == 1 { "recipe" } else { "recipes" };
+    let chef_recipe_text = if chef_recipe_count == 1 {
+        "recipe"
+    } else {
+        "recipes"
+    };
 
     rsx! {
         div {

@@ -1,14 +1,14 @@
-use dioxus::prelude::*;
 use crate::components::icons::MoreHorizontalIcon;
-use crate::components::{ReportModal, AddToListModal};
 use crate::components::pin_board_item_selector::PinToBoardModal;
-use crate::stores::pin_boards_store::{PinContentType, PinReference};
+use crate::components::{AddToListModal, ReportModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{PinContentType, PinReference};
 use crate::stores::pinned_notes;
 use crate::utils::clipboard::copy_to_clipboard;
-use nostr_sdk::prelude::*;
-use nostr_sdk::nips::nip19::{ToBech32, FromBech32};
+use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use nostr_sdk::nips::nip19::{FromBech32, ToBech32};
+use nostr_sdk::prelude::*;
 use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]

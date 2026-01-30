@@ -25,19 +25,27 @@ fn is_public_relay(url: &str) -> bool {
         let host = after_scheme.split(&['/', ':'][..]).next().unwrap_or("");
 
         // 10.x.x.x
-        if host.starts_with("10.") { return false; }
+        if host.starts_with("10.") {
+            return false;
+        }
         // 192.168.x.x
-        if host.starts_with("192.168.") { return false; }
+        if host.starts_with("192.168.") {
+            return false;
+        }
         // 172.16-31.x.x
         if host.starts_with("172.") {
             if let Some(second) = host.split('.').nth(1) {
                 if let Ok(n) = second.parse::<u8>() {
-                    if (16..=31).contains(&n) { return false; }
+                    if (16..=31).contains(&n) {
+                        return false;
+                    }
                 }
             }
         }
         // fc00::/7 (private IPv6)
-        if host.starts_with("fc") || host.starts_with("fd") { return false; }
+        if host.starts_with("fc") || host.starts_with("fd") {
+            return false;
+        }
     }
 
     true
@@ -73,8 +81,7 @@ pub async fn make_naddr_with_hints(
     use nostr::nips::nip19::{Nip19Coordinate, ToBech32};
     use nostr::types::url::RelayUrl;
 
-    let coordinate = Coordinate::new(Kind::from(kind), *pubkey)
-        .identifier(identifier);
+    let coordinate = Coordinate::new(Kind::from(kind), *pubkey).identifier(identifier);
 
     // Get write relay hints
     let relay_hints = get_write_relay_hints(client).await;
@@ -84,6 +91,7 @@ pub async fn make_naddr_with_hints(
         .collect();
 
     let nip19 = Nip19Coordinate::new(coordinate, relay_urls);
-    nip19.to_bech32()
+    nip19
+        .to_bech32()
         .map_err(|e| format!("Failed to encode naddr: {}", e))
 }

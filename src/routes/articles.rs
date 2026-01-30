@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, feed_cache, nostr_client};
-use crate::stores::feed_cache::FeedCacheKey;
-use crate::utils::FeedItem;
 use crate::components::{ArticleCard, ArticleCardSkeleton, ClientInitializing};
 use crate::hooks::use_infinite_scroll;
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::article_meta::get_identifier;
+use crate::utils::FeedItem;
+use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -63,7 +63,9 @@ pub fn Articles() -> Element {
         let refresh_changed = refresh != last_refresh;
 
         if has_data && !feed_type_changed && !refresh_changed {
-            log::debug!("Skipping articles feed re-load: data already present, no intentional change");
+            log::debug!(
+                "Skipping articles feed re-load: data already present, no intentional change"
+            );
             return;
         }
 
@@ -109,7 +111,8 @@ pub fn Articles() -> Element {
 
             if !cached_items.is_empty() {
                 log::info!("Loaded {} articles from cache", cached_items.len());
-                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
+                let cached_events: Vec<Event> =
+                    cached_items.iter().map(|i| i.event().clone()).collect();
 
                 // Seed pagination from cache to enable proper pagination on cached data
                 if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
@@ -137,7 +140,7 @@ pub fn Articles() -> Element {
                     let effective_cache_key = if did_fallback {
                         log::info!("No contacts, switched to Global articles feed");
                         feed_type.set(FeedType::Global);
-                        FeedCacheKey::ArticlesGlobal  // Use Global key, not Following
+                        FeedCacheKey::ArticlesGlobal // Use Global key, not Following
                     } else {
                         cache_key.clone()
                     };
@@ -148,11 +151,13 @@ pub fn Articles() -> Element {
                     }
 
                     // STEP 3: Store to cache with effective key
-                    let feed_items: Vec<FeedItem> = feed_events.iter()
+                    let feed_items: Vec<FeedItem> = feed_events
+                        .iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(&effective_cache_key, &feed_items).await;
+                        let _ =
+                            feed_cache::store_feed_items(&effective_cache_key, &feed_items).await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
 
@@ -231,11 +236,7 @@ pub fn Articles() -> Element {
     };
 
     // Set up infinite scroll
-    let sentinel_id = use_infinite_scroll(
-        load_more,
-        has_more,
-        loading
-    );
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
 
     let article_list = articles.read();
     let is_loading = *loading.read();
@@ -434,14 +435,16 @@ async fn load_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
     for article in raw_articles {
         // Only include articles with valid identifiers
         if let Some(identifier) = get_identifier(&article) {
-            let address = format!("{}:{}:{}",
+            let address = format!(
+                "{}:{}:{}",
                 article.kind.as_u16(),
                 article.pubkey.to_hex(),
                 identifier
             );
 
             // Keep the newest version (replace if newer)
-            address_map.entry(address)
+            address_map
+                .entry(address)
                 .and_modify(|existing| {
                     if article.created_at > existing.created_at {
                         *existing = article.clone();
@@ -462,16 +465,22 @@ async fn load_articles(until: Option<u64>) -> Result<Vec<Event>, String> {
 /// Returns (articles, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     // Get current user's pubkey
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading following articles for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading following articles for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     // Fetch the user's contact list (people they follow)
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            log::warn!(
+                "Failed to fetch contacts: {}, falling back to global feed",
+                e
+            );
             let global = load_articles(until).await?;
             return Ok((global, true));
         }
@@ -513,16 +522,25 @@ async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool
         filter = filter.until(Timestamp::from(until_ts));
     }
 
-    log::info!("Fetching articles from {} followed accounts", filter.authors.as_ref().map(|a| a.len()).unwrap_or(0));
+    log::info!(
+        "Fetching articles from {} followed accounts",
+        filter.authors.as_ref().map(|a| a.len()).unwrap_or(0)
+    );
 
     // Fetch articles using aggregated pattern (database first, then relays)
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(raw_articles) => {
-            log::info!("Loaded {} raw articles from following feed", raw_articles.len());
+            log::info!(
+                "Loaded {} raw articles from following feed",
+                raw_articles.len()
+            );
 
             // Convert to Vec for deduplication
             let raw_articles_vec: Vec<Event> = raw_articles.into_iter().collect();
-            log::info!("Processing {} articles for deduplication", raw_articles_vec.len());
+            log::info!(
+                "Processing {} articles for deduplication",
+                raw_articles_vec.len()
+            );
 
             // Deduplicate by address (kind:pubkey:identifier)
             // Keep only the most recent version of each article
@@ -532,14 +550,16 @@ async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool
             for article in raw_articles_vec {
                 // Only include articles with valid identifiers
                 if let Some(identifier) = get_identifier(&article) {
-                    let address = format!("{}:{}:{}",
+                    let address = format!(
+                        "{}:{}:{}",
                         article.kind.as_u16(),
                         article.pubkey.to_hex(),
                         identifier
                     );
 
                     // Keep the newest version (replace if newer)
-                    address_map.entry(address)
+                    address_map
+                        .entry(address)
                         .and_modify(|existing| {
                             if article.created_at > existing.created_at {
                                 *existing = article.clone();
@@ -552,14 +572,20 @@ async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool
             }
 
             if articles_without_identifier > 0 {
-                log::warn!("Filtered out {} articles without identifiers", articles_without_identifier);
+                log::warn!(
+                    "Filtered out {} articles without identifiers",
+                    articles_without_identifier
+                );
             }
 
             // Convert back to vec and sort by created_at descending
             let mut deduplicated: Vec<Event> = address_map.into_values().collect();
             deduplicated.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-            log::info!("After deduplication: {} unique articles", deduplicated.len());
+            log::info!(
+                "After deduplication: {} unique articles",
+                deduplicated.len()
+            );
 
             // If no articles found, return empty (valid result - user's contacts just haven't posted articles)
             // Don't fall back to global here - empty following is different from no contacts
@@ -571,7 +597,10 @@ async fn load_following_articles(until: Option<u64>) -> Result<(Vec<Event>, bool
             Ok((deduplicated, false))
         }
         Err(e) => {
-            log::error!("Failed to fetch following articles: {}, falling back to global", e);
+            log::error!(
+                "Failed to fetch following articles: {}, falling back to global",
+                e
+            );
             let global = load_articles(until).await?;
             Ok((global, true))
         }

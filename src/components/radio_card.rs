@@ -1,11 +1,11 @@
 // Radio Station Card Component
 // Displays a radio station with play functionality and live indicator
 
-use dioxus::prelude::*;
+use crate::components::icons;
 use crate::routes::Route;
 use crate::stores::music_player::{self, MusicTrack, MUSIC_PLAYER};
-use crate::components::icons;
-use crate::utils::radio::{RadioStation, get_ranked_stream_urls};
+use crate::utils::radio::{get_ranked_stream_urls, RadioStation};
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct RadioCardProps {
@@ -63,7 +63,9 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
     };
 
     // Get thumbnail URL with fallback
-    let thumbnail_url = station.thumbnail.clone()
+    let thumbnail_url = station
+        .thumbnail
+        .clone()
         .unwrap_or_else(|| "https://api.dicebear.com/7.x/shapes/svg?seed=radio".to_string());
 
     // Get primary genre
@@ -80,7 +82,10 @@ pub fn RadioCard(props: RadioCardProps) -> Element {
     });
 
     // Build route to station detail page
-    let naddr = station.naddr.clone().unwrap_or_else(|| station.coordinate.clone());
+    let naddr = station
+        .naddr
+        .clone()
+        .unwrap_or_else(|| station.coordinate.clone());
 
     if props.compact {
         // Compact grid layout

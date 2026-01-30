@@ -3,12 +3,12 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use gloo_storage::Storage;
-use nostr_sdk::{EventBuilder, Filter, Kind, Tag, FromBech32};
+use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::stores::{auth_store, nostr_client, theme_store, blossom_store};
 use crate::stores::blossom_store::BlossomServersStoreStoreExt;
+use crate::stores::{auth_store, blossom_store, nostr_client, theme_store};
 
 /// localStorage key for settings cache
 const SETTINGS_LOCAL_STORAGE_KEY: &str = "nostr_blue_settings";
@@ -47,7 +47,7 @@ impl Default for AppSettings {
             payment_method_preference: "nwc_first".to_string(), // Default to NWC if connected
             mempool_endpoint: default_mempool_endpoint(),
             cashu_wallet_auto_load: false, // Opt-in, default off
-            version: 5, // Incremented for cashu_wallet_auto_load addition
+            version: 5,                    // Incremented for cashu_wallet_auto_load addition
         }
     }
 }
@@ -105,7 +105,8 @@ pub async fn load_settings() -> Result<(), String> {
     }
 
     // Get client and pubkey
-    let client = nostr_client::NOSTR_CLIENT.read()
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
@@ -147,7 +148,8 @@ pub async fn load_settings() -> Result<(), String> {
 
                         // Update Blossom servers
                         if !settings.blossom_servers.is_empty() {
-                            *blossom_store::BLOSSOM_SERVERS.read().data().write() = settings.blossom_servers.clone();
+                            *blossom_store::BLOSSOM_SERVERS.read().data().write() =
+                                settings.blossom_servers.clone();
                         }
 
                         // Cache to localStorage for instant loading next time
@@ -160,7 +162,9 @@ pub async fn load_settings() -> Result<(), String> {
                     }
                     Err(e) => {
                         log::warn!("Failed to parse settings: {}", e);
-                        SETTINGS_ERROR.write().clone_from(&Some(format!("Parse error: {}", e)));
+                        SETTINGS_ERROR
+                            .write()
+                            .clone_from(&Some(format!("Parse error: {}", e)));
                     }
                 }
             } else {
@@ -169,7 +173,9 @@ pub async fn load_settings() -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("Failed to fetch settings: {}", e);
-            SETTINGS_ERROR.write().clone_from(&Some(format!("Fetch error: {}", e)));
+            SETTINGS_ERROR
+                .write()
+                .clone_from(&Some(format!("Fetch error: {}", e)));
         }
     }
 
@@ -188,7 +194,8 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
     }
 
     // Get client
-    let client = nostr_client::NOSTR_CLIENT.read()
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
@@ -202,11 +209,13 @@ pub async fn save_settings(settings: &AppSettings) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
     // Build NIP-78 event (kind 30078 with 'd' tag)
-    let builder = EventBuilder::new(Kind::from(APP_DATA_KIND), content)
-        .tag(Tag::identifier(SETTINGS_D_TAG));
+    let builder =
+        EventBuilder::new(Kind::from(APP_DATA_KIND), content).tag(Tag::identifier(SETTINGS_D_TAG));
 
     // Publish to relays
-    client.send_event_builder(builder).await
+    client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish settings: {}", e))?;
 
     log::info!("Settings saved to Nostr successfully");
@@ -308,7 +317,10 @@ pub async fn update_cashu_wallet_auto_load(enabled: bool) {
 
     // Async persist to Nostr first
     if let Err(e) = save_settings(&settings).await {
-        log::warn!("Failed to persist Cashu wallet auto-load setting to Nostr: {}", e);
+        log::warn!(
+            "Failed to persist Cashu wallet auto-load setting to Nostr: {}",
+            e
+        );
         // Defensive: cache locally on Nostr failure
         cache_settings(&settings);
     }

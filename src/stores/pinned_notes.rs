@@ -1,8 +1,8 @@
+use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
-use nostr_sdk::{Event, Filter, Kind, EventBuilder, EventId, PublicKey};
-use crate::stores::{auth_store, nostr_client};
+use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
 
 #[cfg(target_arch = "wasm32")]
@@ -55,22 +55,20 @@ thread_local! {
 
 /// Initialize pinned notes by fetching from relays for the current user
 pub async fn init_pinned_notes() -> Result<(), String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
-    let pubkey = PublicKey::parse(&pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     log::info!("Loading pinned notes for {}", pubkey_str);
 
     // Fetch pinned notes list (kind 10001 - PinList)
-    let filter = Filter::new()
-        .author(pubkey)
-        .kind(Kind::PinList)
-        .limit(1);
+    let filter = Filter::new().author(pubkey).kind(Kind::PinList).limit(1);
 
     // Ensure relays are ready before fetching
     nostr_client::ensure_relays_ready(&client).await;
@@ -79,9 +77,7 @@ pub async fn init_pinned_notes() -> Result<(), String> {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Extract event IDs from 'e' tags using SDK helper
-                let pinned: Vec<String> = event.tags.event_ids()
-                    .map(|id| id.to_hex())
-                    .collect();
+                let pinned: Vec<String> = event.tags.event_ids().map(|id| id.to_hex()).collect();
 
                 log::info!("Loaded {} pinned notes", pinned.len());
                 *PINNED_EVENTS.read().data().write() = pinned;
@@ -100,47 +96,49 @@ pub async fn init_pinned_notes() -> Result<(), String> {
 }
 
 /// Fetch pinned notes for any user (returns pin IDs and the actual events)
-pub async fn fetch_pinned_notes_for_user(pubkey_str: &str) -> Result<(Vec<String>, Vec<Event>), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+pub async fn fetch_pinned_notes_for_user(
+    pubkey_str: &str,
+) -> Result<(Vec<String>, Vec<Event>), String> {
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
-    let pubkey = PublicKey::parse(pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let pubkey = PublicKey::parse(pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     // Fetch pinned notes list (kind 10001 - PinList)
-    let filter = Filter::new()
-        .author(pubkey)
-        .kind(Kind::PinList)
-        .limit(1);
+    let filter = Filter::new().author(pubkey).kind(Kind::PinList).limit(1);
 
     // Ensure relays are ready before fetching
     nostr_client::ensure_relays_ready(&client).await;
 
-    let events = client.fetch_events(filter, Duration::from_secs(10)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch pinned notes list: {}", e))?;
 
     let pin_list = events.into_iter().next();
 
     if let Some(list_event) = pin_list {
         // Extract event IDs in order (preserving pin order)
-        let pin_ids: Vec<String> = list_event.tags.event_ids()
-            .map(|id| id.to_hex())
-            .collect();
+        let pin_ids: Vec<String> = list_event.tags.event_ids().map(|id| id.to_hex()).collect();
 
         if pin_ids.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
 
         // Fetch the actual pinned events
-        let event_ids: Vec<EventId> = pin_ids.iter()
+        let event_ids: Vec<EventId> = pin_ids
+            .iter()
             .filter_map(|id| EventId::from_hex(id).ok())
             .collect();
 
-        let events_filter = Filter::new()
-            .ids(event_ids)
-            .limit(20);
+        let events_filter = Filter::new().ids(event_ids).limit(20);
 
-        let pinned_events = client.fetch_events(events_filter, Duration::from_secs(10)).await
+        let pinned_events = client
+            .fetch_events(events_filter, Duration::from_secs(10))
+            .await
             .map_err(|e| format!("Failed to fetch pinned events: {}", e))?;
 
         Ok((pin_ids, pinned_events.into_iter().collect()))
@@ -151,14 +149,17 @@ pub async fn fetch_pinned_notes_for_user(pubkey_str: &str) -> Result<(Vec<String
 
 /// Check if an event is pinned by the current user
 pub fn is_pinned(event_id: &str) -> bool {
-    PINNED_EVENTS.read().data().read().contains(&event_id.to_string())
+    PINNED_EVENTS
+        .read()
+        .data()
+        .read()
+        .contains(&event_id.to_string())
 }
 
 /// Add event to pinned notes
 pub async fn pin_event(event_id: String) -> Result<(), String> {
     // Validate event ID early to prevent invalid IDs from being stored
-    EventId::from_hex(&event_id)
-        .map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
+    EventId::from_hex(&event_id).map_err(|e| format!("Invalid event ID '{}': {}", event_id, e))?;
 
     let mut pins = PINNED_EVENTS.read().data().read().clone();
 
@@ -249,7 +250,10 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
 }
 
 /// Publish pinned notes with retry and exponential backoff
-fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+fn publish_with_retry(
+    pins: Vec<String>,
+    retry_count: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
     Box::pin(async move {
         const MAX_RETRIES: u32 = 3;
 
@@ -264,14 +268,22 @@ fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<
                 log::info!("Pinned notes published successfully");
             }
             Err(e) => {
-                log::error!("Failed to publish pinned notes (attempt {}): {}", retry_count + 1, e);
+                log::error!(
+                    "Failed to publish pinned notes (attempt {}): {}",
+                    retry_count + 1,
+                    e
+                );
 
                 if retry_count < MAX_RETRIES {
                     // Calculate exponential backoff delay: 1s, 2s, 4s
                     let delay_ms = 1000u32 * (1 << retry_count); // 2^retry_count seconds
 
-                    log::info!("Retrying pinned notes publish in {}ms (attempt {}/{})",
-                        delay_ms, retry_count + 1, MAX_RETRIES);
+                    log::info!(
+                        "Retrying pinned notes publish in {}ms (attempt {}/{})",
+                        delay_ms,
+                        retry_count + 1,
+                        MAX_RETRIES
+                    );
 
                     // Schedule retry with exponential backoff
                     // Use spawn_local instead of Dioxus spawn - timer callbacks don't have runtime context
@@ -291,10 +303,15 @@ fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<
                     }
                 } else {
                     // Max retries exceeded - rollback local state and set failed status
-                    log::error!("Pinned notes publish failed after {} retries: {}", MAX_RETRIES, e);
+                    log::error!(
+                        "Pinned notes publish failed after {} retries: {}",
+                        MAX_RETRIES,
+                        e
+                    );
 
                     // Rollback local state to match persisted state
-                    if let Some(previous_state) = PINNED_ROLLBACK_STATE.read().data().read().clone() {
+                    if let Some(previous_state) = PINNED_ROLLBACK_STATE.read().data().read().clone()
+                    {
                         log::warn!("Automatically rolling back pinned notes to previous state due to publish failure");
                         *PINNED_EVENTS.read().data().write() = previous_state;
                     }
@@ -313,8 +330,11 @@ fn publish_with_retry(pins: Vec<String>, retry_count: u32) -> std::pin::Pin<Box<
 
 /// Publish pinned notes list to relays (NIP-51 kind 10001)
 async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -323,9 +343,7 @@ async fn publish_pinned_notes(pins: Vec<String>) -> Result<(), String> {
     log::info!("Publishing {} pinned notes", pins.len());
 
     // Parse event IDs
-    let event_ids: Result<Vec<EventId>, _> = pins.iter()
-        .map(|id| EventId::from_hex(id))
-        .collect();
+    let event_ids: Result<Vec<EventId>, _> = pins.iter().map(|id| EventId::from_hex(id)).collect();
 
     let event_ids = event_ids.map_err(|e| format!("Invalid event ID: {}", e))?;
 

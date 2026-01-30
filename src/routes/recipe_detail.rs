@@ -1,12 +1,14 @@
 //! Recipe Detail Page
 //! View a full recipe with all sections, engagement, and actions
 
-use dioxus::prelude::*;
-use crate::stores::recipe_store::{self, CachedRecipe};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::auth_store;
-use crate::components::{RecipeDetailView, RecipeDetailViewSkeleton, ClientInitializing, ZapModal, ShareModal};
+use crate::components::{
+    ClientInitializing, RecipeDetailView, RecipeDetailViewSkeleton, ShareModal, ZapModal,
+};
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::recipe_store::{self, CachedRecipe};
+use dioxus::prelude::*;
 
 #[component]
 pub fn RecipeDetail(naddr: String) -> Element {
@@ -60,7 +62,7 @@ pub fn RecipeDetail(naddr: String) -> Element {
                     }
                 }
             });
-        }
+        },
     ));
 
     rsx! {

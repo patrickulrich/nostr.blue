@@ -7,15 +7,14 @@
 // Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
 
+use cdk::nuts::CurrencyUnit;
+use cdk::wallet::multi_mint_wallet::MultiMintWallet;
 use dioxus::prelude::*;
 use std::sync::Arc;
-use cdk::wallet::multi_mint_wallet::MultiMintWallet;
-use cdk::nuts::CurrencyUnit;
 
 use super::cashu::{
-    WALLET_TOKENS, WALLET_STATUS, WalletStatus,
-    TokenData, ProofData, ProofState, WalletTokensStoreStoreExt,
-    DleqData, WALLET_STATE,
+    DleqData, ProofData, ProofState, TokenData, WalletStatus, WalletTokensStoreStoreExt,
+    WALLET_STATE, WALLET_STATUS, WALLET_TOKENS,
 };
 
 /// Global MultiMintWallet instance
@@ -26,9 +25,8 @@ pub static MULTI_WALLET: GlobalSignal<Option<Arc<MultiMintWallet>>> = Signal::gl
 // The implementation has been moved to cashu/mpp.rs
 #[allow(unused_imports)]
 pub use super::cashu::mpp::{
-    MintBalance, MppQuoteContribution, MppQuoteInfo, MppMeltResult,
-    get_balances_per_mint, calculate_mpp_split, create_mpp_melt_quotes,
-    execute_mpp_melt, mint_supports_mpp,
+    calculate_mpp_split, create_mpp_melt_quotes, execute_mpp_melt, get_balances_per_mint,
+    mint_supports_mpp, MintBalance, MppMeltResult, MppQuoteContribution, MppQuoteInfo,
 };
 
 /// Balance breakdown for UI display
@@ -55,11 +53,9 @@ pub async fn init_multi_wallet(
     log::info!("Initializing MultiMintWallet");
 
     // Create MultiMintWallet - it automatically loads existing mints from the database
-    let multi_wallet = MultiMintWallet::new(
-        localstore,
-        seed,
-        CurrencyUnit::Sat,
-    ).await.map_err(|e| format!("Failed to create MultiMintWallet: {}", e))?;
+    let multi_wallet = MultiMintWallet::new(localstore, seed, CurrencyUnit::Sat)
+        .await
+        .map_err(|e| format!("Failed to create MultiMintWallet: {}", e))?;
 
     let wallet_arc = Arc::new(multi_wallet);
 
@@ -73,15 +69,19 @@ pub async fn init_multi_wallet(
 
 /// Add a mint to the MultiMintWallet
 pub async fn add_mint(mint_url: &str) -> Result<(), String> {
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
-    let mint_url = mint_url.parse()
+    let mint_url = mint_url
+        .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
-    multi_wallet.add_mint(mint_url).await
+    multi_wallet
+        .add_mint(mint_url)
+        .await
         .map_err(|e| format!("Failed to add mint: {}", e))?;
 
     // Sync state after adding mint
@@ -92,12 +92,14 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
 
 /// Remove a mint from the MultiMintWallet
 pub async fn remove_mint(mint_url: &str) -> Result<(), String> {
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
-    let mint_url = mint_url.parse()
+    let mint_url = mint_url
+        .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
     multi_wallet.remove_mint(&mint_url).await;
@@ -110,15 +112,19 @@ pub async fn remove_mint(mint_url: &str) -> Result<(), String> {
 
 /// Get a wallet for a specific mint
 pub async fn get_wallet(mint_url: &str) -> Result<cdk::Wallet, String> {
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
-    let mint_url = mint_url.parse()
+    let mint_url = mint_url
+        .parse()
         .map_err(|e| format!("Invalid mint URL: {}", e))?;
 
-    multi_wallet.get_wallet(&mint_url).await
+    multi_wallet
+        .get_wallet(&mint_url)
+        .await
         .ok_or_else(|| format!("Mint not found: {}", mint_url))
 }
 
@@ -140,12 +146,15 @@ pub async fn has_mint(mint_url: &str) -> bool {
 /// Get total balance across all mints
 #[allow(dead_code)]
 pub async fn get_total_balance() -> Result<u64, String> {
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
 
-    let balance = multi_wallet.total_balance().await
+    let balance = multi_wallet
+        .total_balance()
+        .await
         .map_err(|e| format!("Failed to get balance: {}", e))?;
 
     Ok(u64::from(balance))
@@ -165,7 +174,9 @@ pub async fn sync_wallet_state() -> Result<(), String> {
     };
 
     // Get proofs per mint for token list
-    let proofs_by_mint = multi_wallet.list_proofs().await
+    let proofs_by_mint = multi_wallet
+        .list_proofs()
+        .await
         .map_err(|e| format!("Failed to list proofs: {}", e))?;
 
     // Convert to TokenData format for WALLET_TOKENS
@@ -177,29 +188,37 @@ pub async fn sync_wallet_state() -> Result<(), String> {
 
         // Convert CDK proofs to our ProofData format
         // Note: list_proofs() returns all unspent proofs from CDK's perspective
-        let proof_data: Vec<ProofData> = proofs.iter().map(|p| ProofData {
-            id: p.keyset_id.to_string(),
-            amount: u64::from(p.amount),
-            secret: p.secret.to_string(),
-            c: p.c.to_string(),
-            witness: p.witness.as_ref().and_then(|w| {
-                match serde_json::to_string(w) {
-                    Ok(s) => Some(s),
-                    Err(e) => {
-                        log::warn!("Failed to serialize witness for proof {}: {}", p.keyset_id, e);
-                        None
-                    }
-                }
-            }),
-            dleq: p.dleq.as_ref().map(|d| DleqData {
-                e: d.e.to_string(),
-                s: d.s.to_string(),
-                r: d.r.to_string(),
-            }),
-            state: ProofState::Unspent,
-            transaction_id: None,
-            state_set_at: None,
-        }).collect();
+        let proof_data: Vec<ProofData> = proofs
+            .iter()
+            .map(|p| ProofData {
+                id: p.keyset_id.to_string(),
+                amount: u64::from(p.amount),
+                secret: p.secret.to_string(),
+                c: p.c.to_string(),
+                witness: p
+                    .witness
+                    .as_ref()
+                    .and_then(|w| match serde_json::to_string(w) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to serialize witness for proof {}: {}",
+                                p.keyset_id,
+                                e
+                            );
+                            None
+                        }
+                    }),
+                dleq: p.dleq.as_ref().map(|d| DleqData {
+                    e: d.e.to_string(),
+                    s: d.s.to_string(),
+                    r: d.r.to_string(),
+                }),
+                state: ProofState::Unspent,
+                transaction_id: None,
+                state_set_at: None,
+            })
+            .collect();
 
         tokens.push(TokenData {
             event_id: String::new(), // Will be populated from NIP-60 events
@@ -277,7 +296,8 @@ pub fn is_initialized() -> bool {
 /// Get all mint URLs from the wallet
 #[allow(dead_code)]
 pub async fn get_mint_urls() -> Result<Vec<String>, String> {
-    let multi_wallet = MULTI_WALLET.read()
+    let multi_wallet = MULTI_WALLET
+        .read()
         .as_ref()
         .ok_or("MultiMintWallet not initialized")?
         .clone();
@@ -285,6 +305,3 @@ pub async fn get_mint_urls() -> Result<Vec<String>, String> {
     let wallets = multi_wallet.get_wallets().await;
     Ok(wallets.iter().map(|w| w.mint_url.to_string()).collect())
 }
-
-
-

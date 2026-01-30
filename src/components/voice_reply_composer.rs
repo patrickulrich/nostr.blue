@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventId};
-use crate::stores::{nostr_client::HAS_SIGNER, blossom_store};
-use crate::components::{VoiceRecorder, RichContent};
+use crate::components::{RichContent, VoiceRecorder};
+use crate::stores::{blossom_store, nostr_client::HAS_SIGNER};
+use crate::utils::format::display_server_url;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
-use crate::utils::format::display_server_url;
+use dioxus::prelude::*;
+use nostr_sdk::{Event as NostrEvent, EventId};
 
 #[component]
 pub fn VoiceReplyComposer(
@@ -28,11 +28,16 @@ pub fn VoiceReplyComposer(
     let reply_event = reply_to.clone();
 
     // Handle recording complete
-    let handle_recording_complete = move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
-        log::info!("Voice reply recording complete: {} bytes, duration: {}s, MIME: {}",
-            bytes.len(), duration, mime_type);
-        audio_data.set(Some((bytes, duration, waveform, mime_type)));
-    };
+    let handle_recording_complete =
+        move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
+            log::info!(
+                "Voice reply recording complete: {} bytes, duration: {}s, MIME: {}",
+                bytes.len(),
+                duration,
+                mime_type
+            );
+            audio_data.set(Some((bytes, duration, waveform, mime_type)));
+        };
 
     // Handle publish
     let handle_publish = move |_| {
@@ -52,9 +57,7 @@ pub fn VoiceReplyComposer(
         // Determine the root event ID for cache invalidation
         let parent_root = event_for_reply.tags.iter().find_map(|tag| {
             let tag_vec = tag.clone().to_vec();
-            if tag_vec.len() >= 4
-                && tag_vec[0] == "e"
-                && tag_vec[3] == "root" {
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
                 Some(tag_vec[1].clone())
             } else {
                 None
@@ -82,14 +85,19 @@ pub fn VoiceReplyComposer(
                         waveform,
                         event_for_reply,
                         Some(mime_type),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(event_id) => {
                             log::info!("Voice reply published successfully: {}", event_id);
 
                             // Invalidate thread tree cache to ensure fresh data on next view
                             if let Ok(root_event_id) = EventId::from_hex(&thread_root_id) {
                                 invalidate_thread_tree_cache(&root_event_id);
-                                log::debug!("Invalidated thread tree cache for root: {}", thread_root_id);
+                                log::debug!(
+                                    "Invalidated thread tree cache for root: {}",
+                                    thread_root_id
+                                );
                             }
 
                             audio_data.set(None);

@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use crate::routes::Route;
 use crate::components::icons::*;
+use crate::routes::Route;
 use crate::services::wavlake::{get_album, WavlakeAlbum};
 use crate::stores::music_player::{self, MusicTrack};
+use dioxus::prelude::*;
 
 #[component]
 pub fn MusicAlbum(album_id: String) -> Element {
@@ -39,7 +39,12 @@ pub fn MusicAlbum(album_id: String) -> Element {
     // Memoize track conversion to avoid reallocation on every render
     let tracks = use_memo(move || {
         album_state()
-            .map(|a| a.tracks.iter().map(|t| t.clone().into()).collect::<Vec<MusicTrack>>())
+            .map(|a| {
+                a.tracks
+                    .iter()
+                    .map(|t| t.clone().into())
+                    .collect::<Vec<MusicTrack>>()
+            })
             .unwrap_or_default()
     });
 

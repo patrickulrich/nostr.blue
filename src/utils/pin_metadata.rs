@@ -51,8 +51,7 @@ pub async fn fetch_event_preview(event_id_str: &str) -> Result<PinPreviewMetadat
 pub async fn fetch_address_preview(naddr: &str) -> Result<PinPreviewMetadata, String> {
     // Strip nostr: prefix (NIP-21) if present
     let normalized = naddr.trim().strip_prefix("nostr:").unwrap_or(naddr.trim());
-    let coord = Coordinate::from_bech32(normalized)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let coord = Coordinate::from_bech32(normalized).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let filter = Filter::new()
         .kind(coord.kind)
@@ -75,19 +74,16 @@ fn parse_event_id(input: &str) -> Result<EventId, String> {
 
     if normalized.starts_with("nevent1") {
         // Parse nevent to extract event_id
-        let nip19 = Nip19::from_bech32(normalized)
-            .map_err(|e| format!("Invalid nevent: {}", e))?;
+        let nip19 = Nip19::from_bech32(normalized).map_err(|e| format!("Invalid nevent: {}", e))?;
         match nip19 {
             Nip19::Event(nip19_event) => Ok(nip19_event.event_id),
             _ => Err("Not an event reference".to_string()),
         }
     } else if normalized.starts_with("note1") {
-        EventId::from_bech32(normalized)
-            .map_err(|e| format!("Invalid note: {}", e))
+        EventId::from_bech32(normalized).map_err(|e| format!("Invalid note: {}", e))
     } else {
         // Assume hex event ID
-        EventId::from_hex(normalized)
-            .map_err(|e| format!("Invalid event ID: {}", e))
+        EventId::from_hex(normalized).map_err(|e| format!("Invalid event ID: {}", e))
     }
 }
 
@@ -101,11 +97,14 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
     }
 
     // Try to find an image from imeta tags or content
-    let image = extract_imeta_image(event)
-        .or_else(|| extract_first_image_from_content(&event.content));
+    let image =
+        extract_imeta_image(event).or_else(|| extract_first_image_from_content(&event.content));
 
     // For notes, use first line as title (truncated)
-    let title = event.content.lines().next()
+    let title = event
+        .content
+        .lines()
+        .next()
         .map(|s| {
             let cleaned = s.trim();
             if cleaned.len() > 100 {
@@ -118,7 +117,10 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
 
     // Description is the full content (or truncated)
     let description = if event.content.len() > 500 {
-        Some(format!("{}...", &event.content.chars().take(500).collect::<String>()))
+        Some(format!(
+            "{}...",
+            &event.content.chars().take(500).collect::<String>()
+        ))
     } else {
         Some(event.content.clone())
     };
@@ -130,7 +132,8 @@ fn extract_event_metadata(event: &Event) -> PinPreviewMetadata {
         20 => "Picture",
         21 | 22 => "Video",
         _ => "Event",
-    }.to_string();
+    }
+    .to_string();
 
     PinPreviewMetadata {
         title,
@@ -151,7 +154,10 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
     // Use content as fallback for description
     let description = summary.or_else(|| {
         if event.content.len() > 500 {
-            Some(format!("{}...", &event.content.chars().take(500).collect::<String>()))
+            Some(format!(
+                "{}...",
+                &event.content.chars().take(500).collect::<String>()
+            ))
         } else if !event.content.is_empty() {
             Some(event.content.clone())
         } else {
@@ -164,10 +170,17 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
             // Check if it's a recipe (has nostrcooking tag)
             let is_recipe = event.tags.iter().any(|t| {
                 let vec = t.clone().to_vec();
-                vec.first().map(|s| s.as_str()) == Some("t") &&
-                vec.get(1).map(|s| s.to_lowercase().contains("nostrcooking")).unwrap_or(false)
+                vec.first().map(|s| s.as_str()) == Some("t")
+                    && vec
+                        .get(1)
+                        .map(|s| s.to_lowercase().contains("nostrcooking"))
+                        .unwrap_or(false)
             });
-            if is_recipe { "Recipe" } else { "Article" }
+            if is_recipe {
+                "Recipe"
+            } else {
+                "Article"
+            }
         }
         30078 => "Recipe",
         30067 => "Pinboard",
@@ -182,7 +195,8 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
         30040 | 30041 => "Publication",
         30030..=30033 => "Citation",
         _ => "Event",
-    }.to_string();
+    }
+    .to_string();
 
     PinPreviewMetadata {
         title,
@@ -211,12 +225,12 @@ fn extract_imeta_image(event: &Event) -> Option<String> {
 
 /// Extract first image URL from note content using regex
 fn extract_first_image_from_content(content: &str) -> Option<String> {
-    static URL_REGEX: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"https?://[^\s\)\]]+").unwrap()
-    });
+    static URL_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"https?://[^\s\)\]]+").unwrap());
 
     for mat in URL_REGEX.find_iter(content) {
-        let url = mat.as_str().trim_end_matches(['.', ',', ')', ']', '>', '"', '\'']);
+        let url = mat
+            .as_str()
+            .trim_end_matches(['.', ',', ')', ']', '>', '"', '\'']);
         if is_image_url(url) {
             return Some(url.to_string());
         }
@@ -227,8 +241,12 @@ fn extract_first_image_from_content(content: &str) -> Option<String> {
 /// Check if a URL points to an image based on extension
 fn is_image_url(url: &str) -> bool {
     let lower = url.to_lowercase();
-    let extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif"];
-    extensions.iter().any(|ext| lower.ends_with(ext) || lower.contains(&format!("{ext}?")))
+    let extensions = [
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".avif",
+    ];
+    extensions
+        .iter()
+        .any(|ext| lower.ends_with(ext) || lower.contains(&format!("{ext}?")))
 }
 
 /// Extract a tag value by name (first match)

@@ -105,7 +105,10 @@ impl NostrMimeType {
 
     /// Get the M tag value (category/use-case/replaceability)
     pub fn m_tag_value(&self) -> String {
-        format!("{}/{}/{}", self.category, self.use_case, self.replaceability)
+        format!(
+            "{}/{}/{}",
+            self.category, self.use_case, self.replaceability
+        )
     }
 
     /// Create tags for this MIME type

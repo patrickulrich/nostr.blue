@@ -1,9 +1,9 @@
 //! OrderCard component - displays an order in the orders list
 
-use dioxus::prelude::*;
-use crate::utils::nip99::ShopOrder;
-use crate::utils::format::{format_sats_with_separator, truncate_id};
 use super::OrderStatusBadge;
+use crate::utils::format::{format_sats_with_separator, truncate_id};
+use crate::utils::nip99::ShopOrder;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct OrderCardProps {

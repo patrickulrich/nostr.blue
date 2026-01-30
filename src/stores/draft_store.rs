@@ -31,10 +31,7 @@ pub const KIND_LONG_FORM: u16 = 30023;
 pub const DEFAULT_DRAFT_EXPIRATION_DAYS: u64 = 90;
 
 /// Default private relays if user has none configured
-pub const DEFAULT_PRIVATE_RELAYS: &[&str] = &[
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-];
+pub const DEFAULT_PRIVATE_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://nos.lol"];
 
 // ============================================================================
 // Types
@@ -110,19 +107,22 @@ impl ArticleDraft {
 
     /// Parse from unsigned event JSON (after decryption)
     pub fn from_unsigned_event_json(json: &str) -> Result<Self, String> {
-        let value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| format!("Failed to parse draft JSON: {}", e))?;
+        let value: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("Failed to parse draft JSON: {}", e))?;
 
-        let content = value.get("content")
+        let content = value
+            .get("content")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        let created_at = value.get("created_at")
+        let created_at = value
+            .get("created_at")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
-        let tags = value.get("tags")
+        let tags = value
+            .get("tags")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
@@ -210,7 +210,10 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
     }
 
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Fetch Kind 10013 event
@@ -263,7 +266,10 @@ pub async fn get_private_relays() -> Result<Vec<String>, String> {
 /// Set and publish Kind 10013 private relay list
 pub async fn set_private_relays(relays: Vec<String>) -> Result<String, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Build encrypted content: [["relay", "wss://..."], ...]
@@ -312,7 +318,10 @@ pub async fn ensure_private_relays() -> Result<Vec<String>, String> {
 
 /// Get default private relays
 pub fn default_private_relays() -> Vec<String> {
-    DEFAULT_PRIVATE_RELAYS.iter().map(|s| s.to_string()).collect()
+    DEFAULT_PRIVATE_RELAYS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 // ============================================================================
@@ -326,7 +335,10 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
     }
 
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Get private relays to publish to
@@ -345,12 +357,16 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         .map_err(|e| format!("Failed to encrypt draft: {}", e))?;
 
     // Calculate expiration (90 days from now)
-    let expiration = Timestamp::now() + Duration::from_secs(DEFAULT_DRAFT_EXPIRATION_DAYS * 24 * 60 * 60);
+    let expiration =
+        Timestamp::now() + Duration::from_secs(DEFAULT_DRAFT_EXPIRATION_DAYS * 24 * 60 * 60);
 
     // Build Kind 31234 tags
     let tags = vec![
         Tag::identifier(&draft.identifier),
-        Tag::custom(TagKind::Custom("k".into()), vec![KIND_LONG_FORM.to_string()]),
+        Tag::custom(
+            TagKind::Custom("k".into()),
+            vec![KIND_LONG_FORM.to_string()],
+        ),
         Tag::expiration(expiration),
     ];
 
@@ -363,7 +379,8 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
         .map_err(|e| format!("Failed to sign draft event: {}", e))?;
 
     // Send to private relays
-    let result = nostr_client::send_presigned_event_to_relays(event.clone(), private_relays).await?;
+    let result =
+        nostr_client::send_presigned_event_to_relays(event.clone(), private_relays).await?;
 
     log::info!(
         "Draft saved: {} ({}/{} relays succeeded)",
@@ -378,11 +395,16 @@ pub async fn save_draft(draft: &ArticleDraft) -> Result<String, String> {
 /// Load all drafts for the current user
 pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Get private relays and add them to the client for fetching
-    let private_relays = get_private_relays().await.unwrap_or_else(|_| default_private_relays());
+    let private_relays = get_private_relays()
+        .await
+        .unwrap_or_else(|_| default_private_relays());
 
     // Add private relays to client so we can fetch drafts from them
     for relay_url in &private_relays {
@@ -394,7 +416,10 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
     let filter = Filter::new()
         .author(pubkey)
         .kind(Kind::from(KIND_DRAFT))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::K), KIND_LONG_FORM.to_string());
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::K),
+            KIND_LONG_FORM.to_string(),
+        );
 
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
@@ -457,11 +482,16 @@ pub async fn load_drafts() -> Result<Vec<LoadedDraft>, String> {
 #[allow(dead_code)]
 pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
+    let signer = client
+        .signer()
+        .await
+        .map_err(|e| format!("No signer: {}", e))?;
     let pubkey = nostr_client::get_cached_pubkey()?;
 
     // Get private relays and add them to the client for fetching
-    let private_relays = get_private_relays().await.unwrap_or_else(|_| default_private_relays());
+    let private_relays = get_private_relays()
+        .await
+        .unwrap_or_else(|_| default_private_relays());
 
     // Add private relays to client so we can fetch drafts from them
     for relay_url in &private_relays {
@@ -502,12 +532,17 @@ pub async fn load_draft(identifier: &str) -> Result<Option<ArticleDraft>, String
 /// Delete a draft by publishing with empty content
 pub async fn delete_draft(identifier: &str) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let private_relays = get_private_relays().await.unwrap_or_else(|_| default_private_relays());
+    let private_relays = get_private_relays()
+        .await
+        .unwrap_or_else(|_| default_private_relays());
 
     // Build Kind 31234 with empty content (signals deletion)
     let tags = vec![
         Tag::identifier(identifier),
-        Tag::custom(TagKind::Custom("k".into()), vec![KIND_LONG_FORM.to_string()]),
+        Tag::custom(
+            TagKind::Custom("k".into()),
+            vec![KIND_LONG_FORM.to_string()],
+        ),
     ];
 
     let builder = EventBuilder::new(Kind::from(KIND_DRAFT), "").tags(tags);

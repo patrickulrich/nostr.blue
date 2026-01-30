@@ -3,8 +3,8 @@
 
 use dioxus::prelude::*;
 use lru::LruCache;
-use nostr_sdk::prelude::*;
 use nostr::Event as NostrEvent;
+use nostr_sdk::prelude::*;
 
 // Use std::result::Result to avoid ambiguity between dioxus and nostr_sdk
 type Result<T> = std::result::Result<T, String>;
@@ -12,17 +12,16 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use serde::{Serialize, Deserialize};
-use crate::stores::nostr_client;
 use crate::stores::indexeddb_database::IndexedDbDatabase;
-use crate::utils::nip99::{
-    parse_product, parse_collection, parse_shipping, parse_review, now_secs,
-    Product, ProductCollection, ShippingOption, ProductReview, CartItem, ShopOrder,
-    OrderItem, OrderStatus, ShippingStatus, ProductVisibility, ProductFormat,
-    OrderMessageType, KIND_PRODUCT, KIND_COLLECTION, KIND_SHIPPING, KIND_REVIEW,
-    KIND_ORDER_MESSAGE, KIND_PAYMENT_RECEIPT,
-};
+use crate::stores::nostr_client;
 use crate::utils::format::truncate_pubkey;
+use crate::utils::nip99::{
+    now_secs, parse_collection, parse_product, parse_review, parse_shipping, CartItem, OrderItem,
+    OrderMessageType, OrderStatus, Product, ProductCollection, ProductFormat, ProductReview,
+    ProductVisibility, ShippingOption, ShippingStatus, ShopOrder, KIND_COLLECTION,
+    KIND_ORDER_MESSAGE, KIND_PAYMENT_RECEIPT, KIND_PRODUCT, KIND_REVIEW, KIND_SHIPPING,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 // ============================================================================
@@ -94,7 +93,8 @@ pub static PROCESSED_ORDER_EVENTS: GlobalSignal<LruCache<String, ()>> =
 
 /// Flag to track if orders have been loaded from DB for this session
 /// Prevents skipping reload when BUYER_ORDERS/SELLER_ORDERS happen to be empty
-static ORDERS_LOADED_FROM_DB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ORDERS_LOADED_FROM_DB: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 // ============================================================================
 // Global Signals - Merchant
@@ -206,9 +206,7 @@ pub fn get_product_reviews(product_coordinate: &str) -> Vec<ProductReview> {
 /// Cache a review
 pub fn cache_review(review: ProductReview) {
     let mut cache = REVIEWS_CACHE.write();
-    let reviews = cache
-        .entry(review.product_coordinate.clone())
-        .or_default();
+    let reviews = cache.entry(review.product_coordinate.clone()).or_default();
 
     // Avoid duplicates
     if !reviews.iter().any(|r| r.event_id == review.event_id) {
@@ -246,7 +244,10 @@ pub fn add_to_cart(product: Product, quantity: u32) {
     let mut items = CART_ITEMS.write();
 
     // Check if already in cart
-    if let Some(existing) = items.iter_mut().find(|item| item.product.naddr == product.naddr) {
+    if let Some(existing) = items
+        .iter_mut()
+        .find(|item| item.product.naddr == product.naddr)
+    {
         existing.quantity += quantity;
     } else {
         items.push(CartItem {
@@ -300,7 +301,11 @@ pub fn clear_cart() {
 
 /// Get cart item count
 pub fn get_cart_count() -> usize {
-    CART_ITEMS.read().iter().map(|item| item.quantity as usize).sum()
+    CART_ITEMS
+        .read()
+        .iter()
+        .map(|item| item.quantity as usize)
+        .sum()
 }
 
 /// Recalculate cart total (internal helper)
@@ -407,7 +412,11 @@ pub fn filter_products(products: &[Product], filters: &ShopFilterState) -> Vec<P
 
             // Category filter
             if let Some(category) = &filters.category {
-                if !product.categories.iter().any(|c| c.eq_ignore_ascii_case(category)) {
+                if !product
+                    .categories
+                    .iter()
+                    .any(|c| c.eq_ignore_ascii_case(category))
+                {
                     return false;
                 }
             }
@@ -541,16 +550,12 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
 
 /// Build filter for fetching products (limited)
 pub fn products_filter(limit: usize) -> Filter {
-    Filter::new()
-        .kind(Kind::Custom(KIND_PRODUCT))
-        .limit(limit)
+    Filter::new().kind(Kind::Custom(KIND_PRODUCT)).limit(limit)
 }
 
 /// Build filter for fetching products with pagination (cursor-based using `until`)
 pub fn products_filter_paginated(limit: usize, until: Option<u64>) -> Filter {
-    let mut filter = Filter::new()
-        .kind(Kind::Custom(KIND_PRODUCT))
-        .limit(limit);
+    let mut filter = Filter::new().kind(Kind::Custom(KIND_PRODUCT)).limit(limit);
     if let Some(ts) = until {
         filter = filter.until(Timestamp::from(ts));
     }
@@ -593,8 +598,7 @@ pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
 
     let filter = products_filter(limit);
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-            .await;
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
 
     *LOADING_PRODUCTS.write() = false;
 
@@ -615,8 +619,7 @@ pub async fn fetch_products(limit: usize) -> Result<Vec<Product>> {
 pub async fn fetch_products_paginated(limit: usize, until: Option<u64>) -> Result<Vec<Product>> {
     let filter = products_filter_paginated(limit, until);
     let result =
-        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15))
-            .await;
+        crate::stores::nostr_client::fetch_events_aggregated(filter, Duration::from_secs(15)).await;
 
     match result {
         Ok(events) => {
@@ -658,8 +661,7 @@ pub async fn fetch_product_by_naddr(naddr: &str) -> Result<Option<Product>> {
     }
 
     // Parse naddr
-    let nip19 = Nip19Coordinate::from_bech32(naddr)
-        .map_err(|e| format!("Invalid naddr: {}", e))?;
+    let nip19 = Nip19Coordinate::from_bech32(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let coordinate = nip19.coordinate;
     let pk = coordinate.public_key;
@@ -682,8 +684,7 @@ pub async fn fetch_product_by_naddr(naddr: &str) -> Result<Option<Product>> {
 
 /// Fetch my products (for merchant dashboard)
 pub async fn fetch_my_products() -> Result<Vec<Product>> {
-    let pubkey = crate::stores::auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
 
     *LOADING_MY_PRODUCTS.write() = true;
 
@@ -784,15 +785,13 @@ pub async fn ensure_orders_loaded() -> Result<()> {
 
     let db = match SHOP_DB.read().as_ref() {
         Some(db) => db.clone(),
-        None => return Ok(()),  // No DB yet, nothing to do
+        None => return Ok(()), // No DB yet, nothing to do
     };
 
     // Use atomic flag instead of checking list emptiness
     // This prevents skipping seller orders when buyer orders happen to be empty
     // Only set flag if restore actually completed (not skipped due to missing auth)
-    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst)
-        && restore_orders_from_db(&db).await?
-    {
+    if !ORDERS_LOADED_FROM_DB.load(Ordering::SeqCst) && restore_orders_from_db(&db).await? {
         ORDERS_LOADED_FROM_DB.store(true, Ordering::SeqCst);
     }
     Ok(())
@@ -853,12 +852,14 @@ pub async fn init_shop_store() -> Result<()> {
 async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
     log::info!("Restoring orders from IndexedDB...");
 
-    let orders = db.get_all_orders().await
+    let orders = db
+        .get_all_orders()
+        .await
         .map_err(|e| format!("Failed to load orders: {:?}", e))?;
 
     if orders.is_empty() {
         log::info!("No persisted orders found");
-        return Ok(true);  // Empty is a valid "loaded" state
+        return Ok(true); // Empty is a valid "loaded" state
     }
 
     // Dioxus pattern: Explicit validation before state mutation
@@ -866,7 +867,7 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
         Ok(pk) => pk.to_hex(),
         Err(_) => {
             log::warn!("Cannot load orders - not authenticated");
-            return Ok(false);  // Signal: skipped, try again later when auth is available
+            return Ok(false); // Signal: skipped, try again later when auth is available
         }
     };
 
@@ -881,8 +882,11 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
         }
     }
 
-    log::info!("Restored {} buyer orders, {} seller orders",
-        buyer_orders.len(), seller_orders.len());
+    log::info!(
+        "Restored {} buyer orders, {} seller orders",
+        buyer_orders.len(),
+        seller_orders.len()
+    );
 
     // Update signals
     *BUYER_ORDERS.write() = buyer_orders;
@@ -895,7 +899,8 @@ async fn restore_orders_from_db(db: &IndexedDbDatabase) -> Result<bool> {
 pub async fn persist_order(order: &ShopOrder) -> Result<()> {
     let db = SHOP_DB.read();
     if let Some(db) = db.as_ref() {
-        db.save_order(order).await
+        db.save_order(order)
+            .await
             .map_err(|e| format!("Failed to persist order: {:?}", e))?;
         log::debug!("Persisted order {} to IndexedDB", order.order_id);
     }
@@ -906,7 +911,8 @@ pub async fn persist_order(order: &ShopOrder) -> Result<()> {
 pub async fn update_persisted_order(order: &ShopOrder) -> Result<()> {
     let db = SHOP_DB.read();
     if let Some(db) = db.as_ref() {
-        db.update_order(order).await
+        db.update_order(order)
+            .await
             .map_err(|e| format!("Failed to update order: {:?}", e))?;
         log::debug!("Updated order {} in IndexedDB", order.order_id);
     }
@@ -1025,16 +1031,28 @@ async fn send_gift_wrapped_rumor(
         .map_err(|e| format!("Failed to create sender gift wrap: {}", e))?;
 
     // Send to receiver
-    let receiver_result = client.send_event(&receiver_gift_wrap).await
+    let receiver_result = client
+        .send_event(&receiver_gift_wrap)
+        .await
         .map_err(|e| format!("Failed to send to receiver: {}", e))?;
 
-    log::info!("Sent {} to receiver: {:?}", log_context, receiver_result.val);
+    log::info!(
+        "Sent {} to receiver: {:?}",
+        log_context,
+        receiver_result.val
+    );
 
     // Send sender copy
-    let sender_result = client.send_event(&sender_gift_wrap).await
+    let sender_result = client
+        .send_event(&sender_gift_wrap)
+        .await
         .map_err(|e| format!("Failed to send sender copy: {}", e))?;
 
-    log::info!("Sent {} copy to sender: {:?}", log_context, sender_result.val);
+    log::info!(
+        "Sent {} copy to sender: {:?}",
+        log_context,
+        sender_result.val
+    );
 
     Ok((receiver_result.val.to_hex(), sender_result.val.to_hex()))
 }
@@ -1044,8 +1062,11 @@ pub async fn send_order_message(
     recipient_pubkey: &str,
     content: OrderMessageContent,
 ) -> Result<String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -1054,24 +1075,39 @@ pub async fn send_order_message(
     let recipient_pk = PublicKey::parse(recipient_pubkey)
         .map_err(|e| format!("Invalid recipient pubkey: {}", e))?;
 
-    let signer = client.signer().await
+    let signer = client
+        .signer()
+        .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
 
-    let sender_pk = signer.get_public_key().await
+    let sender_pk = signer
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
 
     // Serialize order message content
     let message_json = serde_json::to_string(&content)
         .map_err(|e| format!("Failed to serialize order message: {}", e))?;
 
-    log::info!("Sending order message to {}: type={}", recipient_pubkey, content.message_type);
+    log::info!(
+        "Sending order message to {}: type={}",
+        recipient_pubkey,
+        content.message_type
+    );
 
     // Build the rumor (kind 14 for private message)
-    let rumor = EventBuilder::private_msg_rumor(recipient_pk, message_json)
-        .build(sender_pk);
+    let rumor = EventBuilder::private_msg_rumor(recipient_pk, message_json).build(sender_pk);
 
     // Send gift-wrapped message to both recipient and sender
-    send_gift_wrapped_rumor(&client, &signer, recipient_pk, sender_pk, rumor, "order message").await?;
+    send_gift_wrapped_rumor(
+        &client,
+        &signer,
+        recipient_pk,
+        sender_pk,
+        rumor,
+        "order message",
+    )
+    .await?;
 
     Ok(content.order_id)
 }
@@ -1084,29 +1120,39 @@ pub async fn send_payment_receipt(
     merchant_pubkey: &str,
     order_id: &str,
     amount_sats: u64,
-    payment_method: &str, // "cashu", "lightning", "bitcoin", "fiat"
+    payment_method: &str,   // "cashu", "lightning", "bitcoin", "fiat"
     medium_reference: &str, // mint URL, invoice, address, or transaction ID
-    proof: &str, // token, preimage, txid, or receipt ID
+    proof: &str,            // token, preimage, txid, or receipt ID
 ) -> Result<String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let recipient_pk = PublicKey::parse(merchant_pubkey)
-        .map_err(|e| format!("Invalid merchant pubkey: {}", e))?;
+    let recipient_pk =
+        PublicKey::parse(merchant_pubkey).map_err(|e| format!("Invalid merchant pubkey: {}", e))?;
 
-    let signer = client.signer().await
+    let signer = client
+        .signer()
+        .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
 
-    let sender_pk = signer.get_public_key().await
+    let sender_pk = signer
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get sender pubkey: {}", e))?;
 
     // Build Kind 17 payment receipt with proper tags per market-spec
     // Content: human-readable payment confirmation
-    let content = format!("Payment receipt for order {} - {} sats via {}", order_id, amount_sats, payment_method);
+    let content = format!(
+        "Payment receipt for order {} - {} sats via {}",
+        order_id, amount_sats, payment_method
+    );
 
     // Build tags per market-spec:
     // - p: merchant pubkey
@@ -1116,14 +1162,23 @@ pub async fn send_payment_receipt(
     // - amount: payment amount in sats
     let tags = vec![
         Tag::public_key(recipient_pk),
-        Tag::custom(TagKind::Custom("subject".into()), vec!["order-receipt".to_string()]),
+        Tag::custom(
+            TagKind::Custom("subject".into()),
+            vec!["order-receipt".to_string()],
+        ),
         Tag::custom(TagKind::Custom("order".into()), vec![order_id.to_string()]),
-        Tag::custom(TagKind::Custom("payment".into()), vec![
-            payment_method.to_string(),
-            medium_reference.to_string(),
-            proof.to_string()
-        ]),
-        Tag::custom(TagKind::Custom("amount".into()), vec![amount_sats.to_string(), "sat".to_string()]),
+        Tag::custom(
+            TagKind::Custom("payment".into()),
+            vec![
+                payment_method.to_string(),
+                medium_reference.to_string(),
+                proof.to_string(),
+            ],
+        ),
+        Tag::custom(
+            TagKind::Custom("amount".into()),
+            vec![amount_sats.to_string(), "sat".to_string()],
+        ),
     ];
 
     // Build the Kind 17 rumor event
@@ -1131,10 +1186,22 @@ pub async fn send_payment_receipt(
         .tags(tags)
         .build(sender_pk);
 
-    log::info!("Sending payment receipt for order {} to merchant {}", order_id, merchant_pubkey);
+    log::info!(
+        "Sending payment receipt for order {} to merchant {}",
+        order_id,
+        merchant_pubkey
+    );
 
     // Send gift-wrapped receipt to both merchant and buyer
-    send_gift_wrapped_rumor(&client, &signer, recipient_pk, sender_pk, rumor, "payment receipt").await?;
+    send_gift_wrapped_rumor(
+        &client,
+        &signer,
+        recipient_pk,
+        sender_pk,
+        rumor,
+        "payment receipt",
+    )
+    .await?;
 
     Ok(order_id.to_string())
 }
@@ -1185,7 +1252,10 @@ fn validate_payment_proof(payment_method: &str, payment_proof: &str) -> Result<(
         }
         _ => {
             // Unknown payment method - allow but log warning
-            log::warn!("Unknown payment method '{}', skipping proof validation", payment_method);
+            log::warn!(
+                "Unknown payment method '{}', skipping proof validation",
+                payment_method
+            );
         }
     }
 
@@ -1245,14 +1315,19 @@ pub async fn create_shop_order(
 
         let item_total = price_sats
             .checked_mul(item.quantity as u64)
-            .ok_or_else(|| format!(
-                "Arithmetic overflow calculating total for '{}' (price {} x quantity {})",
-                item.product.title, price_sats, item.quantity
-            ))?;
+            .ok_or_else(|| {
+                format!(
+                    "Arithmetic overflow calculating total for '{}' (price {} x quantity {})",
+                    item.product.title, price_sats, item.quantity
+                )
+            })?;
 
-        let entry = merchants.entry(merchant_pubkey).or_insert((Vec::new(), 0u64));
+        let entry = merchants
+            .entry(merchant_pubkey)
+            .or_insert((Vec::new(), 0u64));
         entry.0.push(order_item);
-        entry.1 = entry.1
+        entry.1 = entry
+            .1
             .checked_add(item_total)
             .ok_or_else(|| "Arithmetic overflow calculating merchant subtotal".to_string())?;
     }
@@ -1290,11 +1365,8 @@ pub async fn create_shop_order(
         send_order_message(merchant_pubkey, order_msg).await?;
 
         // Send payment confirmation (Kind 16)
-        let payment_msg = OrderMessageContent::new_payment(
-            &order_id,
-            payment_method,
-            payment_proof,
-        );
+        let payment_msg =
+            OrderMessageContent::new_payment(&order_id, payment_method, payment_proof);
         send_order_message(merchant_pubkey, payment_msg).await?;
 
         // Send payment receipt (Kind 17) per market-spec
@@ -1305,7 +1377,9 @@ pub async fn create_shop_order(
             payment_method,
             &medium_reference,
             payment_proof,
-        ).await {
+        )
+        .await
+        {
             log::warn!("Failed to send payment receipt: {}", e);
             // Don't fail the order if receipt fails - order and payment messages were sent
         }
@@ -1320,7 +1394,6 @@ pub async fn create_shop_order(
     // This ensures each merchant can track their portion of the order
     let merchant_count = merchants.len();
     for (merchant_pubkey, (merchant_items, merchant_total)) in &merchants {
-
         // Generate unique order ID for this merchant's portion
         // For single merchant, use base order_id; for multi-merchant, append merchant suffix
         let merchant_order_id = if merchant_count > 1 {
@@ -1331,7 +1404,8 @@ pub async fn create_shop_order(
         };
 
         // Get shipping info for this merchant's items
-        let merchant_shipping = items.iter()
+        let merchant_shipping = items
+            .iter()
             .find(|item| &item.product.pubkey == merchant_pubkey)
             .and_then(|item| item.selected_shipping.clone());
 
@@ -1363,8 +1437,12 @@ pub async fn create_shop_order(
         add_buyer_order(order).await;
     }
 
-    log::info!("Created order: {} with {} items, total: {} sats",
-        order_id, items.len(), total_sats);
+    log::info!(
+        "Created order: {} with {} items, total: {} sats",
+        order_id,
+        items.len(),
+        total_sats
+    );
 
     Ok(order_id)
 }
@@ -1396,8 +1474,11 @@ pub struct ProductFormData {
 pub async fn publish_product(data: ProductFormData) -> Result<String> {
     use nostr_sdk::TagKind;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -1418,15 +1499,18 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
     let mut tags = vec![
         Tag::identifier(&d_tag),
         Tag::custom(TagKind::custom("title"), vec![data.title.clone()]),
-        Tag::custom(TagKind::custom("price"), vec![
-            data.price_amount.to_string(),
-            data.price_currency.clone(),
-        ]),
+        Tag::custom(
+            TagKind::custom("price"),
+            vec![data.price_amount.to_string(), data.price_currency.clone()],
+        ),
     ];
 
     // Add summary/description
     if !data.description.is_empty() {
-        tags.push(Tag::custom(TagKind::custom("summary"), vec![data.description.clone()]));
+        tags.push(Tag::custom(
+            TagKind::custom("summary"),
+            vec![data.description.clone()],
+        ));
     }
 
     // Add images
@@ -1440,42 +1524,66 @@ pub async fn publish_product(data: ProductFormData) -> Result<String> {
     }
 
     // Add format (digital/physical)
-    let format = if data.is_digital { "digital" } else { "physical" };
-    tags.push(Tag::custom(TagKind::custom("format"), vec![format.to_string()]));
+    let format = if data.is_digital {
+        "digital"
+    } else {
+        "physical"
+    };
+    tags.push(Tag::custom(
+        TagKind::custom("format"),
+        vec![format.to_string()],
+    ));
 
     // Add stock if specified
     if let Some(stock) = data.stock {
-        tags.push(Tag::custom(TagKind::custom("stock"), vec![stock.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::custom("stock"),
+            vec![stock.to_string()],
+        ));
     }
 
     // Add specs
     for (key, value) in &data.specs {
-        tags.push(Tag::custom(TagKind::custom("spec"), vec![key.clone(), value.clone()]));
+        tags.push(Tag::custom(
+            TagKind::custom("spec"),
+            vec![key.clone(), value.clone()],
+        ));
     }
 
     // Add shipping regions for physical products
     if !data.is_digital {
         for region in &data.shipping_regions {
-            tags.push(Tag::custom(TagKind::custom("shipping"), vec![region.clone()]));
+            tags.push(Tag::custom(
+                TagKind::custom("shipping"),
+                vec![region.clone()],
+            ));
         }
     }
 
     // Add condition if specified
     if let Some(ref condition) = data.condition {
         if !condition.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("condition"), vec![condition.clone()]));
+            tags.push(Tag::custom(
+                TagKind::custom("condition"),
+                vec![condition.clone()],
+            ));
         }
     }
 
     // Build and sign event
     let content = data.description.clone();
-    let event_builder = EventBuilder::new(Kind::Custom(KIND_PRODUCT), content)
-        .tags(tags);
+    let event_builder = EventBuilder::new(Kind::Custom(KIND_PRODUCT), content).tags(tags);
 
-    let output = client.send_event_builder(event_builder).await
+    let output = client
+        .send_event_builder(event_builder)
+        .await
         .map_err(|e| format!("Failed to publish product: {}", e))?;
 
-    log::info!("Published product: {} (event: {:?})", data.title, output.val);
+    log::info!(
+        "Published product: {} (event: {:?})",
+        data.title,
+        output.val
+    );
 
     // Refresh my products
     spawn(async {
@@ -1503,8 +1611,11 @@ pub async fn publish_review(
 ) -> Result<String> {
     use nostr_sdk::TagKind;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -1518,42 +1629,54 @@ pub async fn publish_review(
     let mut tags = vec![
         Tag::identifier(&d_tag),
         Tag::custom(TagKind::custom("a"), vec![product_coordinate.to_string()]),
-        Tag::custom(TagKind::custom("rating"), vec![
-            format!("{:.1}", overall_rating),
-            "thumb".to_string(), // Use "thumb" for overall rating per NIP-99
-        ]),
+        Tag::custom(
+            TagKind::custom("rating"),
+            vec![
+                format!("{:.1}", overall_rating),
+                "thumb".to_string(), // Use "thumb" for overall rating per NIP-99
+            ],
+        ),
     ];
 
     // Add category ratings with format: ["rating", score, category]
     if let Some(v) = value_rating {
-        tags.push(Tag::custom(TagKind::custom("rating"), vec![
-            format!("{:.1}", v), "value".to_string()
-        ]));
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", v), "value".to_string()],
+        ));
     }
     if let Some(q) = quality_rating {
-        tags.push(Tag::custom(TagKind::custom("rating"), vec![
-            format!("{:.1}", q), "quality".to_string()
-        ]));
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", q), "quality".to_string()],
+        ));
     }
     if let Some(d) = delivery_rating {
-        tags.push(Tag::custom(TagKind::custom("rating"), vec![
-            format!("{:.1}", d), "delivery".to_string()
-        ]));
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", d), "delivery".to_string()],
+        ));
     }
     if let Some(c) = communication_rating {
-        tags.push(Tag::custom(TagKind::custom("rating"), vec![
-            format!("{:.1}", c), "communication".to_string()
-        ]));
+        tags.push(Tag::custom(
+            TagKind::custom("rating"),
+            vec![format!("{:.1}", c), "communication".to_string()],
+        ));
     }
 
     // Build and sign event
-    let event_builder = EventBuilder::new(Kind::Custom(KIND_REVIEW), content)
-        .tags(tags);
+    let event_builder = EventBuilder::new(Kind::Custom(KIND_REVIEW), content).tags(tags);
 
-    let output = client.send_event_builder(event_builder).await
+    let output = client
+        .send_event_builder(event_builder)
+        .await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
 
-    log::info!("Published review for {}: {:?}", product_coordinate, output.val);
+    log::info!(
+        "Published review for {}: {:?}",
+        product_coordinate,
+        output.val
+    );
 
     Ok(d_tag)
 }
@@ -1574,9 +1697,7 @@ pub async fn fetch_collection_by_naddr(naddr: &str) -> Result<Option<ProductColl
         .map_err(|e| format!("Invalid naddr: {}", e))?;
 
     let (pubkey, d_tag) = match &coordinate {
-        nostr_sdk::nips::nip19::Nip19::Coordinate(c) => {
-            (c.public_key, c.identifier.clone())
-        }
+        nostr_sdk::nips::nip19::Nip19::Coordinate(c) => (c.public_key, c.identifier.clone()),
         _ => return Err("Not a valid collection address".to_string()),
     };
 
@@ -1586,7 +1707,8 @@ pub async fn fetch_collection_by_naddr(naddr: &str) -> Result<Option<ProductColl
         .identifier(&d_tag)
         .limit(1);
 
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch collection: {}", e))?;
 
     if let Some(event) = events.first() {
@@ -1620,7 +1742,9 @@ pub async fn fetch_collection_products(collection: &ProductCollection) -> Result
                     .identifier(d_tag)
                     .limit(1);
 
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
+                if let Ok(events) =
+                    nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await
+                {
                     if let Some(event) = events.first() {
                         if let Ok(product) = parse_product(event) {
                             products.push(product);
@@ -1646,13 +1770,16 @@ pub struct CollectionFormData {
 
 /// Fetch current user's collections
 pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
-    let pubkey = nostr_client::get_cached_pubkey()
-        .map_err(|e| format!("Not authenticated: {}", e))?;
+    let pubkey =
+        nostr_client::get_cached_pubkey().map_err(|e| format!("Not authenticated: {}", e))?;
 
     *LOADING_MY_COLLECTIONS.write() = true;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_COLLECTION))
@@ -1681,11 +1808,17 @@ pub async fn fetch_my_collections() -> Result<Vec<ProductCollection>> {
 }
 
 /// Create or update a collection (Kind 30405)
-pub async fn publish_collection(data: CollectionFormData, existing_d_tag: Option<String>) -> Result<String> {
+pub async fn publish_collection(
+    data: CollectionFormData,
+    existing_d_tag: Option<String>,
+) -> Result<String> {
     use nostr_sdk::TagKind;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -1707,7 +1840,10 @@ pub async fn publish_collection(data: CollectionFormData, existing_d_tag: Option
 
     // Description
     if !data.description.trim().is_empty() {
-        tags.push(Tag::custom(TagKind::custom("summary"), vec![data.description.clone()]));
+        tags.push(Tag::custom(
+            TagKind::custom("summary"),
+            vec![data.description.clone()],
+        ));
     }
 
     // Image
@@ -1724,15 +1860,19 @@ pub async fn publish_collection(data: CollectionFormData, existing_d_tag: Option
 
     // Shipping options
     for shipping in &data.shipping_options {
-        tags.push(Tag::custom(TagKind::custom("shipping_option"), vec![shipping.clone()]));
+        tags.push(Tag::custom(
+            TagKind::custom("shipping_option"),
+            vec![shipping.clone()],
+        ));
     }
 
     // Create event
-    let builder = EventBuilder::new(Kind::Custom(KIND_COLLECTION), &data.description)
-        .tags(tags);
+    let builder = EventBuilder::new(Kind::Custom(KIND_COLLECTION), &data.description).tags(tags);
 
     // Sign and publish
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish collection: {}", e))?;
 
     log::info!("Published collection: {} (event: {})", d_tag, output.id());
@@ -1745,25 +1885,31 @@ pub async fn publish_collection(data: CollectionFormData, existing_d_tag: Option
 
 /// Delete a collection
 pub async fn delete_collection(d_tag: &str) -> Result<()> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     // Find the collection event ID
-    let collection = MY_COLLECTIONS.read()
+    let collection = MY_COLLECTIONS
+        .read()
         .iter()
         .find(|c| c.d_tag == d_tag)
         .cloned()
         .ok_or("Collection not found")?;
 
-    let event_id = EventId::parse(&collection.event_id)
-        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let event_id =
+        EventId::parse(&collection.event_id).map_err(|e| format!("Invalid event ID: {}", e))?;
 
     // Create deletion event using NIP-9
     use nostr::nips::nip09::EventDeletionRequest;
     let deletion_request = EventDeletionRequest::new().id(event_id);
     let delete_builder = EventBuilder::delete(deletion_request);
 
-    client.send_event_builder(delete_builder).await
+    client
+        .send_event_builder(delete_builder)
+        .await
         .map_err(|e| format!("Failed to delete collection: {}", e))?;
 
     // Remove from local state
@@ -1780,8 +1926,7 @@ pub async fn delete_collection(d_tag: &str) -> Result<()> {
 
 /// Search products by query using NIP-50, with fallback to local filtering
 pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> {
-    let client = nostr_client::get_client()
-        .ok_or("Client not initialized")?;
+    let client = nostr_client::get_client().ok_or("Client not initialized")?;
 
     // Try NIP-50 relay search first
     let search_filter = Filter::new()
@@ -1789,12 +1934,18 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
         .search(query)
         .limit(limit);
 
-    let search_result = client.fetch_events(search_filter, Duration::from_secs(5)).await;
+    let search_result = client
+        .fetch_events(search_filter, Duration::from_secs(5))
+        .await;
 
     // If NIP-50 returns results, use them
     if let Ok(events) = search_result {
         if !events.is_empty() {
-            log::debug!("NIP-50 search returned {} products for '{}'", events.len(), query);
+            log::debug!(
+                "NIP-50 search returned {} products for '{}'",
+                events.len(),
+                query
+            );
             let products: Vec<Product> = events
                 .iter()
                 .filter_map(|e| parse_product(e).ok())
@@ -1805,17 +1956,25 @@ pub async fn search_products(query: &str, limit: usize) -> Result<Vec<Product>> 
     }
 
     // Fallback: fetch recent products and filter locally
-    log::debug!("NIP-50 search returned no results, falling back to local filter for '{}'", query);
+    log::debug!(
+        "NIP-50 search returned no results, falling back to local filter for '{}'",
+        query
+    );
     let all_products = fetch_products(200).await?;
 
     let query_lower = query.to_lowercase();
-    let filtered: Vec<Product> = all_products.into_iter()
+    let filtered: Vec<Product> = all_products
+        .into_iter()
         .filter(|p| {
-            p.is_visible() && (
-                p.title.to_lowercase().contains(&query_lower) ||
-                p.description.as_ref().map(|d| d.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
-                p.categories.iter().any(|c| c.to_lowercase().contains(&query_lower))
-            )
+            p.is_visible()
+                && (p.title.to_lowercase().contains(&query_lower)
+                    || p.description
+                        .as_ref()
+                        .map(|d| d.to_lowercase().contains(&query_lower))
+                        .unwrap_or(false)
+                    || p.categories
+                        .iter()
+                        .any(|c| c.to_lowercase().contains(&query_lower)))
         })
         .take(limit)
         .collect();
@@ -1844,7 +2003,10 @@ pub async fn fetch_seller_orders() -> Result<Vec<ShopOrder>> {
 /// Process an incoming order message and update local state
 /// Uses OrderStatus::from_str() and ShippingStatus::from_str() for parsing
 /// sender_pubkey is provided when message comes from gift wrap to identify buyer
-pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Option<&str>) -> Result<()> {
+pub async fn process_order_message(
+    msg: &OrderMessageContent,
+    sender_pubkey: Option<&str>,
+) -> Result<()> {
     let order_id = &msg.order_id;
 
     // Track if we updated an order so we can persist it
@@ -1858,17 +2020,24 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
             // Parse order from payload and add to seller orders
             if let Some(buyer) = sender_pubkey {
                 if let Some(items_value) = msg.payload.get("items") {
-                    if let Ok(items) = serde_json::from_value::<Vec<OrderItem>>(items_value.clone()) {
-                        let shipping_address = msg.payload.get("shipping_address")
+                    if let Ok(items) = serde_json::from_value::<Vec<OrderItem>>(items_value.clone())
+                    {
+                        let shipping_address = msg
+                            .payload
+                            .get("shipping_address")
                             .and_then(|v| v.as_str())
                             .map(String::from);
 
-                        let shipping_option = msg.payload.get("shipping_option")
+                        let shipping_option = msg
+                            .payload
+                            .get("shipping_option")
                             .and_then(|v| v.as_str())
                             .map(String::from);
 
                         // Get total from payload
-                        let total_sats = msg.payload.get("amount_sats")
+                        let total_sats = msg
+                            .payload
+                            .get("amount_sats")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
 
@@ -1877,7 +2046,10 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
                             Ok(pk) => pk.to_hex(),
                             Err(_) => {
                                 log::warn!("Deferring order message - not authenticated");
-                                return Err("Not authenticated - order message will be reprocessed".to_string());
+                                return Err(
+                                    "Not authenticated - order message will be reprocessed"
+                                        .to_string(),
+                                );
                             }
                         };
 
@@ -1917,7 +2089,8 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
             log::info!("Received payment for order: {}", order_id);
             // Update order to confirmed status
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
+            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id)
+            {
                 order.status = OrderStatus::Confirmed;
                 order.paid_at = Some(msg.timestamp);
                 order.updated_at = msg.timestamp;
@@ -1929,29 +2102,30 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
         Some(OrderMessageType::StatusUpdate) => {
             // Order status changed (buyer perspective)
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(status_str) = msg.payload.get("status").and_then(|v| v.as_str()) {
-                if let Some(new_status) = OrderStatus::from_str(status_str) {
-                    log::info!("Order {} status updated to: {}", order_id, new_status);
+            updated_order =
+                if let Some(status_str) = msg.payload.get("status").and_then(|v| v.as_str()) {
+                    if let Some(new_status) = OrderStatus::from_str(status_str) {
+                        log::info!("Order {} status updated to: {}", order_id, new_status);
 
-                    // Update buyer's order with new status
-                    if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
-                        order.status = new_status;
-                        order.updated_at = msg.timestamp;
+                        // Update buyer's order with new status
+                        if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
+                            order.status = new_status;
+                            order.updated_at = msg.timestamp;
 
-                        // Check if order is still active
-                        if !new_status.is_active() {
-                            log::info!("Order {} is no longer active", order_id);
+                            // Check if order is still active
+                            if !new_status.is_active() {
+                                log::info!("Order {} is no longer active", order_id);
+                            }
+                            Some(order.clone())
+                        } else {
+                            None
                         }
-                        Some(order.clone())
                     } else {
                         None
                     }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
         }
         Some(OrderMessageType::ShippingUpdate) => {
             // Shipping info received (buyer perspective)
@@ -1959,10 +2133,15 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
             let carrier = msg.payload.get("carrier").and_then(|v| v.as_str());
             let status_str = msg.payload.get("status").and_then(|v| v.as_str());
 
-            log::info!("Shipping update for order {}: tracking={:?}", order_id, tracking);
+            log::info!(
+                "Shipping update for order {}: tracking={:?}",
+                order_id,
+                tracking
+            );
 
             let mut orders = BUYER_ORDERS.write();
-            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id) {
+            updated_order = if let Some(order) = orders.iter_mut().find(|o| o.order_id == *order_id)
+            {
                 if let Some(t) = tracking {
                     order.tracking_number = Some(t.to_string());
                 }
@@ -2011,13 +2190,20 @@ pub async fn process_order_message(msg: &OrderMessageContent, sender_pubkey: Opt
 /// Listen for order updates via NIP-17 gift wrap messages
 /// This would be called on app startup to process any pending messages
 pub async fn listen_for_order_updates() -> Result<()> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     // Get current user's pubkey
-    let signer = client.signer().await
+    let signer = client
+        .signer()
+        .await
         .map_err(|e| format!("No signer: {}", e))?;
-    let my_pubkey = signer.get_public_key().await
+    let my_pubkey = signer
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
 
     // Subscribe to Kind 1059 (gift wrap) events addressed to us
@@ -2029,7 +2215,9 @@ pub async fn listen_for_order_updates() -> Result<()> {
 
     log::info!("Fetching order update messages...");
 
-    let events = client.fetch_events(filter, Duration::from_secs(10)).await
+    let events = client
+        .fetch_events(filter, Duration::from_secs(10))
+        .await
         .map_err(|e| format!("Failed to fetch gift wraps: {}", e))?;
 
     log::info!("Found {} gift wrap events", events.len());
@@ -2057,7 +2245,8 @@ pub async fn listen_for_order_updates() -> Result<()> {
 
                     match serde_json::from_str::<OrderMessageContent>(&rumor.content) {
                         Ok(msg) => {
-                            if let Err(e) = process_order_message(&msg, Some(&sender_pubkey)).await {
+                            if let Err(e) = process_order_message(&msg, Some(&sender_pubkey)).await
+                            {
                                 log::error!("Failed to process order message: {}", e);
                             }
                         }
@@ -2082,14 +2271,18 @@ pub async fn listen_for_order_updates() -> Result<()> {
 
 /// Get count of active orders (pending, confirmed, processing)
 pub fn get_active_order_count() -> usize {
-    BUYER_ORDERS.read().iter()
+    BUYER_ORDERS
+        .read()
+        .iter()
         .filter(|o| o.status.is_active())
         .count()
 }
 
 /// Get count of seller's active orders
 pub fn get_seller_active_order_count() -> usize {
-    SELLER_ORDERS.read().iter()
+    SELLER_ORDERS
+        .read()
+        .iter()
         .filter(|o| o.status.is_active())
         .count()
 }
@@ -2104,7 +2297,8 @@ pub async fn update_order_status(
 ) -> Result<()> {
     // Find the order
     let mut orders = SELLER_ORDERS.write();
-    let order = orders.iter_mut()
+    let order = orders
+        .iter_mut()
         .find(|o| o.order_id == order_id)
         .ok_or("Order not found")?;
 
@@ -2141,11 +2335,7 @@ pub async fn update_order_status(
         )
     } else {
         // Use status update for order status changes
-        OrderMessageContent::new_status(
-            order_id,
-            new_status.as_str(),
-            None,
-        )
+        OrderMessageContent::new_status(order_id, new_status.as_str(), None)
     };
 
     drop(orders); // Release the lock before async call
@@ -2185,33 +2375,41 @@ pub async fn add_buyer_order(order: ShopOrder) {
 pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
     use nostr_sdk::TagKind;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
 
-    let signer = client.signer().await
+    let signer = client
+        .signer()
+        .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
-    let pubkey = signer.get_public_key().await
+    let pubkey = signer
+        .get_public_key()
+        .await
         .map_err(|e| format!("Failed to get pubkey: {}", e))?;
 
     // Create the coordinate for the product (Kind 30402)
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey.to_hex(), d_tag);
 
     // Build deletion event (Kind 5)
-    let tags = vec![
-        Tag::custom(TagKind::custom("a"), vec![coordinate]),
-    ];
+    let tags = vec![Tag::custom(TagKind::custom("a"), vec![coordinate])];
 
     let event = EventBuilder::new(Kind::EventDeletion, "Product deleted")
         .tags(tags)
-        .sign(&signer).await
+        .sign(&signer)
+        .await
         .map_err(|e| format!("Failed to sign deletion event: {}", e))?;
 
     // Publish to relays
-    client.send_event(&event).await
+    client
+        .send_event(&event)
+        .await
         .map_err(|e| format!("Failed to send deletion event: {}", e))?;
 
     // Remove from local cache
@@ -2226,8 +2424,11 @@ pub async fn delete_product(product_naddr: &str, d_tag: &str) -> Result<()> {
 pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String> {
     use nostr_sdk::TagKind;
 
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     if !*nostr_client::HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -2245,15 +2446,18 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
     let mut tags = vec![
         Tag::identifier(d_tag),
         Tag::custom(TagKind::custom("title"), vec![data.title.clone()]),
-        Tag::custom(TagKind::custom("price"), vec![
-            data.price_amount.to_string(),
-            data.price_currency.clone(),
-        ]),
+        Tag::custom(
+            TagKind::custom("price"),
+            vec![data.price_amount.to_string(), data.price_currency.clone()],
+        ),
     ];
 
     // Add summary/description
     if !data.description.is_empty() {
-        tags.push(Tag::custom(TagKind::custom("summary"), vec![data.description.clone()]));
+        tags.push(Tag::custom(
+            TagKind::custom("summary"),
+            vec![data.description.clone()],
+        ));
     }
 
     // Add images
@@ -2272,23 +2476,39 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
 
     // Add stock if set
     if let Some(stock) = data.stock {
-        tags.push(Tag::custom(TagKind::custom("stock"), vec![stock.to_string()]));
+        tags.push(Tag::custom(
+            TagKind::custom("stock"),
+            vec![stock.to_string()],
+        ));
     }
 
     // Add format
-    let format = if data.is_digital { "digital" } else { "physical" };
-    tags.push(Tag::custom(TagKind::custom("format"), vec![format.to_string()]));
+    let format = if data.is_digital {
+        "digital"
+    } else {
+        "physical"
+    };
+    tags.push(Tag::custom(
+        TagKind::custom("format"),
+        vec![format.to_string()],
+    ));
 
     // Add specs (consistent with publish_product)
     for (key, value) in &data.specs {
-        tags.push(Tag::custom(TagKind::custom("spec"), vec![key.clone(), value.clone()]));
+        tags.push(Tag::custom(
+            TagKind::custom("spec"),
+            vec![key.clone(), value.clone()],
+        ));
     }
 
     // Add shipping regions for physical products (use "shipping" for consistency)
     if !data.is_digital {
         for region in data.shipping_regions.iter() {
             if !region.is_empty() {
-                tags.push(Tag::custom(TagKind::custom("shipping"), vec![region.clone()]));
+                tags.push(Tag::custom(
+                    TagKind::custom("shipping"),
+                    vec![region.clone()],
+                ));
             }
         }
     }
@@ -2296,21 +2516,29 @@ pub async fn update_product(d_tag: &str, data: ProductFormData) -> Result<String
     // Add condition if specified
     if let Some(ref condition) = data.condition {
         if !condition.is_empty() {
-            tags.push(Tag::custom(TagKind::custom("condition"), vec![condition.clone()]));
+            tags.push(Tag::custom(
+                TagKind::custom("condition"),
+                vec![condition.clone()],
+            ));
         }
     }
 
     // Build and sign event
-    let signer = client.signer().await
+    let signer = client
+        .signer()
+        .await
         .map_err(|e| format!("Failed to get signer: {}", e))?;
 
     let event = EventBuilder::new(Kind::Custom(KIND_PRODUCT), data.description.clone())
         .tags(tags)
-        .sign(&signer).await
+        .sign(&signer)
+        .await
         .map_err(|e| format!("Failed to sign product event: {}", e))?;
 
     // Publish
-    client.send_event(&event).await
+    client
+        .send_event(&event)
+        .await
         .map_err(|e| format!("Failed to send product event: {}", e))?;
 
     log::info!("Product updated: {}", d_tag);

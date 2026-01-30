@@ -6,13 +6,11 @@ use nostr_sdk::prelude::NostrDatabaseExt;
 use nostr_sdk::PublicKey;
 use std::time::Duration;
 
-use crate::stores::pin_boards_store::{self, Pinboard};
-use crate::stores::nostr_client::{self, get_client, HAS_SIGNER};
-use crate::stores::auth_store;
-use crate::components::{
-    PinBoardMosaicGrid, BoardSlideover, ZapModal,
-};
+use crate::components::{BoardSlideover, PinBoardMosaicGrid, ZapModal};
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::{self, get_client, HAS_SIGNER};
+use crate::stores::pin_boards_store::{self, Pinboard};
 use crate::utils::truncate_pubkey;
 
 /// Number of boards to fetch per page
@@ -143,7 +141,10 @@ pub fn PinBoardsHome() -> Element {
             return;
         }
 
-        let version = search_version.with_mut(|v| { *v += 1; *v });
+        let version = search_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
         search_loading.set(true);
 
         spawn(async move {
@@ -160,9 +161,13 @@ pub fn PinBoardsHome() -> Element {
             let filtered: Vec<Pinboard> = boards
                 .into_iter()
                 .filter(|b| {
-                    b.title.to_lowercase().contains(&query_lower) ||
-                    b.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&query_lower)) ||
-                    b.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                    b.title.to_lowercase().contains(&query_lower)
+                        || b.description
+                            .as_ref()
+                            .is_some_and(|d| d.to_lowercase().contains(&query_lower))
+                        || b.tags
+                            .iter()
+                            .any(|t| t.to_lowercase().contains(&query_lower))
                 })
                 .collect();
 
@@ -185,8 +190,13 @@ pub fn PinBoardsHome() -> Element {
         };
 
         if let Some(ref tag) = *selected_tag.read() {
-            boards.into_iter()
-                .filter(|b| b.tags.iter().any(|t| t.to_lowercase() == tag.to_lowercase()))
+            boards
+                .into_iter()
+                .filter(|b| {
+                    b.tags
+                        .iter()
+                        .any(|t| t.to_lowercase() == tag.to_lowercase())
+                })
                 .collect()
         } else {
             boards
@@ -195,7 +205,8 @@ pub fn PinBoardsHome() -> Element {
 
     // Collect all unique tags from boards for filter
     let all_tags: Vec<String> = {
-        let mut tags: Vec<String> = discover_boards.read()
+        let mut tags: Vec<String> = discover_boards
+            .read()
             .iter()
             .flat_map(|b| b.tags.clone())
             .collect();
@@ -210,12 +221,19 @@ pub fn PinBoardsHome() -> Element {
         if *show_zap_modal.read() {
             if let Some(ref board) = *zap_board.read() {
                 let metadata_opt = zap_author_metadata.read().clone();
-                let author_name = metadata_opt.as_ref()
+                let author_name = metadata_opt
+                    .as_ref()
                     .and_then(|m| m.display_name.clone().or(m.name.clone()))
                     .unwrap_or_else(|| truncate_pubkey(&board.pubkey));
                 let lud16 = metadata_opt.as_ref().and_then(|m| m.lud16.clone());
                 let lud06 = metadata_opt.as_ref().and_then(|m| m.lud06.clone());
-                Some((board.pubkey.clone(), author_name, lud16, lud06, board.event_id.clone()))
+                Some((
+                    board.pubkey.clone(),
+                    author_name,
+                    lud16,
+                    lud06,
+                    board.event_id.clone(),
+                ))
             } else {
                 None
             }

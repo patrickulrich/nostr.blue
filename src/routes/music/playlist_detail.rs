@@ -1,10 +1,10 @@
 // Playlist Detail Page
 // Shows a single playlist with its tracks and allows playback
 
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::stores::{nostr_music, music_player, profiles};
 use crate::components::{UnifiedTrackCard, UnifiedTrackCardSkeleton};
+use crate::routes::Route;
+use crate::stores::{music_player, nostr_music, profiles};
+use dioxus::prelude::*;
 
 #[component]
 pub fn MusicPlaylistDetail(naddr: String) -> Element {
@@ -46,10 +46,8 @@ pub fn MusicPlaylistDetail(naddr: String) -> Element {
                     // Resolve playlist tracks
                     match nostr_music::resolve_playlist_tracks(&pl).await {
                         Ok(nostr_tracks) => {
-                            let music_tracks: Vec<music_player::MusicTrack> = nostr_tracks
-                                .into_iter()
-                                .map(|t| t.into())
-                                .collect();
+                            let music_tracks: Vec<music_player::MusicTrack> =
+                                nostr_tracks.into_iter().map(|t| t.into()).collect();
                             tracks.set(music_tracks);
                         }
                         Err(e) => {

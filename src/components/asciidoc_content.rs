@@ -1,18 +1,18 @@
 //! AsciiDoc Content Component
 //! Renders AsciiDoc markup with wikilink support for publications and wiki pages
 
-use dioxus::prelude::*;
-use std::collections::HashMap;
+use crate::routes::Route;
+use crate::stores::citation_store::fetch_citations_by_identifiers;
 use crate::utils::asciidoc::{
-    render_content_auto_with_options, content_to_plain_text,
-    render_content_with_citations, content_has_citations, extract_citation_identifiers,
+    content_has_citations, content_to_plain_text, extract_citation_identifiers,
+    render_content_auto_with_options, render_content_with_citations,
 };
 use crate::utils::markdown::sanitize_html;
 use crate::utils::nip54::extract_wikilinks;
 use crate::utils::nkbip03::ResolvedCitation;
 use crate::utils::nkbip08::render_book_wikilinks;
-use crate::stores::citation_store::fetch_citations_by_identifiers;
-use crate::routes::Route;
+use dioxus::prelude::*;
+use std::collections::HashMap;
 
 /// Citation metadata exposed to parent components
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -51,7 +51,8 @@ pub fn AsciiDocContent(
     on_citations_loaded: Option<EventHandler<CitationMetadata>>,
 ) -> Element {
     // State for resolved citations
-    let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> = use_signal(HashMap::new);
+    let mut resolved_citations: Signal<HashMap<String, ResolvedCitation>> =
+        use_signal(HashMap::new);
     let mut citations_loading = use_signal(|| false);
     let mut citations_error = use_signal(|| false);
 
@@ -73,7 +74,10 @@ pub fn AsciiDocContent(
         fetch_generation.set(current_generation);
 
         // Clear stale state when citations are disabled or content is empty
-        if !enable_citations || content_for_effect.is_empty() || !content_has_citations(&content_for_effect) {
+        if !enable_citations
+            || content_for_effect.is_empty()
+            || !content_has_citations(&content_for_effect)
+        {
             citations_loading.set(false);
             citations_error.set(false);
             resolved_citations.set(HashMap::new());
@@ -89,7 +93,7 @@ pub fn AsciiDocContent(
         }
 
         citations_loading.set(true);
-        citations_error.set(false);  // Clear stale error before fetch
+        citations_error.set(false); // Clear stale error before fetch
 
         spawn(async move {
             let result = fetch_citations_by_identifiers(&identifiers).await;
@@ -106,10 +110,8 @@ pub fn AsciiDocContent(
                     let resolved: HashMap<String, ResolvedCitation> = cached
                         .into_iter()
                         .map(|(id, cached_cit)| {
-                            let resolved = ResolvedCitation::from_citation(
-                                id.clone(),
-                                &cached_cit.citation,
-                            );
+                            let resolved =
+                                ResolvedCitation::from_citation(id.clone(), &cached_cit.citation);
                             (id, resolved)
                         })
                         .collect();
@@ -128,7 +130,8 @@ pub fn AsciiDocContent(
 
     // Render content with citations if enabled
     let (rendered, footnotes_html, endnotes_html, citation_metadata) = if enable_citations {
-        let result = render_content_with_citations(&content, &resolved_citations.read(), enable_wikilinks);
+        let result =
+            render_content_with_citations(&content, &resolved_citations.read(), enable_wikilinks);
         let mut html = result.html;
 
         // Process book:: links if enabled
@@ -143,7 +146,12 @@ pub fn AsciiDocContent(
             identifiers: result.citation_identifiers,
         };
 
-        (html, result.footnotes_html, result.endnotes_html, Some(metadata))
+        (
+            html,
+            result.footnotes_html,
+            result.endnotes_html,
+            Some(metadata),
+        )
     } else {
         // Process content through our renderers with automatic format detection
         // Always use auto-detection, controlling wikilinks separately
@@ -161,7 +169,9 @@ pub fn AsciiDocContent(
     // Only call handler when metadata actually changes from previous call to avoid infinite loops
     let citation_metadata_for_effect = citation_metadata.clone();
     use_effect(use_reactive!(|citation_metadata_for_effect| {
-        if let (Some(ref handler), Some(ref metadata)) = (&on_citations_loaded, &citation_metadata_for_effect) {
+        if let (Some(ref handler), Some(ref metadata)) =
+            (&on_citations_loaded, &citation_metadata_for_effect)
+        {
             // Only notify if metadata has changed from what we last notified
             let should_notify = last_notified_metadata.read().as_ref() != Some(metadata);
             if should_notify {
@@ -343,4 +353,3 @@ pub fn WikilinksList(
         }
     }
 }
-

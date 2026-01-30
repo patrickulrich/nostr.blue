@@ -5,10 +5,10 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
 
-use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
-use crate::components::{NoteCard, ClientInitializing};
+use crate::components::{ClientInitializing, NoteCard};
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
+use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -187,7 +187,8 @@ pub fn Notifications() -> Element {
     let auth = auth_store::AUTH_STATE.read();
 
     // Filter notifications based on active filter
-    let filtered_notifications: Vec<NotificationType> = notifications.read()
+    let filtered_notifications: Vec<NotificationType> = notifications
+        .read()
         .iter()
         .filter(|n| active_filter.read().matches(n))
         .cloned()
@@ -437,16 +438,16 @@ fn ReactionNotification(
     // Custom emoji URL if present (use as_slice for zero-copy access)
     let custom_emoji_url = if event.content.starts_with(':') && event.content.ends_with(':') {
         let shortcode = event.content.trim_matches(':');
-        event.tags.iter()
-            .find_map(|tag| {
-                let slice = tag.as_slice();
-                if slice.first().map(|k| k == "emoji").unwrap_or(false) &&
-                   slice.get(1).map(|s| s == shortcode).unwrap_or(false) {
-                    slice.get(2).cloned()
-                } else {
-                    None
-                }
-            })
+        event.tags.iter().find_map(|tag| {
+            let slice = tag.as_slice();
+            if slice.first().map(|k| k == "emoji").unwrap_or(false)
+                && slice.get(1).map(|s| s == shortcode).unwrap_or(false)
+            {
+                slice.get(2).cloned()
+            } else {
+                None
+            }
+        })
     } else {
         None
     };
@@ -460,10 +461,15 @@ fn ReactionNotification(
     };
 
     // Get the event ID that was reacted to
-    let reacted_event_id = event.tags.iter()
-        .find(|tag| tag.kind() == nostr_sdk::TagKind::SingleLetter(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-        ))
+    let reacted_event_id = event
+        .tags
+        .iter()
+        .find(|tag| {
+            tag.kind()
+                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
+        })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
 
@@ -485,7 +491,9 @@ fn ReactionNotification(
 
             // Fetch the original post that was reacted to
             if let Some(eid) = event_id {
-                if let Ok(client) = nostr_client::NOSTR_CLIENT.read().as_ref()
+                if let Ok(client) = nostr_client::NOSTR_CLIENT
+                    .read()
+                    .as_ref()
                     .ok_or("Client not initialized")
                 {
                     let filter = Filter::new()
@@ -493,8 +501,11 @@ fn ReactionNotification(
                         .limit(1);
 
                     // Use gossip for automatic relay routing
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await
-                        .map(|e| e.into_iter().collect::<Vec<_>>()) {
+                    if let Ok(events) = client
+                        .fetch_events(filter, Duration::from_secs(5))
+                        .await
+                        .map(|e| e.into_iter().collect::<Vec<_>>())
+                    {
                         if let Some(original_event) = events.into_iter().next() {
                             reacted_post.set(Some(original_event));
                         }
@@ -506,13 +517,22 @@ fn ReactionNotification(
         });
     });
 
-    let display_name = profile.read().as_ref()
+    let display_name = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| format!("{}...", &reactor_pubkey_for_display[..16]));
 
-    let avatar_url = profile.read().as_ref()
+    let avatar_url = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_avatar_url())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", reactor_pubkey_for_avatar));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                reactor_pubkey_for_avatar
+            )
+        });
 
     rsx! {
         div {
@@ -596,10 +616,15 @@ fn RepostNotification(
     let reposter_pubkey = event.pubkey.to_string();
 
     // Get the event ID that was reposted from 'e' tag
-    let reposted_event_id = event.tags.iter()
-        .find(|tag| tag.kind() == nostr_sdk::TagKind::SingleLetter(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-        ))
+    let reposted_event_id = event
+        .tags
+        .iter()
+        .find(|tag| {
+            tag.kind()
+                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
+        })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
 
@@ -621,7 +646,9 @@ fn RepostNotification(
 
             // Fetch the original post that was reposted
             if let Some(eid) = event_id {
-                if let Ok(client) = nostr_client::NOSTR_CLIENT.read().as_ref()
+                if let Ok(client) = nostr_client::NOSTR_CLIENT
+                    .read()
+                    .as_ref()
                     .ok_or("Client not initialized")
                 {
                     let filter = Filter::new()
@@ -629,8 +656,11 @@ fn RepostNotification(
                         .limit(1);
 
                     // Use gossip for automatic relay routing
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await
-                        .map(|e| e.into_iter().collect::<Vec<_>>()) {
+                    if let Ok(events) = client
+                        .fetch_events(filter, Duration::from_secs(5))
+                        .await
+                        .map(|e| e.into_iter().collect::<Vec<_>>())
+                    {
                         if let Some(original_event) = events.into_iter().next() {
                             reposted_post.set(Some(original_event));
                         }
@@ -642,13 +672,22 @@ fn RepostNotification(
         });
     });
 
-    let display_name = profile.read().as_ref()
+    let display_name = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| format!("{}...", &reposter_pubkey_for_display[..16]));
 
-    let avatar_url = profile.read().as_ref()
+    let avatar_url = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_avatar_url())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", reposter_pubkey_for_avatar));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                reposter_pubkey_for_avatar
+            )
+        });
 
     rsx! {
         div {
@@ -728,10 +767,15 @@ fn ZapNotification(
     let zap_amount_sats = extract_zap_amount(&event);
 
     // Get the event ID that was zapped from 'e' tag
-    let zapped_event_id = event.tags.iter()
-        .find(|tag| tag.kind() == nostr_sdk::TagKind::SingleLetter(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-        ))
+    let zapped_event_id = event
+        .tags
+        .iter()
+        .find(|tag| {
+            tag.kind()
+                == nostr_sdk::TagKind::SingleLetter(nostr_sdk::SingleLetterTag::lowercase(
+                    nostr_sdk::Alphabet::E,
+                ))
+        })
         .and_then(|tag| tag.content())
         .map(|s| s.to_string());
 
@@ -753,7 +797,9 @@ fn ZapNotification(
 
             // Fetch the original post that was zapped
             if let Some(eid) = event_id {
-                if let Ok(client) = nostr_client::NOSTR_CLIENT.read().as_ref()
+                if let Ok(client) = nostr_client::NOSTR_CLIENT
+                    .read()
+                    .as_ref()
                     .ok_or("Client not initialized")
                 {
                     let filter = Filter::new()
@@ -761,8 +807,11 @@ fn ZapNotification(
                         .limit(1);
 
                     // Use gossip for automatic relay routing
-                    if let Ok(events) = client.fetch_events(filter, Duration::from_secs(5)).await
-                        .map(|e| e.into_iter().collect::<Vec<_>>()) {
+                    if let Ok(events) = client
+                        .fetch_events(filter, Duration::from_secs(5))
+                        .await
+                        .map(|e| e.into_iter().collect::<Vec<_>>())
+                    {
                         if let Some(original_event) = events.into_iter().next() {
                             zapped_post.set(Some(original_event));
                         }
@@ -774,13 +823,22 @@ fn ZapNotification(
         });
     });
 
-    let display_name = profile.read().as_ref()
+    let display_name = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_display_name())
         .unwrap_or_else(|| format!("{}...", &zapper_pubkey_for_display[..16]));
 
-    let avatar_url = profile.read().as_ref()
+    let avatar_url = profile
+        .read()
+        .as_ref()
         .map(|p| p.get_avatar_url())
-        .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", zapper_pubkey_for_avatar));
+        .unwrap_or_else(|| {
+            format!(
+                "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                zapper_pubkey_for_avatar
+            )
+        });
 
     rsx! {
         div {
@@ -853,7 +911,10 @@ fn ZapNotification(
 fn extract_zapper_pubkey(event: &NostrEvent) -> Option<String> {
     // Find the description tag which contains the zap request (use as_slice for zero-copy access)
     if let Some(description_tag) = event.tags.iter().find(|tag| {
-        tag.as_slice().first().map(|k| k == "description").unwrap_or(false)
+        tag.as_slice()
+            .first()
+            .map(|k| k == "description")
+            .unwrap_or(false)
     }) {
         if let Some(description) = description_tag.as_slice().get(1) {
             // Parse the zap request event from the description
@@ -873,7 +934,10 @@ fn extract_zapper_pubkey(event: &NostrEvent) -> Option<String> {
 fn extract_zap_amount(event: &NostrEvent) -> Option<u64> {
     // Try to find the bolt11 tag and parse the amount from it (use as_slice for zero-copy access)
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
-        tag.as_slice().first().map(|k| k == "bolt11").unwrap_or(false)
+        tag.as_slice()
+            .first()
+            .map(|k| k == "bolt11")
+            .unwrap_or(false)
     }) {
         if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
             return parse_bolt11_amount(bolt11);
@@ -882,7 +946,10 @@ fn extract_zap_amount(event: &NostrEvent) -> Option<u64> {
 
     // Fallback: try to parse from description tag (zap request) (use as_slice for zero-copy access)
     if let Some(description_tag) = event.tags.iter().find(|tag| {
-        tag.as_slice().first().map(|k| k == "description").unwrap_or(false)
+        tag.as_slice()
+            .first()
+            .map(|k| k == "description")
+            .unwrap_or(false)
     }) {
         if let Some(description) = description_tag.as_slice().get(1) {
             if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(description) {
@@ -933,11 +1000,11 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
 
     // Convert to satoshis based on multiplier
     let sats = match multiplier_char {
-        Some('m') => amount * 100_000,      // milli-bitcoin = 100,000 sats
-        Some('u') => amount * 100,          // micro-bitcoin = 100 sats
-        Some('n') => amount / 10,           // nano-bitcoin = 0.1 sats
-        Some('p') => amount / 10_000,       // pico-bitcoin = 0.0001 sats
-        None => amount * 100_000_000,       // whole bitcoin = 100,000,000 sats
+        Some('m') => amount * 100_000, // milli-bitcoin = 100,000 sats
+        Some('u') => amount * 100,     // micro-bitcoin = 100 sats
+        Some('n') => amount / 10,      // nano-bitcoin = 0.1 sats
+        Some('p') => amount / 10_000,  // pico-bitcoin = 0.0001 sats
+        None => amount * 100_000_000,  // whole bitcoin = 100,000,000 sats
         _ => return None,
     };
 
@@ -947,24 +1014,32 @@ fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
 /// Helper to get timestamp from notification
 fn get_timestamp(notification: &NotificationType) -> u64 {
     match notification {
-        NotificationType::Mention(e) | NotificationType::Reply(e) |
-        NotificationType::Reaction(e) | NotificationType::Repost(e) |
-        NotificationType::Zap(e) => e.created_at.as_secs(),
+        NotificationType::Mention(e)
+        | NotificationType::Reply(e)
+        | NotificationType::Reaction(e)
+        | NotificationType::Repost(e)
+        | NotificationType::Zap(e) => e.created_at.as_secs(),
     }
 }
 
 async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>, String> {
-    let client = nostr_client::NOSTR_CLIENT.read().as_ref()
-        .ok_or("Client not initialized")?.clone();
+    let client = nostr_client::NOSTR_CLIENT
+        .read()
+        .as_ref()
+        .ok_or("Client not initialized")?
+        .clone();
 
     // Ensure at least one relay is connected before fetching
     // This is critical - CLIENT_INITIALIZED may be true but relays not yet connected
     nostr_client::ensure_relays_ready(&client).await;
 
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
 
-    log::info!("Loading notifications for {} (until: {:?})", pubkey_str, until);
+    log::info!(
+        "Loading notifications for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
 
     let mut all_notifications = Vec::new();
 
@@ -973,14 +1048,14 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
     // Use limit: 100 for historical/initial load
     let mut filter = Filter::new()
         .kinds(vec![
-            Kind::TextNote,      // 1 - for mentions and replies
-            Kind::Repost,        // 6
-            Kind::Reaction,      // 7
-            Kind::ZapReceipt,    // 9735
+            Kind::TextNote,   // 1 - for mentions and replies
+            Kind::Repost,     // 6
+            Kind::Reaction,   // 7
+            Kind::ZapReceipt, // 9735
         ])
         .custom_tag(
             nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
-            pubkey_str.clone()
+            pubkey_str.clone(),
         )
         .limit(100);
 
@@ -990,8 +1065,11 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
     }
 
     // Use gossip for automatic relay routing
-    match client.fetch_events(filter, Duration::from_secs(10)).await
-        .map(|e| e.into_iter().collect::<Vec<_>>()) {
+    match client
+        .fetch_events(filter, Duration::from_secs(10))
+        .await
+        .map(|e| e.into_iter().collect::<Vec<_>>())
+    {
         Ok(events) => {
             for event in events {
                 // Skip our own events
@@ -1003,9 +1081,10 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
                     Kind::TextNote => {
                         // Check if it's a reply (has 'e' tag) or just a mention
                         let is_reply = event.tags.iter().any(|tag| {
-                            tag.kind() == nostr_sdk::TagKind::SingleLetter(
-                                nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E)
-                            )
+                            tag.kind()
+                                == nostr_sdk::TagKind::SingleLetter(
+                                    nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::E),
+                                )
                         });
 
                         if is_reply {
@@ -1034,9 +1113,7 @@ async fn load_notifications(until: Option<u64>) -> Result<Vec<NotificationType>,
     }
 
     // Sort by timestamp (newest first)
-    all_notifications.sort_by(|a, b| {
-        get_timestamp(b).cmp(&get_timestamp(a))
-    });
+    all_notifications.sort_by(|a, b| get_timestamp(b).cmp(&get_timestamp(a)));
 
     log::info!("Loaded {} notifications", all_notifications.len());
     Ok(all_notifications)
@@ -1051,14 +1128,12 @@ async fn prefetch_notification_authors(notifications: &[NotificationType]) {
     }
 
     // Extract pubkeys directly without string conversion
-    let pubkeys = profile_prefetch::extract_pubkeys(notifications, |notif| {
-        match notif {
-            NotificationType::Mention(e) => e.pubkey,
-            NotificationType::Reply(e) => e.pubkey,
-            NotificationType::Reaction(e) => e.pubkey,
-            NotificationType::Repost(e) => e.pubkey,
-            NotificationType::Zap(e) => e.pubkey,
-        }
+    let pubkeys = profile_prefetch::extract_pubkeys(notifications, |notif| match notif {
+        NotificationType::Mention(e) => e.pubkey,
+        NotificationType::Reply(e) => e.pubkey,
+        NotificationType::Reaction(e) => e.pubkey,
+        NotificationType::Repost(e) => e.pubkey,
+        NotificationType::Zap(e) => e.pubkey,
     });
 
     // Use optimized prefetch utility - no string conversions, direct database queries

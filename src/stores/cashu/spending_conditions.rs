@@ -193,8 +193,12 @@ pub fn build_sig_all_message_for_melt(
 /// Sign a SIG_ALL message with a secret key
 ///
 /// Returns the hex-encoded Schnorr signature.
-pub fn sign_sig_all_message(message: &str, secret_key: &cdk::nuts::SecretKey) -> Result<String, String> {
-    let signature = secret_key.sign(message.as_bytes())
+pub fn sign_sig_all_message(
+    message: &str,
+    secret_key: &cdk::nuts::SecretKey,
+) -> Result<String, String> {
+    let signature = secret_key
+        .sign(message.as_bytes())
         .map_err(|e| format!("Failed to sign: {}", e))?;
 
     Ok(signature.to_string())
@@ -270,8 +274,7 @@ pub fn verify_inputs_match_for_sig_all(
     }
 
     // Get first input's conditions
-    let first_conditions = conditions.first()
-        .ok_or("No conditions for first input")?;
+    let first_conditions = conditions.first().ok_or("No conditions for first input")?;
 
     // Verify first input has SIG_ALL
     if let Some(cond) = first_conditions {
@@ -367,7 +370,10 @@ pub fn extract_conditions_from_cdk(
 
             Some(ext)
         }
-        SpendingConditions::HTLCConditions { data: _, conditions } => {
+        SpendingConditions::HTLCConditions {
+            data: _,
+            conditions,
+        } => {
             let mut ext = ExtendedConditions::default();
 
             if let Some(cond) = conditions {
@@ -424,7 +430,11 @@ pub fn create_multisig_sig_all(
         data: primary_pubkey,
         conditions: Some(Conditions {
             locktime: None,
-            pubkeys: if additional_pubkeys.is_empty() { None } else { Some(additional_pubkeys) },
+            pubkeys: if additional_pubkeys.is_empty() {
+                None
+            } else {
+                Some(additional_pubkeys)
+            },
             refund_keys: None,
             num_sigs: Some(required_sigs),
             sig_flag: cdk::nuts::SigFlag::SigAll,
@@ -474,13 +484,7 @@ mod tests {
         let c_points = vec!["C1".to_string()];
         let quote_id = "quote123";
 
-        let msg = build_sig_all_message_for_melt(
-            &secrets,
-            &c_points,
-            None,
-            None,
-            quote_id,
-        );
+        let msg = build_sig_all_message_for_melt(&secrets, &c_points, None, None, quote_id);
 
         assert_eq!(msg, "secret1C1quote123");
     }

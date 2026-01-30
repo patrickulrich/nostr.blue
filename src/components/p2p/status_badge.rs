@@ -2,8 +2,8 @@
 //!
 //! Color-coded status indicator for NIP-69 P2P orders
 
+use crate::utils::nip69::{Layer, Network, OrderStatus, OrderType};
 use dioxus::prelude::*;
-use crate::utils::nip69::{OrderStatus, OrderType, Layer, Network};
 
 /// Status badge with color-coded styling
 #[component]
@@ -11,24 +11,21 @@ pub fn P2PStatusBadge(status: OrderStatus) -> Element {
     let (class, label) = match status {
         OrderStatus::Pending => (
             "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400",
-            "Pending"
+            "Pending",
         ),
         OrderStatus::InProgress => (
             "bg-blue-500/20 text-blue-600 dark:text-blue-400",
-            "In Progress"
+            "In Progress",
         ),
         OrderStatus::Success => (
             "bg-green-500/20 text-green-600 dark:text-green-400",
-            "Completed"
+            "Completed",
         ),
         OrderStatus::Canceled => (
             "bg-gray-500/20 text-gray-600 dark:text-gray-400",
-            "Canceled"
+            "Canceled",
         ),
-        OrderStatus::Expired => (
-            "bg-red-500/20 text-red-600 dark:text-red-400",
-            "Expired"
-        ),
+        OrderStatus::Expired => ("bg-red-500/20 text-red-600 dark:text-red-400", "Expired"),
     };
 
     rsx! {
@@ -43,14 +40,8 @@ pub fn P2PStatusBadge(status: OrderStatus) -> Element {
 #[component]
 pub fn P2PTypeBadge(order_type: OrderType) -> Element {
     let (class, label) = match order_type {
-        OrderType::Buy => (
-            "bg-green-500/20 text-green-600 dark:text-green-400",
-            "BUY"
-        ),
-        OrderType::Sell => (
-            "bg-red-500/20 text-red-600 dark:text-red-400",
-            "SELL"
-        ),
+        OrderType::Buy => ("bg-green-500/20 text-green-600 dark:text-green-400", "BUY"),
+        OrderType::Sell => ("bg-red-500/20 text-red-600 dark:text-red-400", "SELL"),
     };
 
     rsx! {
@@ -85,16 +76,13 @@ pub fn P2PNetworkBadge(network: Network) -> Element {
     let (class, label) = match network {
         Network::Mainnet => (
             "bg-orange-500/20 text-orange-600 dark:text-orange-400",
-            "Mainnet"
+            "Mainnet",
         ),
         Network::Testnet => (
             "bg-purple-500/20 text-purple-600 dark:text-purple-400",
-            "Testnet"
+            "Testnet",
         ),
-        Network::Signet => (
-            "bg-cyan-500/20 text-cyan-600 dark:text-cyan-400",
-            "Signet"
-        ),
+        Network::Signet => ("bg-cyan-500/20 text-cyan-600 dark:text-cyan-400", "Signet"),
     };
 
     rsx! {

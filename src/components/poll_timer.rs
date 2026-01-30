@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
-use nostr_sdk::Timestamp;
 use gloo_timers::future::TimeoutFuture;
+use nostr_sdk::Timestamp;
 
 #[component]
 pub fn PollTimer(ends_at: Timestamp) -> Element {
@@ -105,7 +105,11 @@ fn format_ended_date(ends_at: Timestamp) -> String {
         "just now".to_string()
     } else if diff < 3600 {
         let minutes = diff / 60;
-        format!("{} minute{} ago", minutes, if minutes == 1 { "" } else { "s" })
+        format!(
+            "{} minute{} ago",
+            minutes,
+            if minutes == 1 { "" } else { "s" }
+        )
     } else if diff < 86400 {
         let hours = diff / 3600;
         format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" })
@@ -114,8 +118,8 @@ fn format_ended_date(ends_at: Timestamp) -> String {
         format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
     } else {
         // Format as date for older polls
-        let date = chrono::DateTime::from_timestamp(ends_at.as_secs() as i64, 0)
-            .unwrap_or_default();
+        let date =
+            chrono::DateTime::from_timestamp(ends_at.as_secs() as i64, 0).unwrap_or_default();
         date.format("%b %d, %Y").to_string()
     }
 }

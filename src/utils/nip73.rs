@@ -36,7 +36,11 @@ pub fn get_display_name(content: &ExternalContentId) -> String {
         ExternalContentId::PodcastEpisode(guid) => format!("Episode: {}", truncate_id(guid)),
         ExternalContentId::PodcastPublisher(guid) => format!("Publisher: {}", truncate_id(guid)),
         ExternalContentId::Geohash(hash) => format!("Location: {}", hash),
-        ExternalContentId::BlockchainTransaction { chain, transaction_hash, .. } => {
+        ExternalContentId::BlockchainTransaction {
+            chain,
+            transaction_hash,
+            ..
+        } => {
             if chain == "bitcoin" {
                 format!("TX: {}", truncate_id(transaction_hash))
             } else {
@@ -77,7 +81,10 @@ pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
 
         ExternalContentId::Movie(isan) => {
             // ISAN lookup - less common, link to ISAN registry
-            Some(format!("https://web.isan.org/public/en/search?isan={}", isan))
+            Some(format!(
+                "https://web.isan.org/public/en/search?isan={}",
+                isan
+            ))
         }
 
         ExternalContentId::PodcastFeed(guid) => {
@@ -100,7 +107,11 @@ pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
             Some(format!("https://geohash.org/{}", hash))
         }
 
-        ExternalContentId::BlockchainTransaction { chain, transaction_hash, .. } => {
+        ExternalContentId::BlockchainTransaction {
+            chain,
+            transaction_hash,
+            ..
+        } => {
             if chain == "bitcoin" {
                 // Mempool.space for Bitcoin transactions
                 Some(format!("https://mempool.space/tx/{}", transaction_hash))
@@ -138,7 +149,9 @@ pub fn get_raw_identifier(content: &ExternalContentId) -> String {
         ExternalContentId::PodcastEpisode(guid) => guid.clone(),
         ExternalContentId::PodcastPublisher(guid) => guid.clone(),
         ExternalContentId::Geohash(hash) => hash.clone(),
-        ExternalContentId::BlockchainTransaction { transaction_hash, .. } => transaction_hash.clone(),
+        ExternalContentId::BlockchainTransaction {
+            transaction_hash, ..
+        } => transaction_hash.clone(),
         ExternalContentId::BlockchainAddress { address, .. } => address.clone(),
     }
 }

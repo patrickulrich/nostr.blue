@@ -1,9 +1,9 @@
-use dioxus::prelude::*;
-use dioxus::signals::ReadableExt;
-use nostr_sdk::{Filter, Kind, SubscriptionId, PublicKey, FromBech32};
-use gloo_storage::{LocalStorage, Storage};
 use crate::stores::{auth_store, nostr_client, settings_store, subscription_manager};
 use crate::utils::notification_nip78;
+use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use gloo_storage::{LocalStorage, Storage};
+use nostr_sdk::{Filter, FromBech32, Kind, PublicKey, SubscriptionId};
 
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 
@@ -49,7 +49,10 @@ pub fn increment_unread_count() {
 pub fn load_checked_at() {
     let timestamp = LocalStorage::get::<i64>(NOTIFICATIONS_CHECKED_AT_KEY).unwrap_or(0);
     *NOTIFICATIONS_CHECKED_AT.write() = timestamp;
-    log::debug!("Loaded notifications checked_at from localStorage: {}", timestamp);
+    log::debug!(
+        "Loaded notifications checked_at from localStorage: {}",
+        timestamp
+    );
 }
 
 /// Get the current checked_at timestamp
@@ -118,7 +121,10 @@ async fn publish_checked_at_if_enabled(timestamp: i64) {
 
     match client.send_event_builder(builder).await {
         Ok(output) => {
-            log::info!("Published notification checked_at to NIP-78: {}", output.id());
+            log::info!(
+                "Published notification checked_at to NIP-78: {}",
+                output.id()
+            );
             *LAST_PUBLISHED_AT.write() = timestamp;
         }
         Err(e) => {
@@ -164,7 +170,8 @@ pub async fn fetch_and_merge_from_nip78() {
 
     // Parse pubkey
     let my_pubkey = match PublicKey::from_bech32(&my_pubkey_str)
-        .or_else(|_| PublicKey::from_hex(&my_pubkey_str)) {
+        .or_else(|_| PublicKey::from_hex(&my_pubkey_str))
+    {
         Ok(pk) => pk,
         Err(e) => {
             log::error!("Invalid pubkey for NIP-78 fetch: {}", e);
@@ -184,7 +191,10 @@ pub async fn fetch_and_merge_from_nip78() {
     nostr_client::ensure_relays_ready(&client).await;
 
     // Fetch events with timeout
-    match client.fetch_events(filter, std::time::Duration::from_secs(5)).await {
+    match client
+        .fetch_events(filter, std::time::Duration::from_secs(5))
+        .await
+    {
         Ok(events) => {
             if let Some(event) = events.into_iter().next() {
                 // Parse the timestamp from the event
@@ -204,7 +214,9 @@ pub async fn fetch_and_merge_from_nip78() {
                     // Update if merged is newer than current
                     if merged_timestamp > local_timestamp {
                         *NOTIFICATIONS_CHECKED_AT.write() = merged_timestamp;
-                        if let Err(e) = LocalStorage::set(NOTIFICATIONS_CHECKED_AT_KEY, merged_timestamp) {
+                        if let Err(e) =
+                            LocalStorage::set(NOTIFICATIONS_CHECKED_AT_KEY, merged_timestamp)
+                        {
                             log::error!("Failed to save merged checked_at: {}", e);
                         }
                     }
@@ -228,7 +240,9 @@ pub async fn start_realtime_subscription() {
     let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
 
     if !is_authenticated || !client_initialized {
-        log::warn!("Cannot start notification subscription: not authenticated or client not initialized");
+        log::warn!(
+            "Cannot start notification subscription: not authenticated or client not initialized"
+        );
         return;
     }
 
@@ -248,7 +262,8 @@ pub async fn start_realtime_subscription() {
 
     // Parse pubkey
     let my_pubkey = match PublicKey::from_bech32(&my_pubkey_str)
-        .or_else(|_| PublicKey::from_hex(&my_pubkey_str)) {
+        .or_else(|_| PublicKey::from_hex(&my_pubkey_str))
+    {
         Ok(pk) => pk,
         Err(e) => {
             log::error!("Invalid pubkey for notification subscription: {}", e);
@@ -268,16 +283,16 @@ pub async fn start_realtime_subscription() {
     // Use #p tag to match events that mention/tag our pubkey
     let filter = Filter::new()
         .kinds(vec![
-            Kind::TextNote,      // For mentions and replies
-            Kind::Repost,        // Reposts
-            Kind::Reaction,      // Reactions (likes)
-            Kind::ZapReceipt,    // Zap receipts
+            Kind::TextNote,   // For mentions and replies
+            Kind::Repost,     // Reposts
+            Kind::Reaction,   // Reactions (likes)
+            Kind::ZapReceipt, // Zap receipts
         ])
         .custom_tag(
             nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
-            my_pubkey_str
+            my_pubkey_str,
         )
-        .limit(20);              // Only recent events for real-time updates
+        .limit(20); // Only recent events for real-time updates
 
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
 
@@ -287,7 +302,8 @@ pub async fn start_realtime_subscription() {
         &client,
         filter.clone(),
         Some(600), // 10 minute idle timeout
-    ).await;
+    )
+    .await;
 
     match subscription_result {
         Ok(sub_id) => {
@@ -336,7 +352,9 @@ pub async fn start_realtime_subscription() {
 
                 // Clear subscription ID when loop ends (timeout or disconnect)
                 // This allows future calls to start_realtime_subscription to succeed
-                log::warn!("Notification listener loop ended - clearing subscription for reconnect");
+                log::warn!(
+                    "Notification listener loop ended - clearing subscription for reconnect"
+                );
                 *SUBSCRIPTION_ID.write() = None;
             });
         }

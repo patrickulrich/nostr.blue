@@ -107,7 +107,8 @@ pub fn update_pending_nutzap_status(event_id: &str, status: super::nutzap::Nutza
 
 /// Get current status of a pending nutzap (CDK pattern: read before write)
 pub fn get_pending_nutzap_status(event_id: &str) -> Option<super::nutzap::NutzapStatus> {
-    PENDING_NUTZAPS.read()
+    PENDING_NUTZAPS
+        .read()
         .iter()
         .find(|n| n.event_id == event_id)
         .map(|n| n.status.clone())
@@ -116,7 +117,8 @@ pub fn get_pending_nutzap_status(event_id: &str) -> Option<super::nutzap::Nutzap
 /// Get count of pending nutzaps (only those with Pending status)
 #[allow(dead_code)]
 pub fn pending_nutzap_count() -> usize {
-    PENDING_NUTZAPS.read()
+    PENDING_NUTZAPS
+        .read()
         .iter()
         .filter(|n| matches!(n.status, super::nutzap::NutzapStatus::Pending))
         .count()
@@ -126,7 +128,8 @@ pub fn pending_nutzap_count() -> usize {
 #[allow(dead_code)]
 pub fn pending_nutzap_value() -> u64 {
     // Use sum() for clarity - nutzap amounts can't realistically overflow u64
-    PENDING_NUTZAPS.read()
+    PENDING_NUTZAPS
+        .read()
         .iter()
         .filter(|n| matches!(n.status, super::nutzap::NutzapStatus::Pending))
         .map(|n| n.amount)

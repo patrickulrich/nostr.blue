@@ -1,12 +1,12 @@
-use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, Kind};
-use nostr_sdk::prelude::{Coordinate, ToBech32};
+use crate::components::StreamStatus;
 use crate::routes::Route;
 use crate::stores::nostr_client::CLIENT_INITIALIZED;
 use crate::stores::profiles;
-use crate::components::StreamStatus;
-use crate::utils::nip53::{parse_nip53_live_event, extract_live_event_host};
+use crate::utils::nip53::{extract_live_event_host, parse_nip53_live_event};
 use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
+use nostr_sdk::prelude::{Coordinate, ToBech32};
+use nostr_sdk::{Event as NostrEvent, Kind};
 
 #[derive(Clone, Debug)]
 pub struct LiveStreamMeta {
@@ -31,7 +31,9 @@ fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
     let host_verified = host.as_ref().map(|h| h.is_verified).unwrap_or(false);
 
     // Get raw status and apply stale check
-    let raw_status = live_event.status.as_ref()
+    let raw_status = live_event
+        .status
+        .as_ref()
         .map(StreamStatus::from)
         .unwrap_or(StreamStatus::Planned);
     let effective_status = StreamStatus::effective_status(raw_status, event.created_at);
@@ -51,40 +53,46 @@ fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
 pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
     let stream_meta = match parse_live_stream_event(&event) {
         Some(meta) => meta,
-        None => return rsx! { div { class: "hidden" } }
+        None => return rsx! { div { class: "hidden" } },
     };
 
     // Use host pubkey from p tag if available, otherwise fall back to event publisher
-    let author_pubkey = stream_meta.host_pubkey.clone()
+    let author_pubkey = stream_meta
+        .host_pubkey
+        .clone()
         .unwrap_or_else(|| event.pubkey.to_string());
     let author_pubkey_for_fetch = author_pubkey.clone();
     let host_verified = stream_meta.host_verified;
 
     // Create bech32 naddr for the livestream
-    let coord = Coordinate::new(Kind::from(30311), event.pubkey)
-        .identifier(&stream_meta.d_tag);
-    let naddr = coord.to_bech32().unwrap_or_else(|_| {
-        format!("30311:{}:{}", event.pubkey, stream_meta.d_tag)
-    });
+    let coord = Coordinate::new(Kind::from(30311), event.pubkey).identifier(&stream_meta.d_tag);
+    let naddr = coord
+        .to_bech32()
+        .unwrap_or_else(|_| format!("30311:{}:{}", event.pubkey, stream_meta.d_tag));
 
     // Get author metadata from profile store (uses LRU cache + database, much faster)
     // Use signal instead of memo so we can update it after background fetch
     let mut author_metadata = use_signal(move || profiles::get_profile(&author_pubkey_for_fetch));
 
     // Fetch author profile in background if not cached
-    use_effect(use_reactive((&author_pubkey, &*CLIENT_INITIALIZED.read()), move |(pk, client_initialized)| {
-        if !client_initialized {
-            return;
-        }
-        spawn(async move {
-            if profiles::fetch_profile(pk.clone()).await.is_ok() {
-                // Update signal with freshly fetched profile to trigger re-render
-                author_metadata.set(profiles::get_profile(&pk));
+    use_effect(use_reactive(
+        (&author_pubkey, &*CLIENT_INITIALIZED.read()),
+        move |(pk, client_initialized)| {
+            if !client_initialized {
+                return;
             }
-        });
-    }));
+            spawn(async move {
+                if profiles::fetch_profile(pk.clone()).await.is_ok() {
+                    // Update signal with freshly fetched profile to trigger re-render
+                    author_metadata.set(profiles::get_profile(&pk));
+                }
+            });
+        },
+    ));
 
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 

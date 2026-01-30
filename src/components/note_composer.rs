@@ -1,7 +1,9 @@
+use crate::components::icons::{BarChartIcon, CameraIcon};
+use crate::components::{
+    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal,
+};
+use crate::stores::{auth_store, nostr_client::publish_note_tracked};
 use dioxus::prelude::*;
-use crate::stores::{nostr_client::publish_note_tracked, auth_store};
-use crate::components::{MediaUploader, EmojiPicker, GifPicker, MentionAutocomplete, PollCreatorModal};
-use crate::components::icons::{CameraIcon, BarChartIcon};
 
 const MAX_LENGTH: usize = 5000;
 
@@ -52,14 +54,22 @@ pub fn NoteComposer() -> Element {
                     let success_count = result.success_count();
                     let total = result.total_attempted();
 
-                    log::info!("Note published: {} ({}/{} relays)", result.event_id, success_count, total);
+                    log::info!(
+                        "Note published: {} ({}/{} relays)",
+                        result.event_id,
+                        success_count,
+                        total
+                    );
 
                     // Show feedback based on relay results
                     if result.has_failures() && success_count > 0 {
                         // Partial success
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
-                        publish_feedback.set(Some((true, format!("Published to {}/{} relays", success_count, total))));
+                        publish_feedback.set(Some((
+                            true,
+                            format!("Published to {}/{} relays", success_count, total),
+                        )));
 
                         content.set(String::new());
                         show_image_uploader.set(false);
@@ -74,7 +84,8 @@ pub fn NoteComposer() -> Element {
                         // All failed - preserve draft for retry (mirror Err(e) behavior)
                         feedback_version.set(feedback_version() + 1);
                         let current_version = feedback_version();
-                        publish_feedback.set(Some((false, "Failed to publish to any relay".to_string())));
+                        publish_feedback
+                            .set(Some((false, "Failed to publish to any relay".to_string())));
                         is_publishing.set(false);
                         // DO NOT clear content or show_image_uploader - let user retry
 
@@ -117,16 +128,16 @@ pub fn NoteComposer() -> Element {
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
         let pos = *cursor_position.read();
-        
+
         // Ensure position is valid
         let pos = pos.min(current.len());
-        
+
         // Insert text
         current.insert_str(pos, &text);
-        
+
         // Update content
         content.set(current);
-        
+
         // Update cursor position to be after inserted text
         cursor_position.set(pos + text.len());
     };

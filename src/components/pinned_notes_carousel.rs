@@ -1,10 +1,10 @@
-use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
+use crate::components::icons::PinIcon;
 use crate::routes::Route;
 use crate::stores::profiles;
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
-use crate::components::icons::PinIcon;
+use dioxus::prelude::*;
+use nostr_sdk::Event as NostrEvent;
 
 /// Props for the PinnedNotesCarousel component
 #[derive(Props, Clone, PartialEq)]
@@ -60,11 +60,15 @@ pub fn PinnedNoteCard(props: PinnedNoteCardProps) -> Element {
     }));
 
     // Get display info from metadata
-    let author_avatar = author_metadata.read().as_ref()
+    let author_avatar = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone())
         .unwrap_or_default();
 
-    let author_name = author_metadata.read().as_ref()
+    let author_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 

@@ -4,12 +4,12 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
-use crate::stores::pin_boards_store::{self, Pin, Pinboard, PinMetadata};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::auth_store;
-use crate::components::{PinMosaicGrid, PinBoardMosaicGrid, PinToBoardRequest};
 use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::components::{PinBoardMosaicGrid, PinMosaicGrid, PinToBoardRequest};
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pin_boards_store::{self, Pin, PinMetadata, Pinboard};
 
 /// Tab selection for the user pins page
 #[derive(Clone, PartialEq, Default)]
@@ -92,13 +92,19 @@ pub fn UserPins() -> Element {
             pins.read()
                 .iter()
                 .filter(|p| {
-                    p.title.as_ref().is_some_and(|t| t.to_lowercase().contains(&query)) ||
-                    p.content.to_lowercase().contains(&query) ||
-                    p.tags.iter().any(|t| t.to_lowercase().contains(&query)) ||
-                    meta.get(&p.event_id).is_some_and(|m| {
-                        m.title.as_ref().is_some_and(|t| t.to_lowercase().contains(&query)) ||
-                        m.summary.as_ref().is_some_and(|s| s.to_lowercase().contains(&query))
-                    })
+                    p.title
+                        .as_ref()
+                        .is_some_and(|t| t.to_lowercase().contains(&query))
+                        || p.content.to_lowercase().contains(&query)
+                        || p.tags.iter().any(|t| t.to_lowercase().contains(&query))
+                        || meta.get(&p.event_id).is_some_and(|m| {
+                            m.title
+                                .as_ref()
+                                .is_some_and(|t| t.to_lowercase().contains(&query))
+                                || m.summary
+                                    .as_ref()
+                                    .is_some_and(|s| s.to_lowercase().contains(&query))
+                        })
                 })
                 .cloned()
                 .collect()
@@ -111,12 +117,15 @@ pub fn UserPins() -> Element {
         if query.len() < 2 {
             boards.read().clone()
         } else {
-            boards.read()
+            boards
+                .read()
                 .iter()
                 .filter(|b| {
-                    b.title.to_lowercase().contains(&query) ||
-                    b.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&query)) ||
-                    b.tags.iter().any(|t| t.to_lowercase().contains(&query))
+                    b.title.to_lowercase().contains(&query)
+                        || b.description
+                            .as_ref()
+                            .is_some_and(|d| d.to_lowercase().contains(&query))
+                        || b.tags.iter().any(|t| t.to_lowercase().contains(&query))
                 })
                 .cloned()
                 .collect()

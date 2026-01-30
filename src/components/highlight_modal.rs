@@ -2,9 +2,9 @@
 //!
 //! A modal that allows users to add an optional comment before publishing a highlight.
 
-use dioxus::prelude::*;
 use dioxus::events::MouseData;
 use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
 
 /// Props for the HighlightModal component
 #[derive(Props, Clone, PartialEq)]

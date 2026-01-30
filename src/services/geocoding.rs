@@ -147,10 +147,13 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
 
     // Cache the result (even if None, to avoid repeated failed lookups)
     let location = result.as_ref().ok().cloned().flatten();
-    cache.entries.insert(normalized, CachedGeoResult {
-        location: location.clone(),
-        cached_at: now_secs(),
-    });
+    cache.entries.insert(
+        normalized,
+        CachedGeoResult {
+            location: location.clone(),
+            cached_at: now_secs(),
+        },
+    );
     save_cache(&cache);
 
     result
@@ -163,10 +166,7 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
 /// Query Photon API for geocoding
 async fn query_photon(query: &str) -> Result<Option<GeoLocation>, String> {
     let encoded = urlencoding::encode(query);
-    let url = format!(
-        "{}?q={}&limit=1",
-        PHOTON_API_URL, encoded
-    );
+    let url = format!("{}?q={}&limit=1", PHOTON_API_URL, encoded);
 
     let response = Request::get(&url)
         .send()

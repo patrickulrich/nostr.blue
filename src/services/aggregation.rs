@@ -16,17 +16,19 @@
 //! - Automatic eviction of stale/excess entries
 //! - Reduces redundant database queries for recently-viewed events
 
-use dioxus::prelude::{ReadableExt, Signal, WritableExt};
-use lru::LruCache;
-use nostr_sdk::{Event, EventId, Filter, Kind, Timestamp, TagStandard, SubscriptionId, RelayPoolNotification};
-use nostr_relay_pool::{SyncOptions, SyncDirection};
 use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
+use dioxus::prelude::{ReadableExt, Signal, WritableExt};
+use futures::join;
+use instant::{Duration, Instant};
+use lru::LruCache;
+use nostr_relay_pool::{SyncDirection, SyncOptions};
+use nostr_sdk::{
+    Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard, Timestamp,
+};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
-use instant::{Duration, Instant};
-use futures::join;
 
 /// Aggregated interaction counts for a single event
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -132,7 +134,14 @@ impl CountsCache {
     /// Updates an existing cache entry with new interaction data.
     /// If the event isn't cached, this is a no-op.
     #[allow(dead_code)]
-    fn increment(&mut self, event_id: &str, kind: Kind, content: Option<&str>, is_current_user: bool, zap_amount: Option<u64>) {
+    fn increment(
+        &mut self,
+        event_id: &str,
+        kind: Kind,
+        content: Option<&str>,
+        is_current_user: bool,
+        zap_amount: Option<u64>,
+    ) {
         if let Some(cached) = self.cache.get_mut(event_id) {
             // Refresh the timestamp since we're updating
             cached.cached_at = Instant::now();
@@ -173,12 +182,17 @@ impl CountsCache {
     #[allow(dead_code)]
     fn get_or_create_mut(&mut self, event_id: &str) -> &mut InteractionCounts {
         // First, check if we have a valid entry
-        let needs_create = self.cache.get(event_id)
+        let needs_create = self
+            .cache
+            .get(event_id)
             .map(|c| !c.is_valid(self.ttl))
             .unwrap_or(true);
 
         if needs_create {
-            self.cache.put(event_id.to_string(), CachedCounts::new(InteractionCounts::default()));
+            self.cache.put(
+                event_id.to_string(),
+                CachedCounts::new(InteractionCounts::default()),
+            );
         }
 
         &mut self.cache.get_mut(event_id).unwrap().counts
@@ -262,17 +276,11 @@ fn get_nip45_cache() -> &'static Mutex<HashMap<String, Nip45SupportStatus>> {
 /// * `Some(count)` - COUNT succeeded on at least one relay
 /// * `None` - COUNT not supported or failed on all relays
 #[allow(dead_code)]
-async fn try_count_from_relays(
-    event_id: &EventId,
-    kind: Kind,
-    timeout: Duration,
-) -> Option<usize> {
+async fn try_count_from_relays(event_id: &EventId, kind: Kind, timeout: Duration) -> Option<usize> {
     let client = get_client()?;
 
     // EventId implements Copy - no need to clone
-    let filter = Filter::new()
-        .kind(kind)
-        .event(*event_id);
+    let filter = Filter::new().kind(kind).event(*event_id);
 
     // Get connected relays
     let relays = client.relays().await;
@@ -306,9 +314,9 @@ async fn try_count_from_relays(
                 // Cache successful result (permanent)
                 {
                     let mut cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
-                log::warn!("NIP-45 cache mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
+                        log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                        poisoned.into_inner()
+                    });
                     cache.insert(url_str, Nip45SupportStatus::new(true));
                 }
                 log::debug!("COUNT from {}: {} events", url, count);
@@ -318,9 +326,9 @@ async fn try_count_from_relays(
                 // Cache failure for this relay (with TTL - will retry after 10 minutes)
                 {
                     let mut cache = get_nip45_cache().lock().unwrap_or_else(|poisoned| {
-                log::warn!("NIP-45 cache mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
+                        log::warn!("NIP-45 cache mutex was poisoned, recovering");
+                        poisoned.into_inner()
+                    });
                     cache.insert(url_str, Nip45SupportStatus::new(false));
                 }
                 log::debug!("COUNT failed on {}: {}", url, e);
@@ -385,7 +393,10 @@ pub async fn get_counts_with_count_fallback(
 
     // If any COUNT failed, fall back to batch fetch for complete data
     if needs_fallback {
-        log::debug!("COUNT incomplete for {}, using full fetch", event_id.to_hex());
+        log::debug!(
+            "COUNT incomplete for {}, using full fetch",
+            event_id.to_hex()
+        );
         if let Ok(batch_counts) = fetch_interaction_counts_batch(vec![*event_id], timeout).await {
             if let Some(fetched) = batch_counts.get(&event_id.to_hex()) {
                 return fetched.clone();
@@ -497,7 +508,11 @@ pub async fn fetch_interaction_counts_batch(
         Err(e) => {
             // If relay fetch fails but we have DB data, continue with what we have
             if !db_events.is_empty() {
-                log::warn!("Relay fetch failed but using {} cached events: {}", db_events.len(), e);
+                log::warn!(
+                    "Relay fetch failed but using {} cached events: {}",
+                    db_events.len(),
+                    e
+                );
                 Vec::new()
             } else {
                 return Err(format!("Failed to fetch interactions: {}", e));
@@ -516,15 +531,17 @@ pub async fn fetch_interaction_counts_batch(
     }
     let events: Vec<Event> = event_map.into_values().collect();
 
-    log::info!("Processing {} total interaction events (DB + relay, deduplicated)", events.len());
+    log::info!(
+        "Processing {} total interaction events (DB + relay, deduplicated)",
+        events.len()
+    );
 
     // Aggregate counts by event_id for uncached events only
     let mut freshly_fetched: HashMap<String, InteractionCounts> = HashMap::new();
 
     // Build set of requested event IDs for filtering
-    let requested_ids: std::collections::HashSet<String> = uncached_ids.iter()
-        .map(|id| id.to_hex())
-        .collect();
+    let requested_ids: std::collections::HashSet<String> =
+        uncached_ids.iter().map(|id| id.to_hex()).collect();
 
     // Initialize uncached event IDs with zero counts
     for event_id in &uncached_ids {
@@ -540,7 +557,8 @@ pub async fn fetch_interaction_counts_batch(
     // Track which events we've already processed a user reaction for.
     // Since fetch_events() returns events sorted descending by created_at (newest first),
     // we use "first seen wins" - the first reaction we see is the most recent one.
-    let mut user_reactions_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut user_reactions_seen: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
     // Count interactions
     for event in events {
@@ -586,7 +604,7 @@ pub async fn fetch_interaction_counts_batch(
 
                         // Check for NIP-30 custom emoji - extract URL from emoji tag
                         if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
-                            let shortcode = &content[1..content.len()-1];
+                            let shortcode = &content[1..content.len() - 1];
                             // Find emoji tag with matching shortcode
                             let emoji_url = event.tags.iter().find_map(|tag| {
                                 let tag_slice = tag.as_slice();
@@ -605,7 +623,7 @@ pub async fn fetch_interaction_counts_batch(
                         }
                     }
                 }
-            },
+            }
             Kind::Repost => counts.reposts += 1,
             Kind::ZapReceipt => {
                 counts.zaps += 1;
@@ -692,13 +710,16 @@ pub async fn sync_interaction_counts(
                 log::info!("Negentropy sync: no new interaction events found");
                 // Return current cached counts
                 let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
-            log::warn!("Counts cache mutex was poisoned, recovering");
-            poisoned.into_inner()
-        });
+                    log::warn!("Counts cache mutex was poisoned, recovering");
+                    poisoned.into_inner()
+                });
                 return Ok(cache.get_batch(&event_ids));
             }
 
-            log::info!("Negentropy sync: {} new interaction events to process", new_event_count);
+            log::info!(
+                "Negentropy sync: {} new interaction events to process",
+                new_event_count
+            );
 
             // Fetch the newly received events from database
             // (they were saved during sync)
@@ -712,9 +733,9 @@ pub async fn sync_interaction_counts(
             // Get existing cached counts
             let mut result = {
                 let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
-            log::warn!("Counts cache mutex was poisoned, recovering");
-            poisoned.into_inner()
-        });
+                    log::warn!("Counts cache mutex was poisoned, recovering");
+                    poisoned.into_inner()
+                });
                 cache.get_batch(&event_ids)
             };
 
@@ -731,9 +752,8 @@ pub async fn sync_interaction_counts(
                 .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
 
             // Build set of requested event IDs
-            let requested_ids: std::collections::HashSet<String> = event_ids.iter()
-                .map(|id| id.to_hex())
-                .collect();
+            let requested_ids: std::collections::HashSet<String> =
+                event_ids.iter().map(|id| id.to_hex()).collect();
 
             // Process new events and update counts
             for event in new_events {
@@ -766,13 +786,18 @@ pub async fn sync_interaction_counts(
                                 counts.user_reaction = Some(content.to_string());
 
                                 // Check for NIP-30 custom emoji - extract URL from emoji tag
-                                if content.starts_with(':') && content.ends_with(':') && content.len() > 2 {
-                                    let shortcode = &content[1..content.len()-1];
+                                if content.starts_with(':')
+                                    && content.ends_with(':')
+                                    && content.len() > 2
+                                {
+                                    let shortcode = &content[1..content.len() - 1];
                                     let emoji_url = event.tags.iter().find_map(|tag| {
                                         let tag_slice = tag.as_slice();
                                         if tag_slice.len() >= 3
-                                            && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
-                                            && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                            && tag_slice.first().map(|s| s.as_str())
+                                                == Some("emoji")
+                                            && tag_slice.get(1).map(|s| s.as_str())
+                                                == Some(shortcode)
                                         {
                                             tag_slice.get(2).map(|s| s.to_string())
                                         } else {
@@ -800,13 +825,16 @@ pub async fn sync_interaction_counts(
             // Update cache with new counts
             {
                 let mut cache = get_counts_cache().lock().unwrap_or_else(|poisoned| {
-            log::warn!("Counts cache mutex was poisoned, recovering");
-            poisoned.into_inner()
-        });
+                    log::warn!("Counts cache mutex was poisoned, recovering");
+                    poisoned.into_inner()
+                });
                 cache.insert_batch(result.clone());
             }
 
-            log::info!("Negentropy sync complete: updated {} interaction counts", result.len());
+            log::info!(
+                "Negentropy sync complete: updated {} interaction counts",
+                result.len()
+            );
             Ok(result)
         }
         Err(e) => {
@@ -852,13 +880,19 @@ pub fn invalidate_interaction_counts_batch(event_ids: &[String]) {
             cache.invalidate(event_id);
         }
     }
-    log::debug!("Invalidated interaction counts cache for {} events", event_ids.len());
+    log::debug!(
+        "Invalidated interaction counts cache for {} events",
+        event_ids.len()
+    );
 }
 
 /// Extract the event ID being referenced by an interaction event
 /// Only returns the event ID if it matches one of the requested IDs
 /// If requested_ids is empty, returns the first 'e' tag found (for trending/all events)
-fn extract_referenced_event(event: &Event, requested_ids: &std::collections::HashSet<String>) -> Option<EventId> {
+fn extract_referenced_event(
+    event: &Event,
+    requested_ids: &std::collections::HashSet<String>,
+) -> Option<EventId> {
     // Check for 'e' tags (most interactions use this)
     for tag in event.tags.iter() {
         if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
@@ -879,7 +913,10 @@ fn extract_referenced_event(event: &Event, requested_ids: &std::collections::Has
 fn extract_zap_amount(event: &Event) -> Option<u64> {
     // Look for 'bolt11' tag first (use as_slice for zero-copy access)
     if let Some(bolt11_tag) = event.tags.iter().find(|tag| {
-        tag.as_slice().first().map(|k| k.as_str() == "bolt11").unwrap_or(false)
+        tag.as_slice()
+            .first()
+            .map(|k| k.as_str() == "bolt11")
+            .unwrap_or(false)
     }) {
         if let Some(bolt11) = bolt11_tag.as_slice().get(1) {
             // Parse bolt11 invoice to extract amount
@@ -893,7 +930,10 @@ fn extract_zap_amount(event: &Event) -> Option<u64> {
 
     // Fallback: check description tag for amount (use as_slice for zero-copy access)
     if let Some(description_tag) = event.tags.iter().find(|tag| {
-        tag.as_slice().first().map(|k| k.as_str() == "description").unwrap_or(false)
+        tag.as_slice()
+            .first()
+            .map(|k| k.as_str() == "description")
+            .unwrap_or(false)
     }) {
         if let Some(desc) = description_tag.as_slice().get(1) {
             // Description contains the zap request which has amount
@@ -993,7 +1033,7 @@ pub async fn fetch_trending_interactions(
                 if event.content.trim() != "-" {
                     counts.likes += 1;
                 }
-            },
+            }
             Kind::Repost => counts.reposts += 1,
             Kind::ZapReceipt => {
                 counts.zaps += 1;
@@ -1160,8 +1200,8 @@ pub async fn stream_interaction_counts(
     interaction_counts: Signal<HashMap<String, InteractionCounts>>,
     post_eose_timeout_secs: Option<u64>,
 ) -> Result<InteractionStreamHandle, String> {
-    use nostr_relay_pool::{SubscribeAutoCloseOptions, RelayStatus as PoolRelayStatus};
     use nostr_relay_pool::relay::ReqExitPolicy;
+    use nostr_relay_pool::{RelayStatus as PoolRelayStatus, SubscribeAutoCloseOptions};
 
     if event_ids.is_empty() {
         return Err("No event IDs to stream".to_string());
@@ -1202,7 +1242,11 @@ pub async fn stream_interaction_counts(
             break urls;
         }
         attempts += 1;
-        log::debug!("Waiting for relay connections (attempt {}/{})", attempts, MAX_ATTEMPTS);
+        log::debug!(
+            "Waiting for relay connections (attempt {}/{})",
+            attempts,
+            MAX_ATTEMPTS
+        );
         gloo_timers::future::TimeoutFuture::new(500).await;
     };
 
@@ -1278,10 +1322,11 @@ pub async fn stream_interaction_counts(
                         }
 
                         // Find which tracked event this interaction references
-                        let referenced_id = match extract_referenced_event_for_streaming(&event, &tracked_ids) {
-                            Some(id) => id,
-                            None => return Ok(false), // Not for a tracked event
-                        };
+                        let referenced_id =
+                            match extract_referenced_event_for_streaming(&event, &tracked_ids) {
+                                Some(id) => id,
+                                None => return Ok(false), // Not for a tracked event
+                            };
 
                         // Check if this is from the current user
                         let is_current_user = current_user_pk
@@ -1312,7 +1357,9 @@ pub async fn stream_interaction_counts(
                         ) {
                             // Update the signal with new counts
                             // Dioxus pattern: write after async work
-                            interaction_counts.write().insert(referenced_id.clone(), updated_counts);
+                            interaction_counts
+                                .write()
+                                .insert(referenced_id.clone(), updated_counts);
                             log::debug!(
                                 "Streamed interaction update for {}: kind={}",
                                 &referenced_id[..8.min(referenced_id.len())],

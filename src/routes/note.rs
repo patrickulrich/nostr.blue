@@ -4,20 +4,24 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 
-use crate::stores::nostr_client;
-use crate::routes::Route;
-use crate::components::{NoteCard, ThreadedComment, ClientInitializing, VoiceMessageCard};
-use crate::utils::{build_thread_tree, merge_pending_into_tree, event::is_voice_message};
-use crate::stores::pending_comments::get_pending_comments;
+use crate::components::{ClientInitializing, NoteCard, ThreadedComment, VoiceMessageCard};
 use crate::hooks::use_mute_block_cache;
+use crate::routes::Route;
+use crate::stores::nostr_client;
+use crate::stores::pending_comments::get_pending_comments;
+use crate::utils::{build_thread_tree, event::is_voice_message, merge_pending_into_tree};
 
 // Helper functions for parallel loading
 
 async fn fetch_main_note(event_id: EventId) -> std::result::Result<NostrEvent, String> {
     let filter = Filter::new().id(event_id);
     // Use outbox routing - SDK will use hint relays if available
-    let events = nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
-    events.into_iter().next().ok_or("Event not found".to_string())
+    let events =
+        nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await?;
+    events
+        .into_iter()
+        .next()
+        .ok_or("Event not found".to_string())
 }
 
 /// Extract parent event IDs from note tags (NIP-10 lowercase 'e' and NIP-22 uppercase 'E')
@@ -46,10 +50,7 @@ fn extract_parent_ids(note: &NostrEvent) -> Vec<EventId> {
 fn extract_thread_root_id(note: &NostrEvent) -> Option<EventId> {
     for tag in note.tags.iter() {
         let tag_vec = tag.clone().to_vec();
-        if tag_vec.len() >= 4
-            && tag_vec[0] == "e"
-            && tag_vec[3] == "root"
-        {
+        if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
             return EventId::from_hex(&tag_vec[1]).ok();
         }
     }
@@ -57,14 +58,19 @@ fn extract_thread_root_id(note: &NostrEvent) -> Option<EventId> {
 }
 
 /// Fetch parent events by their IDs
-async fn fetch_parents_by_ids(parent_ids: Vec<EventId>) -> std::result::Result<Vec<NostrEvent>, String> {
+async fn fetch_parents_by_ids(
+    parent_ids: Vec<EventId>,
+) -> std::result::Result<Vec<NostrEvent>, String> {
     if parent_ids.is_empty() {
         return Ok(Vec::new());
     }
 
-    let filter = Filter::new()
-        .ids(parent_ids)
-        .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply, Kind::Comment]);
+    let filter = Filter::new().ids(parent_ids).kinds(vec![
+        Kind::TextNote,
+        Kind::VoiceMessage,
+        Kind::VoiceMessageReply,
+        Kind::Comment,
+    ]);
 
     // Use outbox routing for better thread loading from users' write relays
     nostr_client::fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await
@@ -76,14 +82,22 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
 
     // Filter for lowercase 'e' tag references (NIP-10 standard)
     let filter_lower = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::VoiceMessage, Kind::VoiceMessageReply])
+        .kinds(vec![
+            Kind::TextNote,
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+        ])
         .event(event_id)
         .limit(100);
 
     // Filter for uppercase 'E' tag references (NIP-22 root references)
     let upper_e_tag = nostr_sdk::SingleLetterTag::uppercase(nostr_sdk::Alphabet::E);
     let filter_upper = Filter::new()
-        .kinds(vec![Kind::VoiceMessage, Kind::VoiceMessageReply, Kind::Comment])
+        .kinds(vec![
+            Kind::VoiceMessage,
+            Kind::VoiceMessageReply,
+            Kind::Comment,
+        ])
         .custom_tag(upper_e_tag, event_id_hex)
         .limit(100);
 
@@ -104,7 +118,8 @@ async fn fetch_replies(event_id: EventId) -> std::result::Result<Vec<NostrEvent>
 
     // Deduplicate by event ID
     let mut seen_ids = std::collections::HashSet::new();
-    let unique_replies: Vec<NostrEvent> = all_replies.into_iter()
+    let unique_replies: Vec<NostrEvent> = all_replies
+        .into_iter()
         .filter(|event| seen_ids.insert(event.id))
         .collect();
 
@@ -149,7 +164,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
 
             // Parse the note ID
             let event_id = match EventId::from_bech32(&note_id_str)
-                .or_else(|_| EventId::from_hex(&note_id_str)) {
+                .or_else(|_| EventId::from_hex(&note_id_str))
+            {
                 Ok(id) => id,
                 Err(e) => {
                     error.set(Some(format!("Invalid note ID: {}", e)));
@@ -180,10 +196,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             };
 
             // Now fetch parents and replies in parallel (no duplicate main note fetch)
-            let (parents_result, replies_result) = tokio::join!(
-                fetch_parents_by_ids(parent_ids),
-                fetch_replies(event_id)
-            );
+            let (parents_result, replies_result) =
+                tokio::join!(fetch_parents_by_ids(parent_ids), fetch_replies(event_id));
 
             // Process parents
             if let Ok(mut parents) = parents_result {

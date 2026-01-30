@@ -2,12 +2,12 @@
 //!
 //! Display component for a single Kind 9802 highlight event.
 
-use dioxus::prelude::*;
-use nostr::Event as NostrEvent;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::utils::nip84::{self, HighlightSource};
-use crate::utils::{format_relative_time_or, truncate_pubkey, is_valid_http_url};
+use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
+use dioxus::prelude::*;
+use nostr::Event as NostrEvent;
 
 /// Props for the HighlightCard component
 #[derive(Props, Clone, PartialEq)]
@@ -22,7 +22,7 @@ pub fn HighlightCard(props: HighlightCardProps) -> Element {
     // Parse the event into a Highlight struct
     let highlight = match nip84::parse_highlight(&props.event) {
         Some(h) => h,
-        None => return rsx! { }, // Invalid event, render nothing
+        None => return rsx! {}, // Invalid event, render nothing
     };
 
     let author_pubkey = highlight.pubkey.clone();
@@ -35,16 +35,22 @@ pub fn HighlightCard(props: HighlightCardProps) -> Element {
     let timestamp = format_relative_time_or(created_at, "Unknown");
 
     // Get display name from metadata or fallback
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone())
         .filter(|url| is_valid_http_url(url));
 
     // Generate avatar fallback letter
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();

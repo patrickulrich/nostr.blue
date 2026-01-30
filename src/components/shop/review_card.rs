@@ -1,7 +1,7 @@
 //! ReviewCard component - displays a product review
 
-use dioxus::prelude::*;
 use crate::utils::nip99::ProductReview;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ReviewCardProps {

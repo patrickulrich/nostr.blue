@@ -52,7 +52,10 @@ pub async fn fetch_history() -> Result<(), String> {
         SYNC_STATE.read().clone()
     };
 
-    let last_sync_ts = sync_state.as_ref().map(|s| s.last_history_sync).unwrap_or(0);
+    let last_sync_ts = sync_state
+        .as_ref()
+        .map(|s| s.last_history_sync)
+        .unwrap_or(0);
 
     // Force full sync if WALLET_HISTORY is empty (e.g., after page refresh)
     // Even if we have a sync timestamp, we need all events if local state is empty
@@ -60,7 +63,10 @@ pub async fn fetch_history() -> Result<(), String> {
     let is_incremental = last_sync_ts > 0 && !history_is_empty;
 
     if is_incremental {
-        log::info!("Fetching transaction history (incremental since {})", last_sync_ts);
+        log::info!(
+            "Fetching transaction history (incremental since {})",
+            last_sync_ts
+        );
     } else {
         log::info!("Fetching transaction history (full sync)");
     }
@@ -133,10 +139,16 @@ pub async fn fetch_history() -> Result<(), String> {
                                         }
                                         "e" => {
                                             // Event reference: ["e", "event_id", "", "marker"]
-                                            if let (Some(event_id), Some(marker)) = (pair.get(1), pair.get(3)) {
+                                            if let (Some(event_id), Some(marker)) =
+                                                (pair.get(1), pair.get(3))
+                                            {
                                                 match marker.as_str() {
-                                                    "created" => created_tokens.push(event_id.clone()),
-                                                    "destroyed" => destroyed_tokens.push(event_id.clone()),
+                                                    "created" => {
+                                                        created_tokens.push(event_id.clone())
+                                                    }
+                                                    "destroyed" => {
+                                                        destroyed_tokens.push(event_id.clone())
+                                                    }
                                                     _ => {}
                                                 }
                                             }
@@ -229,7 +241,10 @@ pub async fn fetch_history() -> Result<(), String> {
             let new_sync_state = SyncState {
                 last_token_sync: sync_state.as_ref().map(|s| s.last_token_sync).unwrap_or(0),
                 last_history_sync: new_sync_ts,
-                last_deletion_sync: sync_state.as_ref().map(|s| s.last_deletion_sync).unwrap_or(0),
+                last_deletion_sync: sync_state
+                    .as_ref()
+                    .map(|s| s.last_deletion_sync)
+                    .unwrap_or(0),
                 known_token_event_ids: sync_state
                     .as_ref()
                     .map(|s| s.known_token_event_ids.clone())

@@ -8,9 +8,9 @@ use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
+use crate::stores::auth_store;
 use crate::stores::code_store::{is_repo_starred, star_repo, unstar_repo, STARRED_REPOS};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
-use crate::stores::auth_store;
 
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -36,10 +36,12 @@ pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, String> {
     }
 
     // Build reaction event with + content and a-tag
-    let builder = EventBuilder::new(Kind::Reaction, "+")
-        .tag(Tag::coordinate(coordinate.clone(), None));
+    let builder =
+        EventBuilder::new(Kind::Reaction, "+").tag(Tag::coordinate(coordinate.clone(), None));
 
-    let output = client.send_event_builder(builder).await
+    let output = client
+        .send_event_builder(builder)
+        .await
         .map_err(|e| format!("Failed to publish star: {}", e))?;
 
     let event_id = *output.id();
@@ -70,10 +72,9 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
     }
 
     // Find the star event to delete
-    let my_pubkey_str = auth_store::get_pubkey()
-        .ok_or_else(|| "Not logged in".to_string())?;
-    let my_pubkey = PublicKey::from_hex(&my_pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let my_pubkey_str = auth_store::get_pubkey().ok_or_else(|| "Not logged in".to_string())?;
+    let my_pubkey =
+        PublicKey::from_hex(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = Filter::new()
         .kind(Kind::Reaction)
@@ -93,7 +94,9 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
         let request = EventDeletionRequest::new().id(star_event.id);
         let builder = EventBuilder::delete(request);
 
-        client.send_event_builder(builder).await
+        client
+            .send_event_builder(builder)
+            .await
             .map_err(|e| format!("Failed to publish delete: {}", e))?;
     }
 
@@ -105,12 +108,10 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
 
 /// Fetch star count for a repository
 pub async fn fetch_star_count(coordinate: &Coordinate) -> Result<u32, String> {
-    let filter = Filter::new()
-        .kind(Kind::Reaction)
-        .custom_tag(
-            SingleLetterTag::lowercase(Alphabet::A),
-            coordinate.to_string(),
-        );
+    let filter = Filter::new().kind(Kind::Reaction).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::A),
+        coordinate.to_string(),
+    );
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -162,7 +163,9 @@ pub async fn check_user_star(coordinate: &Coordinate) -> Result<bool, String> {
         .await
         .map_err(|e| format!("Failed to check star: {}", e))?;
 
-    let is_starred = events.iter().any(|e| e.content == "+" || e.content.is_empty());
+    let is_starred = events
+        .iter()
+        .any(|e| e.content == "+" || e.content.is_empty());
 
     // Update local cache
     if is_starred {
@@ -178,8 +181,8 @@ pub async fn load_user_stars() -> Result<(), String> {
         Some(pk) => pk,
         None => return Err("Not logged in".to_string()),
     };
-    let my_pubkey = PublicKey::from_hex(&my_pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let my_pubkey =
+        PublicKey::from_hex(&my_pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
 
     let filter = Filter::new()
         .kind(Kind::Reaction)

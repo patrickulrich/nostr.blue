@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::MintInfoDisplay;
+use dioxus::prelude::*;
 
 #[component]
 pub fn CashuAddMintModal(

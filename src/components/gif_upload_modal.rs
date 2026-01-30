@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 
-use crate::stores::{nip96_store, gif_store, blossom_store};
+use crate::stores::{blossom_store, gif_store, nip96_store};
 use crate::utils::format::display_server_url;
 
 #[derive(Props, Clone, PartialEq)]
@@ -43,11 +43,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
     // Derive progress reactively based on selected server
     // Using use_memo ensures proper re-renders when global signals change
-    let progress = use_memo(move || {
-        match *upload_server.read() {
-            UploadServer::NostrBuild => *nip96_store::NIP96_UPLOAD_PROGRESS.read(),
-            UploadServer::Blossom => *blossom_store::UPLOAD_PROGRESS.read(),
-        }
+    let progress = use_memo(move || match *upload_server.read() {
+        UploadServer::NostrBuild => *nip96_store::NIP96_UPLOAD_PROGRESS.read(),
+        UploadServer::Blossom => *blossom_store::UPLOAD_PROGRESS.read(),
     });
 
     // Generate unique input ID
@@ -79,7 +77,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     // Validate GIF magic bytes (GIF87a or GIF89a)
                     // This is more reliable than MIME type or extension which can be spoofed
                     if data.len() < 6 || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a") {
-                        error.set(Some("Invalid GIF file. Please select a valid GIF.".to_string()));
+                        error.set(Some(
+                            "Invalid GIF file. Please select a valid GIF.".to_string(),
+                        ));
                         return;
                     }
 
@@ -142,32 +142,36 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
             spawn(async move {
                 // Calculate hash for later use
-                use sha2::{Sha256, Digest};
+                use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
                 hasher.update(&data);
                 let file_hash = hex::encode(hasher.finalize());
 
                 // Upload based on selected server
                 let upload_result = match server {
-                    UploadServer::NostrBuild => {
-                        nip96_store::upload_to_nip96(
-                            data,
-                            mime_type.clone(),
-                            caption_text.clone(),
-                            caption_text.clone(),
-                        ).await.map(|metadata| (
+                    UploadServer::NostrBuild => nip96_store::upload_to_nip96(
+                        data,
+                        mime_type.clone(),
+                        caption_text.clone(),
+                        caption_text.clone(),
+                    )
+                    .await
+                    .map(|metadata| {
+                        (
                             metadata.url,
                             metadata.original_hash.unwrap_or(file_hash.clone()),
                             metadata.dimensions,
-                        ))
-                    }
+                        )
+                    }),
                     UploadServer::Blossom => {
                         blossom_store::upload_image(
                             data,
                             mime_type.clone(),
                             100, // No compression for GIFs
                             Some(blossom_server.clone()),
-                        ).await.map(|url| (url, file_hash.clone(), None))
+                        )
+                        .await
+                        .map(|url| (url, file_hash.clone(), None))
                     }
                 };
 
@@ -183,7 +187,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             caption_text.clone(),
                             Some(file_size),
                             dimensions,
-                        ).await {
+                        )
+                        .await
+                        {
                             Ok(event_id) => {
                                 log::info!("GIF event published: {}", event_id);
                                 success.set(true);
@@ -220,7 +226,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                         return;
                                     }
                                     // Revoke object URL to free memory before clearing
-                                    if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
+                                    if let Some((_, _, _, Some(url))) =
+                                        selected_file.read().as_ref()
+                                    {
                                         let _ = web_sys::Url::revoke_object_url(url);
                                     }
                                     show.set(false);
@@ -233,7 +241,10 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             }
                             Err(e) => {
                                 log::error!("Failed to publish GIF event: {}", e);
-                                error.set(Some(format!("Upload succeeded but failed to publish: {}", e)));
+                                error.set(Some(format!(
+                                    "Upload succeeded but failed to publish: {}",
+                                    e
+                                )));
                                 uploading.set(false);
                             }
                         }
@@ -533,9 +544,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
 
 /// Read file as bytes from file input
 async fn read_file_as_bytes(input_id: &str) -> Result<(String, Vec<u8>, String), String> {
+    use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
-    use js_sys::{Uint8Array, ArrayBuffer};
 
     let window = window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;
@@ -607,8 +618,8 @@ fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
     let blob_options = BlobPropertyBag::new();
     blob_options.set_type(mime_type);
 
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options)
-        .ok()?;
+    let blob =
+        web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options).ok()?;
 
     // Create Object URL from Blob
     web_sys::Url::create_object_url_with_blob(&blob).ok()

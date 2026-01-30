@@ -6,14 +6,16 @@
 //! - Real relay search
 //! - Infinite scroll pagination
 
-use dioxus::prelude::*;
-use crate::stores::community_store::{self, Community, MembershipStatus, CommunityWithMembership};
-use crate::stores::nostr_client::{self, HAS_SIGNER};
-use crate::stores::auth_store;
-use crate::stores::pinned_communities::{self, get_pinned_communities_set};
-use crate::components::{CommunityCard, CommunityCardWithMembership, CommunityCardSkeleton, ClientInitializing};
+use crate::components::{
+    ClientInitializing, CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership,
+};
 use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
+use crate::stores::auth_store;
+use crate::stores::community_store::{self, Community, CommunityWithMembership, MembershipStatus};
+use crate::stores::nostr_client::{self, HAS_SIGNER};
+use crate::stores::pinned_communities::{self, get_pinned_communities_set};
+use dioxus::prelude::*;
 use std::collections::HashSet;
 
 #[component]
@@ -99,9 +101,8 @@ pub fn Communities() -> Element {
                         );
 
                         // Separate pinned from user communities
-                        let (pinned, user): (Vec<_>, Vec<_>) = sorted
-                            .into_iter()
-                            .partition(|c| c.is_pinned);
+                        let (pinned, user): (Vec<_>, Vec<_>) =
+                            sorted.into_iter().partition(|c| c.is_pinned);
 
                         // Filter user communities to only those where user has a role
                         let user_with_roles: Vec<_> = user
@@ -165,7 +166,10 @@ pub fn Communities() -> Element {
         }
 
         // Increment version to invalidate previous searches
-        let version = search_version.with_mut(|v| { *v += 1; *v });
+        let version = search_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
         search_loading.set(true);
 
         spawn(async move {
@@ -241,7 +245,8 @@ pub fn Communities() -> Element {
         // If searching, show search results (deduplicated)
         if let Some(results) = search_results.read().as_ref() {
             let mut seen = HashSet::new();
-            return results.iter()
+            return results
+                .iter()
                 .filter(|c| seen.insert(c.a_tag.clone()))
                 .cloned()
                 .collect();
@@ -271,8 +276,12 @@ pub fn Communities() -> Element {
             .cloned()
             .collect();
 
-        log::info!("display_communities: total={}, excluded={}, filtered={}",
-            all_communities.len(), excluded_a_tags.len(), filtered.len());
+        log::info!(
+            "display_communities: total={}, excluded={}, filtered={}",
+            all_communities.len(),
+            excluded_a_tags.len(),
+            filtered.len()
+        );
 
         filtered
     });

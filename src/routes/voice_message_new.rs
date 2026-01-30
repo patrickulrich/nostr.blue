@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, blossom_store};
 use crate::components::VoiceRecorder;
+use crate::stores::{auth_store, blossom_store};
 use crate::utils::format::display_server_url;
+use dioxus::prelude::*;
 
 #[component]
 pub fn VoiceMessageNew() -> Element {
@@ -24,11 +24,17 @@ pub fn VoiceMessageNew() -> Element {
     };
 
     // Handle recording complete
-    let handle_recording_complete = move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
-        log::info!("Recording complete: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
-            bytes.len(), duration, waveform.len(), mime_type);
-        audio_data.set(Some((bytes, duration, waveform, mime_type)));
-    };
+    let handle_recording_complete =
+        move |(bytes, duration, waveform, mime_type): (Vec<u8>, f64, Vec<u8>, String)| {
+            log::info!(
+                "Recording complete: {} bytes, duration: {}s, waveform points: {}, MIME: {}",
+                bytes.len(),
+                duration,
+                waveform.len(),
+                mime_type
+            );
+            audio_data.set(Some((bytes, duration, waveform, mime_type)));
+        };
 
     // Handle publishing
     let handle_publish = move |_| {
@@ -66,7 +72,9 @@ pub fn VoiceMessageNew() -> Element {
                         waveform,
                         tags_vec,
                         Some(mime_type),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(event_id) => {
                             log::info!("Voice message published successfully: {}", event_id);
                             is_publishing.set(false);
@@ -91,7 +99,9 @@ pub fn VoiceMessageNew() -> Element {
     // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home { list: String::new() });
+            navigator.push(crate::routes::Route::Home {
+                list: String::new(),
+            });
         }
     });
 

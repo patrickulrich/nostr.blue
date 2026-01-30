@@ -1,12 +1,12 @@
-use dioxus::prelude::*;
-use nostr_sdk::Event as NostrEvent;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
 use crate::utils::article_meta::{
-    get_title, get_summary, get_image, get_published_at,
-    get_hashtags, get_identifier, calculate_read_time
+    calculate_read_time, get_hashtags, get_identifier, get_image, get_published_at, get_summary,
+    get_title,
 };
-use crate::utils::{format_relative_time_or, truncate_pubkey, is_valid_http_url};
+use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
+use dioxus::prelude::*;
+use nostr_sdk::Event as NostrEvent;
 
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
@@ -28,21 +28,28 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     let timestamp = format_relative_time_or(published_at, "Unknown date");
 
     // Get display name from metadata or fallback (filter empty strings)
-    let display_name = author_metadata.read().as_ref()
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| {
-            m.display_name.as_ref()
+            m.display_name
+                .as_ref()
                 .filter(|s| !s.trim().is_empty())
                 .or(m.name.as_ref().filter(|s| !s.trim().is_empty()))
                 .cloned()
         })
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
 
-    let profile_picture = author_metadata.read().as_ref()
+    let profile_picture = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.picture.clone())
         .filter(|url| !url.trim().is_empty() && is_valid_http_url(url));
 
     // Generate avatar fallback (first letter of display name)
-    let avatar_letter = display_name.chars().next()
+    let avatar_letter = display_name
+        .chars()
+        .next()
         .unwrap_or('?')
         .to_uppercase()
         .to_string();
@@ -51,10 +58,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     let naddr_opt = identifier.clone().and_then(|id| {
         use nostr::prelude::*;
 
-        let coord = Coordinate::new(
-            event.kind,
-            event.pubkey
-        ).identifier(id);
+        let coord = Coordinate::new(event.kind, event.pubkey).identifier(id);
 
         // Get relay URLs from global state (or use empty vec for now)
         let relays = vec![]; // TODO: Could add relay hints from RELAY_POOL

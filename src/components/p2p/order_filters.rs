@@ -2,9 +2,9 @@
 //!
 //! Advanced filtering panel for NIP-69 P2P orders
 
-use dioxus::prelude::*;
-use crate::utils::nip69::{OrderStatus, Network, Layer};
 use crate::stores::p2p_store::P2PFilterState;
+use crate::utils::nip69::{Layer, Network, OrderStatus};
+use dioxus::prelude::*;
 
 /// Common currencies for quick selection
 const COMMON_CURRENCIES: &[&str] = &["USD", "EUR", "GBP", "BRL", "MXN", "ARS", "CAD", "AUD"];
@@ -16,11 +16,7 @@ const COMMON_CURRENCIES: &[&str] = &["USD", "EUR", "GBP", "BRL", "MXN", "ARS", "
 /// Generic filter chip that renders a toggle button with active/inactive states.
 /// Reduces duplication across status, network, layer, and payment method chips.
 #[component]
-fn FilterChip(
-    label: String,
-    is_active: bool,
-    on_toggle: EventHandler<()>,
-) -> Element {
+fn FilterChip(label: String, is_active: bool, on_toggle: EventHandler<()>) -> Element {
     rsx! {
         button {
             class: if is_active {
@@ -36,8 +32,16 @@ fn FilterChip(
 
 /// Common payment methods
 const COMMON_PAYMENT_METHODS: &[&str] = &[
-    "Bank Transfer", "PayPal", "Revolut", "Wise", "Venmo",
-    "Zelle", "Cash App", "PIX", "SEPA", "Cash"
+    "Bank Transfer",
+    "PayPal",
+    "Revolut",
+    "Wise",
+    "Venmo",
+    "Zelle",
+    "Cash App",
+    "PIX",
+    "SEPA",
+    "Cash",
 ];
 
 /// Known P2P platforms
@@ -51,8 +55,20 @@ pub fn P2POrderFilters(
 ) -> Element {
     // Local state for form inputs
     let mut currency_input = use_signal(|| filters.read().currency.clone().unwrap_or_default());
-    let mut min_amount = use_signal(|| filters.read().min_amount.map(|a| a.to_string()).unwrap_or_default());
-    let mut max_amount = use_signal(|| filters.read().max_amount.map(|a| a.to_string()).unwrap_or_default());
+    let mut min_amount = use_signal(|| {
+        filters
+            .read()
+            .min_amount
+            .map(|a| a.to_string())
+            .unwrap_or_default()
+    });
+    let mut max_amount = use_signal(|| {
+        filters
+            .read()
+            .max_amount
+            .map(|a| a.to_string())
+            .unwrap_or_default()
+    });
 
     // Apply filters
     let apply_filters = move |_| {
@@ -60,7 +76,11 @@ pub fn P2POrderFilters(
 
         // Currency
         let curr = currency_input.read().trim().to_string();
-        f.currency = if curr.is_empty() { None } else { Some(curr.to_uppercase()) };
+        f.currency = if curr.is_empty() {
+            None
+        } else {
+            Some(curr.to_uppercase())
+        };
 
         // Amount range
         f.min_amount = min_amount.read().parse().ok();
@@ -334,7 +354,11 @@ fn NetworkFilterChip(
     filters: Signal<P2PFilterState>,
     label: &'static str,
 ) -> Element {
-    let is_active = filters.read().network.map(|n| n == network).unwrap_or(false);
+    let is_active = filters
+        .read()
+        .network
+        .map(|n| n == network)
+        .unwrap_or(false);
 
     rsx! {
         FilterChip {
@@ -353,11 +377,7 @@ fn NetworkFilterChip(
 
 /// Layer filter chip - uses generic FilterChip
 #[component]
-fn LayerFilterChip(
-    layer: Layer,
-    filters: Signal<P2PFilterState>,
-    label: &'static str,
-) -> Element {
+fn LayerFilterChip(layer: Layer, filters: Signal<P2PFilterState>, label: &'static str) -> Element {
     let is_active = filters.read().layer.map(|l| l == layer).unwrap_or(false);
 
     rsx! {
@@ -377,11 +397,13 @@ fn LayerFilterChip(
 
 /// Payment method filter chip - uses generic FilterChip
 #[component]
-fn PaymentMethodChip(
-    method: String,
-    filters: Signal<P2PFilterState>,
-) -> Element {
-    let is_active = filters.read().payment_method.as_ref().map(|m| m == &method).unwrap_or(false);
+fn PaymentMethodChip(method: String, filters: Signal<P2PFilterState>) -> Element {
+    let is_active = filters
+        .read()
+        .payment_method
+        .as_ref()
+        .map(|m| m == &method)
+        .unwrap_or(false);
     let method_for_toggle = method.clone();
 
     rsx! {
