@@ -366,7 +366,7 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 current_element.clear();
             }
             Ok(Event::Text(ref e)) => {
-                let text = e.unescape().unwrap_or_default().to_string();
+                let text = e.decode().unwrap_or_default().to_string();
                 if text.trim().is_empty() {
                     continue;
                 }

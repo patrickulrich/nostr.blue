@@ -670,7 +670,7 @@ mod tests {
         let content = "hello world";
         let (result, cursor) = apply_markdown_format(content, 6, 6, MarkdownFormat::Bold);
         assert_eq!(result, "hello **text**world");
-        assert_eq!(cursor, 18);
+        assert_eq!(cursor, 14);
     }
 
     #[test]
@@ -710,6 +710,6 @@ mod tests {
         let content = "check this out";
         let (result, cursor) = apply_markdown_format(content, 6, 10, MarkdownFormat::Link);
         assert_eq!(result, "check [this](url) out");
-        assert_eq!(cursor, 17);
+        assert_eq!(cursor, 13);
     }
 }

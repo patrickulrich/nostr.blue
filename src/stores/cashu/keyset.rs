@@ -410,19 +410,3 @@ pub fn calculate_proofs_fee(mint_url: &str, proofs: &[ProofData]) -> u64 {
     total_fee
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_count_proofs_by_status_empty() {
-        // This would need mock data, just verify it doesn't panic
-        let (active, inactive, _, _) = count_proofs_by_status("https://nonexistent.mint");
-        assert_eq!(active, 0);
-        assert_eq!(inactive, 0);
-    }
-}

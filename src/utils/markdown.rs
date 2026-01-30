@@ -80,11 +80,13 @@ pub fn markdown_to_text(markdown: &str) -> String {
     for event in parser {
         match event {
             Event::Text(t) | Event::Code(t) => {
+                // Just append text directly - the source already has proper spacing
                 text.push_str(&t);
-                text.push(' ');
             }
             Event::SoftBreak | Event::HardBreak => {
-                text.push(' ');
+                if !text.is_empty() && !text.ends_with(' ') {
+                    text.push(' ');
+                }
             }
             Event::Start(Tag::Paragraph) => {
                 if !text.is_empty() && !text.ends_with(' ') {
@@ -133,7 +135,7 @@ mod tests {
     fn test_markdown_to_text() {
         let md = "# Title\n\nThis is **bold** text with [a link](https://example.com).";
         let text = markdown_to_text(md);
-        assert_eq!(text, "Title This is bold text with a link .");
+        assert_eq!(text, "Title This is bold text with a link.");
     }
 
     #[test]

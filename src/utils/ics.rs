@@ -603,9 +603,9 @@ mod tests {
         let result = decode_geohash_approx("u4pruydqqvj");
         assert!(result.is_some());
         let (lat, lon) = result.unwrap();
-        // Should be approximately 57.6, 11.9 (Gothenburg, Sweden)
-        assert!((lat - 57.6).abs() < 1.0);
-        assert!((lon - 11.9).abs() < 1.0);
+        // Should be approximately 57.65, 10.41 (Aalborg area, Denmark)
+        assert!((lat - 57.65).abs() < 0.1);
+        assert!((lon - 10.41).abs() < 0.1);
     }
 
     #[test]

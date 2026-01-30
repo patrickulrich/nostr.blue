@@ -691,8 +691,9 @@ pub async fn publish_recipe(
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
-        // Title-based hashtag for discoverability
+        // Title-based hashtag for discoverability (both prefixes for compatibility)
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, &slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
             vec![Timestamp::now().as_secs().to_string()]
@@ -713,10 +714,11 @@ pub async fn publish_recipe(
         }
     }
 
-    // Add category tags with nostrcooking prefix
+    // Add category tags with both prefixes for compatibility
     for tag in tags {
         let tag_slug = tag.to_lowercase().replace(' ', "-");
         event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug)));
+        event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, tag_slug)));
     }
 
     // Build and publish
@@ -757,8 +759,9 @@ pub async fn fork_recipe(
         Tag::title(new_title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
-        // Title-based hashtag for discoverability
+        // Title-based hashtag for discoverability (both prefixes for compatibility)
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, &slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, &slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
             vec![Timestamp::now().as_secs().to_string()]
@@ -779,10 +782,11 @@ pub async fn fork_recipe(
         }
     }
 
-    // Add category tags
+    // Add category tags with both prefixes for compatibility
     for tag in new_tags {
         let tag_slug = tag.to_lowercase().replace(' ', "-");
         event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug)));
+        event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, tag_slug)));
     }
 
     // Build and publish
@@ -822,8 +826,9 @@ pub async fn update_recipe(
         Tag::title(title),
         Tag::hashtag(RECIPE_TAG_PREFIX),
         Tag::hashtag(RECIPE_TAG_PREFIX_ALT),
-        // Title-based hashtag for discoverability
+        // Title-based hashtag for discoverability (both prefixes for compatibility)
         Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, original_slug)),
+        Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, original_slug)),
         Tag::custom(
             TagKind::Custom("published_at".into()),
             vec![Timestamp::now().as_secs().to_string()]
@@ -844,10 +849,11 @@ pub async fn update_recipe(
         }
     }
 
-    // Add category tags
+    // Add category tags with both prefixes for compatibility
     for tag in tags {
         let tag_slug = tag.to_lowercase().replace(' ', "-");
         event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX, tag_slug)));
+        event_tags.push(Tag::hashtag(format!("{}-{}", RECIPE_TAG_PREFIX_ALT, tag_slug)));
     }
 
     // Build and publish

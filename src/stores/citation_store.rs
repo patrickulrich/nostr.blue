@@ -787,13 +787,128 @@ pub async fn publish_prompt_citation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::nkbip03::{
+        CitationBase, InternalCitation, ExternalWebCitation, HardcopyCitation, PromptCitation,
+    };
+    use nostr_sdk::{EventBuilder, Keys};
+
+    fn test_keys() -> Keys {
+        Keys::generate()
+    }
+
+    fn create_test_event(kind: u16) -> NostrEvent {
+        let keys = test_keys();
+        EventBuilder::new(Kind::Custom(kind), "test content")
+            .sign_with_keys(&keys)
+            .unwrap()
+    }
+
+    fn create_citation_base() -> CitationBase {
+        CitationBase {
+            event_id: "abc123".to_string(),
+            pubkey: "0".repeat(64), // 64 hex chars = 32 bytes
+            title: "Test Citation".to_string(),
+            author: "Test Author".to_string(),
+            content: "Test content".to_string(),
+            accessed_on: None,
+            summary: None,
+            created_at: 1234567890,
+        }
+    }
+
+    fn create_internal_citation() -> CachedCitation {
+        CachedCitation {
+            event: create_test_event(KIND_INTERNAL_REF),
+            citation: Citation::Internal(InternalCitation {
+                base: create_citation_base(),
+                coordinate: "30:pubkey:id".to_string(),
+                published_on: None,
+                location: None,
+                geohash: None,
+            }),
+            naddr: None,
+            a_tag: None,
+        }
+    }
+
+    fn create_external_citation() -> CachedCitation {
+        CachedCitation {
+            event: create_test_event(KIND_EXTERNAL_WEB),
+            citation: Citation::ExternalWeb(ExternalWebCitation {
+                base: create_citation_base(),
+                url: "https://example.com".to_string(),
+                published_on: None,
+                published_by: None,
+                version: None,
+                open_timestamp: None,
+                location: None,
+                geohash: None,
+            }),
+            naddr: None,
+            a_tag: None,
+        }
+    }
+
+    fn create_hardcopy_citation() -> CachedCitation {
+        CachedCitation {
+            event: create_test_event(KIND_HARDCOPY),
+            citation: Citation::Hardcopy(HardcopyCitation {
+                base: create_citation_base(),
+                page_range: Some("1-10".to_string()),
+                chapter_title: None,
+                editor: None,
+                published_on: None,
+                published_by: Some("Test Publisher".to_string()),
+                published_in: None,
+                doi: None,
+                version: None,
+                location: None,
+                geohash: None,
+            }),
+            naddr: None,
+            a_tag: None,
+        }
+    }
+
+    fn create_prompt_citation() -> CachedCitation {
+        CachedCitation {
+            event: create_test_event(KIND_PROMPT),
+            citation: Citation::Prompt(PromptCitation {
+                base: create_citation_base(),
+                llm: "GPT-4".to_string(),
+                version: Some("2024-01".to_string()),
+                url: None,
+            }),
+            naddr: None,
+            a_tag: None,
+        }
+    }
 
     #[test]
-    fn test_citation_group_total_count() {
-        let mut group = CitationGroup::default();
+    fn test_citation_group_total_count_empty() {
+        let group = CitationGroup::default();
         assert_eq!(group.total_count(), 0);
+    }
 
-        // Would need mock CachedCitations to fully test
+    #[test]
+    fn test_citation_group_total_count_with_data() {
+        let mut group = CitationGroup::default();
+        group.internal.push(create_internal_citation());
+        group.external.push(create_external_citation());
+        group.external.push(create_external_citation());
+        group.hardcopy.push(create_hardcopy_citation());
+
+        assert_eq!(group.total_count(), 4);
+    }
+
+    #[test]
+    fn test_citation_group_all() {
+        let mut group = CitationGroup::default();
+        group.internal.push(create_internal_citation());
+        group.external.push(create_external_citation());
+
+        let all = group.all();
+        assert_eq!(all.len(), 2);
     }
 
     #[test]
@@ -801,5 +916,24 @@ mod tests {
         let citations = vec![];
         let group = group_citations(citations);
         assert_eq!(group.total_count(), 0);
+    }
+
+    #[test]
+    fn test_group_citations_by_type() {
+        let citations = vec![
+            create_internal_citation(),
+            create_external_citation(),
+            create_external_citation(),
+            create_hardcopy_citation(),
+            create_prompt_citation(),
+        ];
+
+        let group = group_citations(citations);
+
+        assert_eq!(group.internal.len(), 1);
+        assert_eq!(group.external.len(), 2);
+        assert_eq!(group.hardcopy.len(), 1);
+        assert_eq!(group.prompt.len(), 1);
+        assert_eq!(group.total_count(), 5);
     }
 }

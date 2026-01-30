@@ -182,6 +182,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "wasm32")]
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -202,6 +203,8 @@ mod tests {
         assert_eq!(serializer.debouncer.delay_ms, 500);
     }
 
+    // Tests that use gloo_timers::Timeout are WASM-only
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_pending_data_storage() {
         let serializer = TimedSerializer::<String>::new();
@@ -216,6 +219,7 @@ mod tests {
         assert!(serializer.pending_data.borrow().is_some());
     }
 
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_cancel() {
         let serializer = TimedSerializer::<String>::new();

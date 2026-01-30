@@ -68,22 +68,73 @@ pub fn parse_checked_at_event(event: &Event) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr_sdk::Keys;
+
+    fn test_keys() -> Keys {
+        Keys::generate()
+    }
 
     #[test]
-    fn test_create_checked_at_event() {
+    fn test_create_checked_at_event_content() {
         let timestamp = 1234567890i64;
         let builder = create_checked_at_event(timestamp);
+        let keys = test_keys();
 
-        // The builder should have the correct kind
-        // Note: We can't easily test the full event without signing keys
+        // Build and sign event to verify properties
+        let event = builder.sign_with_keys(&keys).unwrap();
+
+        // Verify kind is 30078 (NIP-78 app data)
+        assert_eq!(event.kind, Kind::from(APP_DATA_KIND));
+
+        // Verify content includes the timestamp
+        assert!(event.content.contains("1234567890"));
+
+        // Verify d-tag is set correctly
+        let has_d_tag = event.tags.iter().any(|tag| {
+            if let Some(identifier) = tag.as_standardized() {
+                matches!(identifier, nostr_sdk::TagStandard::Identifier(d) if d == NOTIFICATION_CHECKED_AT_D_TAG)
+            } else {
+                false
+            }
+        });
+        assert!(has_d_tag, "Event should have d-tag for notifications_checked_at");
+
+        // Verify created_at matches the timestamp
+        assert_eq!(event.created_at.as_secs(), timestamp as u64);
+    }
+
+    #[test]
+    fn test_roundtrip_create_and_parse() {
+        let timestamp = 1700000000i64;
+        let builder = create_checked_at_event(timestamp);
+        let keys = test_keys();
+        let event = builder.sign_with_keys(&keys).unwrap();
+
+        // Parse should extract the same timestamp
+        let parsed = parse_checked_at_event(&event);
+        assert_eq!(parsed, Some(timestamp));
     }
 
     #[test]
     fn test_parse_invalid_kind() {
+        let keys = test_keys();
         // Create an event with wrong kind
         let event = EventBuilder::new(Kind::TextNote, "test")
-            .to_unsigned_event(nostr_sdk::PublicKey::from_slice(&[0u8; 32]).unwrap());
+            .sign_with_keys(&keys)
+            .unwrap();
 
-        assert_eq!(parse_checked_at_event(&event.into()), None);
+        assert_eq!(parse_checked_at_event(&event), None);
+    }
+
+    #[test]
+    fn test_parse_missing_d_tag() {
+        let keys = test_keys();
+        // Create event with correct kind but wrong d-tag
+        let event = EventBuilder::new(Kind::from(APP_DATA_KIND), "test")
+            .tag(Tag::identifier("wrong_d_tag"))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        assert_eq!(parse_checked_at_event(&event), None);
     }
 }

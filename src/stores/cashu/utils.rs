@@ -21,10 +21,19 @@ pub fn normalize_mint_url(url: &str) -> String {
     }
 
     // Lowercase the host portion for consistency
+    // The URL parser normalizes hosts to lowercase, so we reconstruct with lowercase host
     if let Ok(parsed) = Url::parse(&normalized) {
         if let Some(host) = parsed.host_str() {
-            let lowercase_host = host.to_lowercase();
-            normalized = normalized.replacen(host, &lowercase_host, 1);
+            // Reconstruct URL with lowercase host
+            let scheme = parsed.scheme();
+            let port_str = parsed
+                .port()
+                .map(|p| format!(":{}", p))
+                .unwrap_or_default();
+            let path = parsed.path();
+            // Only include path if it's not just "/"
+            let path_str = if path == "/" { "" } else { path };
+            normalized = format!("{}://{}{}{}", scheme, host, port_str, path_str);
         }
     }
 
@@ -40,7 +49,14 @@ pub fn mint_matches(stored_mint: &str, normalized_mint: &str) -> bool {
 
 /// Get current timestamp in seconds
 pub fn now_secs() -> u64 {
-    js_sys::Date::now() as u64 / 1000
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64 / 1000
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        chrono::Utc::now().timestamp() as u64
+    }
 }
 
 /// Get current timestamp using chrono (for non-WASM contexts)

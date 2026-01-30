@@ -370,6 +370,7 @@ pub fn build_thread_tree(replies: Vec<Event>, root_event_id: &EventId) -> Vec<Th
 
 /// Count the total number of replies in a thread tree (including nested replies)
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn count_total_replies(nodes: &[ThreadNode]) -> usize {
     let mut count = 0;
     for node in nodes {

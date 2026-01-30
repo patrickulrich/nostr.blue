@@ -35,9 +35,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# CSS (generated)
+# Generated assets
 /public/tailwind.css
-/assets/tailwind.css
+/public/git-worker.js
 
 # Agent config
 AGENTS.md

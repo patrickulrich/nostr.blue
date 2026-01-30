@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic() {
-        let mut cache = BlindAuthCache::new();
+        let cache = BlindAuthCache::new();
 
         assert_eq!(cache.available_count("https://test.mint"), 0);
         assert!(!cache.has_tokens("https://test.mint"));

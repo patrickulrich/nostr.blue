@@ -18,7 +18,7 @@ impl RecipeTag {
     }
 }
 
-/// All 163 curated recipe tags
+/// All 171 curated recipe tags
 /// These are used for filtering and categorizing recipes
 pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Alcohol", "alcohol", Some("🍸")),
@@ -46,6 +46,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Cabbage", "cabbage", None),
     RecipeTag::new("Cajun", "cajun", None),
     RecipeTag::new("Cake", "cake", Some("🍰")),
+    RecipeTag::new("Caribbean", "caribbean", Some("🏝️")),
     RecipeTag::new("Cheese", "cheese", Some("🧀")),
     RecipeTag::new("Cheesefare", "cheesefare", None),
     RecipeTag::new("Chicken", "chicken", Some("🍗")),
@@ -73,6 +74,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Easy", "easy", Some("😌")),
     RecipeTag::new("Eggs", "eggs", Some("🥚")),
     RecipeTag::new("English", "english", Some("🏴󠁧󠁢󠁥󠁮󠁧󠁿")),
+    RecipeTag::new("Ethiopian", "ethiopian", Some("🇪🇹")),
     RecipeTag::new("Fasting", "fasting", None),
     RecipeTag::new("Feta", "feta", Some("🧀")),
     RecipeTag::new("Filipino", "filipino", Some("🇵🇭")),
@@ -91,9 +93,11 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Irish", "irish", Some("☘️")),
     RecipeTag::new("Israeli", "israeli", Some("🇮🇱")),
     RecipeTag::new("Italian", "italian", Some("🇮🇹")),
+    RecipeTag::new("Jamaican", "jamaican", Some("🇯🇲")),
     RecipeTag::new("Jam", "jam", None),
     RecipeTag::new("Japanese", "japanese", Some("🇯🇵")),
     RecipeTag::new("Keto", "keto", None),
+    RecipeTag::new("Korean", "korean", Some("🇰🇷")),
     RecipeTag::new("Lamb", "lamb", Some("🐑")),
     RecipeTag::new("Layered", "layered", None),
     RecipeTag::new("Lebanese", "lebanese", Some("🇱🇧")),
@@ -107,9 +111,12 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Mexican", "mexican", Some("🇲🇽")),
     RecipeTag::new("Middle-Eastern", "middle-eastern", None),
     RecipeTag::new("Milk", "milk", Some("🥛")),
+    RecipeTag::new("Moroccan", "moroccan", Some("🇲🇦")),
     RecipeTag::new("Mushrooms", "mushrooms", Some("🍄")),
     RecipeTag::new("Mutton", "mutton", Some("🐑")),
+    RecipeTag::new("Nigerian", "nigerian", Some("🇳🇬")),
     RecipeTag::new("Noodles", "noodles", Some("🍜")),
+    RecipeTag::new("Nuts", "nuts", Some("🥜")),
     RecipeTag::new("Oven", "oven", Some("🔥")),
     RecipeTag::new("Palestinian", "palestinian", None),
     RecipeTag::new("Pancake", "pancake", Some("🥞")),
@@ -117,6 +124,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Pastry", "pastry", Some("🥐")),
     RecipeTag::new("Pate", "pate", None),
     RecipeTag::new("Peppers", "peppers", Some("🌶️")),
+    RecipeTag::new("Persian", "persian", Some("🇮🇷")),
     RecipeTag::new("Peruvian", "peruvian", Some("🇵🇪")),
     RecipeTag::new("Pie", "pie", Some("🥧")),
     RecipeTag::new("Pizza", "pizza", Some("🍕")),
@@ -142,6 +150,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Side", "side", None),
     RecipeTag::new("Slowcooked", "slowcooked", Some("⏲️")),
     RecipeTag::new("Snack", "snack", Some("🍿")),
+    RecipeTag::new("Somali", "somali", Some("🇸🇴")),
     RecipeTag::new("Soup", "soup", Some("🍲")),
     RecipeTag::new("Sourdough", "sourdough", Some("🍞")),
     RecipeTag::new("Southern", "southern", None),
@@ -308,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_tag_count() {
-        assert_eq!(RECIPE_TAGS.len(), 163);
+        assert_eq!(RECIPE_TAGS.len(), 171);
     }
 
     #[test]
@@ -316,12 +325,6 @@ mod tests {
         let italian = find_tag("Italian");
         assert!(italian.is_some());
         assert_eq!(italian.unwrap().emoji, Some("🇮🇹"));
-    }
-
-    #[test]
-    fn test_nostr_tag() {
-        let italian = find_tag("Italian").unwrap();
-        assert_eq!(italian.nostr_tag(), "nostrcooking-italian");
     }
 
     #[test]

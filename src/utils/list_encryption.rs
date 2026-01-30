@@ -345,14 +345,3 @@ pub async fn create_people_list(
     Ok(event)
 }
 
-#[cfg(test)]
-mod tests {
-    #[allow(unused_imports)]
-    use super::*;
-
-    #[test]
-    fn test_list_encryption_compiles() {
-        // This would need a mock event for proper testing
-        // For now, just verify the module compiles
-    }
-}

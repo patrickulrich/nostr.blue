@@ -83,6 +83,7 @@ impl<T> DataState<T> {
 
     /// Consumes self and returns the data if loaded, None otherwise (test helper)
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn into_data(self) -> Option<T> {
         match self {
             DataState::Loaded(data) => Some(data),
@@ -142,14 +143,14 @@ mod tests {
         let state: DataState<i32> = DataState::Pending;
         assert!(state.is_pending());
 
-        let state = DataState::Loading;
+        let state: DataState<i32> = DataState::Loading;
         assert!(state.is_loading());
 
         let state = DataState::Loaded(42);
         assert!(state.is_loaded());
         assert_eq!(state.data(), Some(&42));
 
-        let state = DataState::Error("test error".to_string());
+        let state: DataState<i32> = DataState::Error("test error".to_string());
         assert!(state.is_error());
         assert_eq!(state.error(), Some("test error"));
     }

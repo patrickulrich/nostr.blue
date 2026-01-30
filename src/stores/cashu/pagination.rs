@@ -295,6 +295,7 @@ mod tests {
                 dleq: None,
                 state: Default::default(),
                 transaction_id: None,
+                state_set_at: None,
             },
             ProofData {
                 id: "2".to_string(),
@@ -305,6 +306,7 @@ mod tests {
                 dleq: None,
                 state: Default::default(),
                 transaction_id: None,
+                state_set_at: None,
             },
             ProofData {
                 id: "3".to_string(),
@@ -315,6 +317,7 @@ mod tests {
                 dleq: None,
                 state: Default::default(),
                 transaction_id: None,
+                state_set_at: None,
             },
         ];
 
@@ -336,6 +339,7 @@ mod tests {
                 dleq: None,
                 state: Default::default(),
                 transaction_id: None,
+                state_set_at: None,
             })
             .collect();
 

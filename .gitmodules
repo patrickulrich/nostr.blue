@@ -1,0 +1,15 @@
+[submodule "docs/NKBIPs"]
+	path = docs/NKBIPs
+	url = https://github.com/patrickulrich/NKBIPs.git
+[submodule "docs/blossom"]
+	path = docs/blossom
+	url = https://github.com/hzrd149/blossom.git
+[submodule "docs/market-spec"]
+	path = docs/market-spec
+	url = https://github.com/GammaMarkets/market-spec.git
+[submodule "docs/nips"]
+	path = docs/nips
+	url = https://github.com/nostr-protocol/nips.git
+[submodule "docs/nuts"]
+	path = docs/nuts
+	url = https://github.com/cashubtc/nuts.git
