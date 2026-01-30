@@ -39,5 +39,3 @@ yarn-error.log*
 /public/tailwind.css
 /public/git-worker.js
 
-# Agent config
-AGENTS.md
