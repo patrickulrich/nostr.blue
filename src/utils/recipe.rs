@@ -221,14 +221,12 @@ fn parse_directions(content: &str) -> Result<Vec<String>, ValidationError> {
             }
             directions.push(step_text.to_string());
             expected_step += 1;
-        } else {
-            if let Some(current_step) = directions.last_mut() {
-                if current_step.is_empty() {
-                    *current_step = line.to_string();
-                } else {
-                    current_step.push('\n');
-                    current_step.push_str(line);
-                }
+        } else if let Some(current_step) = directions.last_mut() {
+            if current_step.is_empty() {
+                *current_step = line.to_string();
+            } else {
+                current_step.push('\n');
+                current_step.push_str(line);
             }
         }
     }

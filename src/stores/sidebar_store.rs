@@ -347,8 +347,7 @@ pub async fn load_sidebar_preferences() {
     }
     if !auth_store::is_authenticated() {
         log::info!(
-            "Not authenticated, using {} sidebar", if loaded_from_cache { "cached" } else
-            { "default" }
+            "Not authenticated, using {} sidebar", if loaded_from_cache { "cached" } else { "default" }
         );
         *SIDEBAR_STATE.write() = Nip78LoadState::LoadedDefaults;
         return;

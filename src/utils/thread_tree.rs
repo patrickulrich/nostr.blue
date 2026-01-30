@@ -255,7 +255,7 @@ pub fn build_thread_tree(
                     if let Some(node) = node_map.remove(&reply.id) {
                         root_replies.push(node);
                     }
-                } else {}
+                } 
             }
         }
     }

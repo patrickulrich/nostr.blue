@@ -116,8 +116,7 @@ pub fn WebBookmarkModal(
         auto_fetched.set(false);
         if mode == BookmarkModalMode::Add && !*auto_fetched.read()
             && !new_url.trim().is_empty()
-        {
-            if new_url.contains('.')
+            && new_url.contains('.')
                 && (new_url.starts_with("http") || !new_url.contains(' '))
             {
                 spawn(async move {
@@ -148,7 +147,6 @@ pub fn WebBookmarkModal(
                     }
                 });
             }
-        }
     };
     let handle_save = move |_| {
         let url = url_input.read().trim().to_string();

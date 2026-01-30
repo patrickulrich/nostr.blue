@@ -43,8 +43,10 @@ pub fn AddToCookbookModal(
     let loaded = *has_loaded.read();
     use_effect(
         use_reactive!(
-            | (client_init, has_signer, loaded) | { if loaded { return; } if !
-            client_init { cookbooks_loading.set(false); return; } if ! has_signer {
+            | (client_init, has_signer, loaded) | {
+                if loaded { return; }
+                if !client_init { cookbooks_loading.set(false); return; }
+                if !has_signer {
             cookbooks_loading.set(false); needs_signin.set(true); return; } needs_signin
             .set(false); has_loaded.set(true); cookbooks_loading.set(true); spawn(async
             move { match pin_boards_store::fetch_user_cookbooks(). await { Ok(books) => {

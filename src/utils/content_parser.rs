@@ -191,19 +191,17 @@ pub fn parse_content(content: &str, _tags: &[Tag]) -> Vec<ContentToken> {
                 }
                 Nip19::Secret(_) | Nip19::EncryptedSecret(_) => None,
             }
+        } else if identifier_lower.starts_with("npub1")
+            || identifier_lower.starts_with("nprofile1")
+        {
+            Some(ContentToken::Mention(uri.to_string()))
+        } else if identifier_lower.starts_with("note1")
+            || identifier_lower.starts_with("nevent1")
+            || identifier_lower.starts_with("naddr1")
+        {
+            Some(ContentToken::EventMention(uri.to_string()))
         } else {
-            if identifier_lower.starts_with("npub1")
-                || identifier_lower.starts_with("nprofile1")
-            {
-                Some(ContentToken::Mention(uri.to_string()))
-            } else if identifier_lower.starts_with("note1")
-                || identifier_lower.starts_with("nevent1")
-                || identifier_lower.starts_with("naddr1")
-            {
-                Some(ContentToken::EventMention(uri.to_string()))
-            } else {
-                None
-            }
+            None
         };
         if let Some(token) = content_token {
             matches.push((mat.start(), mat.end(), token));

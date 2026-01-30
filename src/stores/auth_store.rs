@@ -492,51 +492,49 @@ pub async fn restore_with_password(password: &str) -> Result<(), String> {
                 Err(e.to_string())
             }
         }
-    } else {
-        if let Ok(nsec) = LocalStorage::get::<String>(STORAGE_KEY_NSEC) {
-            if let Some(err) = crate::utils::nip49::validate_password(password) {
+    } else if let Ok(nsec) = LocalStorage::get::<String>(STORAGE_KEY_NSEC) {
+        if let Some(err) = crate::utils::nip49::validate_password(password) {
+            PASSWORD_PROMPT.write().loading = false;
+            PASSWORD_PROMPT.write().error = Some(err.clone());
+            return Err(err);
+        }
+        let keys = match Keys::parse(&nsec) {
+            Ok(k) => k,
+            Err(e) => {
+                let err = format!("Invalid stored key: {}", e);
                 PASSWORD_PROMPT.write().loading = false;
                 PASSWORD_PROMPT.write().error = Some(err.clone());
                 return Err(err);
             }
-            let keys = match Keys::parse(&nsec) {
-                Ok(k) => k,
-                Err(e) => {
-                    let err = format!("Invalid stored key: {}", e);
-                    PASSWORD_PROMPT.write().loading = false;
-                    PASSWORD_PROMPT.write().error = Some(err.clone());
-                    return Err(err);
-                }
-            };
-            let ncryptsec = match crate::utils::nip49::encrypt_secret_key_with_security(
-                keys.secret_key(),
-                password,
-                nostr::nips::nip49::KeySecurity::Weak,
-            ) {
-                Ok(enc) => enc,
-                Err(e) => {
-                    let err = format!("Encryption failed: {}", e);
-                    PASSWORD_PROMPT.write().loading = false;
-                    PASSWORD_PROMPT.write().error = Some(err.clone());
-                    return Err(err);
-                }
-            };
-            LocalStorage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec).ok();
-            LocalStorage::delete(STORAGE_KEY_NSEC);
-            if let Err(e) = login_with_keys_internal(keys).await {
+        };
+        let ncryptsec = match crate::utils::nip49::encrypt_secret_key_with_security(
+            keys.secret_key(),
+            password,
+            nostr::nips::nip49::KeySecurity::Weak,
+        ) {
+            Ok(enc) => enc,
+            Err(e) => {
+                let err = format!("Encryption failed: {}", e);
                 PASSWORD_PROMPT.write().loading = false;
-                PASSWORD_PROMPT.write().error = Some(e.clone());
-                return Err(e);
+                PASSWORD_PROMPT.write().error = Some(err.clone());
+                return Err(err);
             }
-            *PASSWORD_PROMPT.write() = PasswordPromptState::default();
-            log::info!("Successfully migrated key to encrypted format");
-            Ok(())
-        } else {
+        };
+        LocalStorage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec).ok();
+        LocalStorage::delete(STORAGE_KEY_NSEC);
+        if let Err(e) = login_with_keys_internal(keys).await {
             PASSWORD_PROMPT.write().loading = false;
-            let err = "No stored key found".to_string();
-            PASSWORD_PROMPT.write().error = Some(err.clone());
-            Err(err)
+            PASSWORD_PROMPT.write().error = Some(e.clone());
+            return Err(e);
         }
+        *PASSWORD_PROMPT.write() = PasswordPromptState::default();
+        log::info!("Successfully migrated key to encrypted format");
+        Ok(())
+    } else {
+        PASSWORD_PROMPT.write().loading = false;
+        let err = "No stored key found".to_string();
+        PASSWORD_PROMPT.write().error = Some(err.clone());
+        Err(err)
     }
 }
 /// Cancel password prompt and clear auth state

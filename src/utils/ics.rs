@@ -334,10 +334,8 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
                 timezone: tz,
             });
         }
-    } else {
-        if let Some(ts) = parse_ics_local_datetime(value) {
-            return Some(IcsDateTime::DateTime(ts));
-        }
+    } else if let Some(ts) = parse_ics_local_datetime(value) {
+        return Some(IcsDateTime::DateTime(ts));
     }
     None
 }

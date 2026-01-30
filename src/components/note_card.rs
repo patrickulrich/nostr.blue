@@ -396,15 +396,17 @@ pub fn NoteCard(
             let author_pubkey = author_pubkey_block_check.clone(); if let Some(ref
             muted_set) = cached_muted_posts { if let Ok(muted) =
             nostr_client::is_post_muted_cached(& event_id, muted_set) { is_muted
-            .set(muted); } } else { is_muted.set(false); } if let Some(ref blocked_set) =
+            .set(muted); } } else { is_muted.set(false); }
+            if let Some(ref blocked_set) =
             cached_blocked_users { if let Ok(blocked) =
             nostr_client::is_user_blocked_cached(& author_pubkey, blocked_set) {
-            is_author_blocked.set(blocked); } } else { is_author_blocked.set(false); } if
-            cached_muted_posts.is_none() || cached_blocked_users.is_none() { let
+            is_author_blocked.set(blocked); } } else { is_author_blocked.set(false); }
+            if cached_muted_posts.is_none() || cached_blocked_users.is_none() { let
             need_muted = cached_muted_posts.is_none(); let need_blocked =
             cached_blocked_users.is_none(); spawn(async move { if need_muted { match
             nostr_client::is_post_muted(event_id.clone()). await { Ok(muted) => is_muted
-            .set(muted), Err(_) => is_muted.set(false), } } if need_blocked { match
+            .set(muted), Err(_) => is_muted.set(false), } }
+            if need_blocked { match
             nostr_client::is_user_blocked(author_pubkey). await { Ok(blocked) =>
             is_author_blocked.set(blocked), Err(_) => is_author_blocked.set(false), } }
             }); } }

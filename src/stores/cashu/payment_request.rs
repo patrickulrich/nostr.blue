@@ -387,33 +387,21 @@ pub async fn pay_payment_request(
                 }
             },
         );
-    } else {
-        if !event_ids_to_delete.is_empty() {
-            use nostr::nips::nip09::EventDeletionRequest;
-            let mut deletion_request = EventDeletionRequest::new();
-            for event_id_str in &event_ids_to_delete {
-                if let Ok(event_id) = EventId::parse(event_id_str) {
-                    deletion_request = deletion_request.id(event_id);
-                }
+    } else if !event_ids_to_delete.is_empty() {
+        use nostr::nips::nip09::EventDeletionRequest;
+        let mut deletion_request = EventDeletionRequest::new();
+        for event_id_str in &event_ids_to_delete {
+            if let Ok(event_id) = EventId::parse(event_id_str) {
+                deletion_request = deletion_request.id(event_id);
             }
-            let builder = nostr_sdk::EventBuilder::delete(deletion_request);
-            match client.send_event_builder(builder.clone()).await {
-                Ok(output) => {
-                    if output.success.is_empty() {
-                        log::warn!(
-                            "No relays accepted deletion event, queuing for retry"
-                        );
-                        queue_event_for_retry(
-                                builder,
-                                PendingEventType::DeletionEvent,
-                                None,
-                                None,
-                            )
-                            .await;
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failed to publish deletion event: {}", e);
+        }
+        let builder = nostr_sdk::EventBuilder::delete(deletion_request);
+        match client.send_event_builder(builder.clone()).await {
+            Ok(output) => {
+                if output.success.is_empty() {
+                    log::warn!(
+                        "No relays accepted deletion event, queuing for retry"
+                    );
                     queue_event_for_retry(
                             builder,
                             PendingEventType::DeletionEvent,
@@ -422,6 +410,16 @@ pub async fn pay_payment_request(
                         )
                         .await;
                 }
+            }
+            Err(e) => {
+                log::warn!("Failed to publish deletion event: {}", e);
+                queue_event_for_retry(
+                        builder,
+                        PendingEventType::DeletionEvent,
+                        None,
+                        None,
+                    )
+                    .await;
             }
         }
     }

@@ -730,19 +730,7 @@ fn MentionRenderer(mention: String) -> Element {
                 format!("@{}", display_name)
             } else if let Some(name) = &meta.name {
                 format!("@{}", name)
-            } else {
-                if pubkey_str.len() > 16 {
-                    format!(
-                        "@{}...{}",
-                        &pubkey_str[..8],
-                        &pubkey_str[pubkey_str.len() - 4..],
-                    )
-                } else {
-                    format!("@{}", pubkey_str)
-                }
-            }
-        } else {
-            if pubkey_str.len() > 16 {
+            } else if pubkey_str.len() > 16 {
                 format!(
                     "@{}...{}",
                     &pubkey_str[..8],
@@ -751,6 +739,14 @@ fn MentionRenderer(mention: String) -> Element {
             } else {
                 format!("@{}", pubkey_str)
             }
+        } else if pubkey_str.len() > 16 {
+            format!(
+                "@{}...{}",
+                &pubkey_str[..8],
+                &pubkey_str[pubkey_str.len() - 4..],
+            )
+        } else {
+            format!("@{}", pubkey_str)
         };
         rsx! {
             Link {
@@ -3182,21 +3178,19 @@ fn RumbleRenderer(embed_url: String) -> Element {
     let mut is_visible = use_signal(|| false);
     let final_embed_url = if embed_url.contains("/embed/") {
         embed_url.clone()
-    } else {
-        if let Some(start) = embed_url.find("/v") {
-            let after_v = &embed_url[start + 1..];
-            let video_id: String = after_v
-                .chars()
-                .take_while(|c| *c != '-' && *c != '.' && *c != '/')
-                .collect();
-            if !video_id.is_empty() {
-                format!("https://rumble.com/embed/{}/", video_id)
-            } else {
-                embed_url.clone()
-            }
+    } else if let Some(start) = embed_url.find("/v") {
+        let after_v = &embed_url[start + 1..];
+        let video_id: String = after_v
+            .chars()
+            .take_while(|c| *c != '-' && *c != '.' && *c != '/')
+            .collect();
+        if !video_id.is_empty() {
+            format!("https://rumble.com/embed/{}/", video_id)
         } else {
             embed_url.clone()
         }
+    } else {
+        embed_url.clone()
     };
     rsx! {
         div {
@@ -4039,35 +4033,33 @@ fn NostrBlueRssPodcastEpisodeRenderer(
                     return Ok(DisplayEpisode::from_podcast_index_episode(&ep, &feed));
                 }
                 log::debug!("Direct episode fetch failed, falling back to search");
-            } else {
-                if let Ok((ep, feed_opt)) = podcast_index::get_episode_by_guid(
-                        &decoded_episode_id,
-                        None,
-                    )
-                    .await
-                {
-                    if ep.feed_id == Some(feed_id) {
-                        let feed = match feed_opt {
-                            Some(f) => f,
-                            None => {
-                                podcast_index::get_podcast_by_id(feed_id)
-                                    .await
-                                    .unwrap_or_else(|_| create_minimal_feed(&ep, feed_id))
-                            }
-                        };
-                        return Ok(
-                            DisplayEpisode::from_podcast_index_episode(&ep, &feed),
-                        );
-                    } else {
-                        log::debug!(
-                            "GUID lookup returned episode from different feed, falling back to search"
-                        );
-                    }
+            } else if let Ok((ep, feed_opt)) = podcast_index::get_episode_by_guid(
+                    &decoded_episode_id,
+                    None,
+                )
+                .await
+            {
+                if ep.feed_id == Some(feed_id) {
+                    let feed = match feed_opt {
+                        Some(f) => f,
+                        None => {
+                            podcast_index::get_podcast_by_id(feed_id)
+                                .await
+                                .unwrap_or_else(|_| create_minimal_feed(&ep, feed_id))
+                        }
+                    };
+                    return Ok(
+                        DisplayEpisode::from_podcast_index_episode(&ep, &feed),
+                    );
                 } else {
                     log::debug!(
-                        "GUID-based episode fetch failed, falling back to search"
+                        "GUID lookup returned episode from different feed, falling back to search"
                     );
                 }
+            } else {
+                log::debug!(
+                    "GUID-based episode fetch failed, falling back to search"
+                );
             }
             let feed = podcast_index::get_podcast_by_id(feed_id)
                 .await

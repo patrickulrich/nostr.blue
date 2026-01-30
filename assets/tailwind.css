@@ -2120,9 +2120,6 @@
   .cursor-wait {
     cursor: wait;
   }
-  .resize {
-    resize: both;
-  }
   .resize-none {
     resize: none;
   }

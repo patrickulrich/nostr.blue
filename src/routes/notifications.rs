@@ -893,7 +893,7 @@ async fn load_notifications(
             return Err(format!("Failed to fetch notifications: {}", e));
         }
     }
-    all_notifications.sort_by(|a, b| get_timestamp(b).cmp(&get_timestamp(a)));
+    all_notifications.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
     log::info!("Loaded {} notifications", all_notifications.len());
     Ok(all_notifications)
 }

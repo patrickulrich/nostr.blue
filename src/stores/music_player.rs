@@ -543,12 +543,10 @@ pub fn toggle_play() {
         spawn(async move {
             clear_music_status().await;
         });
-    } else {
-        if let Some(track) = state.current_track.clone() {
-            spawn(async move {
-                publish_music_status(&track).await;
-            });
-        }
+    } else if let Some(track) = state.current_track.clone() {
+        spawn(async move {
+            publish_music_status(&track).await;
+        });
     }
 }
 /// Play next track in playlist

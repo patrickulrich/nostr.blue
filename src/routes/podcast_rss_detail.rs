@@ -185,25 +185,23 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
                                                     Ok(()) => log::info!("Unsubscribed from podcast: {}", sub_id),
                                                     Err(e) => log::error!("Failed to unsubscribe: {}", e),
                                                 }
-                                            } else {
-                                                if let Some(ref guid) = guid {
-                                                    match podcast_subscription::add_rss_subscription(
-                                                            guid,
-                                                            Some(id),
-                                                            Some(&url),
+                                            } else if let Some(ref guid) = guid {
+                                                match podcast_subscription::add_rss_subscription(
+                                                        guid,
+                                                        Some(id),
+                                                        Some(&url),
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(()) => {
+                                                        log::info!(
+                                                            "Subscribed to podcast: {} (guid: {})", url, guid
                                                         )
-                                                        .await
-                                                    {
-                                                        Ok(()) => {
-                                                            log::info!(
-                                                                "Subscribed to podcast: {} (guid: {})", url, guid
-                                                            )
-                                                        }
-                                                        Err(e) => log::error!("Failed to subscribe: {}", e),
                                                     }
-                                                } else {
-                                                    log::error!("Cannot subscribe: podcast does not have a GUID");
+                                                    Err(e) => log::error!("Failed to subscribe: {}", e),
                                                 }
+                                            } else {
+                                                log::error!("Cannot subscribe: podcast does not have a GUID");
                                             }
                                             subscribing.set(false);
                                         });

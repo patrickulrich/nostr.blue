@@ -205,21 +205,19 @@ pub fn VoiceRecorder(
                                                 }
                                             }
                                             break;
-                                        } else {
-                                            if let Ok(error) = Reflect::get(
-                                                &result,
-                                                &JsValue::from_str("error"),
-                                            ) {
-                                                let error_msg = error
-                                                    .as_string()
-                                                    .unwrap_or_else(|| "Unknown error".to_string());
-                                                log::error!("Recording error: {}", error_msg);
-                                                state
-                                                    .set(RecorderState::Error {
-                                                        message: error_msg,
-                                                    });
-                                                break;
-                                            }
+                                        } else if let Ok(error) = Reflect::get(
+                                            &result,
+                                            &JsValue::from_str("error"),
+                                        ) {
+                                            let error_msg = error
+                                                .as_string()
+                                                .unwrap_or_else(|| "Unknown error".to_string());
+                                            log::error!("Recording error: {}", error_msg);
+                                            state
+                                                .set(RecorderState::Error {
+                                                    message: error_msg,
+                                                });
+                                            break;
                                         }
                                     }
                                 }

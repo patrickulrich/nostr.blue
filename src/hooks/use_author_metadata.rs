@@ -31,7 +31,8 @@ pub fn use_author_metadata(pubkey: String) -> Signal<Option<Metadata>> {
             get_client() { Some(c) => c, None => {
             log::error!("Client not initialized, cannot fetch author metadata"); return;
             } }; if let Ok(Some(m)) = client.database().metadata(pk). await { metadata
-            .set(Some(m)); return; } if let Ok(Some(m)) = client.fetch_metadata(pk,
+            .set(Some(m)); return; }
+            if let Ok(Some(m)) = client.fetch_metadata(pk,
             Duration::from_secs(5)). await { metadata.set(Some(m)); } }); }
         ),
     );

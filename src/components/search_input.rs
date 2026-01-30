@@ -118,14 +118,12 @@ pub fn SearchInput() -> Element {
                 }
                 _ => {}
             }
-        } else {
-            if key == Key::Enter {
-                evt.prevent_default();
-                let search_query = query.read().clone();
-                if !search_query.is_empty() {
-                    navigator.push(Route::Search { q: search_query });
-                    query.set(String::new());
-                }
+        } else if key == Key::Enter {
+            evt.prevent_default();
+            let search_query = query.read().clone();
+            if !search_query.is_empty() {
+                navigator.push(Route::Search { q: search_query });
+                query.set(String::new());
             }
         }
     };

@@ -402,7 +402,7 @@ pub async fn fetch_recipe_engagement(
                         .iter()
                         .find(|t| t.kind().to_string() == "bolt11")
                         .and_then(|t| t.content())
-                        .and({ None::<u64> })
+                        .and(None::<u64>)
                 })
                 .sum::<u64>()
         })

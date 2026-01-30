@@ -159,7 +159,8 @@ pub fn PinBoardCardMosaic(
         use_reactive!(
             | a_tag_for_reactions | { let a_tag = a_tag_for_reactions.clone();
             spawn(async move { if let Ok(count) = fetch_pinboard_reaction_count(& a_tag).
-            await { reaction_count.set(count); } if * HAS_SIGNER.read() { if let
+            await { reaction_count.set(count); }
+            if *HAS_SIGNER.read() { if let
             Ok(reacted) = has_user_reacted_to_pinboard(& a_tag). await { has_reacted
             .set(reacted); } } }); }
         ),

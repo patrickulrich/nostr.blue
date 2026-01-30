@@ -1078,7 +1078,8 @@ pub fn start_pending_events_processor() {
                         result = recovery_future => { if result.recovered_count > 0 ||
                         result.spent_count > 0 {
                         log::info!("Periodic recovery: {} recovered, {} spent", result
-                        .recovered_count, result.spent_count); } if ! result.errors
+                        .recovered_count, result.spent_count); }
+                        if !result.errors
                         .is_empty() { for err in result.errors {
                         log::debug!("Periodic recovery error: {}", err); } } } _ =
                         timeout_future => {

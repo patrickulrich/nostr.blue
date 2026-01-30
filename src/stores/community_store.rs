@@ -1058,42 +1058,40 @@ pub async fn fetch_user_communities(
                     "Approved member list has non-community a_tag: {}", a_tag_str
                 );
             }
-        } else {
-            if let Some(d_tag) = event
-                .tags
-                .iter()
-                .find(|t| t.kind() == TagKind::d())
-                .and_then(|t| t.content())
+        } else if let Some(d_tag) = event
+            .tags
+            .iter()
+            .find(|t| t.kind() == TagKind::d())
+            .and_then(|t| t.content())
+        {
+            log::info!("  No 'a' tag, but found 'd' tag: {}", d_tag);
+            let potential_a_tag = if d_tag
+                .starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION))
             {
-                log::info!("  No 'a' tag, but found 'd' tag: {}", d_tag);
-                let potential_a_tag = if d_tag
-                    .starts_with(&format!("{}:", KIND_COMMUNITY_DEFINITION))
-                {
-                    d_tag.to_string()
-                } else {
-                    log::warn!(
-                        "  d_tag '{}' doesn't look like a community a_tag", d_tag
-                    );
-                    continue;
-                };
-                member_community_a_tags.insert(potential_a_tag.clone());
-                let members: HashSet<String> = event
-                    .tags
-                    .iter()
-                    .filter(|t| t.kind() == TagKind::p())
-                    .filter_map(|t| t.content().map(|s| s.to_lowercase()))
-                    .collect();
-                log::info!(
-                    "Caching {} approved members from d_tag for {}", members.len(), &
-                    potential_a_tag
-                );
-                APPROVED_MEMBERS_CACHE.write().insert(potential_a_tag, members);
+                d_tag.to_string()
             } else {
                 log::warn!(
-                    "Approved member list event {} has no 'a' or 'd' tag", event.id
-                    .to_hex()
+                    "  d_tag '{}' doesn't look like a community a_tag", d_tag
                 );
-            }
+                continue;
+            };
+            member_community_a_tags.insert(potential_a_tag.clone());
+            let members: HashSet<String> = event
+                .tags
+                .iter()
+                .filter(|t| t.kind() == TagKind::p())
+                .filter_map(|t| t.content().map(|s| s.to_lowercase()))
+                .collect();
+            log::info!(
+                "Caching {} approved members from d_tag for {}", members.len(), &
+                potential_a_tag
+            );
+            APPROVED_MEMBERS_CACHE.write().insert(potential_a_tag, members);
+        } else {
+            log::warn!(
+                "Approved member list event {} has no 'a' or 'd' tag", event.id
+                .to_hex()
+            );
         }
     }
     let member_community_count = member_community_a_tags.len();

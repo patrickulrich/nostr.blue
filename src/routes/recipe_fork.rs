@@ -84,18 +84,16 @@ pub fn RecipeFork(naddr: String) -> Element {
                 } else {
                     Err("Original recipe not found".to_string())
                 }
+            } else if let Some(ref orig) = original {
+                recipe_store::fork_recipe(
+                        orig,
+                        &form_data.title,
+                        &content,
+                        form_data.tags.clone(),
+                    )
+                    .await
             } else {
-                if let Some(ref orig) = original {
-                    recipe_store::fork_recipe(
-                            orig,
-                            &form_data.title,
-                            &content,
-                            form_data.tags.clone(),
-                        )
-                        .await
-                } else {
-                    Err("Original recipe not found".to_string())
-                }
+                Err("Original recipe not found".to_string())
             };
             match result {
                 Ok(naddr) => {

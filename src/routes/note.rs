@@ -127,7 +127,8 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
             .set(false); return; } }; let (parents_result, replies_result) =
             tokio::join!(fetch_parents_by_ids(parent_ids), fetch_replies(event_id)); if
             let Ok(mut parents) = parents_result { parents.sort_by(| a, b | a.created_at
-            .cmp(& b.created_at)); parent_events.set(parents); } if let Ok(mut reply_vec)
+            .cmp(& b.created_at)); parent_events.set(parents); }
+            if let Ok(mut reply_vec)
             = replies_result { reply_vec.sort_by(| a, b | a.created_at.cmp(& b
             .created_at)); let count = reply_vec.len(); replies.set(reply_vec);
             log::info!("Loaded {} replies", count); } use crate

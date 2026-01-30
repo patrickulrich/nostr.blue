@@ -127,11 +127,10 @@ pub async fn check_keyset_collision(
 /// Extract keyset ID from a proof's id field
 fn extract_keyset_id_from_proof(proof: &ProofData) -> Option<String> {
     let len = proof.id.len();
-    if (len == 14 || len == 64) && !proof.id.contains('_') {
-        if proof.id.chars().all(|c| c.is_ascii_hexdigit()) {
+    if (len == 14 || len == 64) && !proof.id.contains('_')
+        && proof.id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some(proof.id.clone());
         }
-    }
     None
 }
 /// Get total number of mints
