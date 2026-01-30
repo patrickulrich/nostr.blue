@@ -1,7 +1,6 @@
 //! Calendar Event Creation Page
 //!
 //! Create new calendar events (NIP-52 kinds 31922/31923)
-
 use crate::components::MediaUploader;
 use crate::routes::Route;
 use crate::stores::{auth_store, calendar_store};
@@ -12,26 +11,20 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::ToBech32;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
-
 /// Maximum ICS file size (1MB)
 const MAX_ICS_FILE_SIZE: u64 = 1_048_576;
-
 /// Valid participant roles per NIP-52
 const VALID_ROLES: &[&str] = &["participant", "speaker", "organizer", "moderator"];
-
 /// Event type selection
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum EventType {
     #[default]
-    TimeBased, // Kind 31923 - specific time
-    DateBased, // Kind 31922 - all day
+    TimeBased,
+    DateBased,
 }
-
 #[component]
 pub fn CalendarEventNew() -> Element {
     let navigator = navigator();
-
-    // Form state
     let mut title = use_signal(String::new);
     let mut summary = use_signal(String::new);
     let mut content = use_signal(String::new);
@@ -46,30 +39,17 @@ pub fn CalendarEventNew() -> Element {
     let mut hashtags_input = use_signal(String::new);
     let mut timezone = use_signal(get_local_timezone);
     let mut is_private = use_signal(|| false);
-
-    // Publishing state
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
-
-    // ICS import state
     let mut ics_events = use_signal(Vec::<IcsEvent>::new);
     let mut show_ics_selector = use_signal(|| false);
-
-    // Participant state
-    // Each participant is (pubkey, display_name, role)
     let mut participants = use_signal(Vec::<(String, String, String)>::new);
     let mut participant_input = use_signal(String::new);
-
-    // Check authentication
     let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-
-    // Validation - use signal() calls for proper reactivity
     let can_publish = use_memo(move || {
         let title_val = title();
         !title_val.trim().is_empty() && !is_publishing()
     });
-
-    // Add location to list
     let add_location = move |_| {
         let loc = location.read().trim().to_string();
         if !loc.is_empty() {
@@ -79,8 +59,6 @@ pub fn CalendarEventNew() -> Element {
             location.set(String::new());
         }
     };
-
-    // Remove location from list
     let mut remove_location = move |idx: usize| {
         let mut locs = locations.read().clone();
         if idx < locs.len() {
@@ -88,60 +66,48 @@ pub fn CalendarEventNew() -> Element {
             locations.set(locs);
         }
     };
-
-    // Add participant (closure for direct call)
     let mut do_add_participant = move || {
         let input = participant_input.read().trim().to_string();
         if input.is_empty() {
             return;
         }
-
-        // Use PublicKey::parse() which handles hex, bech32/npub, and nostr: URIs (NIP-21)
         let pk = match nostr_sdk::prelude::PublicKey::parse(&input) {
             Ok(pk) => pk,
             Err(_) => {
-                error_message.set(Some(
-                    "Invalid pubkey. Use hex, npub, or nostr:npub format".to_string(),
-                ));
+                error_message
+                    .set(
+                        Some(
+                            "Invalid pubkey. Use hex, npub, or nostr:npub format"
+                                .to_string(),
+                        ),
+                    );
                 return;
             }
         };
         let pubkey_hex = pk.to_hex();
-        // Use to_bech32() for user-friendly display
         let display = pk
             .to_bech32()
             .map(|s| format!("{}...", &s[..12]))
             .unwrap_or_else(|_| format!("{}...", &pubkey_hex[..8]));
-
-        // Check for duplicates
         let mut parts = participants.read().clone();
         if parts.iter().any(|(pk, _, _)| pk == &pubkey_hex) {
             error_message.set(Some("Participant already added".to_string()));
             return;
         }
-
-        // Add with default role "participant"
         parts.push((pubkey_hex, display, "participant".to_string()));
         participants.set(parts);
         participant_input.set(String::new());
         error_message.set(None);
     };
-
-    // Add participant onclick handler
     let add_participant = move |_: Event<MouseData>| {
         do_add_participant();
     };
-
-    // Remove participant by pubkey (using stable ID, not index - Dioxus list pattern)
     let mut remove_participant = move |pubkey_to_remove: String| {
         let mut parts = participants.read().clone();
         parts.retain(|(pk, _, _)| pk != &pubkey_to_remove);
         participants.set(parts);
     };
-
-    // Handle ICS file upload
     let handle_ics_upload = move |_evt: Event<FormData>| {
-        // Check file size before spawning async task
         let window = match web_sys::window() {
             Some(w) => w,
             None => {
@@ -156,7 +122,6 @@ pub fn CalendarEventNew() -> Element {
                 return;
             }
         };
-
         if let Some(input) = document
             .get_element_by_id("ics-file-input")
             .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
@@ -165,29 +130,31 @@ pub fn CalendarEventNew() -> Element {
                 if let Some(file) = files.get(0) {
                     let size = file.size() as u64;
                     if size > MAX_ICS_FILE_SIZE {
-                        error_message.set(Some(format!(
-                            "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
-                            size as f64 / 1_048_576.0
-                        )));
+                        error_message
+                            .set(
+                                Some(
+                                    format!(
+                                        "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
+                                        size as f64 / 1_048_576.0,
+                                    ),
+                                ),
+                            );
                         clear_file_input("ics-file-input");
                         return;
                     }
                 }
             }
         }
-
         spawn(async move {
-            // Read file content from file input
             if let Ok(content) = read_ics_file_content("ics-file-input").await {
                 let events = parse_ics(&content);
                 if events.is_empty() {
                     error_message.set(Some("No events found in ICS file".to_string()));
                     clear_file_input("ics-file-input");
                 } else {
-                    error_message.set(None); // Clear any previous error
+                    error_message.set(None);
                     ics_events.set(events);
                     show_ics_selector.set(true);
-                    // Clear file input after successful parse to allow re-uploads
                     clear_file_input("ics-file-input");
                 }
             } else {
@@ -196,34 +163,22 @@ pub fn CalendarEventNew() -> Element {
             }
         });
     };
-
-    // Apply selected ICS event to form
     let mut apply_ics_event = move |evt: &IcsEvent| {
         title.set(evt.title.clone());
-
-        // Set content to full description
         content.set(evt.description.clone());
-
-        // Set summary to truncated excerpt for preview (UTF-8 safe)
         let desc = &evt.description;
         if desc.len() > 200 {
-            // Find the last valid UTF-8 char boundary at or before 200 bytes
             let safe_boundary = desc
                 .char_indices()
                 .take_while(|(i, _)| *i < 200)
                 .last()
                 .map(|(i, c)| i + c.len_utf8())
                 .unwrap_or(desc.len().min(200));
-
-            // Find word boundary within the safe slice
             let truncate_at = desc[..safe_boundary].rfind(' ').unwrap_or(safe_boundary);
-
             summary.set(format!("{}...", &desc[..truncate_at]));
         } else {
             summary.set(desc.clone());
         }
-
-        // Parse start time
         if let Some(ref start) = evt.start {
             match start {
                 IcsDateTime::Date(date_str) => {
@@ -236,12 +191,8 @@ pub fn CalendarEventNew() -> Element {
                     start_date.set(date);
                     start_time.set(time);
                 }
-                IcsDateTime::DateTimeWithTz {
-                    timestamp: ts,
-                    timezone: tz,
-                } => {
+                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
                     event_type.set(EventType::TimeBased);
-                    // Convert to event's timezone for accurate display
                     let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
                     start_date.set(date);
                     start_time.set(time);
@@ -249,8 +200,6 @@ pub fn CalendarEventNew() -> Element {
                 }
             }
         }
-
-        // Parse end time
         if let Some(ref end_dt) = evt.end {
             match end_dt {
                 IcsDateTime::Date(date_str) => {
@@ -261,24 +210,16 @@ pub fn CalendarEventNew() -> Element {
                     end_date.set(date);
                     end_time.set(time);
                 }
-                IcsDateTime::DateTimeWithTz {
-                    timestamp: ts,
-                    timezone: tz,
-                } => {
-                    // Convert to event's timezone for accurate display
+                IcsDateTime::DateTimeWithTz { timestamp: ts, timezone: tz } => {
                     let (date, time) = timestamp_to_date_time_in_tz(*ts, tz);
                     end_date.set(date);
                     end_time.set(time);
                 }
             }
         }
-
-        // Location
         if !evt.location.is_empty() {
             location.set(evt.location.clone());
         }
-
-        // URL - add only if not already present (avoid duplicates)
         if !evt.url.is_empty() {
             let mut locs = locations.read().clone();
             if !locs.contains(&evt.url) {
@@ -286,22 +227,15 @@ pub fn CalendarEventNew() -> Element {
             }
             locations.set(locs);
         }
-
-        // Close selector
         show_ics_selector.set(false);
     };
-
-    // Handle close
     let handle_close = move |_| {
         navigator.go_back();
     };
-
-    // Handle publish
     let handle_publish = move |_| {
         if !*can_publish.read() {
             return;
         }
-
         let title_val = title.read().clone();
         let summary_val = summary.read().clone();
         let content_val = content.read().clone();
@@ -316,12 +250,10 @@ pub fn CalendarEventNew() -> Element {
         let hashtags_val = hashtags_input.read().clone();
         let timezone_val = timezone.read().clone();
         let is_private_val = *is_private.read();
-        // Convert participants to (pubkey, role) tuples with role validation (defense in depth)
         let participants_val: Vec<(String, String)> = participants
             .read()
             .iter()
             .filter_map(|(pk, _, role)| {
-                // Validate role before publishing
                 if VALID_ROLES.contains(&role.as_str()) {
                     Some((pk.clone(), role.clone()))
                 } else {
@@ -330,26 +262,19 @@ pub fn CalendarEventNew() -> Element {
                 }
             })
             .collect();
-
         is_publishing.set(true);
         error_message.set(None);
-
         let nav = navigator;
         spawn(async move {
-            // Combine locations
             let mut all_locations = locations_val;
             if !single_location.trim().is_empty() {
                 all_locations.push(single_location.trim().to_string());
             }
-
-            // Parse hashtags
             let hashtags: Vec<String> = hashtags_val
                 .split([',', ' ', '#'])
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-
-            // Publish based on event type
             let result = match event_type_val {
                 EventType::DateBased => {
                     let end_date_opt = if end_date_val != start_date_val {
@@ -357,78 +282,67 @@ pub fn CalendarEventNew() -> Element {
                     } else {
                         None
                     };
-
                     calendar_store::publish_date_event(
-                        &title_val,
-                        &start_date_val,
-                        end_date_opt,
-                        if summary_val.is_empty() {
-                            None
-                        } else {
-                            Some(&summary_val)
-                        },
-                        if content_val.is_empty() {
-                            None
-                        } else {
-                            Some(&content_val)
-                        },
-                        if image_val.is_empty() {
-                            None
-                        } else {
-                            Some(&image_val)
-                        },
-                        &all_locations,
-                        &hashtags,
-                        &participants_val,
-                        is_private_val,
-                    )
-                    .await
+                            &title_val,
+                            &start_date_val,
+                            end_date_opt,
+                            if summary_val.is_empty() {
+                                None
+                            } else {
+                                Some(&summary_val)
+                            },
+                            if content_val.is_empty() {
+                                None
+                            } else {
+                                Some(&content_val)
+                            },
+                            if image_val.is_empty() { None } else { Some(&image_val) },
+                            &all_locations,
+                            &hashtags,
+                            &participants_val,
+                            is_private_val,
+                        )
+                        .await
                 }
                 EventType::TimeBased => {
-                    // Convert date/time to timestamps
-                    let start_ts = parse_datetime_to_timestamp(&start_date_val, &start_time_val);
-                    let end_ts = parse_datetime_to_timestamp(&end_date_val, &end_time_val);
-
+                    let start_ts = parse_datetime_to_timestamp(
+                        &start_date_val,
+                        &start_time_val,
+                    );
+                    let end_ts = parse_datetime_to_timestamp(
+                        &end_date_val,
+                        &end_time_val,
+                    );
                     calendar_store::publish_time_event(
-                        &title_val,
-                        start_ts,
-                        if end_ts > start_ts {
-                            Some(end_ts)
-                        } else {
-                            None
-                        },
-                        if summary_val.is_empty() {
-                            None
-                        } else {
-                            Some(&summary_val)
-                        },
-                        if content_val.is_empty() {
-                            None
-                        } else {
-                            Some(&content_val)
-                        },
-                        if image_val.is_empty() {
-                            None
-                        } else {
-                            Some(&image_val)
-                        },
-                        &all_locations,
-                        &hashtags,
-                        &participants_val,
-                        if timezone_val.is_empty() {
-                            None
-                        } else {
-                            Some(&timezone_val)
-                        },
-                        is_private_val,
-                    )
-                    .await
+                            &title_val,
+                            start_ts,
+                            if end_ts > start_ts { Some(end_ts) } else { None },
+                            if summary_val.is_empty() {
+                                None
+                            } else {
+                                Some(&summary_val)
+                            },
+                            if content_val.is_empty() {
+                                None
+                            } else {
+                                Some(&content_val)
+                            },
+                            if image_val.is_empty() { None } else { Some(&image_val) },
+                            &all_locations,
+                            &hashtags,
+                            &participants_val,
+                            if timezone_val.is_empty() {
+                                None
+                            } else {
+                                Some(&timezone_val)
+                            },
+                            is_private_val,
+                        )
+                        .await
                 }
             };
-
             match result {
                 Ok(naddr) => {
-                    // Navigate to the new event
                     nav.push(Route::CalendarEventDetail {
                         naddr,
                         from: Some("calendar".to_string()),
@@ -441,18 +355,11 @@ pub fn CalendarEventNew() -> Element {
             }
         });
     };
-
     rsx! {
-        div {
-            class: "min-h-screen bg-background",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border",
-                div {
-                    class: "px-4 py-3 flex items-center justify-between",
-                    div {
-                        class: "flex items-center gap-3",
+        div { class: "min-h-screen bg-background",
+            div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border",
+                div { class: "px-4 py-3 flex items-center justify-between",
+                    div { class: "flex items-center gap-3",
                         button {
                             class: "p-2 -ml-2 hover:bg-accent rounded-lg transition",
                             onclick: handle_close,
@@ -466,21 +373,14 @@ pub fn CalendarEventNew() -> Element {
                                 path {
                                     stroke_linecap: "round",
                                     stroke_linejoin: "round",
-                                    d: "M6 18L18 6M6 6l12 12"
+                                    d: "M6 18L18 6M6 6l12 12",
                                 }
                             }
                         }
-                        h1 {
-                            class: "text-lg font-bold",
-                            "Create Event"
-                        }
+                        h1 { class: "text-lg font-bold", "Create Event" }
                     }
                     button {
-                        class: if *can_publish.read() {
-                            "px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition"
-                        } else {
-                            "px-4 py-2 bg-muted text-muted-foreground rounded-lg font-medium cursor-not-allowed"
-                        },
+                        class: if *can_publish.read() { "px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition" } else { "px-4 py-2 bg-muted text-muted-foreground rounded-lg font-medium cursor-not-allowed" },
                         disabled: !*can_publish.read(),
                         onclick: handle_publish,
                         if *is_publishing.read() {
@@ -491,11 +391,8 @@ pub fn CalendarEventNew() -> Element {
                     }
                 }
             }
-
-            // Content
             if !is_authenticated {
-                div {
-                    class: "p-8 text-center",
+                div { class: "p-8 text-center",
                     div { class: "text-4xl mb-4", "🔒" }
                     h3 { class: "text-lg font-medium mb-2", "Sign in required" }
                     p { class: "text-muted-foreground mb-4", "You need to sign in to create events" }
@@ -506,31 +403,21 @@ pub fn CalendarEventNew() -> Element {
                     }
                 }
             } else {
-                div {
-                    class: "p-4 max-w-2xl mx-auto",
-
-                    // Error message
+                div { class: "p-4 max-w-2xl mx-auto",
                     if let Some(err) = error_message.read().as_ref() {
-                        div {
-                            class: "mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500",
+                        div { class: "mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500",
                             "{err}"
                         }
                     }
-
-                    // ICS Import Section
-                    div {
-                        class: "mb-6 p-4 bg-muted/50 rounded-lg border border-border",
-                        div {
-                            class: "flex items-center gap-2 mb-2",
+                    div { class: "mb-6 p-4 bg-muted/50 rounded-lg border border-border",
+                        div { class: "flex items-center gap-2 mb-2",
                             span { class: "text-xl", "📅" }
                             span { class: "font-medium", "Import from Calendar" }
                         }
-                        p {
-                            class: "text-sm text-muted-foreground mb-3",
+                        p { class: "text-sm text-muted-foreground mb-3",
                             "Import event details from an .ics file (iCalendar format)"
                         }
-                        label {
-                            class: "inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg cursor-pointer transition",
+                        label { class: "inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg cursor-pointer transition",
                             input {
                                 r#type: "file",
                                 accept: ".ics,text/calendar",
@@ -542,20 +429,14 @@ pub fn CalendarEventNew() -> Element {
                             span { "Choose .ics File" }
                         }
                     }
-
-                    // ICS Event Selector Modal
                     if *show_ics_selector.read() && !ics_events.read().is_empty() {
                         div {
                             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
                             onclick: move |_| show_ics_selector.set(false),
-
                             div {
                                 class: "bg-background rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden",
                                 onclick: move |evt| evt.stop_propagation(),
-
-                                // Modal header
-                                div {
-                                    class: "p-4 border-b border-border flex items-center justify-between",
+                                div { class: "p-4 border-b border-border flex items-center justify-between",
                                     h3 { class: "font-bold text-lg", "Select Event to Import" }
                                     button {
                                         class: "p-1 hover:bg-muted rounded",
@@ -563,35 +444,22 @@ pub fn CalendarEventNew() -> Element {
                                         "✕"
                                     }
                                 }
-
-                                // Event list
-                                div {
-                                    class: "p-4 overflow-y-auto max-h-[60vh]",
-                                    for (idx, evt) in ics_events.read().iter().enumerate() {
+                                div { class: "p-4 overflow-y-auto max-h-[60vh]",
+                                    for (idx , evt) in ics_events.read().iter().enumerate() {
                                         {
                                             let evt_clone = evt.clone();
-                                            // Use index + title as stable key for DOM reconciliation
                                             let key_str = format!("{}-{}", idx, evt.title);
                                             rsx! {
                                                 button {
                                                     key: "{key_str}",
                                                     class: "w-full p-3 mb-2 text-left bg-muted/50 hover:bg-muted rounded-lg transition",
                                                     onclick: move |_| apply_ics_event(&evt_clone),
-                                                    div {
-                                                        class: "font-medium",
-                                                        "{evt.title}"
-                                                    }
+                                                    div { class: "font-medium", "{evt.title}" }
                                                     if let Some(ref start) = evt.start {
-                                                        div {
-                                                            class: "text-sm text-muted-foreground",
-                                                            {format_ics_datetime(start)}
-                                                        }
+                                                        div { class: "text-sm text-muted-foreground", {format_ics_datetime(start)} }
                                                     }
                                                     if !evt.location.is_empty() {
-                                                        div {
-                                                            class: "text-sm text-muted-foreground",
-                                                            "📍 {evt.location}"
-                                                        }
+                                                        div { class: "text-sm text-muted-foreground", "📍 {evt.location}" }
                                                     }
                                                 }
                                             }
@@ -601,66 +469,41 @@ pub fn CalendarEventNew() -> Element {
                             }
                         }
                     }
-
-                    // Event type selector
-                    div {
-                        class: "mb-6",
+                    div { class: "mb-6",
                         label { class: "block text-sm font-medium mb-2", "Event Type" }
-                        div {
-                            class: "flex gap-2",
+                        div { class: "flex gap-2",
                             button {
-                                class: if *event_type.read() == EventType::TimeBased {
-                                    "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium"
-                                } else {
-                                    "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition"
-                                },
+                                class: if *event_type.read() == EventType::TimeBased { "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition" },
                                 onclick: move |_| event_type.set(EventType::TimeBased),
                                 "Specific Time"
                             }
                             button {
-                                class: if *event_type.read() == EventType::DateBased {
-                                    "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium"
-                                } else {
-                                    "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition"
-                                },
+                                class: if *event_type.read() == EventType::DateBased { "flex-1 py-2 px-4 bg-primary text-primary-foreground rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-accent rounded-lg font-medium transition" },
                                 onclick: move |_| event_type.set(EventType::DateBased),
                                 "All Day"
                             }
                         }
                     }
-
-                    // Title
-                    div {
-                        class: "mb-4",
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Event Title *"
-                        }
+                    div { class: "mb-4",
+                        label { class: "block text-sm font-medium mb-2", "Event Title *" }
                         input {
                             r#type: "text",
                             class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                             placeholder: "What's happening?",
                             value: "{title}",
-                            oninput: move |e| title.set(e.value())
+                            oninput: move |e| title.set(e.value()),
                         }
                     }
-
-                    // Date/Time section
-                    div {
-                        class: "mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4",
-
-                        // Start date
+                    div { class: "mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4",
                         div {
                             label { class: "block text-sm font-medium mb-2", "Start Date" }
                             input {
                                 r#type: "date",
                                 class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 value: "{start_date}",
-                                oninput: move |e| start_date.set(e.value())
+                                oninput: move |e| start_date.set(e.value()),
                             }
                         }
-
-                        // Start time (only for time-based)
                         if *event_type.read() == EventType::TimeBased {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Start Time" }
@@ -668,23 +511,19 @@ pub fn CalendarEventNew() -> Element {
                                     r#type: "time",
                                     class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                     value: "{start_time}",
-                                    oninput: move |e| start_time.set(e.value())
+                                    oninput: move |e| start_time.set(e.value()),
                                 }
                             }
                         }
-
-                        // End date
                         div {
                             label { class: "block text-sm font-medium mb-2", "End Date" }
                             input {
                                 r#type: "date",
                                 class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 value: "{end_date}",
-                                oninput: move |e| end_date.set(e.value())
+                                oninput: move |e| end_date.set(e.value()),
                             }
                         }
-
-                        // End time (only for time-based)
                         if *event_type.read() == EventType::TimeBased {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "End Time" }
@@ -692,39 +531,32 @@ pub fn CalendarEventNew() -> Element {
                                     r#type: "time",
                                     class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                     value: "{end_time}",
-                                    oninput: move |e| end_time.set(e.value())
+                                    oninput: move |e| end_time.set(e.value()),
                                 }
                             }
                         }
                     }
-
-                    // Timezone (for time-based)
                     if *event_type.read() == EventType::TimeBased {
-                        div {
-                            class: "mb-4",
+                        div { class: "mb-4",
                             label { class: "block text-sm font-medium mb-2", "Timezone" }
                             input {
                                 r#type: "text",
                                 class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 placeholder: "e.g., America/New_York",
                                 value: "{timezone}",
-                                oninput: move |e| timezone.set(e.value())
+                                oninput: move |e| timezone.set(e.value()),
                             }
                         }
                     }
-
-                    // Location
-                    div {
-                        class: "mb-4",
+                    div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Location" }
-                        div {
-                            class: "flex gap-2",
+                        div { class: "flex gap-2",
                             input {
                                 r#type: "text",
                                 class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 placeholder: "Address or online link",
                                 value: "{location}",
-                                oninput: move |e| location.set(e.value())
+                                oninput: move |e| location.set(e.value()),
                             }
                             button {
                                 class: "px-4 py-3 bg-muted hover:bg-accent rounded-lg transition",
@@ -732,11 +564,9 @@ pub fn CalendarEventNew() -> Element {
                                 "+"
                             }
                         }
-                        // Show added locations
                         if !locations.read().is_empty() {
-                            div {
-                                class: "mt-2 flex flex-wrap gap-2",
-                                for (idx, loc) in locations.read().iter().enumerate() {
+                            div { class: "mt-2 flex flex-wrap gap-2",
+                                for (idx , loc) in locations.read().iter().enumerate() {
                                     div {
                                         key: "{idx}",
                                         class: "flex items-center gap-2 px-3 py-1 bg-muted rounded-full text-sm",
@@ -751,38 +581,28 @@ pub fn CalendarEventNew() -> Element {
                             }
                         }
                     }
-
-                    // Summary
-                    div {
-                        class: "mb-4",
+                    div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Summary" }
                         textarea {
                             class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition resize-none",
                             rows: "2",
                             placeholder: "Brief description of the event",
                             value: "{summary}",
-                            oninput: move |e| summary.set(e.value())
+                            oninput: move |e| summary.set(e.value()),
                         }
                     }
-
-                    // Full description
-                    div {
-                        class: "mb-4",
+                    div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Details" }
                         textarea {
                             class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition resize-none",
                             rows: "5",
                             placeholder: "Full event description (markdown supported)",
                             value: "{content}",
-                            oninput: move |e| content.set(e.value())
+                            oninput: move |e| content.set(e.value()),
                         }
                     }
-
-                    // Cover Image
-                    div {
-                        class: "mb-4",
+                    div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Cover Image" }
-
                         MediaUploader {
                             on_upload: move |url: String| {
                                 image_url.set(url);
@@ -791,15 +611,12 @@ pub fn CalendarEventNew() -> Element {
                             input_id: "event-image-upload".to_string(),
                             show_server_selector: true,
                         }
-
-                        // Preview uploaded image
                         if !image_url.read().is_empty() {
-                            div {
-                                class: "mt-3 relative",
+                            div { class: "mt-3 relative",
                                 img {
                                     src: "{image_url}",
                                     alt: "Event cover",
-                                    class: "max-h-40 rounded-lg object-cover"
+                                    class: "max-h-40 rounded-lg object-cover",
                                 }
                                 button {
                                     class: "absolute top-2 right-2 px-2 py-1 bg-red-500/80 text-white text-xs rounded hover:bg-red-600 transition",
@@ -809,17 +626,12 @@ pub fn CalendarEventNew() -> Element {
                             }
                         }
                     }
-
-                    // Participants
-                    div {
-                        class: "mb-4",
+                    div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Participants" }
-                        p {
-                            class: "text-xs text-muted-foreground mb-2",
+                        p { class: "text-xs text-muted-foreground mb-2",
                             "Invite people to this event (enter npub or hex pubkey)"
                         }
-                        div {
-                            class: "flex gap-2 mb-2",
+                        div { class: "flex gap-2 mb-2",
                             input {
                                 r#type: "text",
                                 class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
@@ -828,10 +640,10 @@ pub fn CalendarEventNew() -> Element {
                                 oninput: move |e| participant_input.set(e.value()),
                                 onkeydown: move |e| {
                                     if e.key() == Key::Enter {
-                                        e.prevent_default(); // Prevent form submission
+                                        e.prevent_default();
                                         do_add_participant();
                                     }
-                                }
+                                },
                             }
                             button {
                                 class: "px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg font-medium transition",
@@ -840,18 +652,17 @@ pub fn CalendarEventNew() -> Element {
                                 "Add"
                             }
                         }
-                        // Participant list
                         if !participants.read().is_empty() {
-                            div {
-                                class: "space-y-2",
-                                for (_idx, (pubkey, display, role)) in participants.read().iter().enumerate() {
+                            div { class: "space-y-2",
+                                for (_idx , (pubkey , display , role)) in participants.read().iter().enumerate() {
                                     div {
                                         class: "flex items-center gap-2 p-2 bg-muted/50 rounded-lg",
                                         key: "{pubkey}",
-                                        div {
-                                            class: "flex-1",
+                                        div { class: "flex-1",
                                             div { class: "text-sm font-medium", "{display}" }
-                                            div { class: "text-xs text-muted-foreground", "{role}" }
+                                            div { class: "text-xs text-muted-foreground",
+                                                "{role}"
+                                            }
                                         }
                                         select {
                                             class: "px-2 py-1 text-xs bg-background border border-border rounded",
@@ -860,7 +671,6 @@ pub fn CalendarEventNew() -> Element {
                                                 let pubkey = pubkey.clone();
                                                 move |e: Event<FormData>| {
                                                     let new_role = e.value();
-                                                    // Validate role against allowlist
                                                     if !VALID_ROLES.contains(&new_role.as_str()) {
                                                         log::warn!("Invalid role value received: {}", new_role);
                                                         return;
@@ -880,7 +690,7 @@ pub fn CalendarEventNew() -> Element {
                                         button {
                                             class: "p-1 text-red-500 hover:text-red-600",
                                             onclick: {
-                                                let pubkey_for_remove = pubkey.clone();  // Capture stable unique ID
+                                                let pubkey_for_remove = pubkey.clone();
                                                 move |_| remove_participant(pubkey_for_remove.clone())
                                             },
                                             "✕"
@@ -890,34 +700,29 @@ pub fn CalendarEventNew() -> Element {
                             }
                         }
                     }
-
-                    // Hashtags
-                    div {
-                        class: "mb-4",
+                    div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Hashtags" }
                         input {
                             r#type: "text",
                             class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                             placeholder: "conference, meetup, bitcoin (comma or space separated)",
                             value: "{hashtags_input}",
-                            oninput: move |e| hashtags_input.set(e.value())
+                            oninput: move |e| hashtags_input.set(e.value()),
                         }
                     }
-
-                    // Private event toggle
-                    div {
-                        class: "mb-6",
-                        label {
-                            class: "flex items-center gap-3 cursor-pointer",
+                    div { class: "mb-6",
+                        label { class: "flex items-center gap-3 cursor-pointer",
                             input {
                                 r#type: "checkbox",
                                 class: "w-5 h-5 rounded border-border",
                                 checked: *is_private.read(),
-                                oninput: move |e| is_private.set(e.checked())
+                                oninput: move |e| is_private.set(e.checked()),
                             }
                             div {
                                 div { class: "font-medium", "Private Event" }
-                                div { class: "text-sm text-muted-foreground", "Only visible to you and invited participants (NIP-59)" }
+                                div { class: "text-sm text-muted-foreground",
+                                    "Only visible to you and invited participants (NIP-59)"
+                                }
                             }
                         }
                     }
@@ -926,11 +731,7 @@ pub fn CalendarEventNew() -> Element {
         }
     }
 }
-
-// Helper functions
-
 fn get_local_timezone() -> String {
-    // Try to get timezone from JS using a simpler approach
     let result = js_sys::eval("Intl.DateTimeFormat().resolvedOptions().timeZone");
     if let Ok(tz) = result {
         if let Some(s) = tz.as_string() {
@@ -939,67 +740,49 @@ fn get_local_timezone() -> String {
     }
     "UTC".to_string()
 }
-
 fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {
         return 0;
     }
-
     let year: i32 = parts[0].parse().unwrap_or(2024);
-    let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1; // JS months 0-indexed
+    let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1;
     let day: i32 = parts[2].parse().unwrap_or(1);
-
     let time_parts: Vec<&str> = time.split(':').collect();
     let hours: u32 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minutes: u32 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-
     let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
     js_date.set_hours(hours);
     js_date.set_minutes(minutes);
-
     (js_date.get_time() / 1000.0) as u64
 }
-
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in local time
 fn timestamp_to_date_time(ts: u64) -> (String, String) {
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
     let year = date.get_full_year();
-    let month = date.get_month() + 1; // JS months 0-indexed
+    let month = date.get_month() + 1;
     let day = date.get_date();
     let hours = date.get_hours();
     let minutes = date.get_minutes();
-
     let date_str = format!("{:04}-{:02}-{:02}", year, month, day);
     let time_str = format!("{:02}:{:02}", hours, minutes);
-
     (date_str, time_str)
 }
-
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in a specific timezone
 /// Uses JavaScript's Intl.DateTimeFormat for proper timezone handling
 fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     use wasm_bindgen::JsValue;
-
-    // Validate timezone string - basic sanity check before passing to Intl API
-    // Invalid timezones cause RangeError in Intl.DateTimeFormat
-    if tz.is_empty()
-        || tz.len() > 64
+    if tz.is_empty() || tz.len() > 64
         || !tz
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+')
+            .all(|c| {
+                c.is_ascii_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '+'
+            })
     {
-        log::debug!(
-            "Invalid timezone format: {}, falling back to local time",
-            tz
-        );
+        log::debug!("Invalid timezone format: {}, falling back to local time", tz);
         return timestamp_to_date_time(ts);
     }
-
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-
-    // Try to use Intl.DateTimeFormat for timezone conversion
-    // Falls back to local time if timezone is invalid
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &"timeZone".into(), &JsValue::from_str(tz)).ok();
     js_sys::Reflect::set(&options, &"year".into(), &"numeric".into()).ok();
@@ -1008,21 +791,12 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     js_sys::Reflect::set(&options, &"hour".into(), &"2-digit".into()).ok();
     js_sys::Reflect::set(&options, &"minute".into(), &"2-digit".into()).ok();
     js_sys::Reflect::set(&options, &"hour12".into(), &JsValue::FALSE).ok();
-
-    // Format the date parts using Intl API
-    // Wrap DateTimeFormat constructor in try-catch to handle RangeError for invalid timezones
-    // that pass basic validation but aren't recognized by the browser.
-    // js_sys::Intl::DateTimeFormat::new() is a direct binding that throws exceptions
-    // which would trap WASM if not caught.
     let formatter = {
         use wasm_bindgen::JsCast;
-
-        // Create a function that wraps the constructor in try-catch
         let try_create_formatter = js_sys::Function::new_with_args(
             "options",
             "try { return new Intl.DateTimeFormat([], options); } catch(e) { return null; }",
         );
-
         match try_create_formatter.call1(&JsValue::NULL, &options) {
             Ok(result) if !result.is_null() => {
                 match result.dyn_into::<js_sys::Intl::DateTimeFormat>() {
@@ -1043,13 +817,11 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
         }
     };
     let parts = formatter.format_to_parts(&date);
-
     let mut year = String::new();
     let mut month = String::new();
     let mut day = String::new();
     let mut hour = String::new();
     let mut minute = String::new();
-
     for i in 0..parts.length() {
         if let Some(part) = parts.get(i).dyn_ref::<js_sys::Object>() {
             let part_type = js_sys::Reflect::get(part, &"type".into())
@@ -1060,7 +832,6 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
                 .ok()
                 .and_then(|v| v.as_string())
                 .unwrap_or_default();
-
             match part_type.as_str() {
                 "year" => year = part_value,
                 "month" => month = part_value,
@@ -1071,23 +842,17 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
             }
         }
     }
-
     if !year.is_empty() && !month.is_empty() && !day.is_empty() {
-        return (
-            format!("{}-{}-{}", year, month, day),
-            format!("{}:{}", hour, minute),
-        );
+        return (format!("{}-{}-{}", year, month, day), format!("{}:{}", hour, minute));
     }
-
-    // Fallback to local time conversion if Intl fails
     timestamp_to_date_time(ts)
 }
-
 /// Format ICS datetime for display
 fn format_ics_datetime(dt: &IcsDateTime) -> String {
     match dt {
         IcsDateTime::Date(d) => d.clone(),
-        IcsDateTime::DateTime(ts) | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+        IcsDateTime::DateTime(ts)
+        | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
             let date = js_sys::Date::new(&(*ts as f64 * 1000.0).into());
             format!(
                 "{:04}-{:02}-{:02} {:02}:{:02}",
@@ -1095,41 +860,28 @@ fn format_ics_datetime(dt: &IcsDateTime) -> String {
                 date.get_month() + 1,
                 date.get_date(),
                 date.get_hours(),
-                date.get_minutes()
+                date.get_minutes(),
             )
         }
     }
 }
-
 /// Read ICS file content from file input
 async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
-
     let window = window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;
-
-    // Get the file input element
     let input = document
         .get_element_by_id(element_id)
         .ok_or("Input not found")?
         .dyn_into::<HtmlInputElement>()
         .map_err(|_| "Not an input element")?;
-
     let file_list = input.files().ok_or("No files")?;
     let file = file_list.get(0).ok_or("No file selected")?;
-
-    // Read file as text
     let promise = file.text();
-    let result = JsFuture::from(promise)
-        .await
-        .map_err(|_| "Failed to read file")?;
-
-    result
-        .as_string()
-        .ok_or("Could not convert to string".to_string())
+    let result = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
+    result.as_string().ok_or("Could not convert to string".to_string())
 }
-
 /// Clear file input value to allow re-selecting the same file
 fn clear_file_input(input_id: &str) {
     if let Some(window) = web_sys::window() {

@@ -1,10 +1,8 @@
 //! Shop/Marketplace components (NIP-99)
 //!
 //! Components for displaying products, cart, checkout, and orders
-
 /// Default maximum quantity for items without explicit stock limit
 pub const DEFAULT_MAX_QUANTITY: u32 = 99;
-
 mod cart_item;
 mod cart_summary;
 mod category_selector;
@@ -19,7 +17,6 @@ mod product_grid;
 mod quantity_selector;
 mod review_card;
 mod review_form;
-
 pub use cart_item::CartItemCard;
 pub use cart_summary::CartSummary;
 pub use category_selector::CategorySelector;
@@ -32,8 +29,6 @@ pub use product_card::{ProductCard, ProductCardSkeleton};
 pub use quantity_selector::QuantitySelector;
 pub use review_card::ReviewCard;
 pub use review_form::ReviewForm;
-
-// Components available for future use (not currently wired into routes)
 #[allow(unused_imports)]
 pub use order_card::OrderCard;
 #[allow(unused_imports)]

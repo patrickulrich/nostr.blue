@@ -8,7 +8,6 @@ use crate::stores::music_player::{self, MusicTrack};
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use std::sync::Arc;
-
 #[component]
 pub fn MusicRssAlbum(feed_id: u64) -> Element {
     let mut feed_state = use_signal(|| None::<PodcastFeed>);
@@ -16,26 +15,16 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
     let mut loading = use_signal(|| true);
     let mut error_msg = use_signal(|| None::<String>);
     let mut show_share_modal = use_signal(|| false);
-
-    // Fetch album (feed) and tracks (episodes)
-    // Wait for client initialization and signer before making NIP-98 authenticated requests
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
-
-        // Only fetch if client is initialized and has signer (NIP-98 auth requires signer)
         if !client_initialized || !has_signer {
             return;
         }
-
-        // Capture feed_id for the async block
         let feed_id = feed_id;
-
         loading.set(true);
         error_msg.set(None);
-
         spawn(async move {
-            // Fetch feed metadata
             match podcast_index::get_podcast_by_id(feed_id).await {
                 Ok(feed) => {
                     feed_state.set(Some(feed));
@@ -46,8 +35,6 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                     return;
                 }
             }
-
-            // Fetch episodes (tracks)
             match podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await {
                 Ok(episodes) => {
                     episodes_state.set(episodes);
@@ -56,12 +43,9 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                     log::warn!("Failed to load tracks: {}", e);
                 }
             }
-
             loading.set(false);
         });
     });
-
-    // Convert episodes to MusicTrack for player, wrapped in Arc for efficient sharing
     let tracks_arc = use_memo(move || {
         let tracks = if let Some(ref feed) = *feed_state.read() {
             episodes_state
@@ -74,25 +58,19 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
         };
         Arc::new(tracks)
     });
-
     let play_album = move |tracks: Arc<Vec<MusicTrack>>| {
         if let Some(first_track) = tracks.first().cloned() {
-            // Convert Arc to Vec for player (player owns the playlist)
             music_player::play_track(first_track, Some((*tracks).clone()), Some(0));
         }
     };
-
     rsx! {
         div { class: "container mx-auto px-4 py-8 max-w-5xl",
-            // Back button
             Link {
                 to: Route::MusicHome {},
                 class: "inline-flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors",
                 ArrowLeftIcon { class: "w-4 h-4".to_string() }
                 "Back to Music"
             }
-
-            // Loading state
             if *loading.read() {
                 div { class: "bg-muted/30 rounded-lg border border-border p-6",
                     div { class: "flex items-center gap-6",
@@ -110,8 +88,6 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                     }
                 }
             }
-
-            // Error state
             if let Some(err) = error_msg.read().clone() {
                 div { class: "bg-muted/30 rounded-lg border border-border p-8 text-center",
                     MusicIcon { class: "w-12 h-12 text-muted-foreground mx-auto mb-4" }
@@ -119,33 +95,27 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                     p { class: "text-muted-foreground", "{err}" }
                 }
             }
-
-            // Album content
             if !*loading.read() && error_msg.read().is_none() {
                 if let Some(feed) = feed_state.read().clone() {
                     {
                         let tracks_arc = tracks_arc();
                         let album_art = feed.get_image().map(String::from);
                         let artist = feed.author.clone().unwrap_or_else(|| feed.title.clone());
-
                         rsx! {
                             div { class: "space-y-6",
-                                // Album Header
                                 div { class: "bg-muted/30 rounded-lg border border-border p-6",
                                     div { class: "flex flex-col sm:flex-row items-start gap-6",
-                                        // Album art
                                         div { class: "w-48 h-48 bg-muted rounded-lg flex items-center justify-center overflow-hidden shrink-0",
                                             if let Some(ref art_url) = album_art {
                                                 img {
                                                     src: "{art_url}",
                                                     alt: "{feed.title}",
-                                                    class: "w-full h-full object-cover"
+                                                    class: "w-full h-full object-cover",
                                                 }
                                             } else {
                                                 MusicIcon { class: "w-24 h-24 text-muted-foreground" }
                                             }
                                         }
-
                                         div { class: "flex-1 space-y-4",
                                             div {
                                                 div { class: "flex items-center gap-2 mb-2",
@@ -159,30 +129,25 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                     }
                                                 }
                                                 h1 { class: "text-3xl font-bold", "{feed.title}" }
-                                                p { class: "text-xl text-muted-foreground mt-2",
-                                                    "by {artist}"
-                                                }
+                                                p { class: "text-xl text-muted-foreground mt-2", "by {artist}" }
                                             }
-
                                             div { class: "flex items-center gap-4 text-sm text-muted-foreground",
                                                 span { class: "flex items-center gap-1",
                                                     MusicIcon { class: "w-3 h-3" }
                                                     "{tracks_arc.len()} "
-                                                    if tracks_arc.len() == 1 { "track" } else { "tracks" }
-                                                }
-                                                if let Some(lang) = &feed.language {
-                                                    span { class: "flex items-center gap-1",
-                                                        "{lang}"
+                                                    if tracks_arc.len() == 1 {
+                                                        "track"
+                                                    } else {
+                                                        "tracks"
                                                     }
                                                 }
-                                            }
-
-                                            if let Some(ref desc) = feed.description {
-                                                p { class: "text-sm text-muted-foreground line-clamp-3",
-                                                    "{desc}"
+                                                if let Some(lang) = &feed.language {
+                                                    span { class: "flex items-center gap-1", "{lang}" }
                                                 }
                                             }
-
+                                            if let Some(ref desc) = feed.description {
+                                                p { class: "text-sm text-muted-foreground line-clamp-3", "{desc}" }
+                                            }
                                             div { class: "flex items-center gap-4 pt-2",
                                                 button {
                                                     class: "px-4 py-2 bg-primary hover:bg-primary/90 rounded text-primary-foreground transition-colors inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
@@ -193,7 +158,6 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                     PlayIcon { class: "w-4 h-4" }
                                                     "Play Album"
                                                 }
-
                                                 if let Some(first_track) = tracks_arc.first() {
                                                     {
                                                         let zap_track = first_track.clone();
@@ -207,8 +171,6 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                         }
                                                     }
                                                 }
-
-                                                // Share button
                                                 button {
                                                     class: "px-4 py-2 rounded border border-border hover:border-primary text-sm transition-colors inline-flex items-center gap-1",
                                                     onclick: move |_| show_share_modal.set(true),
@@ -219,25 +181,20 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                         }
                                     }
                                 }
-
-                                // Share modal
                                 if *show_share_modal.read() {
                                     ContentShareModal {
                                         title: feed.title.clone(),
                                         url: format!("https://nostr.blue/music/rss/album/{}", feed_id),
                                         content_type: ContentType::MusicAlbum,
                                         image_url: feed.get_image().map(String::from),
-                                        on_close: move |_| show_share_modal.set(false)
+                                        on_close: move |_| show_share_modal.set(false),
                                     }
                                 }
-
-                                // Track List
                                 div { class: "space-y-1",
                                     div { class: "flex items-center gap-2 mb-4 px-3",
                                         MusicIcon { class: "w-5 h-5 text-primary" }
                                         h2 { class: "text-xl font-bold", "Tracks" }
                                     }
-
                                     if tracks_arc.is_empty() {
                                         div { class: "text-center py-8",
                                             MusicIcon { class: "w-12 h-12 text-muted-foreground mx-auto mb-4" }
@@ -251,7 +208,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                                                     track: track.clone(),
                                                     show_album: false,
                                                     show_sats: true,
-                                                    playlist: Some(tracks_arc.clone())
+                                                    playlist: Some(tracks_arc.clone()),
                                                 }
                                             }
                                         }

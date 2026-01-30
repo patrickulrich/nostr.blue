@@ -3,10 +3,8 @@
 //! Displays action buttons for a repository: Watch, Star, Fork, Zap, Share.
 //! Desktop: horizontal button row. Mobile: dropdown menu.
 //! Styled to match gittr's layout-client.tsx action bar pattern.
-
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
-
 use crate::components::icons;
 use crate::services::git_hosting::stars::{check_user_star, publish_star, remove_star};
 use crate::stores::code_store::is_repo_starred;
@@ -14,9 +12,8 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::nip34::Repository;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
-
 /// Repository action bar with Watch, Star, Fork, Zap, Share buttons
-#[allow(clippy::clone_on_copy)] // handle_watch closure is Copy only on non-wasm32 targets
+#[allow(clippy::clone_on_copy)]
 #[component]
 pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let toast = consume_toast();
@@ -25,13 +22,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let mut is_watching = use_signal(|| false);
     let mut star_loading = use_signal(|| false);
     let mut show_actions_menu = use_signal(|| false);
-
-    // Store prop values in signals to make them reactive across re-renders
-    // When navigating between repos, signals ensure memos and effects recompute
     let mut repo_pubkey_signal = use_signal(|| repo.pubkey.clone());
     let mut repo_id_signal = use_signal(|| repo.id.clone());
-
-    // Update signals when props change (triggers dependent memos/effects)
     {
         let current_pubkey = repo.pubkey.clone();
         let current_id = repo.id.clone();
@@ -41,42 +33,32 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         if *repo_id_signal.read() != current_id {
             repo_id_signal.set(current_id);
         }
-        // Sync star_count when navigating between repos (using peek to avoid subscribing)
         if *star_count.peek() != repo.star_count {
             star_count.set(repo.star_count);
         }
     }
-
-    // Build coordinate for the repository (reactive via signal reads)
     let coordinate = use_memo(move || {
         let pubkey_str = repo_pubkey_signal.read();
         let id_str = repo_id_signal.read();
         if let Ok(pk) = PublicKey::from_hex(&pubkey_str) {
-            // Need explicit deref for identifier() which requires Into<String>
             Some(Coordinate::new(Kind::GitRepoAnnouncement, pk).identifier(&*id_str))
         } else {
             None
         }
     });
-
-    // Check star status when coordinate changes (reactive via memo read)
     use_effect(move || {
-        // Reset starred state for new repo
         is_starred.set(false);
-
         let coord = coordinate.read().clone();
         if let Some(coord) = coord {
             let coord_str = format!(
                 "{}:{}:{}",
                 coord.kind.as_u16(),
                 coord.public_key.to_hex(),
-                coord.identifier
+                coord.identifier,
             );
-            // Check local cache first
             if is_repo_starred(&coord_str) {
                 is_starred.set(true);
             } else {
-                // Check from relays
                 spawn(async move {
                     match check_user_star(&coord).await {
                         Ok(starred) => is_starred.set(starred),
@@ -86,51 +68,44 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             }
         }
     });
-
-    // Load watch status from localStorage (reactive to repo changes)
     use_effect(move || {
         #[cfg(target_arch = "wasm32")]
         {
-            // Reading signals here subscribes effect to changes
             let pubkey = repo_pubkey_signal.read().clone();
             let id = repo_id_signal.read().clone();
-
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(watched_json)) = storage.get_item("nostr_blue_watched_repos") {
-                        if let Ok(watched) = serde_json::from_str::<Vec<String>>(&watched_json) {
+                    if let Ok(Some(watched_json)) = storage
+                        .get_item("nostr_blue_watched_repos")
+                    {
+                        if let Ok(watched) = serde_json::from_str::<
+                            Vec<String>,
+                        >(&watched_json) {
                             let coord_str = format!("{}:{}", pubkey, id);
                             is_watching.set(watched.contains(&coord_str));
-                            return; // Early return on success
+                            return;
                         }
                     }
                 }
             }
-            is_watching.set(false); // Default if localStorage unavailable
+            is_watching.set(false);
         }
     });
-
-    // Star/Unstar handler
     let handle_star = {
         move |_| {
-            // Prevent concurrent star operations - set loading immediately after check
-            // to close TOCTOU race window
             if *star_loading.read() {
                 return;
             }
             star_loading.set(true);
-
-            // Read HAS_SIGNER fresh to get current auth state (not stale capture)
             if !*HAS_SIGNER.read() {
                 star_loading.set(false);
-                toast.warning(
-                    "Sign in to star repositories".to_string(),
-                    ToastOptions::new(),
-                );
+                toast
+                    .warning(
+                        "Sign in to star repositories".to_string(),
+                        ToastOptions::new(),
+                    );
                 return;
             }
-
-            // Read coordinate fresh each time handler runs to avoid stale capture
             let coord = match coordinate.read().clone() {
                 Some(c) => c,
                 None => {
@@ -138,21 +113,16 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     return;
                 }
             };
-
             spawn(async move {
-                // Read current state inside async block for fresh values
                 let currently_starred = *is_starred.read();
-
                 let result = if currently_starred {
                     remove_star(&coord).await
                 } else {
                     publish_star(&coord).await.map(|_| ())
                 };
-
                 match result {
                     Ok(_) => {
                         is_starred.set(!currently_starred);
-                        // Read fresh count after operation succeeds
                         let current = *star_count.read();
                         if currently_starred {
                             star_count.set(current.saturating_sub(1));
@@ -162,24 +132,27 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     }
                     Err(e) => {
                         log::error!("Star action failed: {}", e);
-                        toast.error(format!("Failed to update star: {}", e), ToastOptions::new());
+                        toast
+                            .error(
+                                format!("Failed to update star: {}", e),
+                                ToastOptions::new(),
+                            );
                     }
                 }
                 star_loading.set(false);
             });
         }
     };
-
-    // Watch handler (localStorage only)
     let handle_watch = {
         move |_| {
             let currently_watching = *is_watching.read();
-
             #[cfg(target_arch = "wasm32")]
             {
-                // Read signals fresh inside closure - signals are Copy
-                let repo_coord = format!("{}:{}", repo_pubkey_signal.read(), repo_id_signal.read());
-
+                let repo_coord = format!(
+                    "{}:{}",
+                    repo_pubkey_signal.read(),
+                    repo_id_signal.read(),
+                );
                 if let Some(window) = web_sys::window() {
                     if let Ok(Some(storage)) = window.local_storage() {
                         let mut watched: Vec<String> = storage
@@ -188,28 +161,23 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             .flatten()
                             .and_then(|s| serde_json::from_str(&s).ok())
                             .unwrap_or_default();
-
                         if currently_watching {
                             watched.retain(|x| x != &repo_coord);
                         } else if !watched.contains(&repo_coord) {
                             watched.push(repo_coord.clone());
                         }
-
                         if let Ok(json) = serde_json::to_string(&watched) {
                             let _ = storage.set_item("nostr_blue_watched_repos", &json);
                         }
                     }
                 }
             }
-
             is_watching.set(!currently_watching);
             if !currently_watching {
                 toast.success("Watching repository".to_string(), ToastOptions::new());
             }
         }
     };
-
-    // Share handler (copy naddr)
     let handle_share = {
         let naddr = naddr.clone();
         move |_| {
@@ -217,52 +185,30 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             spawn(async move {
                 let share_text = format!("nostr:{}", naddr);
                 if copy_to_clipboard(&share_text).await.is_ok() {
-                    toast.success("Copied to clipboard".to_string(), ToastOptions::new());
+                    toast
+                        .success("Copied to clipboard".to_string(), ToastOptions::new());
                 } else {
                     toast.error("Failed to copy".to_string(), ToastOptions::new());
                 }
             });
         }
     };
-
-    // Fork handler (placeholder)
     let handle_fork = move |_| {
         toast.info("Fork coming soon".to_string(), ToastOptions::new());
     };
-
-    // Zap handler (placeholder - opens ZapModal later)
     let handle_zap = move |_| {
-        // Read HAS_SIGNER fresh to get current auth state (not stale capture)
         if !*HAS_SIGNER.read() {
-            toast.warning(
-                "Sign in to zap repositories".to_string(),
-                ToastOptions::new(),
-            );
+            toast
+                .warning("Sign in to zap repositories".to_string(), ToastOptions::new());
             return;
         }
         toast.info("Zap modal coming soon".to_string(), ToastOptions::new());
     };
-
-    let star_text = if *is_starred.read() {
-        "Starred"
-    } else {
-        "Star"
-    };
-    let watch_text = if *is_watching.read() {
-        "Unwatch"
-    } else {
-        "Watch"
-    };
-
+    let star_text = if *is_starred.read() { "Starred" } else { "Star" };
+    let watch_text = if *is_watching.read() { "Unwatch" } else { "Watch" };
     rsx! {
-        div {
-            class: "flex items-center gap-2",
-
-            // Desktop buttons (hidden on small screens)
-            div {
-                class: "hidden md:flex items-center gap-2",
-
-                // Watch button
+        div { class: "flex items-center gap-2",
+            div { class: "hidden md:flex items-center gap-2",
                 ActionButton {
                     icon: icons::EYE,
                     label: "{watch_text}",
@@ -272,8 +218,6 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     loading: false,
                     onclick: handle_watch.clone(),
                 }
-
-                // Star button
                 ActionButton {
                     icon: if *is_starred.read() { icons::STAR_FILLED } else { icons::STAR },
                     label: "{star_text}",
@@ -283,8 +227,6 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     loading: *star_loading.read(),
                     onclick: handle_star.clone(),
                 }
-
-                // Fork button
                 ActionButton {
                     icon: icons::GIT_FORK,
                     label: "Fork",
@@ -294,8 +236,6 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     loading: false,
                     onclick: handle_fork,
                 }
-
-                // Zap button
                 ActionButton {
                     icon: icons::ZAP,
                     label: "Zap",
@@ -305,8 +245,6 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     loading: false,
                     onclick: handle_zap,
                 }
-
-                // Share button
                 ActionButton {
                     icon: icons::SHARE,
                     label: "Share",
@@ -317,11 +255,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     onclick: handle_share.clone(),
                 }
             }
-
-            // Mobile dropdown (shown on small screens)
-            div {
-                class: "md:hidden relative",
-
+            div { class: "md:hidden relative",
                 button {
                     class: "flex items-center gap-2 px-3 py-1.5 text-sm border border-border rounded-lg bg-muted hover:bg-accent transition",
                     onclick: move |_| {
@@ -343,13 +277,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         polyline { points: "6 9 12 15 18 9" }
                     }
                 }
-
-                // Dropdown menu
                 if *show_actions_menu.read() {
                     div {
                         class: "absolute right-0 top-full mt-1 w-48 bg-background border border-border rounded-lg shadow-lg z-50",
                         onclick: move |_| show_actions_menu.set(false),
-
                         MobileMenuItem {
                             icon: icons::EYE,
                             label: "{watch_text}",
@@ -384,7 +315,6 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     }
 }
-
 /// Desktop action button with icon, label, and optional count
 #[component]
 fn ActionButton(
@@ -403,7 +333,6 @@ fn ActionButton(
     } else {
         "flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border bg-muted hover:bg-accent text-foreground rounded-lg transition cursor-pointer"
     };
-
     rsx! {
         button {
             class: "{base_class}",
@@ -413,9 +342,7 @@ fn ActionButton(
                     onclick.call(e);
                 }
             },
-
             if loading {
-                // Loading spinner
                 svg {
                     class: "w-4 h-4 animate-spin",
                     xmlns: "http://www.w3.org/2000/svg",
@@ -425,35 +352,35 @@ fn ActionButton(
                     fill: "none",
                     stroke: "currentColor",
                     stroke_width: "2",
-                    circle { cx: "12", cy: "12", r: "10", stroke_opacity: "0.25" }
+                    circle {
+                        cx: "12",
+                        cy: "12",
+                        r: "10",
+                        stroke_opacity: "0.25",
+                    }
                     path { d: "M12 2a10 10 0 0 1 10 10", stroke_opacity: "1" }
                 }
             } else {
-                span {
-                    class: "w-4 h-4",
-                    dangerous_inner_html: "{icon}"
-                }
+                span { class: "w-4 h-4", dangerous_inner_html: "{icon}" }
             }
-
             span { "{label}" }
-
             if let Some(c) = count {
-                span {
-                    class: "ml-1 px-1.5 py-0.5 text-xs rounded-full bg-background",
+                span { class: "ml-1 px-1.5 py-0.5 text-xs rounded-full bg-background",
                     "{c}"
                 }
             }
         }
     }
 }
-
 /// Mobile menu item
 #[component]
 fn MobileMenuItem(
     icon: &'static str,
     label: String,
-    #[props(default = false)] disabled: bool,
-    #[props(default = false)] loading: bool,
+    #[props(default = false)]
+    disabled: bool,
+    #[props(default = false)]
+    loading: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let is_disabled = disabled || loading;
@@ -462,7 +389,6 @@ fn MobileMenuItem(
     } else {
         "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition text-left"
     };
-
     rsx! {
         button {
             class: "{button_class}",
@@ -472,9 +398,7 @@ fn MobileMenuItem(
                     onclick.call(e);
                 }
             },
-
             if loading {
-                // Loading spinner
                 svg {
                     class: "w-4 h-4 animate-spin",
                     xmlns: "http://www.w3.org/2000/svg",
@@ -484,14 +408,16 @@ fn MobileMenuItem(
                     fill: "none",
                     stroke: "currentColor",
                     stroke_width: "2",
-                    circle { cx: "12", cy: "12", r: "10", stroke_opacity: "0.25" }
+                    circle {
+                        cx: "12",
+                        cy: "12",
+                        r: "10",
+                        stroke_opacity: "0.25",
+                    }
                     path { d: "M12 2a10 10 0 0 1 10 10", stroke_opacity: "1" }
                 }
             } else {
-                span {
-                    class: "w-4 h-4",
-                    dangerous_inner_html: "{icon}"
-                }
+                span { class: "w-4 h-4", dangerous_inner_html: "{icon}" }
             }
             span { "{label}" }
         }

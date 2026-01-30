@@ -2,12 +2,9 @@
 //!
 //! A specialized component for uploading and managing article cover images.
 //! Shows a URL field with an upload button that fills in the URL when uploaded.
-
 use dioxus::prelude::*;
-
 use super::media_uploader::MediaUploader;
 use super::modal::{Modal, ModalBody, ModalFooter, ModalHeader};
-
 #[derive(Props, Clone, PartialEq)]
 pub struct ArticleCoverUploaderProps {
     /// Signal holding the current cover image URL
@@ -19,21 +16,13 @@ pub struct ArticleCoverUploaderProps {
     #[props(default = true)]
     pub show_url_input: bool,
 }
-
 #[component]
 pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
-    // Track which URL failed, not just whether an error occurred
-    // This allows auto-retry when the cover_url prop changes
     let mut failed_url: Signal<Option<String>> = use_signal(|| None);
-
-    // Generate unique IDs for this uploader instance
     let input_id = use_signal(|| format!("cover-upload-{}", uuid::Uuid::new_v4()));
     let cover_input_id = use_signal(|| format!("cover-url-{}", uuid::Uuid::new_v4()));
-
     let has_cover = !props.cover_url.read().is_empty();
-
-    // Handle successful upload - fills in the URL field
     let handle_upload = {
         let mut cover_url = props.cover_url;
         move |url: String| {
@@ -42,8 +31,6 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
             failed_url.set(None);
         }
     };
-
-    // Handle URL input change
     let handle_url_change = {
         let mut cover_url = props.cover_url;
         move |e: Event<FormData>| {
@@ -51,8 +38,6 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
             failed_url.set(None);
         }
     };
-
-    // Handle remove cover
     let handle_remove = {
         let mut cover_url = props.cover_url;
         move |_| {
@@ -60,38 +45,22 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
             failed_url.set(None);
         }
     };
-
     rsx! {
-        div {
-            class: "space-y-3",
-
-            // Label - use <label> with for attribute when input is rendered, otherwise <span>
+        div { class: "space-y-3",
             if props.show_url_input {
                 label {
                     class: "block text-sm font-medium mb-2",
                     r#for: "{cover_input_id}",
                     "Cover Image"
-                    span {
-                        class: "text-muted-foreground font-normal ml-1",
-                        "(optional)"
-                    }
+                    span { class: "text-muted-foreground font-normal ml-1", "(optional)" }
                 }
             } else {
-                span {
-                    class: "block text-sm font-medium mb-2",
+                span { class: "block text-sm font-medium mb-2",
                     "Cover Image"
-                    span {
-                        class: "text-muted-foreground font-normal ml-1",
-                        "(optional)"
-                    }
+                    span { class: "text-muted-foreground font-normal ml-1", "(optional)" }
                 }
             }
-
-            // URL input with upload button
-            div {
-                class: "flex gap-2",
-
-                // URL input field (only shown if show_url_input is true)
+            div { class: "flex gap-2",
                 if props.show_url_input {
                     input {
                         id: "{cover_input_id}",
@@ -102,13 +71,10 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                         oninput: handle_url_change,
                     }
                 }
-
-                // Upload button
                 button {
                     r#type: "button",
                     class: "px-4 py-2 bg-accent hover:bg-accent/80 text-foreground rounded-lg font-medium transition flex items-center gap-2 text-sm",
                     onclick: move |_| show_upload_modal.set(true),
-                    // Upload icon
                     svg {
                         class: "w-4 h-4",
                         fill: "none",
@@ -118,19 +84,14 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                         path {
                             stroke_linecap: "round",
                             stroke_linejoin: "round",
-                            d: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                            d: "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12",
                         }
                     }
                     "Upload"
                 }
             }
-
-            // Preview existing cover image
             if has_cover {
-                div {
-                    class: "relative rounded-lg overflow-hidden border border-border",
-
-                    // Image preview - check if the current URL is the one that failed
+                div { class: "relative rounded-lg overflow-hidden border border-border",
                     {
                         let current_url = props.cover_url.read().clone();
                         let failed = failed_url.read().clone();
@@ -148,10 +109,8 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                                 }
                             }
                         } else {
-                            // Fallback for failed image load
                             rsx! {
-                                div {
-                                    class: "w-full h-48 flex flex-col items-center justify-center bg-muted text-muted-foreground",
+                                div { class: "w-full h-48 flex flex-col items-center justify-center bg-muted text-muted-foreground",
                                     span { class: "text-4xl mb-2", "🖼️" }
                                     p { class: "text-sm", "Image failed to load" }
                                     p { class: "text-xs text-muted-foreground truncate max-w-full px-4", "{current_url}" }
@@ -159,18 +118,13 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                             }
                         }
                     }
-
-                    // Remove button overlay
-                    div {
-                        class: "absolute top-2 right-2",
-
+                    div { class: "absolute top-2 right-2",
                         button {
                             r#type: "button",
                             class: "p-2 bg-red-600/80 hover:bg-red-600 text-white rounded-full transition",
                             title: "Remove cover image",
                             aria_label: "Remove cover image",
                             onclick: handle_remove,
-                            // X icon
                             svg {
                                 class: "w-4 h-4",
                                 fill: "none",
@@ -180,35 +134,24 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                                 path {
                                     stroke_linecap: "round",
                                     stroke_linejoin: "round",
-                                    d: "M6 18L18 6M6 6l12 12"
+                                    d: "M6 18L18 6M6 6l12 12",
                                 }
                             }
                         }
                     }
                 }
             }
-
-            // Upload modal
-            Modal {
-                open: show_upload_modal,
-
-                div {
-                    class: "w-full max-w-md",
-
+            Modal { open: show_upload_modal,
+                div { class: "w-full max-w-md",
                     ModalHeader {
                         title: "Upload Cover Image".to_string(),
                         on_close: move |_| show_upload_modal.set(false),
                     }
-
                     ModalBody {
-                        div {
-                            class: "space-y-4",
-
-                            p {
-                                class: "text-sm text-muted-foreground",
+                        div { class: "space-y-4",
+                            p { class: "text-sm text-muted-foreground",
                                 "Upload an image to use as your article cover. The URL will be filled in automatically."
                             }
-
                             MediaUploader {
                                 on_upload: handle_upload,
                                 button_label: props.label.clone(),
@@ -217,7 +160,6 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                             }
                         }
                     }
-
                     ModalFooter {
                         button {
                             r#type: "button",

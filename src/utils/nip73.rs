@@ -2,28 +2,23 @@
 //!
 //! Utilities for extracting and displaying external content references from Nostr events.
 //! Leverages the rust-nostr SDK's built-in NIP-73 support.
-
 use nostr_sdk::prelude::*;
-
-// Re-export SDK types for external use
 pub use nostr::nips::nip73::ExternalContentId;
-
 /// Extract external content references from an event's `i` tags
 ///
 /// Returns a vector of (ExternalContentId, Option<Url>) tuples where the URL
 /// is the optional hint provided in the tag.
 pub fn extract_external_content(event: &Event) -> Vec<(ExternalContentId, Option<Url>)> {
     let mut results = Vec::new();
-
     for tag in event.tags.iter() {
-        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag.as_standardized() {
+        if let Some(TagStandard::ExternalContent { content, hint, .. }) = tag
+            .as_standardized()
+        {
             results.push((content.clone(), hint.clone()));
         }
     }
-
     results
 }
-
 /// Get a human-readable display name for an external content type
 pub fn get_display_name(content: &ExternalContentId) -> String {
     match content {
@@ -33,14 +28,14 @@ pub fn get_display_name(content: &ExternalContentId) -> String {
         ExternalContentId::Paper(doi) => format!("DOI: {}", doi),
         ExternalContentId::Movie(isan) => format!("ISAN: {}", isan),
         ExternalContentId::PodcastFeed(guid) => format!("Podcast: {}", truncate_id(guid)),
-        ExternalContentId::PodcastEpisode(guid) => format!("Episode: {}", truncate_id(guid)),
-        ExternalContentId::PodcastPublisher(guid) => format!("Publisher: {}", truncate_id(guid)),
+        ExternalContentId::PodcastEpisode(guid) => {
+            format!("Episode: {}", truncate_id(guid))
+        }
+        ExternalContentId::PodcastPublisher(guid) => {
+            format!("Publisher: {}", truncate_id(guid))
+        }
         ExternalContentId::Geohash(hash) => format!("Location: {}", hash),
-        ExternalContentId::BlockchainTransaction {
-            chain,
-            transaction_hash,
-            ..
-        } => {
+        ExternalContentId::BlockchainTransaction { chain, transaction_hash, .. } => {
             if chain == "bitcoin" {
                 format!("TX: {}", truncate_id(transaction_hash))
             } else {
@@ -56,79 +51,43 @@ pub fn get_display_name(content: &ExternalContentId) -> String {
         }
     }
 }
-
 /// Get an external explorer/reference URL for the content
 ///
 /// Returns None for content types that don't have a standard external service.
 pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
     match content {
         ExternalContentId::Url(url) => Some(url.to_string()),
-
         ExternalContentId::Hashtag(tag) => {
-            // Link to nostr search for hashtag
             Some(format!("https://nostr.band/?q=%23{}", tag))
         }
-
         ExternalContentId::Book(isbn) => {
-            // OpenLibrary for books
             Some(format!("https://openlibrary.org/isbn/{}", isbn))
         }
-
-        ExternalContentId::Paper(doi) => {
-            // DOI resolver
-            Some(format!("https://doi.org/{}", doi))
-        }
-
+        ExternalContentId::Paper(doi) => Some(format!("https://doi.org/{}", doi)),
         ExternalContentId::Movie(isan) => {
-            // ISAN lookup - less common, link to ISAN registry
-            Some(format!(
-                "https://web.isan.org/public/en/search?isan={}",
-                isan
-            ))
+            Some(format!("https://web.isan.org/public/en/search?isan={}", isan))
         }
-
         ExternalContentId::PodcastFeed(guid) => {
-            // Link to Podcast Index by GUID
             Some(format!("https://podcastindex.org/podcast/{}", guid))
         }
-
         ExternalContentId::PodcastEpisode(guid) => {
-            // Episode GUID - link to Podcast Index search
             Some(format!("https://podcastindex.org/search?q={}", guid))
         }
-
-        ExternalContentId::PodcastPublisher(_) => {
-            // Publisher GUIDs don't have a direct lookup
-            None
-        }
-
-        ExternalContentId::Geohash(hash) => {
-            // Geohash explorer
-            Some(format!("https://geohash.org/{}", hash))
-        }
-
-        ExternalContentId::BlockchainTransaction {
-            chain,
-            transaction_hash,
-            ..
-        } => {
+        ExternalContentId::PodcastPublisher(_) => None,
+        ExternalContentId::Geohash(hash) => Some(format!("https://geohash.org/{}", hash)),
+        ExternalContentId::BlockchainTransaction { chain, transaction_hash, .. } => {
             if chain == "bitcoin" {
-                // Mempool.space for Bitcoin transactions
                 Some(format!("https://mempool.space/tx/{}", transaction_hash))
             } else if chain == "ethereum" {
-                // Etherscan for Ethereum
                 Some(format!("https://etherscan.io/tx/{}", transaction_hash))
             } else {
                 None
             }
         }
-
         ExternalContentId::BlockchainAddress { chain, address, .. } => {
             if chain == "bitcoin" {
-                // Mempool.space for Bitcoin addresses
                 Some(format!("https://mempool.space/address/{}", address))
             } else if chain == "ethereum" {
-                // Etherscan for Ethereum
                 Some(format!("https://etherscan.io/address/{}", address))
             } else {
                 None
@@ -136,7 +95,6 @@ pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
         }
     }
 }
-
 /// Extract the raw identifier from an ExternalContentId
 pub fn get_raw_identifier(content: &ExternalContentId) -> String {
     match content {
@@ -149,15 +107,12 @@ pub fn get_raw_identifier(content: &ExternalContentId) -> String {
         ExternalContentId::PodcastEpisode(guid) => guid.clone(),
         ExternalContentId::PodcastPublisher(guid) => guid.clone(),
         ExternalContentId::Geohash(hash) => hash.clone(),
-        ExternalContentId::BlockchainTransaction {
-            transaction_hash, ..
-        } => transaction_hash.clone(),
+        ExternalContentId::BlockchainTransaction { transaction_hash, .. } => {
+            transaction_hash.clone()
+        }
         ExternalContentId::BlockchainAddress { address, .. } => address.clone(),
     }
 }
-
-// Helper functions
-
 /// Truncate an ID for display (show first and last 4 characters)
 fn truncate_id(id: &str) -> String {
     if id.len() > 12 {
@@ -166,16 +121,12 @@ fn truncate_id(id: &str) -> String {
         id.to_string()
     }
 }
-
 /// Shorten a URL for display
 fn shorten_url(url: &str) -> String {
-    // Remove protocol
     let without_protocol = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .unwrap_or(url);
-
-    // Truncate if too long
     if without_protocol.len() > 40 {
         format!("{}...", &without_protocol[0..37])
     } else {

@@ -5,12 +5,9 @@
 //! - `format_duration_compact`: Short abbreviated format ("2h", "30m", "5d")
 //! - `format_duration_timecode`: Media timecode format ("01:24:35" or "02:15")
 //! - `format_duration_verbose`: Human-readable format ("2 hours 30 minutes")
-
-// Time unit constants in seconds
 const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 3600;
 const SECONDS_PER_DAY: u64 = 86400;
-
 /// Format duration in seconds to compact abbreviated format
 ///
 /// Examples:
@@ -31,7 +28,6 @@ pub fn format_duration_compact(seconds: u64) -> String {
         format!("{}d", seconds / SECONDS_PER_DAY)
     }
 }
-
 /// Format duration in seconds to media timecode format
 ///
 /// Examples:
@@ -44,14 +40,12 @@ pub fn format_duration_timecode(seconds: u64) -> String {
     let hours = seconds / SECONDS_PER_HOUR;
     let minutes = (seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
     let secs = seconds % SECONDS_PER_MINUTE;
-
     if hours > 0 {
         format!("{}:{:02}:{:02}", hours, minutes, secs)
     } else {
         format!("{}:{:02}", minutes, secs)
     }
 }
-
 /// Format duration in seconds to media timecode with zero-padded hours
 ///
 /// Examples:
@@ -64,14 +58,12 @@ pub fn format_duration_timecode_padded(seconds: u64) -> String {
     let hours = seconds / SECONDS_PER_HOUR;
     let minutes = (seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
     let secs = seconds % SECONDS_PER_MINUTE;
-
     if hours > 0 {
         format!("{:02}:{:02}:{:02}", hours, minutes, secs)
     } else {
         format!("{:02}:{:02}", minutes, secs)
     }
 }
-
 /// Format duration in seconds to human-readable verbose format
 ///
 /// Examples:
@@ -105,20 +97,17 @@ pub fn format_duration_verbose(seconds: u64) -> String {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_format_duration_compact() {
         assert_eq!(format_duration_compact(45), "45s");
         assert_eq!(format_duration_compact(60), "1m");
         assert_eq!(format_duration_compact(3600), "1h");
         assert_eq!(format_duration_compact(86400), "1d");
-        assert_eq!(format_duration_compact(90), "1m"); // Truncates, doesn't round
+        assert_eq!(format_duration_compact(90), "1m");
     }
-
     #[test]
     fn test_format_duration_timecode() {
         assert_eq!(format_duration_timecode(45), "0:45");
@@ -126,14 +115,12 @@ mod tests {
         assert_eq!(format_duration_timecode(3600), "1:00:00");
         assert_eq!(format_duration_timecode(3661), "1:01:01");
     }
-
     #[test]
     fn test_format_duration_timecode_padded() {
         assert_eq!(format_duration_timecode_padded(45), "00:45");
         assert_eq!(format_duration_timecode_padded(90), "01:30");
         assert_eq!(format_duration_timecode_padded(3600), "01:00:00");
     }
-
     #[test]
     fn test_format_duration_verbose() {
         assert_eq!(format_duration_verbose(45), "45 seconds");

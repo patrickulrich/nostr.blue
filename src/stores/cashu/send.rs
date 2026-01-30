@@ -1,15 +1,14 @@
 //! Send operations
 //!
 //! Functions for sending ecash tokens, including P2PK sends.
-
 use dioxus::prelude::*;
 use nostr_sdk::signer::NostrSigner;
 use nostr_sdk::{EventId, Kind, PublicKey};
-
 use super::events::{queue_event_for_retry, queue_signed_event_for_retry};
 use super::internal::{
-    cleanup_spent_proofs_internal, create_ephemeral_wallet, is_insufficient_funds_error_string,
-    is_token_spent_error_string, nostr_pubkey_to_cdk_pubkey, validate_proofs_with_mint,
+    cleanup_spent_proofs_internal, create_ephemeral_wallet,
+    is_insufficient_funds_error_string, is_token_spent_error_string,
+    nostr_pubkey_to_cdk_pubkey, validate_proofs_with_mint,
 };
 use super::proofs::{cdk_proof_to_proof_data, proof_data_to_cdk_proof};
 use super::signals::{try_acquire_mint_lock, WALLET_STATE, WALLET_TOKENS};
@@ -20,11 +19,6 @@ use super::types::{
 };
 use super::utils::{mint_matches, normalize_mint_url, now_secs};
 use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
-
-// =============================================================================
-// Public API
-// =============================================================================
-
 /// Estimate the fee for sending a given amount from a mint
 ///
 /// Returns the estimated fee in sats, or an error if estimation fails.
@@ -32,32 +26,20 @@ use crate::stores::{auth_store, cashu_cdk_bridge, nostr_client};
 pub async fn estimate_send_fee(mint_url: String, amount: u64) -> Result<u64, String> {
     use cdk::wallet::{SendKind, SendOptions};
     use cdk::Amount;
-
     let mint_url = normalize_mint_url(&mint_url);
-
-    // Get available proofs
     let all_proofs = get_proofs_for_mint(&mint_url)?;
-
     if all_proofs.is_empty() {
         return Err("No tokens found for this mint".to_string());
     }
-
-    // Check we have enough balance
     let total_available: u64 = all_proofs
         .iter()
         .map(|p| u64::from(p.amount))
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
         .ok_or("Balance overflow")?;
     if total_available < amount {
-        return Err(format!(
-            "Insufficient funds. Available: {} sats",
-            total_available
-        ));
+        return Err(format!("Insufficient funds. Available: {} sats", total_available));
     }
-
-    // Create ephemeral wallet and prepare send to get fee estimate
     let wallet = create_ephemeral_wallet(&mint_url, all_proofs).await?;
-
     let prepared = wallet
         .prepare_send(
             Amount::from(amount),
@@ -70,72 +52,47 @@ pub async fn estimate_send_fee(mint_url: String, amount: u64) -> Result<u64, Str
         )
         .await
         .map_err(|e| format!("Failed to estimate fee: {}", e))?;
-
     let fee = u64::from(prepared.fee());
-    log::debug!(
-        "Estimated fee for {} sats from {}: {} sats",
-        amount,
-        mint_url,
-        fee
-    );
-
-    // Cancel the prepared send to release reserved proofs back to Unspent state
-    // This is required per CDK best practices - dropping without cancel/confirm
-    // leaves proofs stuck in Reserved state in IndexedDB
+    log::debug!("Estimated fee for {} sats from {}: {} sats", amount, mint_url, fee);
     prepared
         .cancel()
         .await
         .map_err(|e| format!("Failed to cancel prepared send: {}", e))?;
-
     Ok(fee)
 }
-
 /// Send ecash tokens
 pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String> {
-    // Normalize mint URL for consistent comparison
     let mint_url = normalize_mint_url(&mint_url);
-
     log::info!("Sending {} sats from {}", amount, mint_url);
-
-    // Acquire mint operation lock
     let _lock_guard = try_acquire_mint_lock(&mint_url)
-        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
-
-    // Get available proofs
+        .ok_or_else(|| {
+            format!("Another operation is in progress for mint: {}", mint_url)
+        })?;
     let all_proofs = get_proofs_for_mint(&mint_url)?;
-
     if all_proofs.is_empty() {
         return Err("No tokens found for this mint".to_string());
     }
-
-    // NUT-07: Validate proofs with mint before sending
     let all_proofs = validate_proofs_with_mint(&mint_url, all_proofs).await?;
-
-    // Re-fetch event_ids after potential cleanup
     let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
-
-    // Check balance
     let total_available: u64 = all_proofs
         .iter()
         .map(|p| u64::from(p.amount))
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
         .ok_or("Balance overflow")?;
-
     if total_available < amount {
-        return Err(format!(
-            "Insufficient funds. Available: {} sats, Required: {} sats",
-            total_available, amount
-        ));
+        return Err(
+            format!(
+                "Insufficient funds. Available: {} sats, Required: {} sats",
+                total_available,
+                amount,
+            ),
+        );
     }
-
-    // Generate transaction ID for tracking
     let tx_id = format!("send_{}", uuid::Uuid::new_v4());
-
-    // Collect proof secrets for in-flight tracking
-    let proof_secrets: Vec<String> = all_proofs.iter().map(|p| p.secret.to_string()).collect();
-
-    // SAFETY: Add in-flight tracking BEFORE the send operation
-    // This protects proofs from being reclaimed by proof_recovery
+    let proof_secrets: Vec<String> = all_proofs
+        .iter()
+        .map(|p| p.secret.to_string())
+        .collect();
     let in_flight = InFlightSendRequest {
         transaction_id: tx_id.clone(),
         mint_url: mint_url.clone(),
@@ -145,61 +102,40 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
-
-    // 1. Use try_operation_or_recover wrapper for CDK operation
-    // This ensures proofs are synced with mint if operation fails
     let result = super::internal::try_operation_or_recover(
-        &mint_url,
-        all_proofs.clone(),
-        execute_send_with_retry(
-            &mint_url, amount, all_proofs, None, // No P2PK conditions
-        ),
-    )
-    .await;
-
-    // CDK pattern: Handle error case first, remove in-flight on failure
+            &mint_url,
+            all_proofs.clone(),
+            execute_send_with_retry(&mint_url, amount, all_proofs, None),
+        )
+        .await;
     let (token_string, keep_proofs) = match result {
         Ok(r) => r,
         Err(e) => {
-            // CDK pattern: Remove in-flight tracking on error (matches compensate_all)
             super::signals::remove_in_flight_send_request(&tx_id);
             return Err(e);
         }
     };
-
-    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
-    // This uses a pending event ID that we'll update after Nostr publish
-    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
-
-    // CDK pattern: explicit cleanup on all paths (always remove in-flight, even on state update failure)
     if let Err(e) = update_local_state_after_send(
         &mint_url,
         &keep_proofs,
         &event_ids_to_delete,
         &Some(pending_event_id.clone()),
     ) {
-        // Always remove in-flight tracking, even on state update failure
         super::signals::remove_in_flight_send_request(&tx_id);
         return Err(e);
     }
-
-    // Success path: also remove in-flight tracking
     super::signals::remove_in_flight_send_request(&tx_id);
-
-    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
-    // nostr-sdk saves to local database before relay transmission
     let new_event_id = match publish_send_events(
-        &mint_url,
-        &keep_proofs,
-        &event_ids_to_delete,
-        &pending_event_id,
-    )
-    .await
+            &mint_url,
+            &keep_proofs,
+            &event_ids_to_delete,
+            &pending_event_id,
+        )
+        .await
     {
         Ok(Some(event_id)) => Some(event_id),
         Ok(None) => {
-            // Invariant: when publish returns None, keep_proofs should be empty
             if !keep_proofs.is_empty() {
                 log::error!(
                     "publish_send_events returned None but keep_proofs has {} entries",
@@ -208,7 +144,7 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             }
             debug_assert!(
                 keep_proofs.is_empty(),
-                "publish_send_events returned None but keep_proofs is non-empty"
+                "publish_send_events returned None but keep_proofs is non-empty",
             );
             None
         }
@@ -217,9 +153,6 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
             Some(pending_event_id.clone())
         }
     };
-
-    // Create history event
-    // Filter out pending_* IDs - they're not valid hex event IDs
     let valid_created: Vec<String> = new_event_id
         .iter()
         .filter(|id| !id.starts_with("pending_"))
@@ -230,24 +163,23 @@ pub async fn send_tokens(mint_url: String, amount: u64) -> Result<String, String
         .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
-
-    // Skip history event if both are empty (no valid event IDs to reference)
     if !valid_created.is_empty() || !valid_destroyed.is_empty() {
-        if let Err(e) =
-            super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
+        if let Err(e) = super::events::create_history_event(
+                "out",
+                amount,
+                valid_created,
+                valid_destroyed,
+            )
+            .await
         {
             log::error!("Failed to create history event: {}", e);
         }
     }
-
-    // Sync MultiMintWallet state (non-critical)
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
         log::warn!("Failed to sync MultiMintWallet state after send: {}", e);
     }
-
     Ok(token_string)
 }
-
 /// Send ecash tokens locked to a recipient's public key (P2PK / NUT-11)
 ///
 /// This creates tokens that can only be spent by the holder of the corresponding
@@ -260,62 +192,39 @@ pub async fn send_tokens_p2pk(
     recipient_pubkey: String,
 ) -> Result<String, String> {
     use cdk::nuts::SpendingConditions;
-
-    // Normalize mint URL
     let mint_url = normalize_mint_url(&mint_url);
-
-    log::info!(
-        "Sending {} sats P2PK to {} from {}",
-        amount,
-        recipient_pubkey,
-        mint_url
-    );
-
-    // Convert Nostr pubkey to CDK pubkey for P2PK
+    log::info!("Sending {} sats P2PK to {} from {}", amount, recipient_pubkey, mint_url);
     let cdk_pubkey = nostr_pubkey_to_cdk_pubkey(&recipient_pubkey)?;
-
-    // Create P2PK spending conditions
     let spending_conditions = SpendingConditions::new_p2pk(cdk_pubkey, None);
-
-    // Acquire mint operation lock
     let _lock_guard = try_acquire_mint_lock(&mint_url)
-        .ok_or_else(|| format!("Another operation is in progress for mint: {}", mint_url))?;
-
-    // Get available proofs
+        .ok_or_else(|| {
+            format!("Another operation is in progress for mint: {}", mint_url)
+        })?;
     let all_proofs = get_proofs_for_mint(&mint_url)?;
-
     if all_proofs.is_empty() {
         return Err("No tokens found for this mint".to_string());
     }
-
-    // NUT-07: Validate proofs with mint
     let all_proofs = validate_proofs_with_mint(&mint_url, all_proofs).await?;
-
-    // Re-fetch event_ids after potential cleanup
     let event_ids_to_delete = get_event_ids_for_mint(&mint_url);
-
-    // Check balance
     let total_available: u64 = all_proofs
         .iter()
         .map(|p| u64::from(p.amount))
         .try_fold(0u64, |acc, amt| acc.checked_add(amt))
         .ok_or("Balance overflow")?;
-
     if total_available < amount {
-        return Err(format!(
-            "Insufficient funds. Available: {} sats, Required: {} sats",
-            total_available, amount
-        ));
+        return Err(
+            format!(
+                "Insufficient funds. Available: {} sats, Required: {} sats",
+                total_available,
+                amount,
+            ),
+        );
     }
-
-    // Generate transaction ID for tracking
     let tx_id = format!("send_p2pk_{}", uuid::Uuid::new_v4());
-
-    // Collect proof secrets for in-flight tracking
-    let proof_secrets: Vec<String> = all_proofs.iter().map(|p| p.secret.to_string()).collect();
-
-    // SAFETY: Add in-flight tracking BEFORE the send operation
-    // This protects proofs from being reclaimed by proof_recovery
+    let proof_secrets: Vec<String> = all_proofs
+        .iter()
+        .map(|p| p.secret.to_string())
+        .collect();
     let in_flight = InFlightSendRequest {
         transaction_id: tx_id.clone(),
         mint_url: mint_url.clone(),
@@ -325,59 +234,45 @@ pub async fn send_tokens_p2pk(
         created_at: now_secs(),
     };
     super::signals::add_in_flight_send_request(in_flight);
-
-    // 1. Use try_operation_or_recover wrapper for CDK operation
-    // This ensures proofs are synced with mint if operation fails
     let result = super::internal::try_operation_or_recover(
-        &mint_url,
-        all_proofs.clone(),
-        execute_p2pk_send_via_swap(&mint_url, amount, all_proofs, spending_conditions),
-    )
-    .await;
-
-    // CDK pattern: Handle error case first, remove in-flight on failure
+            &mint_url,
+            all_proofs.clone(),
+            execute_p2pk_send_via_swap(
+                &mint_url,
+                amount,
+                all_proofs,
+                spending_conditions,
+            ),
+        )
+        .await;
     let (token_string, keep_proofs) = match result {
         Ok(r) => r,
         Err(e) => {
-            // CDK pattern: Remove in-flight tracking on error (matches compensate_all)
             super::signals::remove_in_flight_send_request(&tx_id);
             return Err(e);
         }
     };
-
-    // 2. CRITICAL: Update local state IMMEDIATELY after CDK success
-    // This uses a pending event ID that we'll update after Nostr publish
-    // If app crashes here, sync_orphaned_cdk_proofs_to_nostr() will recover on restart
     let pending_event_id = format!("pending_{}", uuid::Uuid::new_v4());
-
-    // CDK pattern: explicit cleanup on all paths (always remove in-flight, even on state update failure)
     if let Err(e) = update_local_state_after_send(
         &mint_url,
         &keep_proofs,
         &event_ids_to_delete,
         &Some(pending_event_id.clone()),
     ) {
-        // Always remove in-flight tracking, even on state update failure
         super::signals::remove_in_flight_send_request(&tx_id);
         return Err(e);
     }
-
-    // Success path: also remove in-flight tracking
     super::signals::remove_in_flight_send_request(&tx_id);
-
-    // 3. NOW attempt Nostr publish (safe to fail - state already updated)
-    // nostr-sdk saves to local database before relay transmission
     let new_event_id = match publish_send_events(
-        &mint_url,
-        &keep_proofs,
-        &event_ids_to_delete,
-        &pending_event_id,
-    )
-    .await
+            &mint_url,
+            &keep_proofs,
+            &event_ids_to_delete,
+            &pending_event_id,
+        )
+        .await
     {
         Ok(Some(event_id)) => Some(event_id),
         Ok(None) => {
-            // Invariant: when publish returns None, keep_proofs should be empty
             if !keep_proofs.is_empty() {
                 log::error!(
                     "publish_send_events returned None but keep_proofs has {} entries",
@@ -386,7 +281,7 @@ pub async fn send_tokens_p2pk(
             }
             debug_assert!(
                 keep_proofs.is_empty(),
-                "publish_send_events returned None but keep_proofs is non-empty"
+                "publish_send_events returned None but keep_proofs is non-empty",
             );
             None
         }
@@ -395,9 +290,6 @@ pub async fn send_tokens_p2pk(
             Some(pending_event_id.clone())
         }
     };
-
-    // Create history event
-    // Filter out pending_* IDs - they're not valid hex event IDs
     let valid_created: Vec<String> = new_event_id
         .iter()
         .filter(|id| !id.starts_with("pending_"))
@@ -408,85 +300,60 @@ pub async fn send_tokens_p2pk(
         .filter(|id| !id.starts_with("pending_") && EventId::from_hex(id).is_ok())
         .cloned()
         .collect();
-
-    // Skip history event if both are empty (no valid event IDs to reference)
     if !valid_created.is_empty() || !valid_destroyed.is_empty() {
-        if let Err(e) =
-            super::events::create_history_event("out", amount, valid_created, valid_destroyed).await
+        if let Err(e) = super::events::create_history_event(
+                "out",
+                amount,
+                valid_created,
+                valid_destroyed,
+            )
+            .await
         {
             log::error!("Failed to create history event: {}", e);
         }
     }
-
-    // Sync state
     if let Err(e) = cashu_cdk_bridge::sync_wallet_state().await {
-        log::warn!(
-            "Failed to sync MultiMintWallet state after P2PK send: {}",
-            e
-        );
+        log::warn!("Failed to sync MultiMintWallet state after P2PK send: {}", e);
     }
-
-    log::info!(
-        "P2PK send complete: {} sats locked to {}",
-        amount,
-        recipient_pubkey
-    );
-
+    log::info!("P2PK send complete: {} sats locked to {}", amount, recipient_pubkey);
     Ok(token_string)
 }
-
 /// Get the wallet's P2PK public key for receiving locked tokens
 ///
 /// Returns the hex-encoded public key derived from the wallet's private key.
 pub fn get_wallet_pubkey() -> Result<String, String> {
     let wallet_state = WALLET_STATE.read();
     let state = wallet_state.as_ref().ok_or("Wallet not initialized")?;
-    let privkey = state
-        .privkey
-        .as_ref()
-        .ok_or("Wallet private key not available")?;
-
+    let privkey = state.privkey.as_ref().ok_or("Wallet private key not available")?;
     let secret_key = cdk::nuts::SecretKey::from_hex(privkey)
         .map_err(|e| format!("Invalid wallet privkey: {}", e))?;
-
     let pubkey = secret_key.public_key();
     Ok(pubkey.to_hex())
 }
-
-// =============================================================================
-// Internal Helpers
-// =============================================================================
-
 /// Get CDK proofs for a specific mint
 fn get_proofs_for_mint(mint_url: &str) -> Result<Vec<cdk::nuts::Proof>, String> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
-
     let mut all_proofs = Vec::new();
-
     for token in tokens.iter().filter(|t| mint_matches(&t.mint, mint_url)) {
         for proof in &token.proofs {
             all_proofs.push(proof_data_to_cdk_proof(proof)?);
         }
     }
-
     Ok(all_proofs)
 }
-
 /// Get event IDs for a specific mint's tokens
 fn get_event_ids_for_mint(mint_url: &str) -> Vec<String> {
     let store = WALLET_TOKENS.read();
     let data = store.data();
     let tokens = data.read();
-
     tokens
         .iter()
         .filter(|t| mint_matches(&t.mint, mint_url))
         .map(|t| t.event_id.clone())
         .collect()
 }
-
 /// Execute send with auto-retry on spent proofs
 async fn execute_send_with_retry(
     mint_url: &str,
@@ -496,11 +363,8 @@ async fn execute_send_with_retry(
 ) -> Result<(String, Vec<cdk::nuts::Proof>), String> {
     use cdk::wallet::{SendKind, SendOptions};
     use cdk::Amount;
-
-    // Try sending with current proofs
     let result = async {
         let wallet = create_ephemeral_wallet(mint_url, all_proofs.clone()).await?;
-
         let prepared = wallet
             .prepare_send(
                 Amount::from(amount),
@@ -513,17 +377,10 @@ async fn execute_send_with_retry(
             )
             .await
             .map_err(|e| e.to_string())?;
-
         let fee = u64::from(prepared.fee());
         log::info!("Send fee: {} sats", fee);
-
-        // Confirm the prepared send
-        // Note: CDK's confirm() takes ownership. If it fails, CDK internally handles
-        // releasing reserved proofs, so we don't need explicit cancel() here.
         let token = prepared.confirm(None).await.map_err(|e| e.to_string())?;
         let keep_proofs = wallet.get_unspent_proofs().await.map_err(|e| e.to_string())?;
-
-        // Validate change amount matches expectations
         let initial_total: u64 = all_proofs
             .iter()
             .map(|p| u64::from(p.amount))
@@ -533,55 +390,45 @@ async fn execute_send_with_retry(
             .map(|p| u64::from(p.amount))
             .fold(0u64, |acc, amt| acc.saturating_add(amt));
         let expected_change = initial_total.saturating_sub(amount).saturating_sub(fee);
-
         if actual_change != expected_change {
             log::warn!(
                 "Change amount mismatch: expected {} sats, got {} sats (initial: {}, sent: {}, fee: {})",
                 expected_change, actual_change, initial_total, amount, fee
             );
-            // Continue anyway - CDK is authoritative, but log the discrepancy
         }
-
         Ok::<(cdk::nuts::Token, Vec<cdk::nuts::Proof>), String>((token, keep_proofs))
     }
-    .await;
-
+        .await;
     match result {
         Ok((token, proofs)) => Ok((token.to_string(), proofs)),
         Err(e) => {
-            // Auto-retry if proofs are already spent
-            if is_token_spent_error_string(&e) || is_insufficient_funds_error_string(&e) {
+            if is_token_spent_error_string(&e) || is_insufficient_funds_error_string(&e)
+            {
                 log::warn!("Send failed ({}), cleaning up and retrying...", e);
-
-                // Cleanup spent proofs
-                let (cleaned_count, cleaned_amount) =
-                    cleanup_spent_proofs_internal(mint_url).await?;
-
+                let (cleaned_count, cleaned_amount) = cleanup_spent_proofs_internal(
+                        mint_url,
+                    )
+                    .await?;
                 log::info!(
                     "Cleaned up {} spent proofs worth {} sats, retrying send",
-                    cleaned_count,
-                    cleaned_amount
+                    cleaned_count, cleaned_amount
                 );
-
-                // Get fresh proofs after cleanup
                 let fresh_proofs = get_proofs_for_mint(mint_url)?;
-
-                // Check we still have enough after cleanup
                 let fresh_total: u64 = fresh_proofs
                     .iter()
                     .map(|p| u64::from(p.amount))
                     .try_fold(0u64, |acc, amt| acc.checked_add(amt))
                     .ok_or("Balance overflow")?;
                 if fresh_total < amount {
-                    return Err(format!(
-                        "Insufficient funds after cleanup. Available: {} sats, Required: {} sats",
-                        fresh_total, amount
-                    ));
+                    return Err(
+                        format!(
+                            "Insufficient funds after cleanup. Available: {} sats, Required: {} sats",
+                            fresh_total,
+                            amount,
+                        ),
+                    );
                 }
-
-                // Retry send with fresh proofs
                 let wallet = create_ephemeral_wallet(mint_url, fresh_proofs).await?;
-
                 let prepared = wallet
                     .prepare_send(
                         Amount::from(amount),
@@ -594,36 +441,28 @@ async fn execute_send_with_retry(
                     )
                     .await
                     .map_err(|e| format!("Retry failed: {}", e))?;
-
                 let fee = u64::from(prepared.fee());
-
-                // Confirm the prepared send
-                // Note: CDK's confirm() takes ownership. If it fails, CDK internally handles
-                // releasing reserved proofs, so we don't need explicit cancel() here.
                 let token = prepared
                     .confirm(None)
                     .await
                     .map_err(|e| format!("Retry confirm failed: {}", e))?;
-
                 let keep_proofs = wallet
                     .get_unspent_proofs()
                     .await
                     .map_err(|e| format!("Failed to get remaining proofs: {}", e))?;
-
-                // Validate change amount matches expectations
                 let actual_change: u64 = keep_proofs
                     .iter()
                     .map(|p| u64::from(p.amount))
                     .fold(0u64, |acc, amt| acc.saturating_add(amt));
-                let expected_change = fresh_total.saturating_sub(amount).saturating_sub(fee);
-
+                let expected_change = fresh_total
+                    .saturating_sub(amount)
+                    .saturating_sub(fee);
                 if actual_change != expected_change {
                     log::warn!(
                         "Change amount mismatch (retry): expected {} sats, got {} sats (initial: {}, sent: {}, fee: {})",
                         expected_change, actual_change, fresh_total, amount, fee
                     );
                 }
-
                 log::info!("Send succeeded after cleanup and retry");
                 Ok((token.to_string(), keep_proofs))
             } else {
@@ -632,7 +471,6 @@ async fn execute_send_with_retry(
         }
     }
 }
-
 /// Execute P2PK send using wallet.swap() directly
 ///
 /// This bypasses CDK's prepare_send() which has a bug in proof selection for P2PK.
@@ -647,47 +485,33 @@ async fn execute_p2pk_send_via_swap(
     use cdk::amount::SplitTarget;
     use cdk::nuts::{CurrencyUnit, Token};
     use cdk::Amount;
-
-    // Try sending with current proofs
     let result = async {
         let wallet = create_ephemeral_wallet(mint_url, all_proofs.clone()).await?;
-
-        // Calculate fee for our proofs
         let fee = wallet
             .get_proofs_fee(&all_proofs)
             .await
             .map_err(|e| format!("Failed to calculate fee: {}", e))?;
         let fee_u64 = u64::from(fee);
         log::info!("P2PK send fee: {} sats", fee_u64);
-
-        // Use swap directly with our proofs and P2PK conditions
-        // This returns the P2PK-locked proofs for the recipient
         let send_proofs = wallet
             .swap(
                 Some(Amount::from(amount)),
                 SplitTarget::default(),
                 all_proofs.clone(),
                 Some(spending_conditions.clone()),
-                true, // include_fees
+                true,
             )
             .await
             .map_err(|e| format!("Swap failed: {}", e))?
             .ok_or("Swap returned no proofs")?;
-
-        // Get change proofs from wallet (stored during swap)
         let keep_proofs = wallet
             .get_unspent_proofs()
             .await
             .map_err(|e| format!("Failed to get change proofs: {}", e))?;
-
-        // Create token from P2PK-locked proofs
         let mint_url_parsed: cdk::mint_url::MintUrl = mint_url
             .parse()
             .map_err(|e| format!("Invalid mint URL: {}", e))?;
-
         let token = Token::new(mint_url_parsed, send_proofs, None, CurrencyUnit::Sat);
-
-        // Validate change amount
         let initial_total: u64 = all_proofs
             .iter()
             .map(|p| u64::from(p.amount))
@@ -696,55 +520,49 @@ async fn execute_p2pk_send_via_swap(
             .iter()
             .map(|p| u64::from(p.amount))
             .fold(0u64, |acc, amt| acc.saturating_add(amt));
-        let expected_change = initial_total.saturating_sub(amount).saturating_sub(fee_u64);
-
+        let expected_change = initial_total
+            .saturating_sub(amount)
+            .saturating_sub(fee_u64);
         if actual_change != expected_change {
             log::warn!(
                 "P2PK change amount mismatch: expected {} sats, got {} sats (initial: {}, sent: {}, fee: {})",
                 expected_change, actual_change, initial_total, amount, fee_u64
             );
         }
-
         Ok::<(Token, Vec<cdk::nuts::Proof>), String>((token, keep_proofs))
     }
-    .await;
-
+        .await;
     match result {
         Ok((token, proofs)) => Ok((token.to_string(), proofs)),
         Err(e) => {
-            // Auto-retry if proofs are already spent
-            if is_token_spent_error_string(&e) || is_insufficient_funds_error_string(&e) {
+            if is_token_spent_error_string(&e) || is_insufficient_funds_error_string(&e)
+            {
                 log::warn!("P2PK send failed ({}), cleaning up and retrying...", e);
-
-                // Cleanup spent proofs
-                let (cleaned_count, cleaned_amount) =
-                    cleanup_spent_proofs_internal(mint_url).await?;
-
+                let (cleaned_count, cleaned_amount) = cleanup_spent_proofs_internal(
+                        mint_url,
+                    )
+                    .await?;
                 log::info!(
                     "Cleaned up {} spent proofs worth {} sats, retrying P2PK send",
-                    cleaned_count,
-                    cleaned_amount
+                    cleaned_count, cleaned_amount
                 );
-
-                // Get fresh proofs after cleanup
                 let fresh_proofs = get_proofs_for_mint(mint_url)?;
-
-                // Check we still have enough after cleanup
                 let fresh_total: u64 = fresh_proofs
                     .iter()
                     .map(|p| u64::from(p.amount))
                     .try_fold(0u64, |acc, amt| acc.checked_add(amt))
                     .ok_or("Balance overflow")?;
                 if fresh_total < amount {
-                    return Err(format!(
-                        "Insufficient funds after cleanup. Available: {} sats, Required: {} sats",
-                        fresh_total, amount
-                    ));
+                    return Err(
+                        format!(
+                            "Insufficient funds after cleanup. Available: {} sats, Required: {} sats",
+                            fresh_total,
+                            amount,
+                        ),
+                    );
                 }
-
-                // Retry with fresh proofs
-                let wallet = create_ephemeral_wallet(mint_url, fresh_proofs.clone()).await?;
-
+                let wallet = create_ephemeral_wallet(mint_url, fresh_proofs.clone())
+                    .await?;
                 let send_proofs = wallet
                     .swap(
                         Some(Amount::from(amount)),
@@ -756,23 +574,21 @@ async fn execute_p2pk_send_via_swap(
                     .await
                     .map_err(|e| format!("Retry swap failed: {}", e))?
                     .ok_or("Retry swap returned no proofs")?;
-
                 let keep_proofs = wallet
                     .get_unspent_proofs()
                     .await
-                    .map_err(|e| format!("Failed to get change proofs after retry: {}", e))?;
-
+                    .map_err(|e| {
+                        format!("Failed to get change proofs after retry: {}", e)
+                    })?;
                 let mint_url_parsed: cdk::mint_url::MintUrl = mint_url
                     .parse()
                     .map_err(|e| format!("Invalid mint URL: {}", e))?;
-
                 let token = Token::new(
                     mint_url_parsed,
                     send_proofs,
                     None,
                     cdk::nuts::CurrencyUnit::Sat,
                 );
-
                 log::info!("P2PK send succeeded after cleanup and retry");
                 Ok((token.to_string(), keep_proofs))
             } else {
@@ -781,7 +597,6 @@ async fn execute_p2pk_send_via_swap(
         }
     }
 }
-
 /// Publish token and deletion events after send
 async fn publish_send_events(
     mint_url: &str,
@@ -792,145 +607,130 @@ async fn publish_send_events(
     let signer = crate::stores::signer::get_signer()
         .ok_or("No signer available")?
         .as_nostr_signer();
-
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pubkey = PublicKey::parse(&pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-
+    let pubkey = PublicKey::parse(&pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-
     let mut new_event_id: Option<String> = None;
-
-    // Publish token event with remaining proofs
     if !keep_proofs.is_empty() {
-        let proof_data: Vec<ProofData> = keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
-
+        let proof_data: Vec<ProofData> = keep_proofs
+            .iter()
+            .map(cdk_proof_to_proof_data)
+            .collect();
         let extended_proofs: Vec<ExtendedCashuProof> = proof_data
             .iter()
             .map(|p| ExtendedCashuProof::from(p.clone()))
             .collect();
-
         let token_event_data = ExtendedTokenEvent {
             mint: mint_url.to_string(),
             unit: "sat".to_string(),
             proofs: extended_proofs,
             del: event_ids_to_delete.to_vec(),
         };
-
         let json_content = serde_json::to_string(&token_event_data)
             .map_err(|e| format!("Failed to serialize token event: {}", e))?;
-
         let encrypted = signer
             .nip44_encrypt(&pubkey, &json_content)
             .await
             .map_err(|e| format!("Failed to encrypt token event: {}", e))?;
-
-        let builder = nostr_sdk::EventBuilder::new(Kind::CashuWalletUnspentProof, encrypted);
-
-        // Pre-compute event ID
+        let builder = nostr_sdk::EventBuilder::new(
+            Kind::CashuWalletUnspentProof,
+            encrypted,
+        );
         let mut unsigned = builder.clone().build(pubkey);
         let event_id_hex = unsigned.id().to_hex();
-
-        // Sign the event
         let signed_event = unsigned
             .sign(&signer)
             .await
             .map_err(|e| format!("Failed to sign token event: {}", e))?;
-
-        // Try to publish
         match client.send_event(&signed_event).await {
             Ok(output) => {
                 if !output.success.is_empty() {
-                    // At least one relay accepted - update token with real event ID
-                    super::events::update_token_event_id(pending_event_id, &event_id_hex);
+                    super::events::update_token_event_id(
+                        pending_event_id,
+                        &event_id_hex,
+                    );
                     log::info!(
-                        "Published new token event: {} (to {} relays)",
-                        event_id_hex,
+                        "Published new token event: {} (to {} relays)", event_id_hex,
                         output.success.len()
                     );
                     new_event_id = Some(event_id_hex);
                 } else {
-                    // No relays accepted - queue for retry with pending_event_id
                     log::warn!(
                         "No relays accepted token event (failed: {}), queuing for retry",
                         output.failed.len()
                     );
                     queue_signed_event_for_retry(
-                        signed_event,
-                        PendingEventType::TokenEvent,
-                        Some(pending_event_id.to_string()),
-                        Some(mint_url.to_string()),
-                    )
-                    .await;
+                            signed_event,
+                            PendingEventType::TokenEvent,
+                            Some(pending_event_id.to_string()),
+                            Some(mint_url.to_string()),
+                        )
+                        .await;
                     new_event_id = Some(pending_event_id.to_string());
                 }
             }
             Err(e) => {
                 log::warn!("Failed to publish token event, queuing for retry: {}", e);
                 queue_signed_event_for_retry(
-                    signed_event,
-                    PendingEventType::TokenEvent,
-                    Some(pending_event_id.to_string()),
-                    Some(mint_url.to_string()),
-                )
-                .await;
+                        signed_event,
+                        PendingEventType::TokenEvent,
+                        Some(pending_event_id.to_string()),
+                        Some(mint_url.to_string()),
+                    )
+                    .await;
                 new_event_id = Some(pending_event_id.to_string());
             }
         }
     }
-
-    // Publish deletion event for old token events
     if !event_ids_to_delete.is_empty() {
         let valid_event_ids: Vec<_> = event_ids_to_delete
             .iter()
             .filter(|id| EventId::from_hex(id).is_ok())
             .collect();
-
         if !valid_event_ids.is_empty() {
             let mut tags = Vec::new();
             for event_id in &valid_event_ids {
                 tags.push(nostr_sdk::Tag::event(EventId::from_hex(event_id).unwrap()));
             }
-            tags.push(nostr_sdk::Tag::custom(
-                nostr_sdk::TagKind::custom("k"),
-                ["7375"],
-            ));
-
-            let deletion_builder =
-                nostr_sdk::EventBuilder::new(Kind::from(5), "Spent token").tags(tags);
-
+            tags.push(nostr_sdk::Tag::custom(nostr_sdk::TagKind::custom("k"), ["7375"]));
+            let deletion_builder = nostr_sdk::EventBuilder::new(
+                    Kind::from(5),
+                    "Spent token",
+                )
+                .tags(tags);
             match client.send_event_builder(deletion_builder.clone()).await {
                 Ok(_) => {
                     log::info!(
-                        "Published deletion events for {} token events",
-                        valid_event_ids.len()
+                        "Published deletion events for {} token events", valid_event_ids
+                        .len()
                     );
                 }
                 Err(e) => {
-                    log::warn!("Failed to publish deletion event, queuing for retry: {}", e);
+                    log::warn!(
+                        "Failed to publish deletion event, queuing for retry: {}", e
+                    );
                     queue_event_for_retry(
-                        deletion_builder,
-                        PendingEventType::DeletionEvent,
-                        None,
-                        None,
-                    )
-                    .await;
+                            deletion_builder,
+                            PendingEventType::DeletionEvent,
+                            None,
+                            None,
+                        )
+                        .await;
                 }
             }
         }
-
         let invalid_count = event_ids_to_delete.len() - valid_event_ids.len();
         if invalid_count > 0 {
             log::warn!("Skipped {} invalid event IDs in deletion", invalid_count);
         }
     }
-
     Ok(new_event_id)
 }
-
 /// Update local state after a successful send using atomic token replacement
 ///
 /// Uses crash-safe atomic replacement: add new tokens BEFORE deleting old ones.
@@ -942,12 +742,13 @@ fn update_local_state_after_send(
     new_event_id: &Option<String>,
 ) -> Result<(), String> {
     let tokens_to_add = if let Some(ref event_id) = new_event_id {
-        // Skip token creation when keep_proofs is empty to avoid zero-proof tokens
         if keep_proofs.is_empty() {
             vec![]
         } else {
-            let keep_proof_data: Vec<ProofData> =
-                keep_proofs.iter().map(cdk_proof_to_proof_data).collect();
+            let keep_proof_data: Vec<ProofData> = keep_proofs
+                .iter()
+                .map(cdk_proof_to_proof_data)
+                .collect();
             let token = TokenData {
                 event_id: event_id.clone(),
                 mint: mint_url.to_string(),
@@ -960,24 +761,14 @@ fn update_local_state_after_send(
     } else {
         vec![]
     };
-
-    let new_balance = super::signals::atomic_token_replace(tokens_to_add, event_ids_to_delete)?;
-
-    // Rebuild the full proof-event map to ensure consistency after atomic replace
-    // This already registers all proofs including the new ones, so no separate call needed
+    let new_balance = super::signals::atomic_token_replace(
+        tokens_to_add,
+        event_ids_to_delete,
+    )?;
     super::proofs::rebuild_proof_event_map();
-
-    log::info!(
-        "Local state updated. Balance after send: {} sats",
-        new_balance
-    );
+    log::info!("Local state updated. Balance after send: {} sats", new_balance);
     Ok(())
 }
-
-// =============================================================================
-// Token Claim Tracking (NUT-17)
-// =============================================================================
-
 /// Watch proof states to detect when sent tokens are claimed by recipient
 ///
 /// This uses NUT-17 WebSocket subscriptions (or polling fallback) to monitor
@@ -996,28 +787,31 @@ fn update_local_state_after_send(
 ///     log::info!("Tokens were claimed by recipient!");
 /// });
 /// ```
-pub fn watch_sent_token_claims<F>(mint_url: String, y_values: Vec<String>, mut on_claimed: F)
+pub fn watch_sent_token_claims<F>(
+    mint_url: String,
+    y_values: Vec<String>,
+    mut on_claimed: F,
+)
 where
     F: FnMut() + 'static,
 {
     use super::ws as cashu_ws;
     use dioxus::prelude::spawn;
-
     if y_values.is_empty() {
         log::warn!("watch_sent_token_claims called with empty Y values");
         return;
     }
-
     spawn(async move {
-        // Try WebSocket subscription first
-        match cashu_ws::subscribe_to_proof_states(mint_url.clone(), y_values.clone()).await {
+        match cashu_ws::subscribe_to_proof_states(mint_url.clone(), y_values.clone())
+            .await
+        {
             Ok(mut rx) => {
                 log::info!("Watching {} proof state(s) via WebSocket", y_values.len());
-
                 while let Some(notification) = rx.recv().await {
-                    // Check if any proof is now spent
                     if notification.state == cashu_ws::ProofState::Spent {
-                        log::info!("Sent token claimed! Proof {} is now spent", notification.y);
+                        log::info!(
+                            "Sent token claimed! Proof {} is now spent", notification.y
+                        );
                         on_claimed();
                         break;
                     }
@@ -1025,31 +819,28 @@ where
             }
             Err(e) => {
                 log::warn!("WebSocket subscription failed for proof states: {}", e);
-                // Fall back to polling
                 poll_for_token_claims(mint_url, y_values, on_claimed).await;
             }
         }
     });
 }
-
-#[allow(dead_code)] // Called by watch_sent_token_claims
+#[allow(dead_code)]
 /// Poll proof states to detect when tokens are claimed (fallback for no WebSocket)
-async fn poll_for_token_claims<F>(mint_url: String, y_values: Vec<String>, mut on_claimed: F)
+async fn poll_for_token_claims<F>(
+    mint_url: String,
+    y_values: Vec<String>,
+    mut on_claimed: F,
+)
 where
     F: FnMut() + 'static,
 {
     use super::ws as cashu_ws;
-
-    let poll_interval_ms = 5000u32; // 5 seconds
-    let max_polls = 60; // 5 minutes max
-
+    let poll_interval_ms = 5000u32;
+    let max_polls = 60;
     for poll_count in 0..max_polls {
-        // Wait between polls
         if poll_count > 0 {
             gloo_timers::future::TimeoutFuture::new(poll_interval_ms).await;
         }
-
-        // Check proof states
         match cashu_ws::poll_proof_states(&mint_url, y_values.clone()).await {
             Ok(states) => {
                 for state in states {
@@ -1068,13 +859,11 @@ where
             }
         }
     }
-
     log::info!(
-        "Stopped watching for token claims after {} minutes",
-        (max_polls * poll_interval_ms / 60000)
+        "Stopped watching for token claims after {} minutes", (max_polls *
+        poll_interval_ms / 60000)
     );
 }
-
 /// Extract Y values from a token string for proof state tracking
 ///
 /// Y values are computed as hash_to_curve(secret) for each proof.
@@ -1082,32 +871,26 @@ where
 pub fn extract_y_values_from_token(token_str: &str) -> Result<Vec<String>, String> {
     use cdk::dhke::hash_to_curve;
     use cdk::nuts::Token;
-
-    // Parse the token
     let token: Token = token_str
         .parse()
         .map_err(|e| format!("Failed to parse token: {}", e))?;
-
-    // Extract secrets from proofs based on token version
-    // We access internal structure directly to avoid needing keyset info
     let secrets: Vec<cdk::secret::Secret> = match &token {
-        Token::TokenV3(v3) => v3
-            .token
-            .iter()
-            .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
-            .collect(),
-        Token::TokenV4(v4) => v4
-            .token
-            .iter()
-            .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
-            .collect(),
+        Token::TokenV3(v3) => {
+            v3.token
+                .iter()
+                .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
+                .collect()
+        }
+        Token::TokenV4(v4) => {
+            v4.token
+                .iter()
+                .flat_map(|t| t.proofs.iter().map(|p| p.secret.clone()))
+                .collect()
+        }
     };
-
     if secrets.is_empty() {
         return Err("Token contains no proofs".to_string());
     }
-
-    // Compute Y = hash_to_curve(secret) for each proof
     let y_values: Result<Vec<String>, String> = secrets
         .iter()
         .map(|secret| {
@@ -1116,6 +899,5 @@ pub fn extract_y_values_from_token(token_str: &str) -> Result<Vec<String>, Strin
                 .map_err(|e| format!("Failed to compute Y for secret: {}", e))
         })
         .collect();
-
     y_values
 }

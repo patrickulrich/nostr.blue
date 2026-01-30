@@ -2,7 +2,6 @@
 //!
 //! This module contains components for displaying Git repositories,
 //! issues, pull requests, code snippets, and file browsing.
-
 pub mod file_tree;
 pub mod file_viewer;
 pub mod issue_card;
@@ -14,8 +13,6 @@ pub mod repo_header;
 pub mod repo_tab_nav;
 pub mod snippet_card;
 pub mod status_badge;
-
-// Re-export main component types for convenience
 pub use file_tree::{BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton};
 pub use file_viewer::{CodeFileViewer, CodeFileViewerSkeleton};
 pub use issue_card::CodeIssueRow;

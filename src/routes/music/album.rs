@@ -3,25 +3,16 @@ use crate::routes::Route;
 use crate::services::wavlake::{get_album, WavlakeAlbum};
 use crate::stores::music_player::{self, MusicTrack};
 use dioxus::prelude::*;
-
 #[component]
 pub fn MusicAlbum(album_id: String) -> Element {
     let mut album_state = use_signal(|| None::<WavlakeAlbum>);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
-
-    // Store album_id in a signal so we can track changes
     let album_id_signal = use_signal(|| album_id.clone());
-
-    // Fetch album data - only runs when album_id_signal changes
     use_effect(move || {
-        // Read the signal to create a reactive dependency
         let id = album_id_signal.read().clone();
-
-        // Set loading true before spawning
         loading.set(true);
         error_msg.set(None);
-
         spawn(async move {
             match get_album(&id).await {
                 Ok(album_data) => {
@@ -35,46 +26,34 @@ pub fn MusicAlbum(album_id: String) -> Element {
             }
         });
     });
-
-    // Memoize track conversion to avoid reallocation on every render
     let tracks = use_memo(move || {
         album_state()
             .map(|a| {
-                a.tracks
-                    .iter()
-                    .map(|t| t.clone().into())
-                    .collect::<Vec<MusicTrack>>()
+                a.tracks.iter().map(|t| t.clone().into()).collect::<Vec<MusicTrack>>()
             })
             .unwrap_or_default()
     });
-
     let play_track = move |track: MusicTrack, playlist: Vec<MusicTrack>, index: usize| {
         music_player::play_track(track, Some(playlist), Some(index));
     };
-
     let play_album = move |tracks: Vec<MusicTrack>| {
         if let Some(first_track) = tracks.first().cloned() {
             music_player::play_track(first_track, Some(tracks), Some(0));
         }
     };
-
     let format_duration = |seconds: u32| -> String {
         let mins = seconds / 60;
         let secs = seconds % 60;
         format!("{}:{:02}", mins, secs)
     };
-
     rsx! {
         div { class: "container mx-auto px-4 py-8",
-            // Back button
             Link {
                 to: Route::MusicHome {},
                 class: "inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition-colors",
                 ArrowLeftIcon { class: "w-4 h-4" }
                 "Back to Music Discovery"
             }
-
-            // Loading state
             if loading() {
                 div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                     div { class: "flex items-center gap-6",
@@ -87,8 +66,6 @@ pub fn MusicAlbum(album_id: String) -> Element {
                     }
                 }
             }
-
-            // Error state
             if let Some(err) = error_msg() {
                 div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-8 text-center",
                     MusicIcon { class: "w-12 h-12 text-gray-400 mx-auto mb-4" }
@@ -96,25 +73,20 @@ pub fn MusicAlbum(album_id: String) -> Element {
                     p { class: "text-gray-400", "{err}" }
                 }
             }
-
-            // Album content
             if let Some(album) = album_state() {
                 {
-                    // Use memoized tracks to avoid reallocation on every render
                     let tracks = tracks();
                     rsx! {
                         div { class: "space-y-6",
-                            // Album Header
                             div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                                 div { class: "flex items-start gap-6",
-                                    // Album art
                                     div { class: "w-48 h-48 bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden shrink-0",
                                         if let Some(art_url) = &album.album_art_url {
                                             if !art_url.is_empty() {
                                                 img {
                                                     src: "{art_url}",
                                                     alt: "{album.title}",
-                                                    class: "w-full h-full object-cover"
+                                                    class: "w-full h-full object-cover",
                                                 }
                                             } else {
                                                 MusicIcon { class: "w-24 h-24 text-gray-400" }
@@ -123,7 +95,6 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                             MusicIcon { class: "w-24 h-24 text-gray-400" }
                                         }
                                     }
-
                                     div { class: "flex-1 space-y-4",
                                         div {
                                             span { class: "inline-block px-2 py-1 rounded border border-gray-600 text-xs text-gray-400 mb-2",
@@ -134,7 +105,9 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                 "by "
                                                 if let Some(first_track) = album.tracks.first() {
                                                     Link {
-                                                        to: Route::MusicArtist { artist_id: first_track.artist_id.clone() },
+                                                        to: Route::MusicArtist {
+                                                            artist_id: first_track.artist_id.clone(),
+                                                        },
                                                         class: "hover:text-white transition-colors underline",
                                                         "{album.artist}"
                                                     }
@@ -143,18 +116,28 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                 }
                                             }
                                         }
-
                                         div { class: "flex items-center gap-4 text-sm text-gray-400",
                                             span { class: "flex items-center gap-1",
                                                 CalendarIcon { class: "w-3 h-3" }
                                                 {
-                                                    album.release_date.split('T').next().unwrap_or("Unknown").split('-').next().unwrap_or("Unknown")
+                                                    album
+                                                        .release_date
+                                                        .split('T')
+                                                        .next()
+                                                        .unwrap_or("Unknown")
+                                                        .split('-')
+                                                        .next()
+                                                        .unwrap_or("Unknown")
                                                 }
                                             }
                                             span { class: "flex items-center gap-1",
                                                 MusicIcon { class: "w-3 h-3" }
                                                 "{album.tracks.len()} "
-                                                if album.tracks.len() == 1 { "track" } else { "tracks" }
+                                                if album.tracks.len() == 1 {
+                                                    "track"
+                                                } else {
+                                                    "tracks"
+                                                }
                                             }
                                             span { class: "flex items-center gap-1",
                                                 ClockIcon { class: "w-3 h-3" }
@@ -165,7 +148,6 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                 }
                                             }
                                         }
-
                                         div { class: "flex items-center gap-4",
                                             button {
                                                 class: "px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-white transition-colors inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed",
@@ -177,7 +159,6 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                 PlayIcon { class: "w-4 h-4" }
                                                 "Play Album"
                                             }
-
                                             if let Some(first_track) = tracks.first() {
                                                 {
                                                     let zap_track = first_track.clone();
@@ -196,14 +177,11 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                 }
                             }
                         }
-
-                        // Track List
                         div { class: "bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-6",
                             div { class: "flex items-center gap-2 mb-4",
                                 MusicIcon { class: "w-5 h-5 text-purple-400" }
                                 h2 { class: "text-xl font-bold text-white", "Tracks" }
                             }
-
                             if album.tracks.is_empty() {
                                 div { class: "text-center py-8",
                                     MusicIcon { class: "w-12 h-12 text-gray-400 mx-auto mb-4" }
@@ -222,45 +200,28 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                     onclick: move |_| {
                                                         play_track(track_clone.clone(), playlist_clone.clone(), index);
                                                     },
-
-                                                    // Track number with play icon on hover
                                                     div { class: "w-8 h-8 flex items-center justify-center text-sm font-medium text-gray-400",
                                                         span { class: "group-hover:hidden", "{index + 1}" }
                                                         div { class: "hidden group-hover:block",
                                                             PlayIcon { class: "w-4 h-4" }
                                                         }
                                                     }
-
-                                                    // Album art thumbnail
                                                     div { class: "w-12 h-12 bg-gray-700 rounded flex items-center justify-center overflow-hidden shrink-0",
                                                         if let Some(art_url) = &track.album_art_url {
                                                             img {
                                                                 src: "{art_url}",
                                                                 alt: "{track.title}",
-                                                                class: "w-full h-full object-cover"
+                                                                class: "w-full h-full object-cover",
                                                             }
                                                         } else {
                                                             MusicIcon { class: "w-6 h-6 text-gray-400" }
                                                         }
                                                     }
-
-                                                    // Track info
                                                     div { class: "flex-1 min-w-0",
-                                                        div {
-                                                            class: "font-medium text-white truncate hover:underline",
-                                                            "{track.title}"
-                                                        }
-                                                        p { class: "text-sm text-gray-400 truncate",
-                                                            "{track.artist}"
-                                                        }
+                                                        div { class: "font-medium text-white truncate hover:underline", "{track.title}" }
+                                                        p { class: "text-sm text-gray-400 truncate", "{track.artist}" }
                                                     }
-
-                                                    // Duration
-                                                    div { class: "text-sm text-gray-400",
-                                                        {track.duration.map(&format_duration).unwrap_or_default()}
-                                                    }
-
-                                                    // Zap button
+                                                    div { class: "text-sm text-gray-400", {track.duration.map(&format_duration).unwrap_or_default()} }
                                                     {
                                                         let zap_track = track.clone();
                                                         rsx! {

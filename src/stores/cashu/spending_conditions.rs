@@ -5,16 +5,8 @@
 //!
 //! SIG_ALL ensures that a signature commits to ALL inputs AND outputs in a transaction,
 //! providing atomicity guarantees for complex spending scenarios.
-
-// Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
-
-// =============================================================================
-// Signature Flag Types
-// =============================================================================
-
 /// Signature flag for spending conditions (NUT-11)
 ///
 /// Determines how signatures are verified:
@@ -29,13 +21,11 @@ pub enum SigFlag {
     /// SIG_ALL: Signature must cover ALL inputs AND ALL outputs
     SigAll,
 }
-
 impl SigFlag {
     /// Check if this is SIG_ALL mode
     pub fn is_sig_all(&self) -> bool {
         matches!(self, SigFlag::SigAll)
     }
-
     /// Parse from string
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
@@ -45,11 +35,6 @@ impl SigFlag {
         }
     }
 }
-
-// =============================================================================
-// Extended Conditions
-// =============================================================================
-
 /// Extended conditions for P2PK/HTLC spending (NUT-11)
 ///
 /// This extends CDK's SpendingConditions with explicit tracking of:
@@ -78,7 +63,6 @@ pub struct ExtendedConditions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub num_sigs_refund: Option<u64>,
 }
-
 impl ExtendedConditions {
     /// Create conditions with SIG_ALL flag
     pub fn with_sig_all(pubkey: String) -> Self {
@@ -88,7 +72,6 @@ impl ExtendedConditions {
             ..Default::default()
         }
     }
-
     /// Create multisig conditions with SIG_ALL
     pub fn multisig_sig_all(pubkeys: Vec<String>, required_sigs: u64) -> Self {
         Self {
@@ -98,7 +81,6 @@ impl ExtendedConditions {
             ..Default::default()
         }
     }
-
     /// Check if locktime has passed
     pub fn is_locktime_passed(&self) -> bool {
         if let Some(locktime) = self.locktime {
@@ -108,22 +90,15 @@ impl ExtendedConditions {
             false
         }
     }
-
     /// Get the required number of signatures
     pub fn required_sigs(&self) -> u64 {
         self.num_sigs.unwrap_or(1)
     }
-
     /// Get the required number of refund signatures
     pub fn required_refund_sigs(&self) -> u64 {
         self.num_sigs_refund.unwrap_or(1)
     }
 }
-
-// =============================================================================
-// SIG_ALL Message Construction
-// =============================================================================
-
 /// Build the SIG_ALL message to sign for a swap request
 ///
 /// Message format: secret_0 || C_0 || ... || secret_n || C_n || amount_0 || B_0 || ... || amount_m || B_m
@@ -136,22 +111,16 @@ pub fn build_sig_all_message_for_swap(
     output_blinded_messages: &[String],
 ) -> String {
     let mut msg = String::new();
-
-    // Add all inputs (secret || C)
     for (secret, c) in input_secrets.iter().zip(input_c_points.iter()) {
         msg.push_str(secret);
         msg.push_str(c);
     }
-
-    // Add all outputs (amount || B_)
     for (amount, b) in output_amounts.iter().zip(output_blinded_messages.iter()) {
         msg.push_str(&amount.to_string());
         msg.push_str(b);
     }
-
     msg
 }
-
 /// Build the SIG_ALL message to sign for a melt request
 ///
 /// Message format: secret_0 || C_0 || ... || secret_n || C_n || amount_0 || B_0 || ... || quote_id
@@ -165,31 +134,19 @@ pub fn build_sig_all_message_for_melt(
     quote_id: &str,
 ) -> String {
     let mut msg = String::new();
-
-    // Add all inputs (secret || C)
     for (secret, c) in input_secrets.iter().zip(input_c_points.iter()) {
         msg.push_str(secret);
         msg.push_str(c);
     }
-
-    // Add outputs if present
     if let (Some(amounts), Some(blinds)) = (output_amounts, output_blinded_messages) {
         for (amount, b) in amounts.iter().zip(blinds.iter()) {
             msg.push_str(&amount.to_string());
             msg.push_str(b);
         }
     }
-
-    // Add quote ID
     msg.push_str(quote_id);
-
     msg
 }
-
-// =============================================================================
-// SIG_ALL Signing
-// =============================================================================
-
 /// Sign a SIG_ALL message with a secret key
 ///
 /// Returns the hex-encoded Schnorr signature.
@@ -200,10 +157,8 @@ pub fn sign_sig_all_message(
     let signature = secret_key
         .sign(message.as_bytes())
         .map_err(|e| format!("Failed to sign: {}", e))?;
-
     Ok(signature.to_string())
 }
-
 /// Sign multiple times for multisig SIG_ALL
 ///
 /// Returns a vector of hex-encoded signatures.
@@ -212,19 +167,12 @@ pub fn sign_sig_all_multisig(
     secret_keys: &[cdk::nuts::SecretKey],
 ) -> Result<Vec<String>, String> {
     let mut signatures = Vec::new();
-
     for key in secret_keys {
         let sig = sign_sig_all_message(message, key)?;
         signatures.push(sig);
     }
-
     Ok(signatures)
 }
-
-// =============================================================================
-// SIG_ALL Verification
-// =============================================================================
-
 /// Verify a SIG_ALL signature against a message and public keys
 ///
 /// Returns the number of valid signatures found.
@@ -234,31 +182,18 @@ pub fn verify_sig_all_signatures(
     signatures: &[String],
 ) -> Result<u64, String> {
     use std::collections::HashSet;
-
     let mut verified_pubkeys: HashSet<String> = HashSet::new();
-
     for pubkey in pubkeys {
         for sig_str in signatures {
-            // Parse signature using CDK's type (wraps secp256k1)
-            // CDK's verify method handles signature parsing internally
-            // For now, we track valid pubkeys based on signature presence
-            // Full verification happens at the mint level via CDK
             let pk_str = pubkey.to_hex();
-
-            // In a real implementation, we would verify the signature here
-            // But CDK handles this during the swap/melt process
-            // This is primarily for pre-validation and tracking
             if !sig_str.is_empty() && !verified_pubkeys.contains(&pk_str) {
-                // Mark as potentially verified - actual verification at mint
                 verified_pubkeys.insert(pk_str);
-                break; // Move to next pubkey
+                break;
             }
         }
     }
-
     Ok(verified_pubkeys.len() as u64)
 }
-
 /// Check if all inputs in a request have matching SIG_ALL conditions
 ///
 /// For SIG_ALL to be valid, all inputs must have:
@@ -272,11 +207,7 @@ pub fn verify_inputs_match_for_sig_all(
     if secrets.is_empty() {
         return Err("No inputs provided".to_string());
     }
-
-    // Get first input's conditions
     let first_conditions = conditions.first().ok_or("No conditions for first input")?;
-
-    // Verify first input has SIG_ALL
     if let Some(cond) = first_conditions {
         if !cond.sig_flag.is_sig_all() {
             return Err("First input does not have SIG_ALL flag".to_string());
@@ -284,38 +215,26 @@ pub fn verify_inputs_match_for_sig_all(
     } else {
         return Err("First input has no conditions".to_string());
     }
-
-    // Verify all other inputs match
     for (i, cond) in conditions.iter().enumerate().skip(1) {
         match (first_conditions, cond) {
             (Some(first), Some(current)) => {
-                // Check sig_flag matches
                 if first.sig_flag != current.sig_flag {
                     return Err(format!("Input {} has different sig_flag", i));
                 }
-
-                // Check pubkeys match
                 if first.pubkeys != current.pubkeys {
                     return Err(format!("Input {} has different pubkeys", i));
                 }
-
-                // Check num_sigs matches
                 if first.num_sigs != current.num_sigs {
                     return Err(format!("Input {} has different num_sigs", i));
                 }
-
-                // Check locktime matches
                 if first.locktime != current.locktime {
                     return Err(format!("Input {} has different locktime", i));
                 }
-
-                // Check refund_keys match
                 if first.refund_keys != current.refund_keys {
                     return Err(format!("Input {} has different refund_keys", i));
                 }
             }
             (None, None) => {
-                // Both have no conditions - this shouldn't happen for SIG_ALL
                 return Err(format!("Input {} has no conditions", i));
             }
             _ => {
@@ -323,88 +242,68 @@ pub fn verify_inputs_match_for_sig_all(
             }
         }
     }
-
     Ok(())
 }
-
-// =============================================================================
-// CDK Integration Helpers
-// =============================================================================
-
 /// Convert CDK SpendingConditions to our ExtendedConditions for SIG_ALL analysis
 pub fn extract_conditions_from_cdk(
     conditions: &cdk::nuts::SpendingConditions,
 ) -> Option<ExtendedConditions> {
     use cdk::nuts::SpendingConditions;
-
     match conditions {
         SpendingConditions::P2PKConditions { data, conditions } => {
             let mut ext = ExtendedConditions {
                 pubkeys: Some(vec![data.to_hex()]),
                 ..Default::default()
             };
-
-            // Additional conditions from inner conditions struct
             if let Some(cond) = conditions {
                 ext.locktime = cond.locktime;
-
                 if let Some(additional_pks) = &cond.pubkeys {
                     let mut pks: Vec<String> = ext.pubkeys.take().unwrap_or_default();
                     pks.extend(additional_pks.iter().map(|pk| pk.to_hex()));
                     ext.pubkeys = Some(pks);
                 }
-
                 if let Some(refund_keys) = &cond.refund_keys {
-                    ext.refund_keys = Some(refund_keys.iter().map(|pk| pk.to_hex()).collect());
+                    ext.refund_keys = Some(
+                        refund_keys.iter().map(|pk| pk.to_hex()).collect(),
+                    );
                 }
-
                 ext.num_sigs = cond.num_sigs;
                 ext.num_sigs_refund = cond.num_sigs_refund;
-
-                // Map CDK SigFlag to our SigFlag
                 ext.sig_flag = match cond.sig_flag {
                     cdk::nuts::SigFlag::SigInputs => SigFlag::SigInputs,
                     cdk::nuts::SigFlag::SigAll => SigFlag::SigAll,
                 };
             }
-
             Some(ext)
         }
-        SpendingConditions::HTLCConditions {
-            data: _,
-            conditions,
-        } => {
+        SpendingConditions::HTLCConditions { data: _, conditions } => {
             let mut ext = ExtendedConditions::default();
-
             if let Some(cond) = conditions {
                 ext.locktime = cond.locktime;
-
                 if let Some(pubkeys) = &cond.pubkeys {
                     ext.pubkeys = Some(pubkeys.iter().map(|pk| pk.to_hex()).collect());
                 }
-
                 if let Some(refund_keys) = &cond.refund_keys {
-                    ext.refund_keys = Some(refund_keys.iter().map(|pk| pk.to_hex()).collect());
+                    ext.refund_keys = Some(
+                        refund_keys.iter().map(|pk| pk.to_hex()).collect(),
+                    );
                 }
-
                 ext.num_sigs = cond.num_sigs;
                 ext.num_sigs_refund = cond.num_sigs_refund;
-
                 ext.sig_flag = match cond.sig_flag {
                     cdk::nuts::SigFlag::SigInputs => SigFlag::SigInputs,
                     cdk::nuts::SigFlag::SigAll => SigFlag::SigAll,
                 };
             }
-
             Some(ext)
         }
     }
 }
-
 /// Create CDK SpendingConditions with SIG_ALL flag
-pub fn create_p2pk_sig_all(pubkey: cdk::nuts::PublicKey) -> cdk::nuts::SpendingConditions {
+pub fn create_p2pk_sig_all(
+    pubkey: cdk::nuts::PublicKey,
+) -> cdk::nuts::SpendingConditions {
     use cdk::nuts::{Conditions, SpendingConditions};
-
     SpendingConditions::P2PKConditions {
         data: pubkey,
         conditions: Some(Conditions {
@@ -417,7 +316,6 @@ pub fn create_p2pk_sig_all(pubkey: cdk::nuts::PublicKey) -> cdk::nuts::SpendingC
         }),
     }
 }
-
 /// Create CDK multisig SpendingConditions with SIG_ALL flag
 pub fn create_multisig_sig_all(
     primary_pubkey: cdk::nuts::PublicKey,
@@ -425,7 +323,6 @@ pub fn create_multisig_sig_all(
     required_sigs: u64,
 ) -> cdk::nuts::SpendingConditions {
     use cdk::nuts::{Conditions, SpendingConditions};
-
     SpendingConditions::P2PKConditions {
         data: primary_pubkey,
         conditions: Some(Conditions {
@@ -442,22 +339,15 @@ pub fn create_multisig_sig_all(
         }),
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_sig_flag_default() {
         let flag = SigFlag::default();
         assert_eq!(flag, SigFlag::SigInputs);
         assert!(!flag.is_sig_all());
     }
-
     #[test]
     fn test_sig_flag_from_str() {
         assert_eq!(SigFlag::from_str("SIG_ALL"), Some(SigFlag::SigAll));
@@ -465,46 +355,42 @@ mod tests {
         assert_eq!(SigFlag::from_str("sig_all"), Some(SigFlag::SigAll));
         assert_eq!(SigFlag::from_str("invalid"), None);
     }
-
     #[test]
     fn test_build_sig_all_message_swap() {
         let secrets = vec!["secret1".to_string(), "secret2".to_string()];
         let c_points = vec!["C1".to_string(), "C2".to_string()];
         let amounts = vec![100u64, 50u64];
         let blinds = vec!["B1".to_string(), "B2".to_string()];
-
         let msg = build_sig_all_message_for_swap(&secrets, &c_points, &amounts, &blinds);
-
         assert_eq!(msg, "secret1C1secret2C2100B150B2");
     }
-
     #[test]
     fn test_build_sig_all_message_melt() {
         let secrets = vec!["secret1".to_string()];
         let c_points = vec!["C1".to_string()];
         let quote_id = "quote123";
-
-        let msg = build_sig_all_message_for_melt(&secrets, &c_points, None, None, quote_id);
-
+        let msg = build_sig_all_message_for_melt(
+            &secrets,
+            &c_points,
+            None,
+            None,
+            quote_id,
+        );
         assert_eq!(msg, "secret1C1quote123");
     }
-
     #[test]
     fn test_extended_conditions_sig_all() {
         let cond = ExtendedConditions::with_sig_all("pubkey123".to_string());
-
         assert!(cond.sig_flag.is_sig_all());
         assert_eq!(cond.required_sigs(), 1);
         assert_eq!(cond.pubkeys.as_ref().unwrap()[0], "pubkey123");
     }
-
     #[test]
     fn test_extended_conditions_multisig() {
         let cond = ExtendedConditions::multisig_sig_all(
             vec!["pk1".to_string(), "pk2".to_string(), "pk3".to_string()],
             2,
         );
-
         assert!(cond.sig_flag.is_sig_all());
         assert_eq!(cond.required_sigs(), 2);
         assert_eq!(cond.pubkeys.as_ref().unwrap().len(), 3);

@@ -5,12 +5,10 @@ use nostr_sdk::prelude::*;
 use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
-
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
 };
 use crate::utils::is_valid_http_url;
-
 /// Groups autocomplete-related signals to reduce parameter count in helper functions
 #[derive(Clone, Copy)]
 struct AutocompleteState {
@@ -22,7 +20,6 @@ struct AutocompleteState {
     is_searching: Signal<bool>,
     relay_search_task: Signal<Option<Task>>,
 }
-
 #[derive(Props, Clone, PartialEq)]
 pub struct MentionAutocompleteProps {
     /// Current content of the textarea
@@ -36,7 +33,11 @@ pub struct MentionAutocompleteProps {
     #[props(default = 2)]
     pub rows: u32,
     /// Additional CSS classes for the textarea
-    #[props(default = "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring resize-none".to_string())]
+    #[props(
+        default = "w-full p-3 text-lg bg-transparent border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring resize-none".to_string(
+
+        )
+    )]
     pub class: String,
     /// Whether the textarea is disabled
     #[props(default = false)]
@@ -51,10 +52,8 @@ pub struct MentionAutocompleteProps {
     #[props(optional)]
     pub cursor_position: Option<Signal<usize>>,
 }
-
 #[component]
 pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
-    // Group autocomplete signals into a single struct
     let mut autocomplete = AutocompleteState {
         show: use_signal(|| false),
         query: use_signal(String::new),
@@ -64,27 +63,21 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
         is_searching: use_signal(|| false),
         relay_search_task: use_signal(|| None::<Task>),
     };
-
-    // Dropdown positioning
     let mut dropdown_top = use_signal(|| 0.0);
     let mut dropdown_left = use_signal(|| 0.0);
     let mut show_below = use_signal(|| true);
-    #[allow(unused_mut)] // Mutated only in WASM target
+    #[allow(unused_mut)]
     let mut is_mobile = use_signal(|| false);
-
-    let textarea_id = use_signal(|| Rc::new(format!("mention-textarea-{}", uuid::Uuid::new_v4())));
-
-    // Contact list cache
+    let textarea_id = use_signal(|| Rc::new(
+        format!("mention-textarea-{}", uuid::Uuid::new_v4()),
+    ));
     let mut contact_pubkeys = use_signal(Vec::<PublicKey>::new);
-
-    // Fetch contacts on mount
     use_effect(move || {
         spawn(async move {
             let contacts = get_contact_pubkeys().await;
             contact_pubkeys.set(contacts);
         });
     });
-
     let handle_input = move |evt: DioxusEvent<FormData>| {
         let new_value = evt.value().clone();
         let cursor_pos = get_cursor_position(&textarea_id.read());
@@ -92,11 +85,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
             let cursor_utf8 = utf16_to_utf8_index(&new_value, cursor_pos);
             signal.set(cursor_utf8);
         }
-
-        // Update content
         props.on_input.call(new_value.clone());
-
-        // Detect @ mentions
         detect_mention(
             &new_value,
             cursor_pos,
@@ -104,8 +93,6 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
             contact_pubkeys,
             &props.thread_participants,
         );
-
-        // Update dropdown position if showing
         if *autocomplete.show.read() {
             update_dropdown_position(
                 &textarea_id.read(),
@@ -116,15 +103,12 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
             );
         }
     };
-
     let handle_keydown = move |evt: DioxusEvent<KeyboardData>| {
         if !*autocomplete.show.read() {
             return;
         }
-
         let key = evt.key();
         let results = autocomplete.results.read();
-
         match key {
             Key::ArrowDown => {
                 evt.prevent_default();
@@ -133,14 +117,15 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current < max {
                     let new_index = current + 1;
                     autocomplete.selected_index.set(new_index);
-                    // Auto-scroll selected item into view
                     #[cfg(target_family = "wasm")]
                     {
                         use dioxus::document;
-                        let _ = document::eval(&format!(
-                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                            new_index
-                        ));
+                        let _ = document::eval(
+                            &format!(
+                                r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                                new_index,
+                            ),
+                        );
                     }
                 }
             }
@@ -150,14 +135,15 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current > 0 {
                     let new_index = current - 1;
                     autocomplete.selected_index.set(new_index);
-                    // Auto-scroll selected item into view
                     #[cfg(target_family = "wasm")]
                     {
                         use dioxus::document;
-                        let _ = document::eval(&format!(
-                            r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
-                            new_index
-                        ));
+                        let _ = document::eval(
+                            &format!(
+                                r#"document.getElementById('mention-option-{}')?.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }})"#,
+                                new_index,
+                            ),
+                        );
                     }
                 }
             }
@@ -185,14 +171,11 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
             _ => {}
         }
     };
-
     let handle_focus = move |_| {
         if let Some(handler) = &props.onfocus {
             handler.call(());
         }
     };
-
-    // Shared helper to update cursor position from DOM
     let sync_cursor_position = move || {
         let cursor_pos = get_cursor_position(&textarea_id.read());
         if let Some(mut signal) = props.cursor_position {
@@ -201,20 +184,14 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
             signal.set(cursor_utf8);
         }
     };
-
     let handle_keyup = move |_| {
         sync_cursor_position();
     };
-
     let handle_click = move |_| {
         sync_cursor_position();
     };
-
     rsx! {
-        div {
-            class: "relative w-full",
-
-            // Textarea
+        div { class: "relative w-full",
             textarea {
                 id: "{textarea_id}",
                 class: "{props.class}",
@@ -228,30 +205,29 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 onclick: handle_click,
                 onfocus: handle_focus,
             }
-
-            // Autocomplete dropdown
             if *autocomplete.show.read() {
-                {render_dropdown(
-                    &autocomplete.results.read(),
-                    *autocomplete.selected_index.read(),
-                    *autocomplete.is_searching.read(),
-                    *dropdown_top.read(),
-                    *dropdown_left.read(),
-                    *show_below.read(),
-                    *is_mobile.read(),
-                    props.content,
-                    props.on_input,
-                    *autocomplete.start_pos.read(),
-                    autocomplete.query.read().len(),
-                    (**textarea_id.read()).clone(),
-                    autocomplete.show,
-                    props.cursor_position,
-                )}
+                {
+                    render_dropdown(
+                        &autocomplete.results.read(),
+                        *autocomplete.selected_index.read(),
+                        *autocomplete.is_searching.read(),
+                        *dropdown_top.read(),
+                        *dropdown_left.read(),
+                        *show_below.read(),
+                        *is_mobile.read(),
+                        props.content,
+                        props.on_input,
+                        *autocomplete.start_pos.read(),
+                        autocomplete.query.read().len(),
+                        (**textarea_id.read()).clone(),
+                        autocomplete.show,
+                        props.cursor_position,
+                    )
+                }
             }
         }
     }
 }
-
 /// Detect @ mention in text at cursor position
 fn detect_mention(
     text: &str,
@@ -260,60 +236,42 @@ fn detect_mention(
     contact_pubkeys: Signal<Vec<PublicKey>>,
     thread_pubkeys: &[PublicKey],
 ) {
-    // Convert UTF-16 cursor position (from DOM) to UTF-8 byte index
     let cursor_byte_index = utf16_to_utf8_index(text, cursor_pos);
-
-    // Get text before cursor
     let before_cursor = &text[..cursor_byte_index];
-
-    // Find the last @ symbol before cursor
     if let Some(at_pos) = before_cursor.rfind('@') {
         let after_at = &before_cursor[at_pos + 1..];
-
-        // Check if there's whitespace after @ (if so, don't show autocomplete)
         if after_at.contains(char::is_whitespace) {
             state.show.set(false);
             return;
         }
-
-        // Valid mention query
         let query = after_at.to_string();
         state.query.set(query.clone());
         state.start_pos.set(at_pos);
         state.show.set(true);
         state.selected_index.set(0);
-
-        // Search cached profiles immediately (no debounce for instant results)
         let contacts = contact_pubkeys.read().clone();
-        let cached_results = search_cached_profiles(&query, 10, &contacts, thread_pubkeys);
+        let cached_results = search_cached_profiles(
+            &query,
+            10,
+            &contacts,
+            thread_pubkeys,
+        );
         state.results.set(cached_results.clone());
-
         log::debug!(
             "Autocomplete search for '{}': found {} results ({} thread participants)",
-            query,
-            cached_results.len(),
-            thread_pubkeys.len()
+            query, cached_results.len(), thread_pubkeys.len()
         );
-
-        // Only query relays if we don't have enough results and query is long enough
         if query.len() >= 3 && cached_results.len() < 5 {
             state.is_searching.set(true);
-
-            // Cancel previous relay search task if any
             if let Some(task) = state.relay_search_task.read().as_ref() {
                 task.cancel();
             }
-
-            // Capture query for stale result verification
             let query_snapshot = query.clone();
             let query_signal = state.query;
             let mut results_signal = state.results;
             let mut searching_signal = state.is_searching;
             let mut task_signal = state.relay_search_task;
-
-            // Start new relay search task with debounce
             let new_task = spawn(async move {
-                // Debounce: wait 300ms
                 #[cfg(target_family = "wasm")]
                 {
                     gloo_timers::future::TimeoutFuture::new(300).await;
@@ -323,43 +281,35 @@ fn detect_mention(
                     use std::time::Duration;
                     tokio::time::sleep(Duration::from_millis(300)).await;
                 }
-
-                // Perform relay search
-                let query_relays = query_snapshot.len() >= 3; // Only query relays for 3+ chars
+                let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {
-                        // Only update results if query hasn't changed (avoid stale results)
                         if query_signal.read().as_str() == query_snapshot.as_str() {
                             results_signal.set(results);
                             searching_signal.set(false);
                         } else {
                             log::debug!(
                                 "Ignoring stale search results for '{}' (current query: '{}')",
-                                query_snapshot,
-                                query_signal.read()
+                                query_snapshot, query_signal.read()
                             );
                         }
                     }
                     Err(e) => {
                         log::error!("Profile search failed: {}", e);
-                        // Only clear searching state if query hasn't changed
                         if query_signal.read().as_str() == query_snapshot.as_str() {
                             searching_signal.set(false);
                         }
                     }
                 }
             });
-
             task_signal.set(Some(new_task));
         } else {
             state.is_searching.set(false);
         }
     } else {
-        // No @ found before cursor
         state.show.set(false);
     }
 }
-
 /// Insert a mention into the textarea
 #[allow(clippy::too_many_arguments)]
 fn insert_mention(
@@ -368,24 +318,21 @@ fn insert_mention(
     on_input: EventHandler<String>,
     mention_start_pos: usize,
     query_len: usize,
-    #[allow(unused_variables)] textarea_id: String,
+    #[allow(unused_variables)]
+    textarea_id: String,
     mut show_autocomplete: Signal<bool>,
     external_cursor_position: Option<Signal<usize>>,
 ) {
     spawn(async move {
-        // Include popular relay hints for better cross-client compatibility
-        // Even with gossip-enabled clients, hints help other clients discover profiles
         let relay_hints: Vec<nostr_sdk::RelayUrl> = [
             "wss://relay.damus.io",
             "wss://nos.lol",
             "wss://relay.snort.social",
         ]
-        .iter()
-        .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
-        .collect();
+            .iter()
+            .filter_map(|r| nostr_sdk::RelayUrl::parse(r).ok())
+            .collect();
         let nprofile = nips::nip19::Nip19Profile::new(profile.pubkey, relay_hints);
-
-        // Encode to bech32
         let mention = match nprofile.to_bech32() {
             Ok(bech32) => format!("nostr:{}", bech32),
             Err(e) => {
@@ -393,68 +340,52 @@ fn insert_mention(
                 return;
             }
         };
-
-        // Calculate positions
         let current_content = content.read().to_string();
-
-        // Bounds check - content may have changed since autocomplete was triggered
-        // Also validate UTF-8 char boundary to prevent panic on multi-byte characters
         if mention_start_pos > current_content.len()
             || !current_content.is_char_boundary(mention_start_pos)
         {
             log::warn!(
                 "Mention start position {} is invalid for content of length {}",
-                mention_start_pos,
-                current_content.len()
+                mention_start_pos, current_content.len()
             );
             show_autocomplete.set(false);
             return;
         }
-
-        let query_end_pos = mention_start_pos + query_len + 1; // +1 for the @ symbol
+        let query_end_pos = mention_start_pos + query_len + 1;
         let safe_query_end = query_end_pos.min(current_content.len());
-
-        // Ensure query_end_pos is also at a valid char boundary
         let safe_query_end = if current_content.is_char_boundary(safe_query_end) {
             safe_query_end
         } else {
-            // Find next valid boundary
             (safe_query_end..=current_content.len())
                 .find(|&i| current_content.is_char_boundary(i))
                 .unwrap_or(current_content.len())
         };
-
-        // Build new content
         let before = &current_content[..mention_start_pos];
         let after = &current_content[safe_query_end..];
         let new_content = format!("{}{} {}", before, mention, after);
-
-        // Calculate new cursor position (UTF-8 byte index)
-        let new_cursor_byte_pos = before.len() + mention.len() + 1; // +1 for space
-
-        // Update content
+        let new_cursor_byte_pos = before.len() + mention.len() + 1;
         on_input.call(new_content.clone());
-
-        // Hide autocomplete
         show_autocomplete.set(false);
-
-        // Update external cursor position signal if provided
         if let Some(mut signal) = external_cursor_position {
             signal.set(new_cursor_byte_pos);
         }
-
-        // Restore focus and cursor position in DOM
         #[cfg(target_family = "wasm")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&textarea_id) {
-                        if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                            // Convert to UTF-16 code unit index for DOM
-                            let new_cursor_utf16_pos =
-                                utf8_to_utf16_index(&new_content, new_cursor_byte_pos) as u32;
+                        if let Ok(textarea) = element
+                            .dyn_into::<web_sys::HtmlTextAreaElement>()
+                        {
+                            let new_cursor_utf16_pos = utf8_to_utf16_index(
+                                &new_content,
+                                new_cursor_byte_pos,
+                            ) as u32;
                             let _ = textarea
-                                .set_selection_range(new_cursor_utf16_pos, new_cursor_utf16_pos);
+                                .set_selection_range(
+                                    new_cursor_utf16_pos,
+                                    new_cursor_utf16_pos,
+                                );
                             let _ = textarea.focus();
                         }
                     }
@@ -463,12 +394,10 @@ fn insert_mention(
         }
     });
 }
-
 /// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
 fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
-
     for ch in text.chars() {
         if utf16_count >= utf16_index {
             break;
@@ -476,19 +405,14 @@ fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
         utf16_count += ch.len_utf16();
         utf8_byte_index += ch.len_utf8();
     }
-
-    // Clamp to valid UTF-8 byte boundaries
     utf8_byte_index.min(text.len())
 }
-
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
 #[allow(dead_code)]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
-    // Clamp to valid bounds for consistency with utf16_to_utf8_index
     let utf8_index = utf8_index.min(text.len());
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
-
     for ch in text.chars() {
         if utf8_byte_index >= utf8_index {
             break;
@@ -496,10 +420,8 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
         utf16_count += ch.len_utf16();
         utf8_byte_index += ch.len_utf8();
     }
-
     utf16_count
 }
-
 /// Get cursor position from textarea
 #[allow(unused_variables)]
 fn get_cursor_position(textarea_id: &str) -> usize {
@@ -508,8 +430,11 @@ fn get_cursor_position(textarea_id: &str) -> usize {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {
-                    if let Ok(textarea) = element.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                        return textarea.selection_start().unwrap_or(None).unwrap_or(0) as usize;
+                    if let Ok(textarea) = element
+                        .dyn_into::<web_sys::HtmlTextAreaElement>()
+                    {
+                        return textarea.selection_start().unwrap_or(None).unwrap_or(0)
+                            as usize;
                     }
                 }
             }
@@ -517,7 +442,6 @@ fn get_cursor_position(textarea_id: &str) -> usize {
     }
     0
 }
-
 /// Update dropdown position based on cursor
 #[allow(unused_variables)]
 fn update_dropdown_position(
@@ -533,7 +457,6 @@ fn update_dropdown_position(
             if let Some(document) = window.document() {
                 if let Some(element) = document.get_element_by_id(textarea_id) {
                     let rect = element.get_bounding_client_rect();
-
                     let viewport_width = window
                         .inner_width()
                         .ok()
@@ -544,36 +467,33 @@ fn update_dropdown_position(
                         .ok()
                         .and_then(|h| h.as_f64())
                         .unwrap_or(600.0);
-
-                    // Mobile breakpoint (sm = 640px)
                     let is_mobile_view = viewport_width < 640.0;
                     is_mobile.set(is_mobile_view);
-
                     let bottom_space = viewport_height - rect.bottom();
                     let top_space = rect.top();
-
-                    // Show below if there's enough space (300px for dropdown, less on mobile)
                     let dropdown_height = if is_mobile_view { 200.0 } else { 300.0 };
                     if bottom_space >= dropdown_height {
                         show_below.set(true);
-                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top
+                            .set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     } else if top_space >= dropdown_height {
                         show_below.set(false);
                         dropdown_top
-                            .set(rect.top() + window.scroll_y().unwrap_or(0.0) - dropdown_height);
+                            .set(
+                                rect.top() + window.scroll_y().unwrap_or(0.0)
+                                    - dropdown_height,
+                            );
                     } else {
-                        // Default to below
                         show_below.set(true);
-                        dropdown_top.set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
+                        dropdown_top
+                            .set(rect.bottom() + window.scroll_y().unwrap_or(0.0));
                     }
-
                     dropdown_left.set(rect.left() + window.scroll_x().unwrap_or(0.0));
                 }
             }
         }
     }
 }
-
 /// Render the autocomplete dropdown
 #[allow(clippy::too_many_arguments)]
 fn render_dropdown(
@@ -592,66 +512,43 @@ fn render_dropdown(
     show_autocomplete: Signal<bool>,
     external_cursor_position: Option<Signal<usize>>,
 ) -> Element {
-    // Wrap in Rc for cheap cloning
     let textarea_id_rc = Rc::new(textarea_id);
-
     let result_count = results.len();
-
     rsx! {
         div {
             role: "listbox",
             aria_label: "Profile suggestions",
             class: "fixed bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50",
             class: "w-[calc(100vw-2rem)] sm:w-[300px] max-h-[50vh] sm:max-h-[300px]",
-            style: if is_mobile {
-                format!("top: {}px; left: 1rem; right: 1rem;", top)
-            } else {
-                format!("top: {}px; left: {}px;", top, left)
-            },
-
-            // Result count header
+            style: if is_mobile { format!("top: {}px; left: 1rem; right: 1rem;", top) } else { format!("top: {}px; left: {}px;", top, left) },
             if !is_searching && !results.is_empty() {
                 {
                     let plural = if result_count == 1 { "" } else { "s" };
                     rsx! {
-                        div {
-                            class: "px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-750 border-b border-gray-200 dark:border-gray-700",
+                        div { class: "px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-750 border-b border-gray-200 dark:border-gray-700",
                             "{result_count} profile{plural} found"
                         }
                     }
                 }
             }
-
             if is_searching {
-                div {
-                    class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400",
-                    "Searching..."
-                }
+                div { class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400", "Searching..." }
             } else if results.is_empty() {
-                div {
-                    class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400",
-                    "No profiles found"
-                }
+                div { class: "px-4 py-3 text-sm text-gray-500 dark:text-gray-400", "No profiles found" }
             } else {
-                div {
-                    class: "overflow-y-auto max-h-[calc(50vh-6rem)] sm:max-h-[240px]",
+                div { class: "overflow-y-auto max-h-[calc(50vh-6rem)] sm:max-h-[240px]",
                     for (index , profile) in results.iter().enumerate() {
                         {
                             let profile_clone = profile.clone();
                             let is_selected = index == selected_index;
                             let option_id = format!("mention-option-{}", index);
-
                             rsx! {
                                 button {
                                     key: "{profile.pubkey.to_hex()}",
                                     id: "{option_id}",
                                     role: "option",
                                     aria_selected: if is_selected { "true" } else { "false" },
-                                    class: if is_selected {
-                                        "w-full px-4 py-2 flex items-center gap-3 hover:bg-blue-50 dark:hover:bg-blue-900 bg-blue-50 dark:bg-blue-900 cursor-pointer transition"
-                                    } else {
-                                        "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition"
-                                    },
+                                    class: if is_selected { "w-full px-4 py-2 flex items-center gap-3 hover:bg-blue-50 dark:hover:bg-blue-900 bg-blue-50 dark:bg-blue-900 cursor-pointer transition" } else { "w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition" },
                                     onclick: {
                                         let textarea_id_clone = textarea_id_rc.clone();
                                         move |_| {
@@ -667,56 +564,40 @@ fn render_dropdown(
                                             );
                                         }
                                     },
-
-                                    // Avatar
-                                    div {
-                                        class: "shrink-0",
+                                    div { class: "shrink-0",
                                         if let Some(picture) = &profile.picture {
                                             if is_valid_http_url(picture) {
                                                 img {
                                                     src: "{picture}",
                                                     class: "w-8 h-8 rounded-full",
                                                     alt: "{profile.get_display_name()}",
-                                                    loading: "lazy"
+                                                    loading: "lazy",
                                                 }
                                             } else {
-                                                div {
-                                                    class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-xs font-bold",
+                                                div { class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-xs font-bold",
                                                     {profile.get_display_name().chars().next().unwrap_or('?').to_string()}
                                                 }
                                             }
                                         } else {
-                                            div {
-                                                class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-xs font-bold",
+                                            div { class: "w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-xs font-bold",
                                                 {profile.get_display_name().chars().next().unwrap_or('?').to_string()}
                                             }
                                         }
                                     }
-
-                                    // Profile info
-                                    div {
-                                        class: "flex-1 text-left min-w-0",
-                                        div {
-                                            class: "font-semibold text-sm text-gray-900 dark:text-gray-100 truncate",
+                                    div { class: "flex-1 text-left min-w-0",
+                                        div { class: "font-semibold text-sm text-gray-900 dark:text-gray-100 truncate",
                                             {profile.get_display_name()}
                                         }
                                         if let Some(username) = profile.get_username() {
-                                            div {
-                                                class: "text-xs text-gray-500 dark:text-gray-400 truncate",
-                                                "@{username}"
-                                            }
+                                            div { class: "text-xs text-gray-500 dark:text-gray-400 truncate", "@{username}" }
                                         }
                                     }
-
-                                    // Thread/Contact badge
                                     if profile.is_thread_participant {
-                                        div {
-                                            class: "shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
+                                        div { class: "shrink-0 text-xs px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full",
                                             "Thread"
                                         }
                                     } else if profile.is_contact {
-                                        div {
-                                            class: "shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
+                                        div { class: "shrink-0 text-xs px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full",
                                             "Contact"
                                         }
                                     }
@@ -725,10 +606,7 @@ fn render_dropdown(
                         }
                     }
                 }
-
-                // Keyboard hints footer
-                div {
-                    class: "px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750",
+                div { class: "px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-750",
                     "↑↓ navigate • Enter select • Esc close"
                 }
             }

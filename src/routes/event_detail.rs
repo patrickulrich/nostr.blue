@@ -1,9 +1,7 @@
 //! Event Detail Page
 //!
 //! Display detailed view of a calendar event or live activity
-
 use dioxus::prelude::*;
-
 use crate::components::ClientInitializing;
 use crate::routes::Route;
 use crate::stores::calendar_store::{CalendarEventComment, UnifiedEvent};
@@ -12,10 +10,8 @@ use crate::utils::ics::{download_ics, export_event_to_ics};
 use crate::utils::nip52::{is_online_location, RsvpStatus};
 use crate::utils::nip53::{LiveActivityEvent, RoomPresence};
 use crate::utils::truncate_pubkey;
-
 #[component]
 pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
-    // State
     let mut event = use_signal(|| None::<UnifiedEvent>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
@@ -24,45 +20,32 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut rsvp_count = use_signal(|| 0usize);
     let mut room_presence = use_signal(Vec::<RoomPresence>::new);
     let mut parent_space_url = use_signal(|| None::<String>);
-
-    // Comment state
     let mut comments = use_signal(Vec::<CalendarEventComment>::new);
     let mut comments_loading = use_signal(|| false);
     let mut comment_input = use_signal(String::new);
     let mut comment_posting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
-
-    // Determine back route based on where we came from
     let back_route = match from.as_deref() {
         Some("events") => Route::Events {},
-        _ => Route::Calendar {}, // Default to calendar
+        _ => Route::Calendar {},
     };
-
-    // Load event on mount
     use_effect(move || {
         let naddr_clone = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         log::info!(
             "[CalendarEventDetail] Effect triggered, client_initialized={}, naddr={}",
-            client_initialized,
-            naddr_clone
+            client_initialized, naddr_clone
         );
-
         if !client_initialized {
             log::info!("[CalendarEventDetail] Client not initialized, waiting...");
             return;
         }
-
         spawn(async move {
             log::info!(
-                "[CalendarEventDetail] Starting fetch for naddr: {}",
-                naddr_clone
+                "[CalendarEventDetail] Starting fetch for naddr: {}", naddr_clone
             );
             loading.set(true);
             error.set(None);
-
-            // Fetch unified event (handles both calendar events and meetings)
             match calendar_store::fetch_unified_event_by_naddr(&naddr_clone).await {
                 Ok(Some(unified_event)) => {
                     log::info!(
@@ -71,20 +54,16 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     );
                     let coord = unified_event.coordinate().to_string();
                     event.set(Some(unified_event.clone()));
-
-                    // Load RSVPs (only for calendar events)
                     if unified_event.is_calendar_event() {
-                        if let Ok(rsvps) = calendar_store::fetch_event_rsvps(&coord).await {
+                        if let Ok(rsvps) = calendar_store::fetch_event_rsvps(&coord)
+                            .await
+                        {
                             rsvp_count.set(rsvps.len());
                         }
-
-                        // Check user's RSVP
                         if let Some(my_rsvp) = calendar_store::get_my_rsvp(&coord) {
                             rsvp_status.set(Some(my_rsvp.status));
                         }
-
-                        // Fetch comments
-                        comment_error.set(None); // Clear any stale error before fetching
+                        comment_error.set(None);
                         comments_loading.set(true);
                         match calendar_store::fetch_event_comments(&coord).await {
                             Ok(event_comments) => {
@@ -92,48 +71,49 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             }
                             Err(e) => {
                                 log::error!("Failed to fetch comments: {}", e);
-                                comment_error.set(Some("Failed to load comments".to_string()));
+                                comment_error
+                                    .set(Some("Failed to load comments".to_string()));
                             }
                         }
                         comments_loading.set(false);
                     } else {
-                        // For meetings, fetch room presence (users in the last 5 minutes)
-                        if let Ok(presence) = calendar_store::fetch_room_presence(&coord, 300).await
+                        if let Ok(presence) = calendar_store::fetch_room_presence(
+                                &coord,
+                                300,
+                            )
+                            .await
                         {
                             log::info!(
-                                "[CalendarEventDetail] Found {} users present",
-                                presence.len()
+                                "[CalendarEventDetail] Found {} users present", presence
+                                .len()
                             );
                             room_presence.set(presence);
                         }
-
-                        // For MeetingRoom (30313), fetch parent space to get service_url
-                        if let UnifiedEvent::Live(LiveActivityEvent::Meeting(ref meeting)) =
-                            unified_event
-                        {
+                        if let UnifiedEvent::Live(
+                            LiveActivityEvent::Meeting(ref meeting),
+                        ) = unified_event {
                             if let Some(ref space_coord) = meeting.space_coordinate {
                                 log::info!(
                                     "[CalendarEventDetail] Fetching parent space: {}",
                                     space_coord
                                 );
-                                // Convert coordinate to naddr format for fetching (splitn to handle identifiers with colons)
                                 let parts: Vec<&str> = space_coord.splitn(3, ':').collect();
                                 if parts.len() >= 3 {
-                                    // Build naddr from coordinate parts using nostr prelude
                                     use nostr::prelude::*;
                                     if let Ok(pk) = PublicKey::from_hex(parts[1]) {
                                         let coordinate = Coordinate::new(Kind::Custom(30312), pk)
                                             .identifier(parts[2]);
                                         let nip19 = Nip19Coordinate::new(coordinate, vec![]);
                                         if let Ok(naddr_str) = nip19.to_bech32() {
-                                            if let Ok(Some(UnifiedEvent::Live(
-                                                LiveActivityEvent::Space(space),
-                                            ))) = calendar_store::fetch_unified_event_by_naddr(
-                                                &naddr_str,
-                                            )
-                                            .await
+                                            if let Ok(
+                                                Some(UnifiedEvent::Live(LiveActivityEvent::Space(space))),
+                                            ) = calendar_store::fetch_unified_event_by_naddr(&naddr_str)
+                                                .await
                                             {
-                                                log::info!("[CalendarEventDetail] Found parent space service_url: {}", space.service_url);
+                                                log::info!(
+                                                    "[CalendarEventDetail] Found parent space service_url: {}",
+                                                    space.service_url
+                                                );
                                                 parent_space_url.set(Some(space.service_url));
                                             }
                                         }
@@ -155,20 +135,15 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     error.set(Some(e));
                 }
             }
-
             loading.set(false);
         });
     });
-
-    // Handle RSVP
     let handle_rsvp = move |status: RsvpStatus| {
         let Some(evt) = event.read().as_ref().cloned() else {
             return;
         };
-
         spawn(async move {
             rsvp_loading.set(true);
-
             let (coord, author) = match &evt {
                 UnifiedEvent::Calendar(e) => (e.coordinate.clone(), e.pubkey.clone()),
                 UnifiedEvent::Live(_) => {
@@ -176,11 +151,9 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     return;
                 }
             };
-
             match calendar_store::publish_rsvp(&coord, &author, status, "").await {
                 Ok(_) => {
                     rsvp_status.set(Some(status));
-                    // Update count
                     let current = *rsvp_count.read();
                     if rsvp_status.read().is_none() {
                         rsvp_count.set(current + 1);
@@ -190,49 +163,42 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     log::error!("Failed to publish RSVP: {}", e);
                 }
             }
-
             rsvp_loading.set(false);
         });
     };
-
-    // Handle comment submission
     let handle_comment_submit = move |_| {
         let content = comment_input.read().trim().to_string();
         if content.is_empty() {
             return;
         }
-
         let Some(evt) = event.read().as_ref().cloned() else {
             return;
         };
-
         let coord = match &evt {
             UnifiedEvent::Calendar(e) => e.coordinate.clone(),
-            UnifiedEvent::Live(_) => return, // Comments only on calendar events for now
+            UnifiedEvent::Live(_) => return,
         };
-
         spawn(async move {
             comment_posting.set(true);
-            comment_error.set(None); // Clear any previous error
-
+            comment_error.set(None);
             match calendar_store::publish_event_comment(&coord, &content).await {
                 Ok(_) => {
                     comment_input.set(String::new());
-                    // Refresh comments
                     match calendar_store::fetch_event_comments(&coord).await {
                         Ok(event_comments) => {
                             comments.set(event_comments);
                         }
                         Err(e) => {
-                            // Comment posted successfully, but refresh failed
-                            // Optimistically add the new comment to show immediate feedback
-                            log::warn!("Comment posted but failed to refresh comments: {}", e);
-
+                            log::warn!(
+                                "Comment posted but failed to refresh comments: {}", e
+                            );
                             if let Some(my_pubkey) = auth_store::get_pubkey() {
                                 let now = (js_sys::Date::now() / 1000.0) as u64;
-                                // Generate temporary unique ID for stable UI keys until refresh succeeds
-                                let temp_id = format!("temp-{}-{}", now, uuid::Uuid::new_v4());
-                                // Sanitize content to match what fetched comments would have
+                                let temp_id = format!(
+                                    "temp-{}-{}",
+                                    now,
+                                    uuid::Uuid::new_v4(),
+                                );
                                 let sanitized_content = ammonia::clean(&content);
                                 let optimistic_comment = CalendarEventComment {
                                     event_id: temp_id,
@@ -252,20 +218,13 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     comment_error.set(Some(format!("Failed to post comment: {}", e)));
                 }
             }
-
             comment_posting.set(false);
         });
     };
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border",
-                div {
-                    class: "px-4 py-3 flex items-center gap-3",
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border",
+                div { class: "px-4 py-3 flex items-center gap-3",
                     Link {
                         to: back_route.clone(),
                         class: "p-2 -ml-2 hover:bg-accent rounded-lg transition",
@@ -279,28 +238,19 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             path {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
-                                d: "M10 19l-7-7m0 0l7-7m-7 7h18"
+                                d: "M10 19l-7-7m0 0l7-7m-7 7h18",
                             }
                         }
                     }
-                    h1 {
-                        class: "text-lg font-bold",
-                        "Event Details"
-                    }
+                    h1 { class: "text-lg font-bold", "Event Details" }
                 }
             }
-
-            // Content
             if !*nostr_client::CLIENT_INITIALIZED.read() {
                 ClientInitializing {}
             } else if *loading.read() {
-                // Loading skeleton
-                div {
-                    class: "animate-pulse",
-                    // Image placeholder
+                div { class: "animate-pulse",
                     div { class: "h-48 bg-muted" }
-                    div {
-                        class: "p-4",
+                    div { class: "p-4",
                         div { class: "h-8 bg-muted rounded w-3/4 mb-4" }
                         div { class: "h-4 bg-muted rounded w-1/2 mb-2" }
                         div { class: "h-4 bg-muted rounded w-1/3 mb-4" }
@@ -309,21 +259,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     }
                 }
             } else if let Some(err) = error.read().as_ref() {
-                // Error state
-                div {
-                    class: "p-8 text-center",
-                    div {
-                        class: "text-4xl mb-4",
-                        "❌"
-                    }
-                    h3 {
-                        class: "text-lg font-medium mb-2",
-                        "Event not found"
-                    }
-                    p {
-                        class: "text-muted-foreground mb-4",
-                        "{err}"
-                    }
+                div { class: "p-8 text-center",
+                    div { class: "text-4xl mb-4", "❌" }
+                    h3 { class: "text-lg font-medium mb-2", "Event not found" }
+                    p { class: "text-muted-foreground mb-4", "{err}" }
                     Link {
                         to: back_route.clone(),
                         class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg inline-block",
@@ -335,16 +274,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                     }
                 }
             } else if let Some(evt) = event.read().as_ref() {
-                // Event content
                 div {
-                    // Event header with image and badges
-                    div {
-                        class: "relative",
-
-                        // Event image (optional)
+                    div { class: "relative",
                         if let Some(image_url) = evt.image() {
-                            div {
-                                class: "h-48 sm:h-64 overflow-hidden",
+                            div { class: "h-48 sm:h-64 overflow-hidden",
                                 img {
                                     src: "{image_url}",
                                     alt: "{evt.title()}",
@@ -352,12 +285,9 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 }
                             }
                         }
-
-                        // Status badge (calendar events show time-based status, live activities show Live when active)
                         {
                             let status = get_detail_event_status(evt);
                             let has_image = evt.image().is_some();
-                            // Use absolute positioning when there's an image, inline otherwise
                             let badge_class = if has_image {
                                 "absolute top-4 left-4"
                             } else {
@@ -365,37 +295,26 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                             };
                             match status {
                                 DetailEventStatus::Live => rsx! {
-                                    div {
-                                        class: "{badge_class} px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
+                                    div { class: "{badge_class} px-3 py-1.5 bg-red-500 text-white font-bold rounded animate-pulse",
                                         "LIVE NOW"
                                     }
                                 },
                                 DetailEventStatus::HappeningNow => rsx! {
-                                    div {
-                                        class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
-                                        "HAPPENING NOW"
-                                    }
+                                    div { class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded", "HAPPENING NOW" }
                                 },
                                 DetailEventStatus::Upcoming => rsx! {
-                                    div {
-                                        class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded",
-                                        "UPCOMING"
-                                    }
+                                    div { class: "{badge_class} px-3 py-1.5 bg-blue-500 text-white font-bold rounded", "UPCOMING" }
                                 },
                                 DetailEventStatus::Ended => rsx! {
-                                    div {
-                                        class: "{badge_class} px-3 py-1.5 bg-gray-500 text-white font-bold rounded opacity-75",
+                                    div { class: "{badge_class} px-3 py-1.5 bg-gray-500 text-white font-bold rounded opacity-75",
                                         "ENDED"
                                     }
                                 },
                                 DetailEventStatus::None => rsx! {},
                             }
                         }
-
-                        // Private badge (top-right, only with image)
                         if evt.is_private() && evt.image().is_some() {
-                            div {
-                                class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
+                            div { class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
                                 svg {
                                     class: "w-4 h-4",
                                     xmlns: "http://www.w3.org/2000/svg",
@@ -406,27 +325,16 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                     path {
                                         stroke_linecap: "round",
                                         stroke_linejoin: "round",
-                                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
                                     }
                                 }
                                 "Private Event"
                             }
                         }
                     }
-
-                    // Event details
-                    div {
-                        class: "p-4",
-
-                        // Title
-                        h1 {
-                            class: "text-2xl font-bold mb-4",
-                            "{evt.title()}"
-                        }
-
-                        // Time
-                        div {
-                            class: "flex items-center gap-3 text-muted-foreground mb-3",
+                    div { class: "p-4",
+                        h1 { class: "text-2xl font-bold mb-4", "{evt.title()}" }
+                        div { class: "flex items-center gap-3 text-muted-foreground mb-3",
                             svg {
                                 class: "w-5 h-5 shrink-0",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -437,30 +345,22 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 path {
                                     stroke_linecap: "round",
                                     stroke_linejoin: "round",
-                                    d: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    d: "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z",
                                 }
                             }
                             div {
-                                div {
-                                    class: "font-medium text-foreground",
+                                div { class: "font-medium text-foreground",
                                     "{format_event_datetime(evt)}"
                                 }
                                 if evt.is_all_day() {
-                                    span {
-                                        class: "text-sm",
-                                        "All day event"
-                                    }
+                                    span { class: "text-sm", "All day event" }
                                 }
                             }
                         }
-
-                        // Location(s) - for calendar events
                         if !evt.locations().is_empty() {
-                            div {
-                                class: "mb-4",
+                            div { class: "mb-4",
                                 for location in evt.locations().iter() {
-                                    div {
-                                        class: "flex items-center gap-3 text-muted-foreground mb-2",
+                                    div { class: "flex items-center gap-3 text-muted-foreground mb-2",
                                         if is_online_location(location) {
                                             svg {
                                                 class: "w-5 h-5 shrink-0 text-blue-500",
@@ -472,7 +372,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 path {
                                                     stroke_linecap: "round",
                                                     stroke_linejoin: "round",
-                                                    d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                                    d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
                                                 }
                                             }
                                         } else {
@@ -486,12 +386,12 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 path {
                                                     stroke_linecap: "round",
                                                     stroke_linejoin: "round",
-                                                    d: "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                                                    d: "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z",
                                                 }
                                                 path {
                                                     stroke_linecap: "round",
                                                     stroke_linejoin: "round",
-                                                    d: "M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                                                    d: "M15 11a3 3 0 11-6 0 3 3 0 016 0z",
                                                 }
                                             }
                                         }
@@ -504,25 +404,20 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 "{location}"
                                             }
                                         } else {
-                                            span {
-                                                "{location}"
-                                            }
+                                            span { "{location}" }
                                         }
                                     }
                                 }
                             }
                         }
-
-                        // Join URL - for meetings (direct URL or parent space URL)
                         {
-                            let effective_join_url = evt.join_url()
+                            let effective_join_url = evt
+                                .join_url()
                                 .map(|s| s.to_string())
                                 .or_else(|| parent_space_url.read().clone());
-
                             if let Some(join_url) = effective_join_url {
                                 rsx! {
-                                    div {
-                                        class: "mb-4",
+                                    div { class: "mb-4",
                                         a {
                                             href: "{join_url}",
                                             target: "_blank",
@@ -538,7 +433,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 path {
                                                     stroke_linecap: "round",
                                                     stroke_linejoin: "round",
-                                                    d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                                    d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
                                                 }
                                             }
                                             "Join Meeting"
@@ -549,11 +444,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 rsx! {}
                             }
                         }
-
-                        // RSVP count (for calendar events)
                         if *rsvp_count.read() > 0 {
-                            div {
-                                class: "flex items-center gap-2 text-muted-foreground mb-4",
+                            div { class: "flex items-center gap-2 text-muted-foreground mb-4",
                                 svg {
                                     class: "w-5 h-5",
                                     xmlns: "http://www.w3.org/2000/svg",
@@ -564,21 +456,15 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                     path {
                                         stroke_linecap: "round",
                                         stroke_linejoin: "round",
-                                        d: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                                        d: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z",
                                     }
                                 }
-                                span {
-                                    "{rsvp_count} attending"
-                                }
+                                span { "{rsvp_count} attending" }
                             }
                         }
-
-                        // Room presence (for meetings)
                         if !room_presence.read().is_empty() {
-                            div {
-                                class: "mb-4",
-                                div {
-                                    class: "flex items-center gap-2 text-muted-foreground mb-2",
+                            div { class: "mb-4",
+                                div { class: "flex items-center gap-2 text-muted-foreground mb-2",
                                     svg {
                                         class: "w-5 h-5 text-green-500",
                                         xmlns: "http://www.w3.org/2000/svg",
@@ -589,38 +475,31 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         path {
                                             stroke_linecap: "round",
                                             stroke_linejoin: "round",
-                                            d: "M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z"
+                                            d: "M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z",
                                         }
                                     }
-                                    span {
-                                        class: "text-sm font-medium",
+                                    span { class: "text-sm font-medium",
                                         "{room_presence.read().len()} in room now"
                                     }
                                 }
-                                // Avatar stack of present users
-                                div {
-                                    class: "flex flex-wrap gap-2",
+                                div { class: "flex flex-wrap gap-2",
                                     for presence in room_presence.read().iter().take(10) {
                                         PresenceAvatar {
                                             key: "{presence.pubkey}",
                                             pubkey: presence.pubkey.clone(),
-                                            hand_raised: presence.hand_raised
+                                            hand_raised: presence.hand_raised,
                                         }
                                     }
                                     if room_presence.read().len() > 10 {
-                                        div {
-                                            class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium",
+                                        div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium",
                                             "+{room_presence.read().len() - 10}"
                                         }
                                     }
                                 }
                             }
                         }
-
-                        // Hashtags
                         if !evt.hashtags().is_empty() {
-                            div {
-                                class: "flex flex-wrap gap-2 mb-4",
+                            div { class: "flex flex-wrap gap-2 mb-4",
                                 for tag in evt.hashtags() {
                                     Link {
                                         to: Route::Events {},
@@ -630,43 +509,29 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 }
                             }
                         }
-
-                        // Divider
                         hr { class: "my-4 border-border" }
-
-                        // Description/Summary
                         if let Some(summary) = evt.summary() {
                             if !summary.is_empty() {
-                                div {
-                                    class: "mb-4",
-                                    h3 {
-                                        class: "text-sm font-medium text-muted-foreground mb-2",
+                                div { class: "mb-4",
+                                    h3 { class: "text-sm font-medium text-muted-foreground mb-2",
                                         "About this event"
                                     }
-                                    p {
-                                        class: "text-foreground whitespace-pre-wrap",
+                                    p { class: "text-foreground whitespace-pre-wrap",
                                         "{summary}"
                                     }
                                 }
                             }
                         }
-
-                        // Full content/details
                         {
                             let content = evt.content();
                             if !content.is_empty() {
-                                // Sanitize HTML to prevent XSS attacks
                                 let sanitized_content = ammonia::clean(content);
                                 rsx! {
-                                    div {
-                                        class: "mb-4",
-                                        h3 {
-                                            class: "text-sm font-medium text-muted-foreground mb-2",
-                                            "Details"
-                                        }
+                                    div { class: "mb-4",
+                                        h3 { class: "text-sm font-medium text-muted-foreground mb-2", "Details" }
                                         div {
                                             class: "prose prose-sm dark:prose-invert max-w-none",
-                                            dangerous_inner_html: "{sanitized_content}"
+                                            dangerous_inner_html: "{sanitized_content}",
                                         }
                                     }
                                 }
@@ -674,36 +539,21 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 rsx! {}
                             }
                         }
-
-                        // Organizer/Author
-                        div {
-                            class: "mb-6",
-                            h3 {
-                                class: "text-sm font-medium text-muted-foreground mb-2",
+                        div { class: "mb-6",
+                            h3 { class: "text-sm font-medium text-muted-foreground mb-2",
                                 "Organized by"
                             }
                             OrganizerCard { pubkey: evt.pubkey().to_string() }
                         }
-
-                        // RSVP buttons (for calendar events, if logged in)
                         if let UnifiedEvent::Calendar(_) = evt {
                             if auth_store::get_pubkey().is_some() {
-                                div {
-                                    class: "border-t border-border pt-4",
-                                    h3 {
-                                        class: "text-sm font-medium text-muted-foreground mb-3",
+                                div { class: "border-t border-border pt-4",
+                                    h3 { class: "text-sm font-medium text-muted-foreground mb-3",
                                         "Your response"
                                     }
-                                    div {
-                                        class: "flex gap-2",
-
-                                        // Going button
+                                    div { class: "flex gap-2",
                                         button {
-                                            class: if *rsvp_status.read() == Some(RsvpStatus::Accepted) {
-                                                "flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium"
-                                            } else {
-                                                "flex-1 py-2 px-4 bg-muted hover:bg-green-600/20 text-foreground rounded-lg font-medium transition"
-                                            },
+                                            class: if *rsvp_status.read() == Some(RsvpStatus::Accepted) { "flex-1 py-2 px-4 bg-green-600 text-white rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-green-600/20 text-foreground rounded-lg font-medium transition" },
                                             disabled: *rsvp_loading.read(),
                                             onclick: move |_| handle_rsvp(RsvpStatus::Accepted),
                                             if *rsvp_loading.read() {
@@ -712,14 +562,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 "Going"
                                             }
                                         }
-
-                                        // Maybe button
                                         button {
-                                            class: if *rsvp_status.read() == Some(RsvpStatus::Tentative) {
-                                                "flex-1 py-2 px-4 bg-yellow-600 text-white rounded-lg font-medium"
-                                            } else {
-                                                "flex-1 py-2 px-4 bg-muted hover:bg-yellow-600/20 text-foreground rounded-lg font-medium transition"
-                                            },
+                                            class: if *rsvp_status.read() == Some(RsvpStatus::Tentative) { "flex-1 py-2 px-4 bg-yellow-600 text-white rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-yellow-600/20 text-foreground rounded-lg font-medium transition" },
                                             disabled: *rsvp_loading.read(),
                                             onclick: move |_| handle_rsvp(RsvpStatus::Tentative),
                                             if *rsvp_loading.read() {
@@ -728,14 +572,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 "Maybe"
                                             }
                                         }
-
-                                        // Not going button
                                         button {
-                                            class: if *rsvp_status.read() == Some(RsvpStatus::Declined) {
-                                                "flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium"
-                                            } else {
-                                                "flex-1 py-2 px-4 bg-muted hover:bg-red-600/20 text-foreground rounded-lg font-medium transition"
-                                            },
+                                            class: if *rsvp_status.read() == Some(RsvpStatus::Declined) { "flex-1 py-2 px-4 bg-red-600 text-white rounded-lg font-medium" } else { "flex-1 py-2 px-4 bg-muted hover:bg-red-600/20 text-foreground rounded-lg font-medium transition" },
                                             disabled: *rsvp_loading.read(),
                                             onclick: move |_| handle_rsvp(RsvpStatus::Declined),
                                             if *rsvp_loading.read() {
@@ -747,11 +585,8 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                     }
                                 }
                             } else {
-                                // Not logged in
-                                div {
-                                    class: "border-t border-border pt-4 text-center",
-                                    p {
-                                        class: "text-muted-foreground mb-3",
+                                div { class: "border-t border-border pt-4 text-center",
+                                    p { class: "text-muted-foreground mb-3",
                                         "Sign in to RSVP to this event"
                                     }
                                     Link {
@@ -762,18 +597,18 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 }
                             }
                         }
-
-                        // Export to Calendar button (available to all users)
                         if let UnifiedEvent::Calendar(ref cal_event) = evt {
-                            div {
-                                class: "border-t border-border pt-4 mt-4",
+                            div { class: "border-t border-border pt-4 mt-4",
                                 button {
                                     class: "w-full flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-lg border border-border hover:bg-accent transition",
                                     onclick: {
                                         let cal_event = cal_event.clone();
                                         move |_| {
                                             let ics_content = export_event_to_ics(&cal_event);
-                                            let filename = format!("{}.ics", cal_event.title.replace(" ", "_").replace("/", "-"));
+                                            let filename = format!(
+                                                "{}.ics",
+                                                cal_event.title.replace(" ", "_").replace("/", "-"),
+                                            );
                                             download_ics(&filename, &ics_content);
                                         }
                                     },
@@ -787,33 +622,24 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         path {
                                             stroke_linecap: "round",
                                             stroke_linejoin: "round",
-                                            d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+                                            d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3",
                                         }
                                     }
                                     "Export to Calendar"
                                 }
                             }
                         }
-
-                        // Comments Section (for calendar events)
                         if let UnifiedEvent::Calendar(_) = evt {
-                            div {
-                                class: "border-t border-border pt-4 mt-4",
-                                h3 {
-                                    class: "text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2",
+                            div { class: "border-t border-border pt-4 mt-4",
+                                h3 { class: "text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2",
                                     "Comments"
-                                    span {
-                                        class: "text-xs bg-muted px-2 py-0.5 rounded",
+                                    span { class: "text-xs bg-muted px-2 py-0.5 rounded",
                                         "{comments.read().len()}"
                                     }
                                 }
-
-                                // Comment composer (if logged in)
                                 if auth_store::get_pubkey().is_some() {
-                                    div {
-                                        class: "mb-4",
-                                        div {
-                                            class: "flex gap-2",
+                                    div { class: "mb-4",
+                                        div { class: "flex gap-2",
                                             textarea {
                                                 class: "flex-1 px-3 py-2 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden text-sm resize-none",
                                                 placeholder: "Add a comment...",
@@ -834,29 +660,21 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         }
                                     }
                                 }
-
-                                // Comment error display
                                 if let Some(err) = comment_error.read().as_ref() {
-                                    div {
-                                        class: "mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm",
+                                    div { class: "mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm",
                                         "{err}"
                                     }
                                 }
-
-                                // Comments list
                                 if *comments_loading.read() {
-                                    div {
-                                        class: "text-center text-muted-foreground py-4",
+                                    div { class: "text-center text-muted-foreground py-4",
                                         "Loading comments..."
                                     }
                                 } else if comments.read().is_empty() {
-                                    div {
-                                        class: "text-center text-muted-foreground py-4 text-sm",
+                                    div { class: "text-center text-muted-foreground py-4 text-sm",
                                         "No comments yet. Be the first to comment!"
                                     }
                                 } else {
-                                    div {
-                                        class: "space-y-3",
+                                    div { class: "space-y-3",
                                         for comment in comments.read().iter() {
                                             CommentCard {
                                                 key: "{comment.event_id}",
@@ -875,22 +693,16 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
         }
     }
 }
-
 /// Comment card component
 #[component]
 fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
     let profile = profiles::get_cached_profile(&pubkey);
-
-    // Show profile name, or truncated pubkey if no profile (makes users distinguishable)
     let display_name = profile
         .as_ref()
         .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
         .map(|s| s.to_string())
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
-
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
-
-    // Format time ago
     let time_ago = {
         let now = (js_sys::Date::now() / 1000.0) as u64;
         let diff = now.saturating_sub(created_at);
@@ -904,16 +716,9 @@ fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
             format!("{}d ago", diff / 86400)
         }
     };
-
     rsx! {
-        div {
-            class: "p-3 bg-muted/50 rounded-lg",
-
-            // Header
-            div {
-                class: "flex items-center gap-2 mb-2",
-
-                // Avatar
+        div { class: "p-3 bg-muted/50 rounded-lg",
+            div { class: "flex items-center gap-2 mb-2",
                 if let Some(url) = avatar {
                     img {
                         src: "{url}",
@@ -921,61 +726,45 @@ fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
                         class: "w-6 h-6 rounded-full object-cover",
                     }
                 } else {
-                    div {
-                        class: "w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center",
-                        span {
-                            class: "text-xs font-bold text-primary",
+                    div { class: "w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center",
+                        span { class: "text-xs font-bold text-primary",
                             "{display_name.chars().next().unwrap_or('?')}"
                         }
                     }
                 }
-
-                // Name and time
                 Link {
-                    to: Route::Profile { pubkey: pubkey.clone() },
+                    to: Route::Profile {
+                        pubkey: pubkey.clone(),
+                    },
                     class: "font-medium text-sm hover:underline",
                     "{display_name}"
                 }
-                span {
-                    class: "text-xs text-muted-foreground",
-                    "{time_ago}"
-                }
+                span { class: "text-xs text-muted-foreground", "{time_ago}" }
             }
-
-            // Content - sanitize for XSS protection (consistent with event content handling)
-            p {
-                class: "text-sm whitespace-pre-wrap",
-                "{ammonia::clean(&content)}"
-            }
+            p { class: "text-sm whitespace-pre-wrap", "{ammonia::clean(&content)}" }
         }
     }
 }
-
 /// Organizer card component
 #[component]
 fn OrganizerCard(pubkey: String) -> Element {
-    // Get profile from cache
     let profile = profiles::get_cached_profile(&pubkey);
-
     let display_name = profile
         .as_ref()
         .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
         .unwrap_or("Anonymous");
-
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
-
     let npub = nostr::PublicKey::from_hex(&pubkey)
         .ok()
         .and_then(|pk| nostr::nips::nip19::ToBech32::to_bech32(&pk).ok())
         .map(|s| format!("{}...{}", &s[..12], &s[s.len() - 8..]))
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
-
     rsx! {
         Link {
-            to: Route::Profile { pubkey: pubkey.clone() },
+            to: Route::Profile {
+                pubkey: pubkey.clone(),
+            },
             class: "flex items-center gap-3 p-3 bg-muted rounded-lg hover:bg-accent transition",
-
-            // Avatar
             if let Some(url) = avatar {
                 img {
                     src: "{url}",
@@ -983,29 +772,16 @@ fn OrganizerCard(pubkey: String) -> Element {
                     class: "w-10 h-10 rounded-full object-cover",
                 }
             } else {
-                div {
-                    class: "w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center",
-                    span {
-                        class: "text-lg font-bold text-primary",
+                div { class: "w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center",
+                    span { class: "text-lg font-bold text-primary",
                         "{display_name.chars().next().unwrap_or('?')}"
                     }
                 }
             }
-
-            // Name and npub
-            div {
-                class: "flex-1 min-w-0",
-                div {
-                    class: "font-medium truncate",
-                    "{display_name}"
-                }
-                div {
-                    class: "text-sm text-muted-foreground truncate",
-                    "{npub}"
-                }
+            div { class: "flex-1 min-w-0",
+                div { class: "font-medium truncate", "{display_name}" }
+                div { class: "text-sm text-muted-foreground truncate", "{npub}" }
             }
-
-            // Arrow
             svg {
                 class: "w-5 h-5 text-muted-foreground",
                 xmlns: "http://www.w3.org/2000/svg",
@@ -1016,22 +792,19 @@ fn OrganizerCard(pubkey: String) -> Element {
                 path {
                     stroke_linecap: "round",
                     stroke_linejoin: "round",
-                    d: "M9 5l7 7-7 7"
+                    d: "M9 5l7 7-7 7",
                 }
             }
         }
     }
 }
-
 /// Format event datetime for display
 fn format_event_datetime(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();
     if ts == 0 {
         return "Date TBD".to_string();
     }
-
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-
     let month_names = [
         "January",
         "February",
@@ -1055,14 +828,12 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         "Friday",
         "Saturday",
     ];
-
     let weekday = date.get_day() as usize;
     let month = date.get_month() as usize;
     let day = date.get_date();
     let year = date.get_full_year();
     let weekday_str = weekday_names.get(weekday).unwrap_or(&"");
     let month_str = month_names.get(month).unwrap_or(&"");
-
     if event.is_all_day() {
         format!("{}, {} {}, {}", weekday_str, month_str, day, year)
     } else {
@@ -1076,33 +847,34 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         } else {
             hours
         };
-
         format!(
             "{}, {} {}, {} at {}:{:02} {}",
-            weekday_str, month_str, day, year, hour_12, minutes, am_pm
+            weekday_str,
+            month_str,
+            day,
+            year,
+            hour_12,
+            minutes,
+            am_pm,
         )
     }
 }
-
 /// Presence avatar component for room presence display
 #[component]
 fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
     let profile = profiles::get_cached_profile(&pubkey);
-
     let display_name = profile
         .as_ref()
         .and_then(|p| p.display_name.as_deref().or(p.name.as_deref()))
         .unwrap_or("?");
-
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
-
     rsx! {
         Link {
-            to: Route::Profile { pubkey: pubkey.clone() },
+            to: Route::Profile {
+                pubkey: pubkey.clone(),
+            },
             class: "relative group",
             title: "{display_name}",
-
-            // Avatar
             if let Some(url) = avatar {
                 img {
                     src: "{url}",
@@ -1110,16 +882,12 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
                     class: "w-8 h-8 rounded-full object-cover ring-2 ring-green-500/50",
                 }
             } else {
-                div {
-                    class: "w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center ring-2 ring-green-500/50",
-                    span {
-                        class: "text-xs font-bold text-primary",
+                div { class: "w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center ring-2 ring-green-500/50",
+                    span { class: "text-xs font-bold text-primary",
                         "{display_name.chars().next().unwrap_or('?')}"
                     }
                 }
             }
-
-            // Hand raised indicator
             if hand_raised {
                 div {
                     class: "absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center text-xs",
@@ -1127,19 +895,10 @@ fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
                     "✋"
                 }
             }
-
-            // Online indicator dot
-            div {
-                class: "absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-background"
-            }
+            div { class: "absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-background" }
         }
     }
 }
-
-// ============================================================================
-// Event Status for Detail Page Badges
-// ============================================================================
-
 /// Event status for display badges
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DetailEventStatus {
@@ -1149,41 +908,27 @@ enum DetailEventStatus {
     Ended,
     None,
 }
-
 /// Determine event status badge to display for detail page
 fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
-    // Live status takes precedence
     if event.is_live() {
         return DetailEventStatus::Live;
     }
-
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
     let start_ts = event.start_timestamp();
-
-    // No status for events without a valid start time
     if start_ts == 0 {
         return DetailEventStatus::None;
     }
-
-    // Only show status badges for calendar events
     if event.is_calendar_event() {
-        // Use end timestamp or compute default based on event type per NIP-52:
-        // - Kind 31922 (date-based/all-day): default to 24 hours
-        // - Kind 31923 (time-based): default to instantaneous (same as start)
-        let end_ts = event.end_timestamp().unwrap_or_else(|| {
-            if event.is_all_day() {
-                start_ts + 86400 // Date-based: default to end of day
-            } else {
-                start_ts // Time-based: default to instantaneous
-            }
-        });
-
+        let end_ts = event
+            .end_timestamp()
+            .unwrap_or_else(|| {
+                if event.is_all_day() { start_ts + 86400 } else { start_ts }
+            });
         if end_ts <= now_secs {
             DetailEventStatus::Ended
         } else if start_ts > now_secs {
             DetailEventStatus::Upcoming
         } else {
-            // Event is happening now (started but not ended)
             DetailEventStatus::HappeningNow
         }
     } else {

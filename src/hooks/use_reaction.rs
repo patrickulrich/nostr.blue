@@ -6,18 +6,14 @@
 //! - Rollback on failure
 //! - NIP-25 compliant toggle (+ to like, - to unlike)
 //! - NIP-30 custom emoji reactions
-
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
-
 use crate::services::aggregation::{invalidate_interaction_counts, InteractionCounts};
 use crate::stores::nostr_client::{get_client, publish_reaction_tracked, HAS_SIGNER};
 use crate::stores::signer::SIGNER_INFO;
-
 /// Maximum reactions to fetch per event
 const MAX_REACTIONS_FETCH: usize = 500;
-
 /// State of the reaction action
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReactionState {
@@ -30,7 +26,6 @@ pub enum ReactionState {
     /// Action failed with error message
     Error(String),
 }
-
 /// Represents an emoji for reactions (standard or custom per NIP-30)
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReactionEmoji {
@@ -43,7 +38,6 @@ pub enum ReactionEmoji {
     /// Unlike (-)
     Unlike,
 }
-
 impl ReactionEmoji {
     /// Get the content string for the reaction event
     pub fn content(&self) -> String {
@@ -54,7 +48,6 @@ impl ReactionEmoji {
             Self::Unlike => "-".to_string(),
         }
     }
-
     /// Get emoji tag data if this is a custom emoji (shortcode, url)
     pub fn emoji_tag(&self) -> Option<(String, String)> {
         match self {
@@ -63,7 +56,6 @@ impl ReactionEmoji {
         }
     }
 }
-
 /// Return type for the use_reaction hook
 #[derive(Clone)]
 pub struct UseReaction {
@@ -80,18 +72,14 @@ pub struct UseReaction {
     /// Function to react with a specific emoji (standard, custom, or like/unlike)
     pub react_with: EventHandler<ReactionEmoji>,
 }
-
 impl PartialEq for UseReaction {
     fn eq(&self, other: &Self) -> bool {
-        // Compare signals by their current values for memoization
-        // EventHandlers are not compared (they're always considered equal for this purpose)
         *self.is_liked.read() == *other.is_liked.read()
             && *self.like_count.read() == *other.like_count.read()
             && *self.state.read() == *other.state.read()
             && *self.user_reaction.read() == *other.user_reaction.read()
     }
 }
-
 /// Hook for managing reaction state on an event
 ///
 /// # Arguments
@@ -121,266 +109,220 @@ pub fn use_reaction(
     event_author: String,
     precomputed_counts: Option<&InteractionCounts>,
 ) -> UseReaction {
-    // Extract precomputed values from InteractionCounts
     let precomputed_count = precomputed_counts.map(|c| c.likes);
     let precomputed_is_liked = precomputed_counts.and_then(|c| c.user_liked);
-    let precomputed_user_reaction = precomputed_counts.and_then(|c| {
-        c.user_reaction.as_ref().map(|r| {
-            // Convert string to ReactionEmoji
-            if r == "+" {
-                ReactionEmoji::Like
-            } else if r == "-" {
-                ReactionEmoji::Unlike
-            } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
-                // NIP-30 custom emoji - check if we have the URL
-                let shortcode = r[1..r.len() - 1].to_string();
-                if let Some(url) = c.user_reaction_url.as_ref() {
-                    ReactionEmoji::Custom {
-                        shortcode,
-                        url: url.clone(),
+    let precomputed_user_reaction = precomputed_counts
+        .and_then(|c| {
+            c.user_reaction
+                .as_ref()
+                .map(|r| {
+                    if r == "+" {
+                        ReactionEmoji::Like
+                    } else if r == "-" {
+                        ReactionEmoji::Unlike
+                    } else if r.starts_with(':') && r.ends_with(':') && r.len() > 2 {
+                        let shortcode = r[1..r.len() - 1].to_string();
+                        if let Some(url) = c.user_reaction_url.as_ref() {
+                            ReactionEmoji::Custom {
+                                shortcode,
+                                url: url.clone(),
+                            }
+                        } else {
+                            ReactionEmoji::Standard(r.clone())
+                        }
+                    } else {
+                        ReactionEmoji::Standard(r.clone())
                     }
-                } else {
-                    // No URL available, fall back to showing shortcode as text
-                    ReactionEmoji::Standard(r.clone())
-                }
-            } else {
-                ReactionEmoji::Standard(r.clone())
-            }
-        })
-    });
-
-    // Signals for reaction state
+                })
+        });
     let mut is_liked = use_signal(|| precomputed_is_liked.unwrap_or(false));
     let mut like_count = use_signal(|| precomputed_count.unwrap_or(0));
     let mut state = use_signal(|| ReactionState::Idle);
-    let mut user_reaction: Signal<Option<ReactionEmoji>> =
-        use_signal(|| precomputed_user_reaction.clone());
-
-    // Watch for late-arriving precomputed data (batch fetch may complete after component mount)
-    // This handles the race condition where NoteCard renders before batch fetch completes
-    use_effect(use_reactive(
-        &(
-            precomputed_count,
-            precomputed_is_liked,
-            precomputed_user_reaction.clone(),
-        ),
-        move |(count_opt, liked_opt, reaction_opt)| {
-            // Update if precomputed has data that's >= current (batch may have more complete data)
-            if let Some(count) = count_opt {
-                let current = *like_count.peek();
-                // Update if batch has more OR if we're still at zero
-                if count > current || (count > 0 && current == 0) {
-                    like_count.set(count);
-                }
-            }
-            if let Some(liked) = liked_opt {
-                // User liked state from batch - always update to reflect accurate state
-                is_liked.set(liked);
-            }
-            if let Some(reaction) = reaction_opt {
-                user_reaction.set(Some(reaction.clone()));
-            }
-        },
-    ));
-
-    // Clone for effect
-    let event_id_fetch = event_id.clone();
-
-    // Track whether we have precomputed data from batch fetch
-    // Note: We check if precomputed_counts exists, not just user_liked,
-    // because user_liked is None when user hasn't reacted (not the same as "unknown")
-    let has_batch_data = precomputed_counts.is_some();
-    let mut has_precomputed_data = use_signal(|| has_batch_data);
-
-    // Update the flag when precomputed data arrives (batch fetch completes after mount)
-    use_effect(use_reactive(&has_batch_data, move |has_data| {
-        if has_data {
-            has_precomputed_data.set(true);
-        }
-    }));
-
-    // Use use_reactive to properly track event_id dependency and re-run when it changes
-    // Skip individual fetch if batch data has already provided user's like status
-    use_effect(use_reactive(&event_id_fetch, move |event_id_for_fetch| {
-        // Check if batch data already provided user's like status
-        // This prevents unnecessary individual fetches when batch data is available
-        if *has_precomputed_data.peek() {
-            return;
-        }
-
-        spawn(async move {
-            let client = match get_client() {
-                Some(c) => c,
-                None => return,
-            };
-
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_fetch) {
-                Ok(id) => id,
-                Err(_) => return,
-            };
-
-            // Fetch reactions for this event
-            let filter = Filter::new()
-                .kind(Kind::Reaction)
-                .event(event_id_parsed)
-                .limit(MAX_REACTIONS_FETCH);
-
-            if let Ok(reactions) = client.fetch_events(filter, Duration::from_secs(5)).await {
-                // Parse current user's pubkey once for efficient comparison
-                let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
-                    .read()
-                    .as_ref()
-                    .and_then(|info| nostr_sdk::PublicKey::from_hex(&info.public_key).ok());
-
-                let mut positive_count = 0usize;
-                let mut user_liked = false;
-                let mut user_unliked = false;
-                let mut user_emoji: Option<ReactionEmoji> = None;
-
-                // Sort reactions by created_at (ascending) to process chronologically
-                // This ensures the final state reflects the user's most recent action
-                let mut reactions_vec: Vec<_> = reactions.iter().collect();
-                reactions_vec.sort_by_key(|r| r.created_at);
-
-                for reaction in reactions_vec.iter() {
-                    let content = reaction.content.trim();
-                    let is_from_user = current_user_pk
-                        .map(|pk| reaction.pubkey == pk)
-                        .unwrap_or(false);
-
-                    if content == "-" {
-                        // Negative reaction (unlike/downvote)
-                        if is_from_user {
-                            user_unliked = true;
-                            user_emoji = None; // Clear any previous reaction
-                        }
-                        // Per NIP-25, "-" reactions reduce count
-                        // We'll handle this by not counting them as positive
-                    } else {
-                        // Positive reaction (+, emoji, etc.)
-                        positive_count += 1;
-                        if is_from_user {
-                            user_liked = true;
-                            user_unliked = false; // Reset - new positive reaction overrides previous unlike
-                                                  // Parse the user's reaction emoji
-                            if content == "+" {
-                                user_emoji = Some(ReactionEmoji::Like);
-                            } else if content.starts_with(':')
-                                && content.ends_with(':')
-                                && content.len() > 2
-                            {
-                                // Custom emoji - look for emoji tag
-                                let shortcode = &content[1..content.len() - 1];
-                                // Find emoji tag with matching shortcode (use as_slice for zero-copy access)
-                                let emoji_url = reaction.tags.iter().find_map(|tag| {
-                                    let tag_slice = tag.as_slice();
-                                    if tag_slice.len() >= 3
-                                        && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
-                                        && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
-                                    {
-                                        tag_slice.get(2).map(|s| s.to_string())
-                                    } else {
-                                        None
-                                    }
-                                });
-                                if let Some(url) = emoji_url {
-                                    user_emoji = Some(ReactionEmoji::Custom {
-                                        shortcode: shortcode.to_string(),
-                                        url,
-                                    });
-                                } else {
-                                    // No emoji tag found, treat as standard emoji
-                                    user_emoji = Some(ReactionEmoji::Standard(content.to_string()));
-                                }
-                            } else {
-                                // Standard unicode emoji
-                                user_emoji = Some(ReactionEmoji::Standard(content.to_string()));
-                            }
-                        }
+    let mut user_reaction: Signal<Option<ReactionEmoji>> = use_signal(|| {
+        precomputed_user_reaction.clone()
+    });
+    use_effect(
+        use_reactive(
+            &(
+                precomputed_count,
+                precomputed_is_liked,
+                precomputed_user_reaction.clone(),
+            ),
+            move |(count_opt, liked_opt, reaction_opt)| {
+                if let Some(count) = count_opt {
+                    let current = *like_count.peek();
+                    if count > current || (count > 0 && current == 0) {
+                        like_count.set(count);
                     }
                 }
-
-                // User's final state: since we process chronologically, user_liked/user_unliked
-                // reflect the most recent action. Final state is liked only if no subsequent unlike.
-                let final_liked = user_liked && !user_unliked;
-
-                // Only update count if we found more than current (avoid overwriting batch data)
-                let current_count = *like_count.peek();
-                if positive_count > current_count {
-                    like_count.set(positive_count);
+                if let Some(liked) = liked_opt {
+                    is_liked.set(liked);
                 }
-
-                // Only update user state if batch data hasn't already provided it
-                // This prevents individual fetch from overwriting authoritative batch data
-                // that may have arrived while this fetch was in progress
-                if !*has_precomputed_data.peek() {
-                    is_liked.set(final_liked);
-                    user_reaction.set(if final_liked { user_emoji } else { None });
+                if let Some(reaction) = reaction_opt {
+                    user_reaction.set(Some(reaction.clone()));
                 }
-            }
-        });
-    }));
-
-    // Clone for handler
+            },
+        ),
+    );
+    let event_id_fetch = event_id.clone();
+    let has_batch_data = precomputed_counts.is_some();
+    let mut has_precomputed_data = use_signal(|| has_batch_data);
+    use_effect(
+        use_reactive(
+            &has_batch_data,
+            move |has_data| {
+                if has_data {
+                    has_precomputed_data.set(true);
+                }
+            },
+        ),
+    );
+    use_effect(
+        use_reactive(
+            &event_id_fetch,
+            move |event_id_for_fetch| {
+                if *has_precomputed_data.peek() {
+                    return;
+                }
+                spawn(async move {
+                    let client = match get_client() {
+                        Some(c) => c,
+                        None => return,
+                    };
+                    let event_id_parsed = match nostr_sdk::EventId::from_hex(
+                        &event_id_for_fetch,
+                    ) {
+                        Ok(id) => id,
+                        Err(_) => return,
+                    };
+                    let filter = Filter::new()
+                        .kind(Kind::Reaction)
+                        .event(event_id_parsed)
+                        .limit(MAX_REACTIONS_FETCH);
+                    if let Ok(reactions) = client
+                        .fetch_events(filter, Duration::from_secs(5))
+                        .await
+                    {
+                        let current_user_pk: Option<nostr_sdk::PublicKey> = SIGNER_INFO
+                            .read()
+                            .as_ref()
+                            .and_then(|info| {
+                                nostr_sdk::PublicKey::from_hex(&info.public_key).ok()
+                            });
+                        let mut positive_count = 0usize;
+                        let mut user_liked = false;
+                        let mut user_unliked = false;
+                        let mut user_emoji: Option<ReactionEmoji> = None;
+                        let mut reactions_vec: Vec<_> = reactions.iter().collect();
+                        reactions_vec.sort_by_key(|r| r.created_at);
+                        for reaction in reactions_vec.iter() {
+                            let content = reaction.content.trim();
+                            let is_from_user = current_user_pk
+                                .map(|pk| reaction.pubkey == pk)
+                                .unwrap_or(false);
+                            if content == "-" {
+                                if is_from_user {
+                                    user_unliked = true;
+                                    user_emoji = None;
+                                }
+                            } else {
+                                positive_count += 1;
+                                if is_from_user {
+                                    user_liked = true;
+                                    user_unliked = false;
+                                    if content == "+" {
+                                        user_emoji = Some(ReactionEmoji::Like);
+                                    } else if content.starts_with(':') && content.ends_with(':')
+                                        && content.len() > 2
+                                    {
+                                        let shortcode = &content[1..content.len() - 1];
+                                        let emoji_url = reaction
+                                            .tags
+                                            .iter()
+                                            .find_map(|tag| {
+                                                let tag_slice = tag.as_slice();
+                                                if tag_slice.len() >= 3
+                                                    && tag_slice.first().map(|s| s.as_str()) == Some("emoji")
+                                                    && tag_slice.get(1).map(|s| s.as_str()) == Some(shortcode)
+                                                {
+                                                    tag_slice.get(2).map(|s| s.to_string())
+                                                } else {
+                                                    None
+                                                }
+                                            });
+                                        if let Some(url) = emoji_url {
+                                            user_emoji = Some(ReactionEmoji::Custom {
+                                                shortcode: shortcode.to_string(),
+                                                url,
+                                            });
+                                        } else {
+                                            user_emoji = Some(
+                                                ReactionEmoji::Standard(content.to_string()),
+                                            );
+                                        }
+                                    } else {
+                                        user_emoji = Some(
+                                            ReactionEmoji::Standard(content.to_string()),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        let final_liked = user_liked && !user_unliked;
+                        let current_count = *like_count.peek();
+                        if positive_count > current_count {
+                            like_count.set(positive_count);
+                        }
+                        if !*has_precomputed_data.peek() {
+                            is_liked.set(final_liked);
+                            user_reaction
+                                .set(if final_liked { user_emoji } else { None });
+                        }
+                    }
+                });
+            },
+        ),
+    );
     let event_id_handler = event_id.clone();
     let event_author_handler = event_author.clone();
-
-    // Toggle like handler with optimistic updates
     let toggle_like = use_callback(move |_: ()| {
-        // Check preconditions
         if !*HAS_SIGNER.read() {
             state.set(ReactionState::Error("No signer available".to_string()));
             return;
         }
-
         if matches!(*state.peek(), ReactionState::Pending) {
-            return; // Already processing
+            return;
         }
-
-        // Capture current state for potential rollback
         let was_liked = *is_liked.peek();
         let prev_count = *like_count.peek();
-
-        // Determine action: like (+) or unlike (-)
         let content = if was_liked { "-" } else { "+" };
-
-        // Save previous user reaction for rollback
         let prev_reaction = user_reaction.peek().clone();
-
-        // Optimistic update
         state.set(ReactionState::Pending);
         is_liked.set(!was_liked);
         if was_liked {
-            // Unliking - decrement count and clear reaction
             like_count.set(prev_count.saturating_sub(1));
             user_reaction.set(None);
         } else {
-            // Liking - increment count and set to Like
             like_count.set(prev_count.saturating_add(1));
             user_reaction.set(Some(ReactionEmoji::Like));
         }
-
         let event_id_clone = event_id_handler.clone();
         let event_author_clone = event_author_handler.clone();
         let content_str = content.to_string();
-
         spawn(async move {
             match publish_reaction_tracked(
-                event_id_clone.clone(),
-                event_author_clone,
-                content_str,
-                None,
-            )
-            .await
+                    event_id_clone.clone(),
+                    event_author_clone,
+                    content_str,
+                    None,
+                )
+                .await
             {
                 Ok(result) => {
                     log::info!(
-                        "{} event {}, reaction ID: {} ({}/{} relays)",
-                        if was_liked { "Unliked" } else { "Liked" },
-                        event_id_clone,
-                        result.event_id,
-                        result.success_count(),
-                        result.total_attempted()
+                        "{} event {}, reaction ID: {} ({}/{} relays)", if was_liked {
+                        "Unliked" } else { "Liked" }, event_id_clone, result.event_id,
+                        result.success_count(), result.total_attempted()
                     );
                     if result.has_failures() {
                         for (relay, error) in &result.failed_relays {
@@ -388,11 +330,7 @@ pub fn use_reaction(
                         }
                     }
                     state.set(ReactionState::Success);
-
-                    // Invalidate cache so next fetch gets fresh data
                     invalidate_interaction_counts(&event_id_clone);
-
-                    // Reset to Idle after a short delay
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -405,95 +343,72 @@ pub fn use_reaction(
                 }
                 Err(e) => {
                     log::error!(
-                        "Failed to {} event: {}",
-                        if was_liked { "unlike" } else { "like" },
-                        e
+                        "Failed to {} event: {}", if was_liked { "unlike" } else { "like"
+                        }, e
                     );
-
-                    // Rollback optimistic update
                     is_liked.set(was_liked);
                     like_count.set(prev_count);
                     user_reaction.set(prev_reaction);
-
-                    state.set(ReactionState::Error(format!(
-                        "Failed to {}: {}",
-                        if was_liked { "unlike" } else { "like" },
-                        e
-                    )));
+                    state
+                        .set(
+                            ReactionState::Error(
+                                format!(
+                                    "Failed to {}: {}",
+                                    if was_liked { "unlike" } else { "like" },
+                                    e,
+                                ),
+                            ),
+                        );
                 }
             }
         });
     });
-
-    // Clone for react_with handler
     let event_id_react = event_id.clone();
     let event_author_react = event_author.clone();
-
-    // React with specific emoji handler (supports standard, custom, like/unlike)
     let react_with = use_callback(move |emoji: ReactionEmoji| {
-        // Check preconditions
         if !*HAS_SIGNER.read() {
             state.set(ReactionState::Error("No signer available".to_string()));
             return;
         }
-
         if matches!(*state.peek(), ReactionState::Pending) {
-            return; // Already processing
+            return;
         }
-
-        // Capture current state for potential rollback
         let prev_liked = *is_liked.peek();
         let prev_count = *like_count.peek();
         let prev_reaction = user_reaction.peek().clone();
-
-        // Get content and emoji tag from the ReactionEmoji
         let content = emoji.content();
         let emoji_tag = emoji.emoji_tag();
-
-        // Determine if this is a positive reaction (not unlike)
         let is_positive = !matches!(emoji, ReactionEmoji::Unlike);
-
-        // Skip publishing unlike when user hasn't liked - no action needed
         if !is_positive && !prev_liked {
             return;
         }
-
-        // Optimistic update
         state.set(ReactionState::Pending);
         if is_positive && !prev_liked {
-            // Adding a positive reaction when not already liked
             is_liked.set(true);
             like_count.set(prev_count.saturating_add(1));
             user_reaction.set(Some(emoji.clone()));
         } else if is_positive && prev_liked {
-            // Changing reaction - just update the emoji, count stays same
             user_reaction.set(Some(emoji.clone()));
         } else if !is_positive && prev_liked {
-            // Removing reaction (unlike)
             is_liked.set(false);
             like_count.set(prev_count.saturating_sub(1));
             user_reaction.set(None);
         }
-
         let event_id_clone = event_id_react.clone();
         let event_author_clone = event_author_react.clone();
-
         spawn(async move {
             match publish_reaction_tracked(
-                event_id_clone.clone(),
-                event_author_clone,
-                content.clone(),
-                emoji_tag,
-            )
-            .await
+                    event_id_clone.clone(),
+                    event_author_clone,
+                    content.clone(),
+                    emoji_tag,
+                )
+                .await
             {
                 Ok(result) => {
                     log::info!(
                         "Reacted to event {} with '{}', reaction ID: {} ({}/{} relays)",
-                        event_id_clone,
-                        content,
-                        result.event_id,
-                        result.success_count(),
+                        event_id_clone, content, result.event_id, result.success_count(),
                         result.total_attempted()
                     );
                     if result.has_failures() {
@@ -502,11 +417,7 @@ pub fn use_reaction(
                         }
                     }
                     state.set(ReactionState::Success);
-
-                    // Invalidate cache so next fetch gets fresh data
                     invalidate_interaction_counts(&event_id_clone);
-
-                    // Reset to Idle after a short delay
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -519,18 +430,14 @@ pub fn use_reaction(
                 }
                 Err(e) => {
                     log::error!("Failed to react with '{}': {}", content, e);
-
-                    // Rollback optimistic update
                     is_liked.set(prev_liked);
                     like_count.set(prev_count);
                     user_reaction.set(prev_reaction);
-
                     state.set(ReactionState::Error(format!("Failed to react: {}", e)));
                 }
             }
         });
     });
-
     UseReaction {
         is_liked,
         like_count,
@@ -540,7 +447,6 @@ pub fn use_reaction(
         react_with,
     }
 }
-
 /// Format a count for display (e.g., "500+" for large numbers)
 pub fn format_count(count: usize) -> String {
     if count > MAX_REACTIONS_FETCH {

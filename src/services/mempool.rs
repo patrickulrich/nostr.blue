@@ -2,17 +2,10 @@
 //!
 //! Fetches Bitcoin transaction and address data from mempool.space.
 //! Supports custom endpoints for self-hosted instances.
-
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
-
 /// Default mempool.space API endpoint
 pub const DEFAULT_ENDPOINT: &str = "https://mempool.space/api";
-
-// ============================================================================
-// API Response Types
-// ============================================================================
-
 /// Transaction data from mempool.space
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BitcoinTransaction {
@@ -37,7 +30,6 @@ pub struct BitcoinTransaction {
     /// Confirmation status
     pub status: TxStatus,
 }
-
 /// Transaction input
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TxInput {
@@ -53,7 +45,6 @@ pub struct TxInput {
     #[serde(default)]
     pub is_coinbase: bool,
 }
-
 /// Transaction output
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TxOutput {
@@ -70,7 +61,6 @@ pub struct TxOutput {
     /// Output address (if applicable)
     pub scriptpubkey_address: Option<String>,
 }
-
 /// Transaction confirmation status
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TxStatus {
@@ -83,7 +73,6 @@ pub struct TxStatus {
     /// Block timestamp (if confirmed)
     pub block_time: Option<u64>,
 }
-
 /// Address information
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BitcoinAddress {
@@ -94,7 +83,6 @@ pub struct BitcoinAddress {
     /// Unconfirmed mempool statistics
     pub mempool_stats: AddressStats,
 }
-
 /// Address statistics
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressStats {
@@ -109,57 +97,42 @@ pub struct AddressStats {
     /// Total transaction count
     pub tx_count: u64,
 }
-
-// ============================================================================
-// API Functions
-// ============================================================================
-
 /// Fetch transaction details
-pub async fn get_transaction(endpoint: &str, txid: &str) -> Result<BitcoinTransaction, String> {
+pub async fn get_transaction(
+    endpoint: &str,
+    txid: &str,
+) -> Result<BitcoinTransaction, String> {
     let url = format!("{}/tx/{}", endpoint.trim_end_matches('/'), txid);
-
     let response = Request::get(&url)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-
     if !response.ok() {
-        return Err(format!(
-            "HTTP {}: {}",
-            response.status(),
-            response.status_text()
-        ));
+        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
     }
-
     response
         .json::<BitcoinTransaction>()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))
 }
-
 /// Fetch address information
-pub async fn get_address(endpoint: &str, address: &str) -> Result<BitcoinAddress, String> {
+pub async fn get_address(
+    endpoint: &str,
+    address: &str,
+) -> Result<BitcoinAddress, String> {
     let url = format!("{}/address/{}", endpoint.trim_end_matches('/'), address);
-
     let response = Request::get(&url)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-
     if !response.ok() {
-        return Err(format!(
-            "HTTP {}: {}",
-            response.status(),
-            response.status_text()
-        ));
+        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
     }
-
     response
         .json::<BitcoinAddress>()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))
 }
-
 /// Truncate a txid or address for display
 pub fn truncate_bitcoin_id(id: &str) -> String {
     if id.len() > 16 {

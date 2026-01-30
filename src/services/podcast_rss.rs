@@ -10,21 +10,14 @@
 //! - podcast:funding
 //!
 //! Reference: https://github.com/Podcastindex-org/podcast-namespace
-
 use crate::utils::podcast::{
     ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
 };
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
-
-// ============================================================================
-// RSS Podcast Types
-// ============================================================================
-
 /// Full Podcasting 2.0 podcast representation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RssPodcast {
-    // Standard RSS
     /// Podcast GUID (from podcast:guid or generated)
     pub guid: String,
     /// Podcast title
@@ -45,8 +38,6 @@ pub struct RssPodcast {
     pub episodes: Vec<RssEpisode>,
     /// RSS feed URL
     pub feed_url: String,
-
-    // Podcasting 2.0 extensions
     /// Funding links (podcast:funding)
     pub funding: Vec<FundingLink>,
     /// V4V Lightning payments (podcast:value)
@@ -66,11 +57,9 @@ pub struct RssPodcast {
     /// Explicit content flag
     pub explicit: bool,
 }
-
 /// Podcasting 2.0 episode representation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RssEpisode {
-    // Standard RSS
     /// Episode GUID
     pub guid: String,
     /// Episode title
@@ -95,8 +84,6 @@ pub struct RssEpisode {
     pub episode_number: Option<u32>,
     /// Episode type: full, trailer, bonus
     pub episode_type: Option<String>,
-
-    // Podcasting 2.0 extensions
     /// Chapters URL (podcast:chapters) - JSON format
     pub chapters_url: Option<String>,
     /// Transcripts (podcast:transcript)
@@ -112,7 +99,6 @@ pub struct RssEpisode {
     /// Alternate enclosures (podcast:alternateEnclosure)
     pub alternate_enclosures: Vec<AlternateEnclosure>,
 }
-
 /// Alternate enclosure for different formats/bitrates
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AlternateEnclosure {
@@ -129,7 +115,6 @@ pub struct AlternateEnclosure {
     /// Title/label
     pub title: Option<String>,
 }
-
 /// Trailer reference
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TrailerInfo {
@@ -144,7 +129,6 @@ pub struct TrailerInfo {
     /// Season this trailer is for
     pub season: Option<u32>,
 }
-
 /// Podroll recommendation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PodrollItem {
@@ -153,64 +137,45 @@ pub struct PodrollItem {
     /// RSS feed URL
     pub feed_url: Option<String>,
 }
-
-// ============================================================================
-// ============================================================================
-// RSS Fetching and Parsing
-// ============================================================================
-
 /// Fetch and parse a podcast RSS feed
 pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
     log::info!("Fetching RSS feed from: {}", url);
-
-    // Validate URL
     if url.is_empty() {
         return Err("RSS feed URL is empty".to_string());
     }
-
-    // Ensure HTTPS (browsers block mixed content)
     let fetch_url = if url.starts_with("http://") {
         log::warn!("Converting HTTP to HTTPS for RSS feed: {}", url);
         url.replacen("http://", "https://", 1)
     } else {
         url.to_string()
     };
-
-    // Fetch the RSS XML
     let response = Request::get(&fetch_url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
-
     if !response.ok() {
-        return Err(format!(
-            "HTTP {} from {}: {}",
-            response.status(),
-            fetch_url,
-            response.status_text()
-        ));
+        return Err(
+            format!(
+                "HTTP {} from {}: {}",
+                response.status(),
+                fetch_url,
+                response.status_text(),
+            ),
+        );
     }
-
     let xml = response
         .text()
         .await
         .map_err(|e| format!("Failed to read response from {}: {}", fetch_url, e))?;
-
     log::info!("Successfully fetched RSS feed ({} bytes)", xml.len());
-
-    // Parse the RSS feed
     parse_podcast_feed(&xml, url)
 }
-
 /// Parse RSS XML into a RssPodcast
 pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, String> {
-    // Use quick-xml for parsing
     use quick_xml::events::Event;
     use quick_xml::Reader;
-
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
-
     let mut podcast = RssPodcast {
         guid: String::new(),
         title: String::new(),
@@ -232,19 +197,16 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
         podroll: Vec::new(),
         explicit: false,
     };
-
     let mut current_element = String::new();
     let mut in_channel = false;
     let mut in_item = false;
     let mut current_episode: Option<RssEpisode> = None;
     let mut buf = Vec::new();
-
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 current_element = name.clone();
-
                 match name.as_str() {
                     "channel" => in_channel = true,
                     "item" => {
@@ -300,8 +262,9 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                             for attr in e.attributes().flatten() {
                                 let key = String::from_utf8_lossy(attr.key.as_ref());
                                 if key == "url" {
-                                    ep.chapters_url =
-                                        Some(String::from_utf8_lossy(&attr.value).to_string());
+                                    ep.chapters_url = Some(
+                                        String::from_utf8_lossy(&attr.value).to_string(),
+                                    );
                                 }
                             }
                         }
@@ -377,7 +340,6 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 if text.trim().is_empty() {
                     continue;
                 }
-
                 if in_item {
                     if let Some(ref mut ep) = current_episode {
                         match current_element.as_str() {
@@ -412,8 +374,12 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                         "podcast:guid" => podcast.guid = text,
                         "podcast:medium" => podcast.medium = Some(text),
                         "podcast:license" => podcast.license = Some(text),
-                        "itunes:explicit" => podcast.explicit = text == "yes" || text == "true",
-                        "podcast:locked" => podcast.locked = text == "yes" || text == "true",
+                        "itunes:explicit" => {
+                            podcast.explicit = text == "yes" || text == "true";
+                        }
+                        "podcast:locked" => {
+                            podcast.locked = text == "yes" || text == "true";
+                        }
                         _ => {}
                     }
                 }
@@ -422,13 +388,15 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
                 let text = String::from_utf8_lossy(e.as_ref()).to_string();
                 if in_item {
                     if let Some(ref mut ep) = current_episode {
-                        if current_element == "description" || current_element == "content:encoded"
+                        if current_element == "description"
+                            || current_element == "content:encoded"
                         {
                             ep.description = Some(text);
                         }
                     }
                 } else if in_channel
-                    && (current_element == "description" || current_element == "content:encoded")
+                    && (current_element == "description"
+                        || current_element == "content:encoded")
                 {
                     podcast.description = Some(text);
                 }
@@ -439,26 +407,16 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
         }
         buf.clear();
     }
-
-    // Generate GUID if not present
     if podcast.guid.is_empty() {
         podcast.guid = generate_guid(&podcast.title, feed_url);
     }
-
-    // Generate episode GUIDs if not present
     for ep in &mut podcast.episodes {
         if ep.guid.is_empty() {
             ep.guid = generate_guid(&ep.title, &ep.enclosure_url);
         }
     }
-
     Ok(podcast)
 }
-
-// ============================================================================
-// Chapter Fetching
-// ============================================================================
-
 /// Fetch and parse JSON chapters file (direct request, may have CORS issues)
 /// Note: For browser use, prefer podcast_index::fetch_chapters_proxied
 #[allow(dead_code)]
@@ -467,21 +425,14 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
         .send()
         .await
         .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
-
     if !response.ok() {
-        return Err(format!(
-            "HTTP {}: {}",
-            response.status(),
-            response.status_text()
-        ));
+        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
     }
-
     response
         .json::<ChaptersFile>()
         .await
         .map_err(|e| format!("Failed to parse chapters: {}", e))
 }
-
 /// Fetch transcript content (direct request, may have CORS issues)
 /// Note: For browser use, prefer podcast_index::fetch_transcript_proxied
 #[allow(dead_code)]
@@ -490,34 +441,17 @@ pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, Stri
         .send()
         .await
         .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
-
     if !response.ok() {
-        return Err(format!(
-            "HTTP {}: {}",
-            response.status(),
-            response.status_text()
-        ));
+        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
     }
-
-    response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read transcript: {}", e))
+    response.text().await.map_err(|e| format!("Failed to read transcript: {}", e))
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
 /// Parse duration string to seconds
 /// Supports formats: "HH:MM:SS", "MM:SS", "SS", or numeric seconds
 fn parse_duration(s: &str) -> Option<u64> {
-    // Try numeric first
     if let Ok(secs) = s.parse::<u64>() {
         return Some(secs);
     }
-
-    // Try HH:MM:SS or MM:SS format
     let parts: Vec<&str> = s.split(':').collect();
     match parts.len() {
         3 => {
@@ -534,25 +468,17 @@ fn parse_duration(s: &str) -> Option<u64> {
         _ => None,
     }
 }
-
 /// Generate a GUID from title and URL
 fn generate_guid(title: &str, url: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-
     let mut hasher = DefaultHasher::new();
     title.hash(&mut hasher);
     url.hash(&mut hasher);
     format!("{:x}", hasher.finish())
 }
-
-// ============================================================================
-// XML Element Parsers
-// ============================================================================
-
 fn parse_value_element(e: &quick_xml::events::BytesStart<'_>) -> ValueBlock {
     let mut block = ValueBlock::default();
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -563,10 +489,8 @@ fn parse_value_element(e: &quick_xml::events::BytesStart<'_>) -> ValueBlock {
             _ => {}
         }
     }
-
     block
 }
-
 fn parse_transcript_element(e: &quick_xml::events::BytesStart<'_>) -> TranscriptRef {
     let mut transcript = TranscriptRef {
         url: String::new(),
@@ -574,7 +498,6 @@ fn parse_transcript_element(e: &quick_xml::events::BytesStart<'_>) -> Transcript
         language: None,
         rel: None,
     };
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -586,17 +509,14 @@ fn parse_transcript_element(e: &quick_xml::events::BytesStart<'_>) -> Transcript
             _ => {}
         }
     }
-
     transcript
 }
-
 fn parse_soundbite_element(e: &quick_xml::events::BytesStart<'_>) -> Soundbite {
     let mut soundbite = Soundbite {
         start_time: 0.0,
         duration: 30.0,
         title: None,
     };
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -607,10 +527,8 @@ fn parse_soundbite_element(e: &quick_xml::events::BytesStart<'_>) -> Soundbite {
             _ => {}
         }
     }
-
     soundbite
 }
-
 fn parse_person_element(e: &quick_xml::events::BytesStart<'_>) -> Person {
     let mut person = Person {
         name: String::new(),
@@ -619,7 +537,6 @@ fn parse_person_element(e: &quick_xml::events::BytesStart<'_>) -> Person {
         img: None,
         href: None,
     };
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -631,16 +548,13 @@ fn parse_person_element(e: &quick_xml::events::BytesStart<'_>) -> Person {
             _ => {}
         }
     }
-
     person
 }
-
 fn parse_funding_element(e: &quick_xml::events::BytesStart<'_>) -> FundingLink {
     let mut funding = FundingLink {
         url: String::new(),
         name: None,
     };
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -648,10 +562,8 @@ fn parse_funding_element(e: &quick_xml::events::BytesStart<'_>) -> FundingLink {
             funding.url = value.to_string();
         }
     }
-
     funding
 }
-
 fn parse_trailer_element(e: &quick_xml::events::BytesStart<'_>) -> TrailerInfo {
     let mut trailer = TrailerInfo {
         url: String::new(),
@@ -660,7 +572,6 @@ fn parse_trailer_element(e: &quick_xml::events::BytesStart<'_>) -> TrailerInfo {
         media_type: None,
         season: None,
     };
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -673,11 +584,11 @@ fn parse_trailer_element(e: &quick_xml::events::BytesStart<'_>) -> TrailerInfo {
             _ => {}
         }
     }
-
     trailer
 }
-
-fn parse_alternate_enclosure_element(e: &quick_xml::events::BytesStart<'_>) -> AlternateEnclosure {
+fn parse_alternate_enclosure_element(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> AlternateEnclosure {
     let mut enclosure = AlternateEnclosure {
         url: String::new(),
         enclosure_type: "audio/mpeg".to_string(),
@@ -686,7 +597,6 @@ fn parse_alternate_enclosure_element(e: &quick_xml::events::BytesStart<'_>) -> A
         default: false,
         title: None,
     };
-
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
@@ -700,21 +610,12 @@ fn parse_alternate_enclosure_element(e: &quick_xml::events::BytesStart<'_>) -> A
             _ => {}
         }
     }
-
     enclosure
 }
-
-// ============================================================================
-// Format Helpers
-// ============================================================================
-
-// Re-export duration formatting from utils for backward compatibility
 pub use crate::utils::duration::format_duration_timecode as format_duration;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_parse_duration() {
         assert_eq!(parse_duration("3600"), Some(3600));
@@ -722,14 +623,12 @@ mod tests {
         assert_eq!(parse_duration("30:00"), Some(1800));
         assert_eq!(parse_duration("45"), Some(45));
     }
-
     #[test]
     fn test_format_duration() {
         assert_eq!(format_duration(3600), "1:00:00");
         assert_eq!(format_duration(90), "1:30");
         assert_eq!(format_duration(45), "0:45");
     }
-
     #[test]
     fn test_generate_guid() {
         let guid1 = generate_guid("Episode 1", "https://example.com/ep1.mp3");

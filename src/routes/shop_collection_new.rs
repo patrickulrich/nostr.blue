@@ -1,24 +1,22 @@
 //! Shop Collection New - Create a new product collection (NIP-99 Kind 30405)
-
 use crate::routes::Route;
-use crate::stores::shop_store::{fetch_my_products, publish_collection, CollectionFormData};
+use crate::stores::shop_store::{
+    fetch_my_products, publish_collection, CollectionFormData,
+};
 use crate::utils::nip99::Product;
 use dioxus::prelude::*;
-
 /// Collection creation form
 #[component]
 pub fn ShopCollectionNew() -> Element {
     let mut title = use_signal(String::new);
     let mut description = use_signal(String::new);
     let mut image_url = use_signal(String::new);
-    let mut selected_products = use_signal(Vec::<String>::new); // Product coordinates
+    let mut selected_products = use_signal(Vec::<String>::new);
     let mut available_products = use_signal(Vec::<Product>::new);
     let mut loading_products = use_signal(|| true);
     let mut publishing = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
-
-    // Fetch user's products for selection
     use_effect(move || {
         spawn(async move {
             loading_products.set(true);
@@ -29,10 +27,8 @@ pub fn ShopCollectionNew() -> Element {
             loading_products.set(false);
         });
     });
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -46,17 +42,12 @@ pub fn ShopCollectionNew() -> Element {
                     h1 { class: "text-xl font-bold", "New Collection" }
                 }
             }
-
-            // Form content
             div { class: "max-w-2xl mx-auto p-4",
                 if *success.read() {
-                    // Success message
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "✅" }
                         h2 { class: "text-xl font-semibold mb-2", "Collection Created!" }
-                        p { class: "text-muted-foreground mb-6",
-                            "Your collection is now live."
-                        }
+                        p { class: "text-muted-foreground mb-6", "Your collection is now live." }
                         div { class: "space-y-3",
                             Link {
                                 to: Route::ShopMerchant {},
@@ -77,9 +68,7 @@ pub fn ShopCollectionNew() -> Element {
                         }
                     }
                 } else {
-                    // Form
                     div { class: "space-y-6",
-                        // Title
                         div {
                             label { class: "block text-sm font-medium mb-2", "Collection Title *" }
                             input {
@@ -87,22 +76,18 @@ pub fn ShopCollectionNew() -> Element {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "e.g., Summer Sale, Best Sellers",
                                 value: "{title}",
-                                oninput: move |e| title.set(e.value())
+                                oninput: move |e| title.set(e.value()),
                             }
                         }
-
-                        // Description
                         div {
                             label { class: "block text-sm font-medium mb-2", "Description" }
                             textarea {
                                 class: "w-full h-24 px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                                 placeholder: "Describe this collection...",
                                 value: "{description}",
-                                oninput: move |e| description.set(e.value())
+                                oninput: move |e| description.set(e.value()),
                             }
                         }
-
-                        // Image URL
                         div {
                             label { class: "block text-sm font-medium mb-2", "Cover Image URL" }
                             input {
@@ -110,26 +95,21 @@ pub fn ShopCollectionNew() -> Element {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "https://example.com/collection-image.jpg",
                                 value: "{image_url}",
-                                oninput: move |e| image_url.set(e.value())
+                                oninput: move |e| image_url.set(e.value()),
                             }
                         }
-
-                        // Image preview
                         if !image_url.read().is_empty() {
                             div { class: "aspect-video bg-muted rounded-lg overflow-hidden max-w-xs",
                                 img {
                                     src: "{image_url}",
-                                    class: "w-full h-full object-cover"
+                                    class: "w-full h-full object-cover",
                                 }
                             }
                         }
-
-                        // Product selection
                         div {
                             label { class: "block text-sm font-medium mb-2",
                                 "Select Products ({selected_products.read().len()} selected)"
                             }
-
                             if *loading_products.read() {
                                 div { class: "text-muted-foreground text-sm", "Loading products..." }
                             } else if available_products.read().is_empty() {
@@ -150,16 +130,11 @@ pub fn ShopCollectionNew() -> Element {
                                             let product_title = product.title.clone();
                                             let product_img = product.images.first().map(|i| i.url.clone());
                                             let coord_for_click = coord.clone();
-
                                             rsx! {
                                                 button {
                                                     key: "{coord}",
                                                     r#type: "button",
-                                                    class: if is_selected {
-                                                        "w-full p-3 flex items-center gap-3 bg-blue-500/10 border-b border-border last:border-0 text-left"
-                                                    } else {
-                                                        "w-full p-3 flex items-center gap-3 hover:bg-accent border-b border-border last:border-0 text-left transition"
-                                                    },
+                                                    class: if is_selected { "w-full p-3 flex items-center gap-3 bg-blue-500/10 border-b border-border last:border-0 text-left" } else { "w-full p-3 flex items-center gap-3 hover:bg-accent border-b border-border last:border-0 text-left transition" },
                                                     onclick: move |_| {
                                                         let mut selected = selected_products.write();
                                                         if selected.contains(&coord_for_click) {
@@ -168,31 +143,18 @@ pub fn ShopCollectionNew() -> Element {
                                                             selected.push(coord_for_click.clone());
                                                         }
                                                     },
-
-                                                    // Checkbox
-                                                    div { class: if is_selected {
-                                                        "w-5 h-5 rounded border-2 border-blue-500 bg-blue-500 flex items-center justify-center"
-                                                    } else {
-                                                        "w-5 h-5 rounded border-2 border-border"
-                                                    },
+                                                    div { class: if is_selected { "w-5 h-5 rounded border-2 border-blue-500 bg-blue-500 flex items-center justify-center" } else { "w-5 h-5 rounded border-2 border-border" },
                                                         if is_selected {
                                                             span { class: "text-white text-xs", "✓" }
                                                         }
                                                     }
-
-                                                    // Product image
                                                     div { class: "w-10 h-10 bg-muted rounded overflow-hidden shrink-0",
                                                         if let Some(ref img) = product_img {
-                                                            img {
-                                                                src: "{img}",
-                                                                class: "w-full h-full object-cover"
-                                                            }
+                                                            img { src: "{img}", class: "w-full h-full object-cover" }
                                                         } else {
                                                             div { class: "w-full h-full flex items-center justify-center text-sm", "📦" }
                                                         }
                                                     }
-
-                                                    // Product title
                                                     span { class: "flex-1 truncate", "{product_title}" }
                                                 }
                                             }
@@ -201,22 +163,18 @@ pub fn ShopCollectionNew() -> Element {
                                 }
                             }
                         }
-
-                        // Error message
                         if let Some(err) = error.read().as_ref() {
                             div { class: "bg-destructive/10 border border-destructive/50 text-destructive rounded-lg p-4",
                                 "{err}"
                             }
                         }
-
-                        // Submit button
                         button {
                             class: "w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition disabled:opacity-50",
-                            disabled: *publishing.read() || title.read().trim().is_empty() || selected_products.read().is_empty(),
+                            disabled: *publishing.read() || title.read().trim().is_empty()
+                                || selected_products.read().is_empty(),
                             onclick: move |_| {
                                 publishing.set(true);
                                 error.set(None);
-
                                 let form_data = CollectionFormData {
                                     title: title.read().clone(),
                                     description: description.read().clone(),
@@ -228,7 +186,6 @@ pub fn ShopCollectionNew() -> Element {
                                     products: selected_products.read().clone(),
                                     shipping_options: vec![],
                                 };
-
                                 spawn(async move {
                                     match publish_collection(form_data, None).await {
                                         Ok(d_tag) => {
@@ -248,8 +205,6 @@ pub fn ShopCollectionNew() -> Element {
                                 "Create Collection"
                             }
                         }
-
-                        // Hint
                         if selected_products.read().is_empty() && !available_products.read().is_empty() {
                             p { class: "text-sm text-muted-foreground text-center",
                                 "Select at least one product to create a collection"

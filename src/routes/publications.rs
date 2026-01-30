@@ -1,18 +1,17 @@
 //! Publications Home Route
 //! Browse NKBIP-01 publications (Kind 30040)
-
 use crate::components::icons::{
     BookOpenIcon, GridIcon, ListIcon, PenSquareIcon, RefreshIcon, SearchIcon,
 };
-use crate::components::{PublicationCardCompact, PublicationCardSkeleton, PublicationGrid};
+use crate::components::{
+    PublicationCardCompact, PublicationCardSkeleton, PublicationGrid,
+};
 use crate::hooks::use_infinite_scroll;
 use crate::stores::publication_store::PublicationIndex;
 use crate::stores::{nostr_client, publication_store};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-
 const PAGE_SIZE: usize = 24;
-
 /// View mode for the publications list
 #[derive(Clone, Copy, PartialEq, Default)]
 enum ViewMode {
@@ -20,7 +19,6 @@ enum ViewMode {
     Grid,
     List,
 }
-
 /// Publications home page
 #[component]
 pub fn PublicationsHome() -> Element {
@@ -32,13 +30,9 @@ pub fn PublicationsHome() -> Element {
     let mut committed_query = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
     let mut view_mode = use_signal(|| ViewMode::Grid);
-
-    // Pagination state
     let mut pagination_loading = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
-
-    // Fetch publications on initial load
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -48,7 +42,6 @@ pub fn PublicationsHome() -> Element {
             loading.set(true);
             match publication_store::fetch_publications(PAGE_SIZE, None).await {
                 Ok(result) => {
-                    // Set oldest timestamp for pagination
                     if let Some(oldest) = result.last() {
                         oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
                     }
@@ -63,38 +56,28 @@ pub fn PublicationsHome() -> Element {
             }
         });
     });
-
-    // Load more function for infinite scroll
     let load_more = move || {
         if *pagination_loading.peek() || !*has_more.peek() {
             return;
         }
-
         let until = *oldest_timestamp.peek();
-
         spawn(async move {
             pagination_loading.set(true);
-
             match publication_store::fetch_publications(PAGE_SIZE, until).await {
                 Ok(fetched) => {
                     let fetched_count = fetched.len();
-
                     if fetched.is_empty() {
                         has_more.set(false);
                     } else {
-                        // Always update oldest_timestamp from ALL fetched items (not just unique)
-                        // to ensure we make progress even if all items were duplicates
-                        // Subtract 1 to avoid re-fetching posts at the exact boundary
                         if let Some(oldest) = fetched.last() {
                             let ts = oldest.event.created_at.as_secs().saturating_sub(1);
                             oldest_timestamp.set(Some(ts));
                         }
-
-                        // Deduplicate and append
                         let mut current = publications.peek().clone();
-                        let existing_ids: HashSet<_> =
-                            current.iter().map(|p| p.event.id.to_hex()).collect();
-
+                        let existing_ids: HashSet<_> = current
+                            .iter()
+                            .map(|p| p.event.id.to_hex())
+                            .collect();
                         let mut added_count = 0;
                         for pub_item in fetched {
                             if !existing_ids.contains(&pub_item.event.id.to_hex()) {
@@ -102,45 +85,32 @@ pub fn PublicationsHome() -> Element {
                                 added_count += 1;
                             }
                         }
-
                         publications.set(current);
-
-                        // Only set has_more to false when fetch returns very few items
                         if fetched_count < PAGE_SIZE / 2 {
                             has_more.set(false);
                         }
-
                         log::info!(
                             "Pagination: fetched {}, added {} unique publications",
-                            fetched_count,
-                            added_count
+                            fetched_count, added_count
                         );
                     }
                 }
                 Err(e) => log::error!("Failed to load more publications: {}", e),
             }
-
             pagination_loading.set(false);
         });
     };
-
-    // Setup infinite scroll
     let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
-
-    // Perform search when committed_query changes
     use_effect(move || {
         let query = committed_query.read().clone();
-
         if query.trim().is_empty() {
             search_results.set(None);
             searching.set(false);
             return;
         }
-
         if query.trim().len() < 2 {
             return;
         }
-
         spawn(async move {
             searching.set(true);
             match publication_store::search_publications(&query, 50).await {
@@ -154,26 +124,20 @@ pub fn PublicationsHome() -> Element {
             searching.set(false);
         });
     });
-
-    // Handle search input - trigger search on Enter or blur
     let mut handle_search_input = move |value: String| {
         search_query.set(value);
     };
-
     let handle_search_keydown = move |e: KeyboardEvent| {
         if e.key() == Key::Enter {
             committed_query.set(search_query.read().clone());
         }
     };
-
     let handle_search_blur = move |_| {
         let query = search_query.read().clone();
         if query != *committed_query.read() {
             committed_query.set(query);
         }
     };
-
-    // Determine which publications to display
     let display_publications = use_memo(move || {
         if let Some(ref results) = *search_results.read() {
             results.clone()
@@ -181,19 +145,18 @@ pub fn PublicationsHome() -> Element {
             publications.read().clone()
         }
     });
-
     let is_searching = search_results.read().is_some();
-
     let refresh = move |_| {
         search_query.set(String::new());
         committed_query.set(String::new());
         search_results.set(None);
-        // Reset pagination state
         has_more.set(true);
         oldest_timestamp.set(None);
         spawn(async move {
             loading.set(true);
-            if let Ok(result) = publication_store::fetch_publications(PAGE_SIZE, None).await {
+            if let Ok(result) = publication_store::fetch_publications(PAGE_SIZE, None)
+                .await
+            {
                 if let Some(oldest) = result.last() {
                     oldest_timestamp.set(Some(oldest.event.created_at.as_secs()));
                 }
@@ -203,43 +166,23 @@ pub fn PublicationsHome() -> Element {
             loading.set(false);
         });
     };
-
     rsx! {
-        div {
-            class: "max-w-6xl mx-auto px-4 py-6",
-
-            // Header
-            div {
-                class: "flex items-center justify-between mb-6",
-                div {
-                    class: "flex items-center gap-3",
+        div { class: "max-w-6xl mx-auto px-4 py-6",
+            div { class: "flex items-center justify-between mb-6",
+                div { class: "flex items-center gap-3",
                     BookOpenIcon { class: "w-8 h-8 text-primary" }
-                    h1 {
-                        class: "text-2xl font-bold text-foreground",
-                        "Publications"
-                    }
+                    h1 { class: "text-2xl font-bold text-foreground", "Publications" }
                 }
-                div {
-                    class: "flex items-center gap-2",
-                    // View toggle
-                    div {
-                        class: "flex items-center border border-border rounded-lg overflow-hidden",
+                div { class: "flex items-center gap-2",
+                    div { class: "flex items-center border border-border rounded-lg overflow-hidden",
                         button {
-                            class: if *view_mode.read() == ViewMode::Grid {
-                                "p-2 bg-accent text-foreground"
-                            } else {
-                                "p-2 hover:bg-accent/50 text-muted-foreground transition-colors"
-                            },
+                            class: if *view_mode.read() == ViewMode::Grid { "p-2 bg-accent text-foreground" } else { "p-2 hover:bg-accent/50 text-muted-foreground transition-colors" },
                             title: "Grid view",
                             onclick: move |_| view_mode.set(ViewMode::Grid),
                             GridIcon { class: "w-4 h-4" }
                         }
                         button {
-                            class: if *view_mode.read() == ViewMode::List {
-                                "p-2 bg-accent text-foreground"
-                            } else {
-                                "p-2 hover:bg-accent/50 text-muted-foreground transition-colors"
-                            },
+                            class: if *view_mode.read() == ViewMode::List { "p-2 bg-accent text-foreground" } else { "p-2 hover:bg-accent/50 text-muted-foreground transition-colors" },
                             title: "List view",
                             onclick: move |_| view_mode.set(ViewMode::List),
                             ListIcon { class: "w-4 h-4" }
@@ -252,22 +195,17 @@ pub fn PublicationsHome() -> Element {
                     }
                     Link {
                         class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors",
-                        to: crate::routes::Route::PublicationNew {},
+                        to: crate::routes::Route::PublicationNew {
+                        },
                         PenSquareIcon { class: "w-5 h-5" }
                         "New Publication"
                     }
                 }
             }
-
-            // Description
-            p {
-                class: "text-muted-foreground mb-6",
+            p { class: "text-muted-foreground mb-6",
                 "Browse curated publications - books, documentation, and structured long-form content on the Nostr network."
             }
-
-            // Search
-            div {
-                class: "relative mb-6",
+            div { class: "relative mb-6",
                 SearchIcon { class: "absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" }
                 input {
                     class: "w-full pl-10 pr-4 py-2 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring",
@@ -278,24 +216,15 @@ pub fn PublicationsHome() -> Element {
                     onkeydown: handle_search_keydown,
                     onblur: handle_search_blur,
                 }
-                // Search loading indicator
                 if *searching.read() {
-                    div {
-                        class: "absolute right-3 top-1/2 -translate-y-1/2",
-                        div {
-                            class: "w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin",
-                        }
+                    div { class: "absolute right-3 top-1/2 -translate-y-1/2",
+                        div { class: "w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" }
                     }
                 }
             }
-
-            // Search results info
             if is_searching {
-                div {
-                    class: "flex items-center justify-between mb-4 text-sm text-muted-foreground",
-                    span {
-                        "Found {display_publications.read().len()} results for \"{search_query}\""
-                    }
+                div { class: "flex items-center justify-between mb-4 text-sm text-muted-foreground",
+                    span { "Found {display_publications.read().len()} results for \"{search_query}\"" }
                     button {
                         class: "text-primary hover:underline",
                         onclick: move |_| {
@@ -307,39 +236,30 @@ pub fn PublicationsHome() -> Element {
                     }
                 }
             }
-
-            // Error state
             if let Some(ref e) = *error.read() {
-                div {
-                    class: "p-4 rounded-lg bg-destructive/10 text-destructive mb-6",
+                div { class: "p-4 rounded-lg bg-destructive/10 text-destructive mb-6",
                     "Error loading publications: {e}"
                 }
             }
-
-            // Content
-            if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && publications.read().is_empty()) {
-                // Loading skeleton
-                div {
-                    class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4",
+            if !*nostr_client::CLIENT_INITIALIZED.read()
+                || (*loading.read() && publications.read().is_empty())
+            {
+                div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4",
                     for _ in 0..6 {
                         PublicationCardSkeleton {}
                     }
                 }
             } else if display_publications.read().is_empty() {
-                // Empty state
-                div {
-                    class: "flex flex-col items-center justify-center py-16 text-center",
+                div { class: "flex flex-col items-center justify-center py-16 text-center",
                     BookOpenIcon { class: "w-16 h-16 text-muted-foreground mb-4" }
-                    h2 {
-                        class: "text-xl font-semibold text-foreground mb-2",
+                    h2 { class: "text-xl font-semibold text-foreground mb-2",
                         if search_query.read().is_empty() {
                             "No Publications Yet"
                         } else {
                             "No Results Found"
                         }
                     }
-                    p {
-                        class: "text-muted-foreground mb-6 max-w-md",
+                    p { class: "text-muted-foreground mb-6 max-w-md",
                         if search_query.read().is_empty() {
                             "Be the first to create a publication! Compile your writing into a structured book or documentation."
                         } else {
@@ -348,77 +268,53 @@ pub fn PublicationsHome() -> Element {
                     }
                     Link {
                         class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors",
-                        to: crate::routes::Route::PublicationNew {},
+                        to: crate::routes::Route::PublicationNew {
+                        },
                         PenSquareIcon { class: "w-5 h-5" }
                         "Create Publication"
                     }
                 }
             } else {
-                // Content based on view mode
                 if *view_mode.read() == ViewMode::Grid {
                     div {
-                        // Grid view with pagination
                         PublicationGrid {
                             publications: display_publications.read().clone(),
                             loading: *loading.read() || *searching.read(),
                         }
-
-                        // Loading more skeletons (only when not searching)
                         if *pagination_loading.read() && !is_searching {
-                            div {
-                                class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4",
+                            div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4",
                                 for i in 0..6 {
                                     PublicationCardSkeleton { key: "loading-grid-{i}" }
                                 }
                             }
                         }
-
-                        // Infinite scroll sentinel (only when not searching)
                         if *has_more.read() && !is_searching {
-                            div {
-                                id: "{sentinel_id}",
-                                class: "h-4"
-                            }
+                            div { id: "{sentinel_id}", class: "h-4" }
                         }
-
-                        // End of list indicator (only when not searching)
                         if !*has_more.read() && !publications.read().is_empty() && !is_searching {
-                            div {
-                                class: "text-center py-8 text-muted-foreground",
+                            div { class: "text-center py-8 text-muted-foreground",
                                 "You've reached the end!"
                             }
                         }
                     }
                 } else {
-                    // List view with pagination
-                    div {
-                        class: "space-y-3",
+                    div { class: "space-y-3",
                         for publication in display_publications.read().iter() {
                             PublicationCardCompact {
                                 key: "{publication.event.id.to_hex()}",
                                 publication: publication.clone(),
                             }
                         }
-
-                        // Loading more skeletons (only when not searching)
                         if *pagination_loading.read() && !is_searching {
                             for i in 0..3 {
                                 PublicationCardSkeleton { key: "loading-list-skeleton-{i}" }
                             }
                         }
-
-                        // Infinite scroll sentinel (only when not searching)
                         if *has_more.read() && !is_searching {
-                            div {
-                                id: "{sentinel_id}",
-                                class: "h-4"
-                            }
+                            div { id: "{sentinel_id}", class: "h-4" }
                         }
-
-                        // End of list indicator (only when not searching)
                         if !*has_more.read() && !publications.read().is_empty() && !is_searching {
-                            div {
-                                class: "text-center py-8 text-muted-foreground",
+                            div { class: "text-center py-8 text-muted-foreground",
                                 "You've reached the end!"
                             }
                         }

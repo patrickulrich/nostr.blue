@@ -1,10 +1,5 @@
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use nostr_sdk::Timestamp;
-
-// ============================================================================
-// Simple Relative Time (WASM-compatible, u64 input)
-// ============================================================================
-
 /// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago")
 ///
 /// This version takes a raw `u64` timestamp and is WASM-compatible,
@@ -20,15 +15,12 @@ use nostr_sdk::Timestamp;
 pub fn format_time_ago(timestamp: u64) -> String {
     #[cfg(target_family = "wasm")]
     let now = (js_sys::Date::now() / 1000.0) as u64;
-
     #[cfg(not(target_family = "wasm"))]
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-
     let diff = now.saturating_sub(timestamp);
-
     if diff < 60 {
         "just now".to_string()
     } else if diff < 3600 {
@@ -43,11 +35,6 @@ pub fn format_time_ago(timestamp: u64) -> String {
         format!("{}mo ago", diff / 2592000)
     }
 }
-
-// ============================================================================
-// Duration Safety Utilities
-// ============================================================================
-
 /// Convert a duration in seconds (f64) to milliseconds (u32) with overflow protection.
 ///
 /// Uses saturating arithmetic to prevent overflow/underflow when converting
@@ -70,13 +57,8 @@ pub fn safe_duration_millis(seconds: f64) -> u32 {
         return 0;
     }
     let millis = seconds * 1000.0;
-    if millis > u32::MAX as f64 {
-        u32::MAX
-    } else {
-        millis as u32
-    }
+    if millis > u32::MAX as f64 { u32::MAX } else { millis as u32 }
 }
-
 /// Format a timestamp as relative time
 ///
 /// # Arguments
@@ -95,16 +77,12 @@ pub fn format_relative_time_ex(
 ) -> String {
     let now = Utc::now().timestamp() as u64;
     let ts = timestamp.as_secs();
-
-    // Handle future timestamps
     if ts > now {
         let diff = ts - now;
         return format_future_time(diff, use_long_format);
     }
-
     let diff = now - ts;
     let ago_suffix = if include_ago { " ago" } else { "" };
-
     match diff {
         0..=59 => "just now".to_string(),
         60..=3599 => {
@@ -132,13 +110,11 @@ pub fn format_relative_time_ex(
             format!("{}d{}", days, ago_suffix)
         }
         _ => {
-            // For older than 7 days, show the date
             let dt = DateTime::from_timestamp(ts as i64, 0).unwrap_or_else(Utc::now);
             dt.format("%b %d").to_string()
         }
     }
 }
-
 /// Format a future time difference
 fn format_future_time(diff: u64, use_long: bool) -> String {
     if diff < 60 {
@@ -167,20 +143,18 @@ fn format_future_time(diff: u64, use_long: bool) -> String {
         format!("in {}d", days)
     }
 }
-
 /// Format a timestamp as relative time (e.g., "5m", "2h", "3d")
 /// This is a convenience wrapper around format_relative_time_ex with default parameters
 pub fn format_relative_time(timestamp: Timestamp) -> String {
     format_relative_time_ex(timestamp, false, false)
 }
-
 /// Format a timestamp as a human-readable date and time
 #[allow(dead_code)]
 pub fn format_datetime(timestamp: Timestamp) -> String {
-    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0).unwrap_or_else(Utc::now);
+    let dt = DateTime::from_timestamp(timestamp.as_secs() as i64, 0)
+        .unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
-
 /// Calculate end timestamp based on preset or custom time
 ///
 /// Supported presets:
@@ -194,7 +168,6 @@ pub fn format_datetime(timestamp: Timestamp) -> String {
 /// Uses `.earliest()` for DST-safe local time conversion.
 pub fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> {
     let now = Timestamp::now();
-
     match preset {
         "1hour" => Some(Timestamp::from(now.as_secs() + 3600)),
         "1day" => Some(Timestamp::from(now.as_secs() + 86400)),
@@ -204,15 +177,13 @@ pub fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> 
             if custom_time.is_empty() {
                 return None;
             }
-            // Parse datetime-local format (YYYY-MM-DDTHH:MM)
-            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(custom_time, "%Y-%m-%dT%H:%M") {
-                // Convert from local time to UTC
-                // Use .earliest() for deterministic behavior during DST transitions
+            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(
+                custom_time,
+                "%Y-%m-%dT%H:%M",
+            ) {
                 if let Some(local_dt) = Local.from_local_datetime(&naive_dt).earliest() {
                     let utc_dt = local_dt.with_timezone(&Utc);
                     let timestamp = utc_dt.timestamp();
-
-                    // Verify timestamp is valid (non-negative and in the future)
                     if timestamp >= 0 && timestamp > Utc::now().timestamp() {
                         Some(Timestamp::from(timestamp as u64))
                     } else {
@@ -225,6 +196,6 @@ pub fn calculate_end_time(preset: &str, custom_time: &str) -> Option<Timestamp> 
                 None
             }
         }
-        _ => Some(Timestamp::from(now.as_secs() + 86400)), // Default to 1 day
+        _ => Some(Timestamp::from(now.as_secs() + 86400)),
     }
 }

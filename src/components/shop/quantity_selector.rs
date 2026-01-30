@@ -1,7 +1,5 @@
 //! QuantitySelector component - increment/decrement quantity input
-
 use dioxus::prelude::*;
-
 #[derive(Props, Clone, PartialEq)]
 pub struct QuantitySelectorProps {
     pub quantity: u32,
@@ -11,13 +9,11 @@ pub struct QuantitySelectorProps {
     #[props(default = 99)]
     pub max: u32,
 }
-
 /// Quantity selector with +/- buttons
 #[component]
 pub fn QuantitySelector(props: QuantitySelectorProps) -> Element {
     let can_decrease = props.quantity > props.min;
     let can_increase = props.quantity < props.max;
-
     rsx! {
         div { class: "flex items-center gap-2",
             button {
@@ -36,11 +32,7 @@ pub fn QuantitySelector(props: QuantitySelectorProps) -> Element {
                 },
                 "-"
             }
-
-            span { class: "w-10 text-center font-medium",
-                "{props.quantity}"
-            }
-
+            span { class: "w-10 text-center font-medium", "{props.quantity}" }
             button {
                 r#type: "button",
                 class: "w-8 h-8 rounded-full border border-border flex items-center justify-center hover:bg-accent transition disabled:opacity-50 disabled:cursor-not-allowed",

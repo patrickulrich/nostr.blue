@@ -7,7 +7,6 @@ use dioxus::prelude::*;
 use nostr_sdk::{Alphabet, Filter, Kind, TagKind, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-
 /// Track reference extracted from vote event
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum TrackRef {
@@ -16,7 +15,6 @@ enum TrackRef {
     /// Wavlake track ID
     Wavlake(String),
 }
-
 /// Vote data for a single track
 #[derive(Clone, Debug, PartialEq)]
 struct VoteData {
@@ -25,9 +23,8 @@ struct VoteData {
     artist: String,
     image: Option<String>,
     votes: usize,
-    voters: HashSet<String>, // O(1) lookup for deduplication
+    voters: HashSet<String>,
 }
-
 /// Leaderboard entry with resolved track for playback
 #[derive(Clone, Debug, PartialEq)]
 struct LeaderboardEntry {
@@ -36,19 +33,15 @@ struct LeaderboardEntry {
     /// Resolved MusicTrack for playback (None if we couldn't resolve it)
     music_track: Option<MusicTrack>,
 }
-
 #[component]
 pub fn MusicLeaderboard() -> Element {
     let mut loading = use_signal(|| true);
     let mut leaderboard = use_signal(Vec::<LeaderboardEntry>::new);
     let mut error_msg = use_signal(|| None::<String>);
-
-    // Fetch vote events and build leaderboard
     use_effect(move || {
         spawn(async move {
             loading.set(true);
             error_msg.set(None);
-
             match fetch_leaderboard_data().await {
                 Ok(entries) => {
                     log::info!("Loaded {} leaderboard entries", entries.len());
@@ -63,56 +56,39 @@ pub fn MusicLeaderboard() -> Element {
             }
         });
     });
-
     rsx! {
-        div {
-            class: "max-w-4xl mx-auto p-4 space-y-6",
-
-            div {
-                class: "flex items-center justify-between",
-                h1 {
-                    class: "text-3xl font-bold",
-                    "Music Leaderboard"
-                }
+        div { class: "max-w-4xl mx-auto p-4 space-y-6",
+            div { class: "flex items-center justify-between",
+                h1 { class: "text-3xl font-bold", "Music Leaderboard" }
                 Link {
                     to: Route::MusicHome {},
                     class: "px-4 py-2 bg-muted hover:bg-muted/80 rounded-full transition",
                     "Back to Music"
                 }
             }
-
-            div {
-                class: "bg-card p-6 rounded-lg border border-border",
-                p {
-                    class: "text-muted-foreground",
+            div { class: "bg-card p-6 rounded-lg border border-border",
+                p { class: "text-muted-foreground",
                     "Top 10 most voted songs of the week from the community."
                 }
-                p {
-                    class: "text-sm text-muted-foreground mt-2",
+                p { class: "text-sm text-muted-foreground mt-2",
                     "One vote per person. Voting for a new song replaces your previous vote."
                 }
             }
-
             if let Some(err) = error_msg.read().as_ref() {
-                div {
-                    class: "bg-destructive/10 border border-destructive text-destructive p-4 rounded-lg",
+                div { class: "bg-destructive/10 border border-destructive text-destructive p-4 rounded-lg",
                     "Failed to load leaderboard: {err}"
                 }
             }
-
             if *loading.read() {
-                div {
-                    class: "space-y-4",
+                div { class: "space-y-4",
                     for i in 0..10 {
                         div {
                             key: "{i}",
                             class: "bg-card p-4 rounded-lg border border-border animate-pulse",
-                            div {
-                                class: "flex items-center gap-4",
+                            div { class: "flex items-center gap-4",
                                 div { class: "w-8 h-8 bg-muted rounded-full" }
                                 div { class: "w-14 h-14 bg-muted rounded-lg" }
-                                div {
-                                    class: "flex-1 space-y-2",
+                                div { class: "flex-1 space-y-2",
                                     div { class: "h-4 bg-muted rounded w-48" }
                                     div { class: "h-3 bg-muted rounded w-32" }
                                 }
@@ -121,108 +97,73 @@ pub fn MusicLeaderboard() -> Element {
                     }
                 }
             } else if leaderboard.read().is_empty() {
-                div {
-                    class: "text-center py-12",
-                    div {
-                        class: "text-6xl mb-4",
-                        "🏆"
-                    }
-                    h3 {
-                        class: "text-xl font-semibold mb-2",
-                        "No Votes Yet"
-                    }
-                    p {
-                        class: "text-muted-foreground",
+                div { class: "text-center py-12",
+                    div { class: "text-6xl mb-4", "🏆" }
+                    h3 { class: "text-xl font-semibold mb-2", "No Votes Yet" }
+                    p { class: "text-muted-foreground",
                         "Be the first to vote for your favorite songs!"
                     }
                 }
             } else {
-                div {
-                    class: "space-y-3",
+                div { class: "space-y-3",
                     for entry in leaderboard.read().iter() {
-                        LeaderboardCard {
-                            key: "{entry.rank}",
-                            entry: entry.clone()
-                        }
+                        LeaderboardCard { key: "{entry.rank}", entry: entry.clone() }
                     }
                 }
             }
         }
     }
 }
-
 /// Individual leaderboard card component
 #[component]
 fn LeaderboardCard(entry: LeaderboardEntry) -> Element {
     let rank_class = match entry.rank {
-        1 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-yellow-500 text-yellow-900 shrink-0",
-        2 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-400 text-gray-900 shrink-0",
-        3 => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-amber-600 text-amber-100 shrink-0",
-        _ => "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-primary/10 text-primary shrink-0",
+        1 => {
+            "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-yellow-500 text-yellow-900 shrink-0"
+        }
+        2 => {
+            "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-400 text-gray-900 shrink-0"
+        }
+        3 => {
+            "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-amber-600 text-amber-100 shrink-0"
+        }
+        _ => {
+            "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-primary/10 text-primary shrink-0"
+        }
     };
-
     let source_badge = match &entry.vote_data.track_ref {
         TrackRef::Nostr(_) => Some("Nostr"),
         TrackRef::Wavlake(_) => Some("Wavlake"),
     };
-
     rsx! {
-        div {
-            class: "bg-card p-4 rounded-lg border border-border hover:shadow-md transition-all duration-200",
-
-            div {
-                class: "flex items-center gap-4",
-
-                // Rank badge
-                div {
-                    class: "{rank_class}",
-                    "{entry.rank}"
-                }
-
-                // Album art
-                div {
-                    class: "w-14 h-14 bg-muted rounded-lg flex items-center justify-center overflow-hidden relative shrink-0",
+        div { class: "bg-card p-4 rounded-lg border border-border hover:shadow-md transition-all duration-200",
+            div { class: "flex items-center gap-4",
+                div { class: "{rank_class}", "{entry.rank}" }
+                div { class: "w-14 h-14 bg-muted rounded-lg flex items-center justify-center overflow-hidden relative shrink-0",
                     if let Some(ref image) = entry.vote_data.image {
                         img {
                             src: "{image}",
                             alt: "{entry.vote_data.title}",
-                            class: "w-full h-full object-cover"
+                            class: "w-full h-full object-cover",
                         }
                     } else {
-                        div {
-                            class: "text-2xl",
-                            "🎵"
-                        }
+                        div { class: "text-2xl", "🎵" }
                     }
                 }
-
-                // Track info
-                div {
-                    class: "flex-1 min-w-0",
-                    h3 {
-                        class: "font-medium truncate",
-                        "{entry.vote_data.title}"
-                    }
-                    p {
-                        class: "text-sm text-muted-foreground truncate",
-                        "{entry.vote_data.artist}"
-                    }
-                    div {
-                        class: "flex items-center gap-2 mt-1",
-                        span {
-                            class: "text-xs px-2 py-1 bg-red-500/10 text-red-500 rounded-full",
+                div { class: "flex-1 min-w-0",
+                    h3 { class: "font-medium truncate", "{entry.vote_data.title}" }
+                    p { class: "text-sm text-muted-foreground truncate", "{entry.vote_data.artist}" }
+                    div { class: "flex items-center gap-2 mt-1",
+                        span { class: "text-xs px-2 py-1 bg-red-500/10 text-red-500 rounded-full",
                             "❤️ {entry.vote_data.votes}"
                         }
                         if let Some(badge) = source_badge {
-                            span {
-                                class: "text-xs px-2 py-1 bg-muted text-muted-foreground rounded-full",
+                            span { class: "text-xs px-2 py-1 bg-muted text-muted-foreground rounded-full",
                                 "{badge}"
                             }
                         }
                     }
                 }
-
-                // Play button (only if we have a resolved track)
                 if let Some(ref track) = entry.music_track {
                     button {
                         class: "px-4 py-2 bg-primary text-primary-foreground rounded-full hover:bg-primary/90 transition",
@@ -239,34 +180,24 @@ fn LeaderboardCard(entry: LeaderboardEntry) -> Element {
         }
     }
 }
-
 /// Fetch and aggregate leaderboard data from Kind 33169 vote events
 async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
     let client = nostr_client::get_client().ok_or("Nostr client not initialized")?;
-
     let one_week_ago = Timestamp::now() - Duration::from_secs(7 * 24 * 60 * 60);
-
     log::info!(
-        "Fetching vote events (kind {}) since {}",
-        KIND_MUSIC_VOTE,
-        one_week_ago.as_secs()
+        "Fetching vote events (kind {}) since {}", KIND_MUSIC_VOTE, one_week_ago
+        .as_secs()
     );
-
     let filter = Filter::new()
         .kind(Kind::from(KIND_MUSIC_VOTE))
         .identifier("music-vote")
         .since(one_week_ago)
         .limit(1000);
-
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch vote events: {}", e))?;
-
     log::info!("Fetched {} vote events", events.len());
-
-    // STEP 1: Keep only the latest vote event per voter
-    // This ensures each user's vote counts only once (their most recent choice)
     #[derive(Clone)]
     struct ParsedVote {
         track_ref: TrackRef,
@@ -275,47 +206,37 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
         image: Option<String>,
         created_at: Timestamp,
     }
-
     let mut latest_per_voter: HashMap<String, ParsedVote> = HashMap::new();
-
     for event in events {
-        // Extract cached metadata using correct TagKind variants
         let title = event
             .tags
             .find(TagKind::Title)
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
-
         let artist = event
             .tags
             .find(TagKind::custom("artist"))
             .and_then(|t| t.content())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Unknown".to_string());
-
         let image = event
             .tags
             .find(TagKind::Image)
             .and_then(|t| t.content())
             .map(|s| s.to_string());
-
         let source_kind = event
             .tags
             .find(TagKind::k())
             .and_then(|t| t.content())
             .map(|s| s.to_string());
-
-        // Determine track reference based on source
         let track_ref = if source_kind.as_deref() == Some("wavlake") {
-            // Wavlake track - look for track_id or parse from r tag
             let track_id = event
                 .tags
                 .find(TagKind::custom("track_id"))
                 .and_then(|t| t.content())
                 .map(|s| s.to_string())
                 .or_else(|| {
-                    // Try to extract from r tag URL
                     event
                         .tags
                         .find(TagKind::single_letter(Alphabet::R, false))
@@ -323,25 +244,21 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                         .and_then(|url| url.split('/').next_back())
                         .map(|s| s.to_string())
                 });
-
             match track_id {
                 Some(id) => TrackRef::Wavlake(id),
-                None => continue, // Skip if we can't identify the track
+                None => continue,
             }
         } else {
-            // Nostr track - look for 'a' tag (coordinate)
             let coordinate = event
                 .tags
                 .find(TagKind::a())
                 .and_then(|t| t.content())
                 .map(|s| s.to_string());
-
             match coordinate {
                 Some(coord) => TrackRef::Nostr(coord),
-                None => continue, // Skip if we can't identify the track
+                None => continue,
             }
         };
-
         let voter_pubkey = event.pubkey.to_hex();
         let parsed = ParsedVote {
             track_ref,
@@ -350,8 +267,6 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             image,
             created_at: event.created_at,
         };
-
-        // Keep only the latest vote per voter
         latest_per_voter
             .entry(voter_pubkey)
             .and_modify(|existing| {
@@ -361,16 +276,12 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
             })
             .or_insert(parsed);
     }
-
-    // STEP 2: Aggregate the latest votes by track
     let mut vote_map: HashMap<String, VoteData> = HashMap::new();
-
     for (voter_pubkey, vote) in latest_per_voter {
         let track_key = match &vote.track_ref {
             TrackRef::Nostr(coord) => coord.clone(),
             TrackRef::Wavlake(id) => format!("wavlake:{}", id),
         };
-
         vote_map
             .entry(track_key)
             .and_modify(|data| {
@@ -386,30 +297,19 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                 voters: HashSet::from([voter_pubkey]),
             });
     }
-
-    // Sort by votes and take top 10
     let mut sorted_votes: Vec<VoteData> = vote_map.into_values().collect();
     sorted_votes.sort_by(|a, b| b.votes.cmp(&a.votes));
     let top_10 = sorted_votes.into_iter().take(10).collect::<Vec<_>>();
-
-    log::info!(
-        "Top {} tracks identified, resolving for playback...",
-        top_10.len()
-    );
-
-    // Resolve tracks for playback
+    log::info!("Top {} tracks identified, resolving for playback...", top_10.len());
     let api = WavlakeAPI::new();
     let mut entries = Vec::new();
-
     for (index, vote_data) in top_10.into_iter().enumerate() {
         let music_track = match &vote_data.track_ref {
             TrackRef::Wavlake(track_id) => {
-                // Fetch from Wavlake API
                 match api.get_track(track_id).await {
                     Ok(wt) => Some(MusicTrack::from(wt)),
                     Err(e) => {
                         log::warn!("Failed to fetch Wavlake track {}: {}", track_id, e);
-                        // Fallback returns None - no playable media_url available
                         create_fallback_track(
                             &vote_data,
                             TrackSource::Wavlake {
@@ -421,26 +321,24 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                 }
             }
             TrackRef::Nostr(coordinate) => {
-                // Parse coordinate and create track source
-                // Format: "36787:pubkey:d-tag"
                 let parts: Vec<&str> = coordinate.split(':').collect();
                 if parts.len() >= 3 {
                     let pubkey = parts[1].to_string();
-                    let d_tag = parts[2..].join(":"); // Handle d-tags with colons
-
-                    // Try to fetch the actual track first for proper playback
+                    let d_tag = parts[2..].join(":");
                     match crate::stores::nostr_music::fetch_nostr_track_by_coordinate(
-                        &pubkey, &d_tag,
-                    )
-                    .await
+                            &pubkey,
+                            &d_tag,
+                        )
+                        .await
                     {
                         Ok(Some(nostr_track)) => {
-                            log::info!("Successfully fetched Nostr track: {}", coordinate);
+                            log::info!(
+                                "Successfully fetched Nostr track: {}", coordinate
+                            );
                             Some(MusicTrack::from(nostr_track))
                         }
                         Ok(None) => {
                             log::warn!("Nostr track not found: {}", coordinate);
-                            // Fallback returns None - no playable media_url available
                             create_fallback_track(
                                 &vote_data,
                                 TrackSource::Nostr {
@@ -451,8 +349,9 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                             )
                         }
                         Err(e) => {
-                            log::warn!("Failed to fetch Nostr track {}: {}", coordinate, e);
-                            // Fallback returns None - no playable media_url available
+                            log::warn!(
+                                "Failed to fetch Nostr track {}: {}", coordinate, e
+                            );
                             create_fallback_track(
                                 &vote_data,
                                 TrackSource::Nostr {
@@ -469,24 +368,22 @@ async fn fetch_leaderboard_data() -> Result<Vec<LeaderboardEntry>, String> {
                 }
             }
         };
-
-        entries.push(LeaderboardEntry {
-            rank: index + 1,
-            vote_data,
-            music_track,
-        });
+        entries
+            .push(LeaderboardEntry {
+                rank: index + 1,
+                vote_data,
+                music_track,
+            });
     }
-
     Ok(entries)
 }
-
 /// Create a fallback MusicTrack from cached vote data
 ///
 /// Returns None because fallback tracks don't have a playable media_url.
 /// This prevents the Play button from rendering for tracks that can't be played.
-fn create_fallback_track(_vote_data: &VoteData, _source: TrackSource) -> Option<MusicTrack> {
-    // Fallback tracks have no media_url, so they aren't playable.
-    // Return None so the Play button won't render for these entries.
-    // The track info is still displayed from vote_data in the LeaderboardEntry.
+fn create_fallback_track(
+    _vote_data: &VoteData,
+    _source: TrackSource,
+) -> Option<MusicTrack> {
     None
 }

@@ -1,11 +1,9 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::NOSTR_CLIENT;
 use crate::stores::profiles::PROFILE_CACHE;
-
 /// Result type for profile search
 #[derive(Clone, Debug)]
 pub struct ProfileSearchResult {
@@ -17,9 +15,8 @@ pub struct ProfileSearchResult {
     pub nip05: Option<String>,
     pub is_contact: bool,
     pub is_thread_participant: bool,
-    pub relevance: u32, // Higher = more relevant
+    pub relevance: u32,
 }
-
 impl ProfileSearchResult {
     /// Get the display name with fallback logic
     pub fn get_display_name(&self) -> String {
@@ -33,17 +30,14 @@ impl ProfileSearchResult {
                 return name.clone();
             }
         }
-        // Fallback to truncated pubkey
         let hex = self.pubkey.to_hex();
         format!("{}...{}", &hex[..8], &hex[hex.len() - 8..])
     }
-
     /// Get the username (name field) or None
     pub fn get_username(&self) -> Option<String> {
         self.name.clone()
     }
 }
-
 /// Search cached profiles synchronously (fast, no relay queries)
 ///
 /// Searches through:
@@ -62,51 +56,35 @@ pub fn search_cached_profiles(
     if query.is_empty() {
         return Vec::new();
     }
-
     let query_lower = query.to_lowercase();
     let mut results: Vec<ProfileSearchResult> = Vec::new();
-
-    // Search in cached profiles
     let cache = PROFILE_CACHE.read();
-
     for (pubkey_str, profile) in cache.iter() {
         let pubkey = match PublicKey::from_hex(pubkey_str) {
             Ok(pk) => pk,
             Err(_) => continue,
         };
-
-        // Check if name or display_name matches
         let name_match = profile
             .name
             .as_ref()
             .map(|n| n.to_lowercase().contains(&query_lower))
             .unwrap_or(false);
-
         let display_name_match = profile
             .display_name
             .as_ref()
             .map(|d| d.to_lowercase().contains(&query_lower))
             .unwrap_or(false);
-
         if !name_match && !display_name_match {
             continue;
         }
-
-        // Calculate relevance score
         let is_contact = contact_pubkeys.contains(&pubkey);
         let is_thread_participant = thread_pubkeys.contains(&pubkey);
         let mut relevance = 0u32;
-
-        // Boost thread participants (highest priority)
         if is_thread_participant {
             relevance += 2000;
-        }
-        // Boost contacts (second priority)
-        else if is_contact {
+        } else if is_contact {
             relevance += 1000;
         }
-
-        // Exact matches get highest score
         if let Some(name) = &profile.name {
             if name.to_lowercase() == query_lower {
                 relevance += 500;
@@ -116,7 +94,6 @@ pub fn search_cached_profiles(
                 relevance += 50;
             }
         }
-
         if let Some(display_name) = &profile.display_name {
             if display_name.to_lowercase() == query_lower {
                 relevance += 400;
@@ -126,35 +103,26 @@ pub fn search_cached_profiles(
                 relevance += 40;
             }
         }
-
-        results.push(ProfileSearchResult {
-            pubkey,
-            name: profile.name.clone(),
-            display_name: profile.display_name.clone(),
-            picture: profile.picture.clone(),
-            nip05: profile.nip05.clone(),
-            is_contact,
-            is_thread_participant,
-            relevance,
-        });
+        results
+            .push(ProfileSearchResult {
+                pubkey,
+                name: profile.name.clone(),
+                display_name: profile.display_name.clone(),
+                picture: profile.picture.clone(),
+                nip05: profile.nip05.clone(),
+                is_contact,
+                is_thread_participant,
+                relevance,
+            });
     }
-
-    drop(cache); // Release the lock
-
-    // Sort by relevance (descending)
+    drop(cache);
     results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
-
-    // Limit results
     results.truncate(limit);
-
     log::debug!(
-        "Cached profile search for '{}' returned {} results",
-        query,
-        results.len()
+        "Cached profile search for '{}' returned {} results", query, results.len()
     );
     results
 }
-
 /// Search profiles by query string (async, includes relay queries)
 ///
 /// Searches through:
@@ -172,15 +140,11 @@ pub async fn search_profiles(
     if query.is_empty() {
         return Ok(Vec::new());
     }
-
-    // Get the Nostr client
     let client_opt = (*NOSTR_CLIENT.read()).clone();
     let client = match client_opt {
         Some(c) => c,
         None => return Err("Nostr client not initialized".to_string()),
     };
-
-    // Fetch contact list
     let contact_pubkeys = match client
         .get_contact_list_public_keys(Duration::from_secs(5))
         .await
@@ -194,66 +158,42 @@ pub async fn search_profiles(
             Vec::new()
         }
     };
-
-    // Search cached profiles first (no thread participants for general search)
     let mut results = search_cached_profiles(query, limit, &contact_pubkeys, &[]);
-
-    // Query relays for additional profiles if requested and query is long enough
     if query_relays && query.len() >= 3 && results.len() < limit {
         let query_lower = query.to_lowercase();
         log::debug!("Querying relays for profiles matching: {}", query);
-
-        // Try NIP-50 search first
         let filter = Filter::new().kind(Kind::Metadata).search(query).limit(20);
-
-        // Ensure search relays are in pool and connected before fetching
         let search_urls = get_connected_search_relays(&client).await;
         let fetch_result = if search_urls.is_empty() {
-            // Fallback to all connected relays
             client.fetch_events(filter, Duration::from_secs(3)).await
         } else {
-            // Route to specific search relays
-            client
-                .fetch_events_from(search_urls, filter, Duration::from_secs(3))
-                .await
+            client.fetch_events_from(search_urls, filter, Duration::from_secs(3)).await
         };
-
         match fetch_result {
             Ok(events) => {
                 log::debug!("Found {} metadata events from relays", events.len());
-
                 for event in events {
-                    // Parse metadata
                     if let Ok(metadata) = Metadata::from_json(&event.content) {
                         let pubkey = event.pubkey;
-
-                        // Skip if already in results
                         if results.iter().any(|r| r.pubkey == pubkey) {
                             continue;
                         }
-
-                        // Check if matches query
                         let name_match = metadata
                             .name
                             .as_ref()
                             .map(|n| n.to_lowercase().contains(&query_lower))
                             .unwrap_or(false);
-
                         let display_name_match = metadata
                             .display_name
                             .as_ref()
                             .map(|d| d.to_lowercase().contains(&query_lower))
                             .unwrap_or(false);
-
                         if !name_match && !display_name_match {
                             continue;
                         }
-
                         let is_contact = contact_pubkeys.contains(&pubkey);
-                        let is_thread_participant = false; // Relay results won't know about thread context
+                        let is_thread_participant = false;
                         let mut relevance = if is_contact { 1000 } else { 10 };
-
-                        // Calculate relevance (lower than cached results)
                         if let Some(name) = &metadata.name {
                             if name.to_lowercase() == query_lower {
                                 relevance += 200;
@@ -263,17 +203,17 @@ pub async fn search_profiles(
                                 relevance += 20;
                             }
                         }
-
-                        results.push(ProfileSearchResult {
-                            pubkey,
-                            name: metadata.name.clone(),
-                            display_name: metadata.display_name.clone(),
-                            picture: metadata.picture.clone(),
-                            nip05: metadata.nip05.clone(),
-                            is_contact,
-                            is_thread_participant,
-                            relevance,
-                        });
+                        results
+                            .push(ProfileSearchResult {
+                                pubkey,
+                                name: metadata.name.clone(),
+                                display_name: metadata.display_name.clone(),
+                                picture: metadata.picture.clone(),
+                                nip05: metadata.nip05.clone(),
+                                is_contact,
+                                is_thread_participant,
+                                relevance,
+                            });
                     }
                 }
             }
@@ -282,21 +222,11 @@ pub async fn search_profiles(
             }
         }
     }
-
-    // Sort by relevance (descending)
     results.sort_by(|a, b| b.relevance.cmp(&a.relevance));
-
-    // Limit results
     results.truncate(limit);
-
-    log::debug!(
-        "Profile search for '{}' returned {} results",
-        query,
-        results.len()
-    );
+    log::debug!("Profile search for '{}' returned {} results", query, results.len());
     Ok(results)
 }
-
 /// Get contact list public keys
 pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
     let client_opt = (*NOSTR_CLIENT.read()).clone();
@@ -304,11 +234,7 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         Some(c) => c,
         None => return Vec::new(),
     };
-
-    match client
-        .get_contact_list_public_keys(Duration::from_secs(5))
-        .await
-    {
+    match client.get_contact_list_public_keys(Duration::from_secs(5)).await {
         Ok(pubkeys) => pubkeys,
         Err(e) => {
             log::warn!("Failed to fetch contact list: {}", e);
@@ -316,7 +242,6 @@ pub async fn get_contact_pubkeys() -> Vec<PublicKey> {
         }
     }
 }
-
 /// Get the user's relay URLs for creating nprofile mentions
 #[allow(dead_code)]
 pub async fn get_user_relays() -> Vec<String> {
@@ -325,22 +250,14 @@ pub async fn get_user_relays() -> Vec<String> {
         Some(c) => c,
         None => return get_default_relays(),
     };
-
-    // Get connected relays from the pool
     let relays = client.pool().relays().await;
     let relay_urls: Vec<String> = relays
         .into_keys()
         .map(|url| url.to_string())
-        .take(3) // Limit to 3 relay hints
+        .take(3)
         .collect();
-
-    if relay_urls.is_empty() {
-        get_default_relays()
-    } else {
-        relay_urls
-    }
+    if relay_urls.is_empty() { get_default_relays() } else { relay_urls }
 }
-
 /// Get default relay URLs
 #[allow(dead_code)]
 fn get_default_relays() -> Vec<String> {

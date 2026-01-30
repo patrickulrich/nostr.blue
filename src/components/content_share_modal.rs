@@ -1,6 +1,6 @@
 use crate::components::icons::{
-    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon, Link2Icon,
-    MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
+    ArrowLeftIcon, BarChartIcon, BookOpenIcon, CameraIcon, CheckIcon, CopyIcon,
+    Link2Icon, MessageCircleIcon, MusicIcon, RssIcon, SendIcon, ShareIcon,
 };
 use crate::components::{EmojiPicker, GifPicker, MediaUploader, PollCreatorModal};
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -11,17 +11,14 @@ use nostr_sdk::{EventBuilder, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
-
 /// Global counter for generating unique modal IDs
 static CONTENT_SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
-
 #[derive(Clone, Copy, PartialEq)]
 enum ShareMode {
     Main,
     Nostr,
     Dm,
 }
-
 /// Type of content being shared
 #[derive(Clone, Copy, PartialEq)]
 pub enum ContentType {
@@ -32,7 +29,6 @@ pub enum ContentType {
     #[cfg(target_arch = "wasm32")]
     BibleVerse,
 }
-
 impl ContentType {
     fn label(&self) -> &'static str {
         match self {
@@ -44,7 +40,6 @@ impl ContentType {
             ContentType::BibleVerse => "Bible",
         }
     }
-
     fn share_label(&self) -> &'static str {
         match self {
             ContentType::Podcast => "Share Podcast",
@@ -55,7 +50,6 @@ impl ContentType {
             ContentType::BibleVerse => "Share Verses",
         }
     }
-
     fn post_placeholder(&self) -> &'static str {
         match self {
             ContentType::Podcast => "Share your thoughts about this podcast...",
@@ -66,13 +60,20 @@ impl ContentType {
             ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
-
     fn dm_message(&self, url: &str) -> String {
         match self {
-            ContentType::Podcast => format!("Check out this podcast on nostr.blue: {}", url),
-            ContentType::PodcastEpisode => format!("Check out this episode on nostr.blue: {}", url),
-            ContentType::MusicAlbum => format!("Check out this album on nostr.blue: {}", url),
-            ContentType::MusicTrack => format!("Check out this track on nostr.blue: {}", url),
+            ContentType::Podcast => {
+                format!("Check out this podcast on nostr.blue: {}", url)
+            }
+            ContentType::PodcastEpisode => {
+                format!("Check out this episode on nostr.blue: {}", url)
+            }
+            ContentType::MusicAlbum => {
+                format!("Check out this album on nostr.blue: {}", url)
+            }
+            ContentType::MusicTrack => {
+                format!("Check out this track on nostr.blue: {}", url)
+            }
             #[cfg(target_arch = "wasm32")]
             ContentType::BibleVerse => {
                 format!("Check out this Bible passage on nostr.blue: {}", url)
@@ -80,7 +81,6 @@ impl ContentType {
         }
     }
 }
-
 /// Generic share modal for podcasts and music content
 #[component]
 pub fn ContentShareModal(
@@ -98,9 +98,9 @@ pub fn ContentShareModal(
     /// Handler to close the modal
     on_close: EventHandler<()>,
 ) -> Element {
-    // Generate unique ID suffix for this modal instance
-    let modal_id = use_signal(|| CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed));
-
+    let modal_id = use_signal(|| {
+        CONTENT_SHARE_MODAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+    });
     let mut share_mode = use_signal(|| ShareMode::Main);
     let mut copied = use_signal(|| false);
     let mut nostr_text = use_signal(String::new);
@@ -108,14 +108,10 @@ pub fn ContentShareModal(
     let mut is_publishing = use_signal(|| false);
     let mut dm_error = use_signal(|| Option::<String>::None);
     let mut nostr_error = use_signal(|| Option::<String>::None);
-
-    // Media buttons state
     let mut show_image_uploader = use_signal(|| false);
     let mut show_poll_modal = use_signal(|| false);
     let mut cursor_position = use_signal(|| 0usize);
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
-
-    // Helper to get cursor position from DOM (returns UTF-16 index)
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str) -> usize {
         #[cfg(target_arch = "wasm32")]
@@ -123,9 +119,13 @@ pub fn ContentShareModal(
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(textarea_id) {
-                        if let Some(textarea) = element.dyn_ref::<web_sys::HtmlTextAreaElement>() {
-                            return textarea.selection_start().unwrap_or(Some(0)).unwrap_or(0)
-                                as usize;
+                        if let Some(textarea) = element
+                            .dyn_ref::<web_sys::HtmlTextAreaElement>()
+                        {
+                            return textarea
+                                .selection_start()
+                                .unwrap_or(Some(0))
+                                .unwrap_or(0) as usize;
                         }
                     }
                 }
@@ -133,8 +133,6 @@ pub fn ContentShareModal(
         }
         0
     }
-
-    // Convert UTF-16 (JS) to UTF-8 (Rust) index
     fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
         let mut utf8_index = 0;
         let mut utf16_count = 0;
@@ -147,8 +145,6 @@ pub fn ContentShareModal(
         }
         utf8_index.min(text.len())
     }
-
-    // Helper to insert text with smart spacing (inlined to avoid move issues)
     let mut insert_with_spacing = {
         let mut nostr_text = nostr_text;
         let mut cursor_position = cursor_position;
@@ -156,16 +152,11 @@ pub fn ContentShareModal(
             let mut text_with_space = text.clone();
             let current = nostr_text.read().clone();
             let pos = (*cursor_position.read()).min(current.len());
-            // Ensure we're at a char boundary
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos)
-                    .rev()
-                    .find(|&i| current.is_char_boundary(i))
-                    .unwrap_or(0)
+                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
             };
-            // Add leading space if previous char is not whitespace
             if safe_pos > 0 {
                 if let Some(prev_char) = current[..safe_pos].chars().last() {
                     if !prev_char.is_whitespace() {
@@ -174,60 +165,42 @@ pub fn ContentShareModal(
                 }
             }
             text_with_space.push(' ');
-            // Inline insert logic
             let mut new_text = current;
             new_text.insert_str(safe_pos, &text_with_space);
             nostr_text.set(new_text);
             cursor_position.set(safe_pos + text_with_space.len());
         }
     };
-
-    // Helper to insert text at cursor position (separate closure for emoji insertion)
     let mut insert_at_cursor = {
         let mut nostr_text = nostr_text;
         let mut cursor_position = cursor_position;
         move |text: String| {
             let mut current = nostr_text.read().clone();
             let pos = (*cursor_position.read()).min(current.len());
-            // Ensure we're at a char boundary
             let safe_pos = if current.is_char_boundary(pos) {
                 pos
             } else {
-                (0..=pos)
-                    .rev()
-                    .find(|&i| current.is_char_boundary(i))
-                    .unwrap_or(0)
+                (0..=pos).rev().find(|&i| current.is_char_boundary(i)).unwrap_or(0)
             };
             current.insert_str(safe_pos, &text);
             nostr_text.set(current);
             cursor_position.set(safe_pos + text.len());
         }
     };
-
-    // Handler when image upload completes
     let handle_image_uploaded = move |url: String| {
         insert_with_spacing(url);
     };
-
-    // Handler when emoji is selected
     let handle_emoji_selected = move |emoji: String| {
         insert_at_cursor(emoji);
     };
-
-    // Handler when GIF is selected
     let handle_gif_selected = move |gif_url: String| {
         insert_with_spacing(gif_url);
     };
-
-    // Handler when poll is created
     let handle_poll_created = move |nevent_ref: String| {
         insert_with_spacing(nevent_ref);
         show_poll_modal.set(false);
     };
-
     let handle_copy_link = {
-        // For Bible verses, copy the formatted verse text with reference
-        // For other content types, copy the URL
         #[cfg(target_arch = "wasm32")]
         let copy_text = if matches!(content_type, ContentType::BibleVerse) {
             if let Some(ref text) = content {
@@ -247,7 +220,6 @@ pub fn ContentShareModal(
                     Ok(_) => {
                         copied.set(true);
                         log::info!("Content copied to clipboard");
-                        // Reset copied flag after 2 seconds
                         spawn(async move {
                             #[cfg(target_arch = "wasm32")]
                             {
@@ -255,7 +227,8 @@ pub fn ContentShareModal(
                             }
                             #[cfg(not(target_arch = "wasm32"))]
                             {
-                                tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                                tokio::time::sleep(std::time::Duration::from_millis(2000))
+                                    .await;
                             }
                             copied.set(false);
                         });
@@ -267,37 +240,30 @@ pub fn ContentShareModal(
             });
         }
     };
-
     let handle_share_to_nostr = move |_| {
-        // Defensive check: verify signer exists before attempting to post
         if !*HAS_SIGNER.read() {
             log::error!("Attempted to share to Nostr without a signer");
-            nostr_error.set(Some(
-                "No signer available. Please log in first.".to_string(),
-            ));
+            nostr_error
+                .set(Some("No signer available. Please log in first.".to_string()));
             return;
         }
-
         let text = nostr_text.read().trim().to_string();
         if text.is_empty() {
             return;
         }
-
         is_publishing.set(true);
-
         spawn(async move {
             let client = match nostr_client::get_client() {
                 Some(c) => c,
                 None => {
                     log::error!("Client not initialized");
-                    nostr_error.set(Some("Failed to initialize Nostr client".to_string()));
+                    nostr_error
+                        .set(Some("Failed to initialize Nostr client".to_string()));
                     is_publishing.set(false);
                     return;
                 }
             };
-
             let builder = EventBuilder::text_note(&text);
-
             match client.send_event_builder(builder).await {
                 Ok(output) => {
                     log::info!("Shared to Nostr: {:?}", output.val);
@@ -315,40 +281,33 @@ pub fn ContentShareModal(
             }
         });
     };
-
     let handle_send_dm = {
         let url_dm = url.clone();
         let content_type_dm = content_type;
         move |_| {
             let manual_recipient = dm_recipient.read().trim().to_string();
-
             if manual_recipient.is_empty() {
                 return;
             }
-
             is_publishing.set(true);
-
             let url_clone = url_dm.clone();
-
             spawn(async move {
-                // Parse recipient - PublicKey::parse() handles all formats:
-                // hex, npub (bech32), and nostr: URIs (NIP-21)
                 let recipient_hex = match PublicKey::parse(&manual_recipient) {
                     Ok(pubkey) => pubkey.to_hex(),
                     Err(_) => {
                         log::error!("Invalid recipient pubkey: {}", manual_recipient);
-                        dm_error.set(Some(
-                            "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
-                                .to_string(),
-                        ));
+                        dm_error
+                            .set(
+                                Some(
+                                    "Invalid recipient. Please enter a valid npub, hex, or nostr: URI."
+                                        .to_string(),
+                                ),
+                            );
                         is_publishing.set(false);
                         return;
                     }
                 };
-
                 let message = content_type_dm.dm_message(&url_clone);
-
-                // Send DM using NIP-17
                 match dms::send_dm(recipient_hex.clone(), message).await {
                     Ok(_) => {
                         log::info!("Sent DM to {}", recipient_hex);
@@ -367,23 +326,15 @@ pub fn ContentShareModal(
             });
         }
     };
-
     rsx! {
-        // Modal backdrop
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4",
             onclick: move |_| on_close.call(()),
-
-            // Modal content
             div {
                 class: "bg-card border border-border rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header
-                div {
-                    class: "sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between z-10",
-                    div {
-                        class: "flex items-center gap-2",
+                div { class: "sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between z-10",
+                    div { class: "flex items-center gap-2",
                         if *share_mode.read() != ShareMode::Main {
                             button {
                                 class: "text-muted-foreground hover:text-foreground transition p-1",
@@ -392,8 +343,7 @@ pub fn ContentShareModal(
                             }
                         }
                         ShareIcon { class: "w-5 h-5" }
-                        h3 {
-                            class: "text-lg font-semibold ml-2",
+                        h3 { class: "text-lg font-semibold ml-2",
                             match *share_mode.read() {
                                 ShareMode::Main => content_type.share_label(),
                                 ShareMode::Nostr => "Share to Nostr",
@@ -407,26 +357,17 @@ pub fn ContentShareModal(
                         "✕"
                     }
                 }
-
-                // Body
-                div {
-                    class: "p-6 space-y-4",
-
-                    // Main menu mode
+                div { class: "p-6 space-y-4",
                     if *share_mode.read() == ShareMode::Main {
-                        // Content preview card
-                        div {
-                            class: "bg-accent rounded-lg p-4 flex items-center gap-3",
-                            // Icon or image
+                        div { class: "bg-accent rounded-lg p-4 flex items-center gap-3",
                             if let Some(ref img_url) = image_url {
                                 img {
                                     src: "{img_url}",
                                     alt: "{title}",
-                                    class: "w-12 h-12 rounded-lg object-cover shrink-0"
+                                    class: "w-12 h-12 rounded-lg object-cover shrink-0",
                                 }
                             } else {
-                                div {
-                                    class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center shrink-0",
+                                div { class: "w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center shrink-0",
                                     match content_type {
                                         ContentType::Podcast | ContentType::PodcastEpisode => rsx! {
                                             RssIcon { class: "w-6 h-6 text-white" }
@@ -441,28 +382,15 @@ pub fn ContentShareModal(
                                     }
                                 }
                             }
-                            div {
-                                class: "flex-1 min-w-0",
-                                p {
-                                    class: "font-medium truncate",
-                                    "{title}"
-                                }
-                                p {
-                                    class: "text-sm text-muted-foreground",
+                            div { class: "flex-1 min-w-0",
+                                p { class: "font-medium truncate", "{title}" }
+                                p { class: "text-sm text-muted-foreground",
                                     "nostr.blue {content_type.label()}"
                                 }
                             }
                         }
-
-                        // Share options
-                        div {
-                            class: "space-y-2",
-                            p {
-                                class: "text-sm font-medium mb-3",
-                                "Choose how to share"
-                            }
-
-                            // Copy link button
+                        div { class: "space-y-2",
+                            p { class: "text-sm font-medium mb-3", "Choose how to share" }
                             button {
                                 class: "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition",
                                 onclick: handle_copy_link,
@@ -471,37 +399,27 @@ pub fn ContentShareModal(
                                 } else {
                                     CopyIcon { class: "w-5 h-5 text-blue-500 shrink-0 mt-0.5" }
                                 }
-                                div {
-                                    class: "text-left",
-                                    p {
-                                        class: "font-medium",
-                                        if *copied.read() { "Copied!" } else { "Copy to clipboard" }
+                                div { class: "text-left",
+                                    p { class: "font-medium",
+                                        if *copied.read() {
+                                            "Copied!"
+                                        } else {
+                                            "Copy to clipboard"
+                                        }
                                     }
-                                    p {
-                                        class: "text-xs text-muted-foreground",
+                                    p { class: "text-xs text-muted-foreground",
                                         "Copy link to share anywhere"
                                     }
                                 }
                             }
-
-                            // Share to Nostr button
                             button {
-                                class: if *HAS_SIGNER.read() {
-                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
-                                } else {
-                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
-                                },
+                                class: if *HAS_SIGNER.read() { "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition" } else { "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed" },
                                 onclick: move |_| share_mode.set(ShareMode::Nostr),
                                 disabled: !*HAS_SIGNER.read(),
                                 MessageCircleIcon { class: "w-5 h-5 text-purple-500 shrink-0 mt-0.5" }
-                                div {
-                                    class: "text-left",
-                                    p {
-                                        class: "font-medium",
-                                        "Share to Nostr"
-                                    }
-                                    p {
-                                        class: "text-xs text-muted-foreground",
+                                div { class: "text-left",
+                                    p { class: "font-medium", "Share to Nostr" }
+                                    p { class: "text-xs text-muted-foreground",
                                         if *HAS_SIGNER.read() {
                                             "Post about this content"
                                         } else {
@@ -510,52 +428,35 @@ pub fn ContentShareModal(
                                     }
                                 }
                             }
-
-                            // Send via DM button
                             button {
-                                class: if *HAS_SIGNER.read() {
-                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition"
-                                } else {
-                                    "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed"
-                                },
+                                class: if *HAS_SIGNER.read() { "w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition" } else { "w-full flex items-start gap-3 p-3 rounded-lg border border-border opacity-50 cursor-not-allowed" },
                                 onclick: move |_| share_mode.set(ShareMode::Dm),
                                 disabled: !*HAS_SIGNER.read(),
                                 SendIcon { class: "w-5 h-5 text-pink-500 shrink-0 mt-0.5" }
-                                div {
-                                    class: "text-left",
-                                    p {
-                                        class: "font-medium",
-                                        "Share via DM"
-                                    }
-                                    p {
-                                        class: "text-xs text-muted-foreground",
-                                        if *HAS_SIGNER.read() { "Send privately to someone" } else { "Login required" }
+                                div { class: "text-left",
+                                    p { class: "font-medium", "Share via DM" }
+                                    p { class: "text-xs text-muted-foreground",
+                                        if *HAS_SIGNER.read() {
+                                            "Send privately to someone"
+                                        } else {
+                                            "Login required"
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Nostr share mode
                     if *share_mode.read() == ShareMode::Nostr {
-                        div {
-                            class: "space-y-3",
-
-                            // Media uploader (conditionally shown)
+                        div { class: "space-y-3",
                             if *show_image_uploader.read() {
-                                div {
-                                    class: "mb-3",
+                                div { class: "mb-3",
                                     MediaUploader {
                                         on_upload: handle_image_uploaded,
-                                        button_label: "Upload Media"
+                                        button_label: "Upload Media",
                                     }
                                 }
                             }
-
-                            label {
-                                class: "text-sm font-medium",
-                                "Compose your note"
-                            }
+                            label { class: "text-sm font-medium", "Compose your note" }
                             textarea {
                                 id: "{textarea_id}",
                                 class: "w-full min-h-[120px] p-3 bg-background border border-border rounded-lg resize-none focus:outline-hidden focus:ring-2 focus:ring-primary",
@@ -564,7 +465,6 @@ pub fn ContentShareModal(
                                 oninput: move |e| {
                                     nostr_text.set(e.value().clone());
                                     nostr_error.set(None);
-                                    // Sync cursor position
                                     let pos = get_cursor_position(&textarea_id.read());
                                     let utf8_pos = utf16_to_utf8_index(&e.value(), pos);
                                     cursor_position.set(utf8_pos);
@@ -582,24 +482,17 @@ pub fn ContentShareModal(
                                     cursor_position.set(utf8_pos);
                                 },
                             }
-                            // Error message display
                             if let Some(error) = nostr_error.read().as_ref() {
-                                div {
-                                    class: "mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-500",
+                                div { class: "mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-500",
                                     "{error}"
                                 }
                             }
-
-                            // Insert buttons
-                            div {
-                                class: "flex flex-wrap gap-2",
-                                // Add Verse button (only for Bible verses with content)
+                            div { class: "flex flex-wrap gap-2",
                                 {
                                     #[cfg(target_arch = "wasm32")]
                                     let show_verse_button = matches!(content_type, ContentType::BibleVerse);
                                     #[cfg(not(target_arch = "wasm32"))]
                                     let show_verse_button = false;
-
                                     if show_verse_button {
                                         if let Some(ref verse_content) = content {
                                             let verse_text = verse_content.clone();
@@ -627,7 +520,6 @@ pub fn ContentShareModal(
                                         rsx! {}
                                     }
                                 }
-                                // Add Link button
                                 button {
                                     class: "px-3 py-1.5 text-sm border border-border rounded-md hover:bg-accent transition flex items-center gap-1",
                                     onclick: {
@@ -646,18 +538,9 @@ pub fn ContentShareModal(
                                     "Add Link"
                                 }
                             }
-
-                            // Media buttons row
-                            div {
-                                class: "flex items-center gap-2",
-
-                                // Camera button (toggle MediaUploader)
+                            div { class: "flex items-center gap-2",
                                 button {
-                                    class: if *show_image_uploader.read() {
-                                        "p-2 rounded-full bg-primary text-primary-foreground transition"
-                                    } else {
-                                        "p-2 rounded-full hover:bg-accent transition"
-                                    },
+                                    class: if *show_image_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
                                     title: "Add media",
                                     onclick: move |_| {
                                         let current = *show_image_uploader.read();
@@ -666,20 +549,14 @@ pub fn ContentShareModal(
                                     disabled: *is_publishing.read(),
                                     CameraIcon { class: "w-5 h-5" }
                                 }
-
-                                // Emoji picker
                                 EmojiPicker {
                                     on_emoji_selected: handle_emoji_selected,
-                                    icon_only: true
+                                    icon_only: true,
                                 }
-
-                                // GIF picker
                                 GifPicker {
                                     on_gif_selected: handle_gif_selected,
-                                    icon_only: true
+                                    icon_only: true,
                                 }
-
-                                // Poll button
                                 button {
                                     class: "p-2 rounded-full hover:bg-accent transition",
                                     title: "Create poll",
@@ -688,35 +565,25 @@ pub fn ContentShareModal(
                                     BarChartIcon { class: "w-5 h-5" }
                                 }
                             }
-
-                            // Post button
                             button {
-                                class: if nostr_text.read().trim().is_empty() || *is_publishing.read() {
-                                    "w-full px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed flex items-center justify-center gap-2"
-                                } else {
-                                    "w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center justify-center gap-2"
-                                },
+                                class: if nostr_text.read().trim().is_empty() || *is_publishing.read() { "w-full px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed flex items-center justify-center gap-2" } else { "w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center justify-center gap-2" },
                                 onclick: handle_share_to_nostr,
                                 disabled: nostr_text.read().trim().is_empty() || *is_publishing.read(),
                                 MessageCircleIcon { class: "w-4 h-4" }
                                 span {
-                                    if *is_publishing.read() { "Posting..." } else { "Post to Nostr" }
+                                    if *is_publishing.read() {
+                                        "Posting..."
+                                    } else {
+                                        "Post to Nostr"
+                                    }
                                 }
                             }
                         }
                     }
-
-                    // DM mode
                     if *share_mode.read() == ShareMode::Dm {
-                        div {
-                            class: "space-y-3",
-
-                            // Manual recipient input
+                        div { class: "space-y-3",
                             div {
-                                label {
-                                    class: "text-sm font-medium",
-                                    "Send to npub or hex pubkey"
-                                }
+                                label { class: "text-sm font-medium", "Send to npub or hex pubkey" }
                                 input {
                                     class: "w-full mt-2 p-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                                     r#type: "text",
@@ -727,27 +594,23 @@ pub fn ContentShareModal(
                                         dm_error.set(None);
                                     },
                                 }
-                                // Error message display
                                 if let Some(error) = dm_error.read().as_ref() {
-                                    div {
-                                        class: "mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-500",
+                                    div { class: "mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-500",
                                         "{error}"
                                     }
                                 }
                             }
-
-                            // Send button
                             button {
-                                class: if dm_recipient.read().trim().is_empty() || *is_publishing.read() {
-                                    "w-full px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed flex items-center justify-center gap-2"
-                                } else {
-                                    "w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center justify-center gap-2"
-                                },
+                                class: if dm_recipient.read().trim().is_empty() || *is_publishing.read() { "w-full px-4 py-2 bg-muted text-muted-foreground rounded-lg cursor-not-allowed flex items-center justify-center gap-2" } else { "w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition flex items-center justify-center gap-2" },
                                 onclick: handle_send_dm,
                                 disabled: dm_recipient.read().trim().is_empty() || *is_publishing.read(),
                                 SendIcon { class: "w-4 h-4" }
                                 span {
-                                    if *is_publishing.read() { "Sending..." } else { "Send Message" }
+                                    if *is_publishing.read() {
+                                        "Sending..."
+                                    } else {
+                                        "Send Message"
+                                    }
                                 }
                             }
                         }
@@ -755,11 +618,6 @@ pub fn ContentShareModal(
                 }
             }
         }
-
-        // Poll creator modal
-        PollCreatorModal {
-            show: show_poll_modal,
-            on_poll_created: handle_poll_created
-        }
+        PollCreatorModal { show: show_poll_modal, on_poll_created: handle_poll_created }
     }
 }

@@ -1,4 +1,6 @@
-use crate::components::icons::{BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon};
+use crate::components::icons::{
+    BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon,
+};
 use crate::components::{ReactionButton, ReplyComposer, RichContent, ZapModal};
 use crate::hooks::{use_author_metadata, use_reaction};
 use crate::routes::Route;
@@ -18,32 +20,19 @@ use dioxus::web::WebEventExt;
 use nostr_sdk::{Filter, Kind};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
-
-const MAX_DEPTH: usize = 8; // Limit nesting to prevent excessive indentation
-
+const MAX_DEPTH: usize = 8;
 #[component]
 pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event = &node.event;
     let children = &node.children;
-
-    // Extract pending state and author pubkey from node source
-    // For pending comments, use the explicitly stored author_pubkey since the display event
-    // may have a dummy pubkey from the unsigned event construction
-    let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node.source {
+    let (is_pending, pending_local_id, pending_status, author_pubkey) = match &node
+        .source
+    {
         ThreadNodeSource::Confirmed => (false, None, None, event.pubkey),
-        ThreadNodeSource::Pending {
-            local_id,
-            status,
-            author_pubkey,
-        } => (
-            true,
-            Some(local_id.clone()),
-            Some(status.clone()),
-            *author_pubkey,
-        ),
+        ThreadNodeSource::Pending { local_id, status, author_pubkey } => {
+            (true, Some(local_id.clone()), Some(status.clone()), *author_pubkey)
+        }
     };
-
-    // Clone values needed for closures
     let event_id = event.id.to_string();
     let event_id_like = event_id.clone();
     let event_id_repost = event_id.clone();
@@ -52,11 +41,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let event_id_counts = event_id.clone();
     let author_pubkey_str = author_pubkey.to_string();
     let author_pubkey_like = author_pubkey_str.clone();
-
-    // Author profile metadata - uses shared hook for database-first, network-fallback pattern
     let author_metadata = use_author_metadata(author_pubkey_str.clone());
-
-    // State for interactions
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
     let mut is_bookmarking = use_signal(|| false);
@@ -64,73 +49,41 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     let has_signer = *HAS_SIGNER.read();
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
-
-    // Track whether to hide the "Posted!" badge after timeout
     let mut hide_confirmed_badge = use_signal(|| false);
-    // Store timer task handle for cancellation to prevent stale timers
-    let mut badge_timer_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
-
-    // Convert pending_status prop to a signal so effects can react to changes
-    // Props aren't automatically reactive in Dioxus - we need an explicit signal
+    let mut badge_timer_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| {
+        None
+    });
     let mut pending_status_signal = use_signal(|| pending_status.clone());
-
-    // Clone pending_status before moving into effect closure
     let pending_status_for_sync = pending_status.clone();
-
-    // Keep signal in sync with prop changes
     use_effect(move || {
         pending_status_signal.set(pending_status_for_sync.clone());
     });
-
-    // Auto-hide "Posted!" badge after 3 seconds using use_effect
-    // Now reads from the reactive signal so the effect re-runs on status changes
-    // Cancels any existing timer when status changes to prevent stale callbacks
     use_effect(move || {
         let status = pending_status_signal.read();
         let is_confirmed = matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)));
-
         if is_confirmed && badge_timer_task.read().is_none() {
-            // Start timer for confirmed status
             let task = spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(3_000).await;
                 hide_confirmed_badge.set(true);
             });
             badge_timer_task.set(Some(task));
         } else if !is_confirmed && badge_timer_task.read().is_some() {
-            // Cancel existing timer and reset state when status changes away from Confirmed
-            // This prevents stale timer from incorrectly hiding badge on re-confirmation
             if let Some(task) = badge_timer_task.write().take() {
                 task.cancel();
             }
             hide_confirmed_badge.set(false);
         }
     });
-
-    // Reaction hook - handles like state with optimistic updates and toggle support
-    let reaction = use_reaction(
-        event_id_like.clone(),
-        author_pubkey_like.clone(),
-        None, // No precomputed counts for comments
-    );
-
-    // State for counts (likes handled by use_reaction hook)
+    let reaction = use_reaction(event_id_like.clone(), author_pubkey_like.clone(), None);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
-
-    // Voice message state
     let is_voice = is_voice_message(event);
-    let audio_url = if is_voice {
-        event.content.clone()
-    } else {
-        String::new()
-    };
+    let audio_url = if is_voice { event.content.clone() } else { String::new() };
     let audio_id = format!("voice-comment-{}", event_id);
     let mut duration = use_signal(|| 0.0f64);
     let mut current_time = use_signal(|| 0.0f64);
     let event_id_parsed = event.id;
-
-    // Parse imeta tags for duration per NIP-92/NIP-94
     let imeta_duration: Option<f64> = if is_voice {
         event
             .tags
@@ -150,8 +103,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     } else {
         None
     };
-
-    // Fetch counts
     use_effect(move || {
         let event_id_for_counts = event_id_counts.clone();
         spawn(async move {
@@ -159,45 +110,35 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 Some(c) => c,
                 None => return,
             };
-
-            let event_id_parsed = match nostr_sdk::EventId::from_hex(&event_id_for_counts) {
+            let event_id_parsed = match nostr_sdk::EventId::from_hex(
+                &event_id_for_counts,
+            ) {
                 Ok(id) => id,
                 Err(_) => return,
             };
-
-            // Fetch reply count
             let reply_filter = Filter::new()
                 .kind(Kind::TextNote)
                 .event(event_id_parsed)
                 .limit(500);
-
             if let Ok(replies) = client
                 .fetch_events(reply_filter, Duration::from_secs(5))
                 .await
             {
                 reply_count.set(replies.len());
             }
-
-            // Note: Reactions/likes are handled by use_reaction hook
-
-            // Fetch repost count
             let repost_filter = Filter::new()
                 .kind(Kind::Repost)
                 .event(event_id_parsed)
                 .limit(500);
-
             if let Ok(reposts) = client
                 .fetch_events(repost_filter, Duration::from_secs(5))
                 .await
             {
-                // Get current user's pubkey to check if they've already reposted
                 let current_user_pubkey = SIGNER_INFO
                     .read()
                     .as_ref()
                     .map(|info| info.public_key.clone());
                 let mut user_has_reposted = false;
-
-                // Check if current user has reposted
                 if let Some(ref user_pk) = current_user_pubkey {
                     for repost in reposts.iter() {
                         if repost.pubkey.to_string() == *user_pk {
@@ -206,17 +147,13 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                         }
                     }
                 }
-
                 repost_count.set(reposts.len());
                 is_reposted.set(user_has_reposted);
             }
-
-            // Fetch zap receipts (kind 9735) and calculate total
             let zap_filter = Filter::new()
                 .kind(Kind::ZapReceipt)
                 .event(event_id_parsed)
                 .limit(500);
-
             if let Ok(zaps) = client
                 .fetch_events(zap_filter, Duration::from_secs(5))
                 .await
@@ -224,32 +161,32 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 let total_sats: u64 = zaps
                     .iter()
                     .filter_map(|zap_event| {
-                        // Look for the description tag which contains the zap request
-                        zap_event.tags.iter().find_map(|tag| {
-                            let tag_vec = tag.clone().to_vec();
-                            if tag_vec.first()?.as_str() == "description" {
-                                // Parse the JSON zap request
-                                let zap_request_json = tag_vec.get(1)?.as_str();
-                                if let Ok(zap_request) =
-                                    serde_json::from_str::<serde_json::Value>(zap_request_json)
-                                {
-                                    // Find the amount tag in the zap request
-                                    if let Some(tags) =
-                                        zap_request.get("tags").and_then(|t| t.as_array())
-                                    {
-                                        for tag_array in tags {
-                                            if let Some(tag_vals) = tag_array.as_array() {
-                                                if tag_vals.first().and_then(|v| v.as_str())
-                                                    == Some("amount")
-                                                {
-                                                    if let Some(amount_str) =
-                                                        tag_vals.get(1).and_then(|v| v.as_str())
+                        zap_event
+                            .tags
+                            .iter()
+                            .find_map(|tag| {
+                                let tag_vec = tag.clone().to_vec();
+                                if tag_vec.first()?.as_str() == "description" {
+                                    let zap_request_json = tag_vec.get(1)?.as_str();
+                                    if let Ok(zap_request) = serde_json::from_str::<
+                                        serde_json::Value,
+                                    >(zap_request_json) {
+                                        if let Some(tags) = zap_request
+                                            .get("tags")
+                                            .and_then(|t| t.as_array())
+                                        {
+                                            for tag_array in tags {
+                                                if let Some(tag_vals) = tag_array.as_array() {
+                                                    if tag_vals.first().and_then(|v| v.as_str())
+                                                        == Some("amount")
                                                     {
-                                                        // Amount is in millisats, convert to sats
-                                                        if let Ok(millisats) =
-                                                            amount_str.parse::<u64>()
+                                                        if let Some(amount_str) = tag_vals
+                                                            .get(1)
+                                                            .and_then(|v| v.as_str())
                                                         {
-                                                            return Some(millisats / 1000);
+                                                            if let Ok(millisats) = amount_str.parse::<u64>() {
+                                                                return Some(millisats / 1000);
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -257,35 +194,26 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                         }
                                     }
                                 }
-                            }
-                            None
-                        })
+                                None
+                            })
                     })
                     .sum();
-
                 zap_amount_sats.set(total_sats);
             }
         });
     });
-
-    // Button class helpers
     let repost_button_class = if *is_reposted.read() {
         "flex items-center text-green-500 hover:text-green-600 transition"
     } else {
         "flex items-center text-muted-foreground hover:text-green-500 transition"
     };
-
     let bookmark_button_class = if *is_bookmarked.read() {
         "flex items-center text-blue-500 hover:text-blue-600 transition"
     } else {
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
     };
-
-    // Voice message handlers
     let audio_id_for_effect = audio_id.clone();
     let audio_id_for_handlers = audio_id.clone();
-
-    // Control audio element based on playback state (for voice messages)
     use_effect(move || {
         if !is_voice {
             return;
@@ -293,7 +221,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
         let global_state = voice_messages_store::VOICE_PLAYBACK.read();
         let is_playing = global_state.currently_playing == Some(event_id_parsed);
         let audio_id_clone = audio_id_for_effect.clone();
-
         let window = match web_sys::window() {
             Some(w) => w,
             None => return,
@@ -310,17 +237,16 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             Some(a) => a,
             None => return,
         };
-
         if is_playing {
-            let _ = audio.play().map_err(|e| {
-                log::debug!("Play failed: {:?}", e);
-            });
+            let _ = audio
+                .play()
+                .map_err(|e| {
+                    log::debug!("Play failed: {:?}", e);
+                });
         } else if let Err(e) = audio.pause() {
             log::debug!("Pause failed: {:?}", e);
         }
     });
-
-    // Voice message event handlers
     let handle_timeupdate = move |evt: Event<MediaData>| {
         if let Some(target) = evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
@@ -332,7 +258,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             }
         }
     };
-
     let handle_loadedmetadata = move |evt: Event<MediaData>| {
         if let Some(target) = evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
@@ -346,17 +271,13 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
             }
         }
     };
-
     let handle_ended = move |_| {
         voice_messages_store::pause_voice_message();
         current_time.set(0.0);
     };
-
     let toggle_play = move |_| {
         voice_messages_store::toggle_voice_message(event_id_parsed);
     };
-
-    // Voice player display values
     let duration_val = imeta_duration.unwrap_or(*duration.read());
     let current_time_str = voice_messages_store::format_time(*current_time.read());
     let duration_str = voice_messages_store::format_time(duration_val);
@@ -365,48 +286,37 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
     } else {
         0.0
     };
-
-    // Calculate indentation (left margin)
     let indent_level = depth.min(MAX_DEPTH);
-    let margin_left = indent_level * 4; // 4px per level
-
-    // Clone event_id for navigation
+    let margin_left = indent_level * 4;
     let event_id_nav = event.id.to_hex();
     let nav = use_navigator();
-
     rsx! {
-        div {
-            class: "comment-thread",
-            style: "margin-left: {margin_left}px;",
-
-            // Comment card - clickable to navigate to thread
+        div { class: "comment-thread", style: "margin-left: {margin_left}px;",
             div {
-                class: if is_pending && matches!(pending_status.as_ref(), Some(CommentStatus::Pending)) {
-                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer opacity-70"
-                } else {
-                    "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer"
-                },
+                class: if is_pending && matches!(pending_status.as_ref(), Some(CommentStatus::Pending)) { "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer opacity-70" } else { "border-l-2 border-border pl-3 py-2 hover:bg-accent/20 transition cursor-pointer" },
                 onclick: {
                     let event_id_click = event_id_nav.clone();
                     let navigator = nav;
                     let is_pending_node = is_pending;
                     let status = pending_status.clone();
                     move |_| {
-                        // Don't navigate to pending comments - they don't exist on relays yet
-                        if is_pending_node && !matches!(status.as_ref(), Some(CommentStatus::Confirmed(_))) {
+                        if is_pending_node
+                            && !matches!(status.as_ref(), Some(CommentStatus::Confirmed(_)))
+                        {
                             return;
                         }
-                        navigator.push(Route::Note { note_id: event_id_click.clone(), from_voice: None });
+                        navigator
+                            .push(Route::Note {
+                                note_id: event_id_click.clone(),
+                                from_voice: None,
+                            });
                     }
                 },
-
-                // Author info
-                div {
-                    class: "flex items-start gap-2 mb-2",
-
-                    // Avatar
+                div { class: "flex items-start gap-2 mb-2",
                     Link {
-                        to: Route::Profile { pubkey: author_pubkey.to_string() },
+                        to: Route::Profile {
+                            pubkey: author_pubkey.to_string(),
+                        },
                         onclick: move |e: MouseEvent| e.stop_propagation(),
                         if let Some(metadata) = author_metadata.read().as_ref() {
                             if let Some(picture) = &metadata.picture {
@@ -414,11 +324,10 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     class: "w-8 h-8 rounded-full shrink-0",
                                     src: "{picture}",
                                     alt: "Avatar",
-                                    loading: "lazy"
+                                    loading: "lazy",
                                 }
                             } else {
-                                div {
-                                    class: "w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0",
+                                div { class: "w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0",
                                     if let Some(name) = &metadata.name {
                                         "{name.chars().next().unwrap_or('?').to_uppercase()}"
                                     } else {
@@ -427,22 +336,17 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 }
                             }
                         } else {
-                            div {
-                                class: "w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs shrink-0",
+                            div { class: "w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs shrink-0",
                                 "?"
                             }
                         }
                     }
-
-                    // Author name and timestamp
-                    div {
-                        class: "flex-1 min-w-0",
-
-                        div {
-                            class: "flex items-baseline gap-2 flex-wrap",
-
+                    div { class: "flex-1 min-w-0",
+                        div { class: "flex items-baseline gap-2 flex-wrap",
                             Link {
-                                to: Route::Profile { pubkey: author_pubkey.to_string() },
+                                to: Route::Profile {
+                                    pubkey: author_pubkey.to_string(),
+                                },
                                 class: "font-semibold text-sm hover:underline truncate",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 if let Some(metadata) = author_metadata.read().as_ref() {
@@ -451,45 +355,37 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     } else if let Some(name) = &metadata.name {
                                         "{name}"
                                     } else {
-                                        span {
-                                            class: "font-mono text-xs",
+                                        span { class: "font-mono text-xs",
                                             "{author_pubkey.to_string().chars().take(16).collect::<String>()}..."
                                         }
                                     }
                                 } else {
-                                    span {
-                                        class: "font-mono text-xs",
+                                    span { class: "font-mono text-xs",
                                         "{author_pubkey.to_string().chars().take(16).collect::<String>()}..."
                                     }
                                 }
                             }
-
-                            span {
-                                class: "text-xs text-muted-foreground",
+                            span { class: "text-xs text-muted-foreground",
                                 "{format_relative_time_ex(event.created_at, true, true)}"
                             }
-
-                            // Pending status badge
                             if is_pending {
                                 match pending_status.as_ref() {
                                     Some(CommentStatus::Pending) => rsx! {
-                                        span {
-                                            class: "ml-2 px-2 py-0.5 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full animate-pulse",
+                                        span { class: "ml-2 px-2 py-0.5 text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full animate-pulse",
                                             "Posting..."
                                         }
                                     },
                                     Some(CommentStatus::Confirmed(_)) => {
                                         if !*hide_confirmed_badge.read() {
                                             rsx! {
-                                                span {
-                                                    class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
+                                                span { class: "ml-2 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full",
                                                     "Posted!"
                                                 }
                                             }
                                         } else {
                                             rsx! {}
                                         }
-                                    },
+                                    }
                                     Some(CommentStatus::Failed(error)) => {
                                         let local_id_retry = pending_local_id.clone().unwrap_or_default();
                                         let local_id_dismiss = pending_local_id.clone().unwrap_or_default();
@@ -506,7 +402,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                                 button {
                                                     class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90",
                                                     onclick: move |_| {
-                                                        // Actually retry publishing the comment
                                                         retry_pending_comment(&local_id_retry);
                                                     },
                                                     "Retry"
@@ -520,20 +415,14 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                                 }
                                             }
                                         }
-                                    },
-                                    None => rsx! {}
+                                    }
+                                    None => rsx! {},
                                 }
                             }
                         }
-
-                        // Comment content - voice player or text
-                        div {
-                            class: "text-sm mt-1",
+                        div { class: "text-sm mt-1",
                             if is_voice {
-                                // Inline voice player for voice message replies
-                                div {
-                                    class: "my-2",
-                                    // Hidden audio element
+                                div { class: "my-2",
                                     audio {
                                         id: "{audio_id_for_handlers}",
                                         src: "{audio_url}",
@@ -546,25 +435,33 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                             log::warn!("Failed to load voice message audio");
                                         },
                                     }
-                                    // Compact player controls
                                     div {
                                         class: "flex items-center gap-3 bg-muted/30 rounded-lg p-2",
                                         onclick: move |e: MouseEvent| e.stop_propagation(),
-                                        // Play/Pause button
                                         button {
                                             class: "shrink-0 w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
                                             onclick: toggle_play,
-                                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id_parsed) {
-                                                // Pause icon
+                                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing
+                                                == Some(event_id_parsed)
+                                            {
                                                 svg {
                                                     class: "w-4 h-4",
                                                     view_box: "0 0 24 24",
                                                     fill: "currentColor",
-                                                    rect { x: "6", y: "4", width: "4", height: "16" }
-                                                    rect { x: "14", y: "4", width: "4", height: "16" }
+                                                    rect {
+                                                        x: "6",
+                                                        y: "4",
+                                                        width: "4",
+                                                        height: "16",
+                                                    }
+                                                    rect {
+                                                        x: "14",
+                                                        y: "4",
+                                                        width: "4",
+                                                        height: "16",
+                                                    }
                                                 }
                                             } else {
-                                                // Play icon
                                                 svg {
                                                     class: "w-4 h-4 ml-0.5",
                                                     view_box: "0 0 24 24",
@@ -573,18 +470,14 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                                 }
                                             }
                                         }
-                                        // Progress bar and time
-                                        div {
-                                            class: "flex-1",
-                                            div {
-                                                class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                                        div { class: "flex-1",
+                                            div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
                                                 div {
                                                     class: "h-full bg-primary transition-all",
-                                                    style: "width: {progress_percent}%"
+                                                    style: "width: {progress_percent}%",
                                                 }
                                             }
-                                            div {
-                                                class: "flex justify-between text-xs text-muted-foreground",
+                                            div { class: "flex justify-between text-xs text-muted-foreground",
                                                 span { "{current_time_str}" }
                                                 span { "{duration_str}" }
                                             }
@@ -594,16 +487,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             } else {
                                 RichContent {
                                     content: event.content.clone(),
-                                    tags: event.tags.clone().to_vec()
+                                    tags: event.tags.clone().to_vec(),
                                 }
                             }
                         }
-
-                        // Action buttons
-                        div {
-                            class: "flex items-center justify-between max-w-md mt-2 -ml-2",
-
-                            // Reply button
+                        div { class: "flex items-center justify-between max-w-md mt-2 -ml-2",
                             button {
                                 class: "flex items-center gap-1 hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
                                 onclick: move |e: MouseEvent| {
@@ -612,10 +500,9 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 },
                                 MessageCircleIcon {
                                     class: "h-4 w-4".to_string(),
-                                    filled: false
+                                    filled: false,
                                 }
-                                span {
-                                    class: "text-xs",
+                                span { class: "text-xs",
                                     {
                                         let count = *reply_count.read();
                                         if count > 500 {
@@ -628,8 +515,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     }
                                 }
                             }
-
-                            // Repost button
                             button {
                                 class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
                                 disabled: !has_signer || *is_reposting.read(),
@@ -638,11 +523,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     if !has_signer || *is_reposting.read() {
                                         return;
                                     }
-
                                     let event_id_clone = event_id_repost.clone();
-
                                     is_reposting.set(true);
-
                                     spawn(async move {
                                         match publish_repost(event_id_clone, None).await {
                                             Ok(repost_id) => {
@@ -661,10 +543,9 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 },
                                 Repeat2Icon {
                                     class: "h-4 w-4".to_string(),
-                                    filled: false
+                                    filled: false,
                                 }
-                                span {
-                                    class: "text-xs",
+                                span { class: "text-xs",
                                     {
                                         let count = *repost_count.read();
                                         if count > 500 {
@@ -677,21 +558,18 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     }
                                 }
                             }
-
-                            // Like button with reaction picker
                             ReactionButton {
                                 reaction: reaction.clone(),
-                                has_signer: has_signer,
+                                has_signer,
                                 icon_class: "h-4 w-4".to_string(),
                                 count_class: "text-xs".to_string(),
                             }
-
-                            // Zap button (only show if author has lightning address)
                             {
-                                let has_lightning = author_metadata.read().as_ref()
+                                let has_lightning = author_metadata
+                                    .read()
+                                    .as_ref()
                                     .and_then(|m| m.lud16.as_ref().or(m.lud06.as_ref()))
                                     .is_some();
-
                                 if has_lightning {
                                     rsx! {
                                         button {
@@ -700,19 +578,11 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                                 e.stop_propagation();
                                                 show_zap_modal.set(true);
                                             },
-                                            ZapIcon {
-                                                class: "h-4 w-4".to_string(),
-                                                filled: false
-                                            }
-                                            span {
-                                                class: "text-xs",
+                                            ZapIcon { class: "h-4 w-4".to_string(), filled: false }
+                                            span { class: "text-xs",
                                                 {
                                                     let amount = *zap_amount_sats.read();
-                                                    if amount > 0 {
-                                                        format_sats_compact(amount)
-                                                    } else {
-                                                        "".to_string()
-                                                    }
+                                                    if amount > 0 { format_sats_compact(amount) } else { "".to_string() }
                                                 }
                                             }
                                         }
@@ -721,8 +591,6 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     rsx! {}
                                 }
                             }
-
-                            // Bookmark button
                             button {
                                 class: "{bookmark_button_class} hover:bg-blue-500/10 gap-1 px-2 py-1.5 rounded",
                                 disabled: *is_bookmarking.read(),
@@ -731,10 +599,8 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                     if *is_bookmarking.read() {
                                         return;
                                     }
-
                                     let event_id_clone = event_id_bookmark.clone();
                                     is_bookmarking.set(true);
-
                                     spawn(async move {
                                         let currently_bookmarked = bookmarks::is_bookmarked(&event_id_clone);
                                         if currently_bookmarked {
@@ -749,11 +615,9 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 },
                                 BookmarkIcon {
                                     class: "h-4 w-4".to_string(),
-                                    filled: *is_bookmarked.read()
+                                    filled: *is_bookmarked.read(),
                                 }
                             }
-
-                            // Share button
                             button {
                                 class: "flex items-center gap-1 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition px-2 py-1.5 rounded",
                                 onclick: move |e: MouseEvent| {
@@ -762,40 +626,36 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                                 },
                                 ShareIcon {
                                     class: "h-4 w-4".to_string(),
-                                    filled: false
+                                    filled: false,
                                 }
                             }
                         }
                     }
                 }
             }
-
-            // Recursively render children
             if !children.is_empty() && depth < MAX_DEPTH {
-                div {
-                    class: "space-y-1 mt-1",
+                div { class: "space-y-1 mt-1",
                     for child in children {
                         ThreadedComment {
                             key: "{child.event.id}",
                             node: child.clone(),
-                            depth: depth + 1
+                            depth: depth + 1,
                         }
                     }
                 }
             } else if !children.is_empty() && depth >= MAX_DEPTH {
-                // Max depth reached, show "Continue thread" link
-                div {
-                    class: "ml-4 mt-2",
+                div { class: "ml-4 mt-2",
                     Link {
-                        to: Route::Note { note_id: event.id.to_hex(), from_voice: None },
+                        to: Route::Note {
+                            note_id: event.id.to_hex(),
+                            from_voice: None,
+                        },
                         class: "text-xs text-blue-500 hover:underline",
                         "→ Continue thread ({children.len()} more replies)"
                     }
                 }
             }
         }
-
-        // Reply composer modal
         if *show_reply_modal.read() {
             ReplyComposer {
                 reply_to: event.clone(),
@@ -804,22 +664,20 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 },
                 on_success: move |_| {
                     show_reply_modal.set(false);
-                    // Update reply count
                     let current = *reply_count.read();
                     reply_count.set(current + 1);
-                }
+                },
             }
         }
-
-        // Zap modal
         if *show_zap_modal.read() {
             {
-                let zap_display_name = author_metadata.read().as_ref()
+                let zap_display_name = author_metadata
+                    .read()
+                    .as_ref()
                     .and_then(|m| m.display_name.clone().or(m.name.clone()))
                     .unwrap_or_else(|| {
                         author_pubkey.to_string().chars().take(16).collect::<String>() + "..."
                     });
-
                 rsx! {
                     ZapModal {
                         recipient_pubkey: author_pubkey_str.clone(),
@@ -829,7 +687,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                         event_id: Some(event_id.clone()),
                         on_close: move |_| {
                             show_zap_modal.set(false);
-                        }
+                        },
                     }
                 }
             }

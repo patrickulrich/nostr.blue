@@ -3,7 +3,6 @@ use crate::stores::cashu;
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::format_sats_with_separator;
 use dioxus::prelude::*;
-
 #[component]
 pub fn WalletBalanceCard(
     on_send: EventHandler<()>,
@@ -21,60 +20,32 @@ pub fn WalletBalanceCard(
     let proof_count = cashu::get_total_proof_count();
     let mint_count = cashu::get_mints().len();
     let mut show_health_modal = use_signal(|| false);
-
-    // Format balance with thousands separator (use available balance)
     let formatted_balance = format_sats_with_separator(balances.available);
-
-    // Check if there are pending funds
     let has_pending = balances.pending > 0;
     let formatted_pending = format_sats_with_separator(balances.pending);
-
     rsx! {
-        div {
-            class: "bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl p-6 text-white shadow-lg",
-
-            // Balance section
-            div {
-                class: "mb-6",
-                div {
-                    class: "text-sm opacity-90 mb-2",
-                    if has_pending { "Available Balance" } else { "Total Balance" }
+        div { class: "bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl p-6 text-white shadow-lg",
+            div { class: "mb-6",
+                div { class: "text-sm opacity-90 mb-2",
+                    if has_pending {
+                        "Available Balance"
+                    } else {
+                        "Total Balance"
+                    }
                 }
-                div {
-                    class: "text-5xl font-bold mb-1",
-                    "{formatted_balance}"
-                }
-                div {
-                    class: "text-sm opacity-75",
-                    "sats"
-                }
-
-                // Show pending balance if any
+                div { class: "text-5xl font-bold mb-1", "{formatted_balance}" }
+                div { class: "text-sm opacity-75", "sats" }
                 if has_pending {
-                    div {
-                        class: "mt-2 text-sm opacity-75 flex items-center gap-2",
-                        span {
-                            class: "inline-block w-2 h-2 rounded-full bg-yellow-400 animate-pulse"
-                        }
+                    div { class: "mt-2 text-sm opacity-75 flex items-center gap-2",
+                        span { class: "inline-block w-2 h-2 rounded-full bg-yellow-400 animate-pulse" }
                         span { "Pending: {formatted_pending} sats" }
                     }
                 }
-
-                // Wallet health indicator (shows stuck proofs badge)
-                WalletHealthIndicator {
-                    on_open_modal: move |_| show_health_modal.set(true),
-                }
+                WalletHealthIndicator { on_open_modal: move |_| show_health_modal.set(true) }
             }
-
-            // Action buttons row 1: Lightning
-            div {
-                class: "mb-3",
-                div {
-                    class: "text-xs opacity-75 mb-2",
-                    "Lightning"
-                }
-                div {
-                    class: "flex gap-3",
+            div { class: "mb-3",
+                div { class: "text-xs opacity-75 mb-2", "Lightning" }
+                div { class: "flex gap-3",
                     button {
                         class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
                         onclick: move |_| on_lightning_deposit.call(()),
@@ -89,15 +60,9 @@ pub fn WalletBalanceCard(
                     }
                 }
             }
-
-            // Action buttons row 2: Ecash
             div {
-                div {
-                    class: "text-xs opacity-75 mb-2",
-                    "Ecash"
-                }
-                div {
-                    class: "flex gap-3",
+                div { class: "text-xs opacity-75 mb-2", "Ecash" }
+                div { class: "flex gap-3",
                     button {
                         class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
                         onclick: move |_| on_receive.call(()),
@@ -112,16 +77,9 @@ pub fn WalletBalanceCard(
                     }
                 }
             }
-
-            // Action buttons row 3: Payment Requests (NUT-18)
-            div {
-                class: "mt-3",
-                div {
-                    class: "text-xs opacity-75 mb-2",
-                    "Payment Requests"
-                }
-                div {
-                    class: "flex gap-3",
+            div { class: "mt-3",
+                div { class: "text-xs opacity-75 mb-2", "Payment Requests" }
+                div { class: "flex gap-3",
                     button {
                         class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
                         onclick: move |_| on_create_request.call(()),
@@ -136,16 +94,9 @@ pub fn WalletBalanceCard(
                     }
                 }
             }
-
-            // Action buttons row 4: Nutzaps (NIP-61)
-            div {
-                class: "mt-3",
-                div {
-                    class: "text-xs opacity-75 mb-2",
-                    "Nutzaps"
-                }
-                div {
-                    class: "flex gap-3",
+            div { class: "mt-3",
+                div { class: "text-xs opacity-75 mb-2", "Nutzaps" }
+                div { class: "flex gap-3",
                     button {
                         class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
                         onclick: move |_| on_nutzap_settings.call(()),
@@ -158,13 +109,11 @@ pub fn WalletBalanceCard(
                         span { "📥" }
                         span { "Zap Inbox" }
                         {
-                            // Compute once and pass to badge (avoid redundant signal reads)
                             let pending_count = cashu::pending_nutzap_count();
                             let pending_value = cashu::pending_nutzap_value();
                             if pending_count > 0 {
                                 rsx! {
-                                    div {
-                                        class: "absolute -top-1 -right-1",
+                                    div { class: "absolute -top-1 -right-1",
                                         NutzapBadge { count: Some(pending_count), value: Some(pending_value) }
                                     }
                                 }
@@ -175,17 +124,10 @@ pub fn WalletBalanceCard(
                     }
                 }
             }
-
-            // Advanced actions row (Transfer between mints)
             if mint_count >= 2 {
-                div {
-                    class: "mt-3",
-                    div {
-                        class: "text-xs opacity-75 mb-2",
-                        "Advanced"
-                    }
-                    div {
-                        class: "flex gap-3",
+                div { class: "mt-3",
+                    div { class: "text-xs opacity-75 mb-2", "Advanced" }
+                    div { class: "flex gap-3",
                         button {
                             class: "flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2",
                             onclick: move |_| on_transfer.call(()),
@@ -195,11 +137,8 @@ pub fn WalletBalanceCard(
                     }
                 }
             }
-
-            // Optimize wallet button (only show if there are proofs)
             if proof_count > 8 {
-                div {
-                    class: "mt-3 pt-3 border-t border-white/20",
+                div { class: "mt-3 pt-3 border-t border-white/20",
                     button {
                         class: "w-full bg-white/10 hover:bg-white/20 backdrop-blur-sm py-2 px-4 rounded-lg text-sm transition flex items-center justify-center gap-2",
                         onclick: move |_| on_optimize.call(()),
@@ -209,8 +148,6 @@ pub fn WalletBalanceCard(
                 }
             }
         }
-
-        // Health modal (outside main card div)
         WalletHealthModal {
             open: show_health_modal,
             on_close: move |_| show_health_modal.set(false),

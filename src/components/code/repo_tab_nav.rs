@@ -3,10 +3,8 @@
 //! Displays responsive tab navigation for repository pages: Overview, Code, Issues, PRs, Commits, etc.
 //! Desktop: horizontal tab bar. Mobile: overflow dropdown for tabs that don't fit.
 //! Styled to match gittr's tab-navigation.tsx pattern.
-
 use crate::routes::Route;
 use dioxus::prelude::*;
-
 /// Tab configuration
 #[derive(Clone, PartialEq)]
 struct TabConfig {
@@ -16,18 +14,17 @@ struct TabConfig {
     route: Route,
     count: Option<u32>,
 }
-
 /// Repository tab navigation with responsive overflow
 #[component]
 pub fn RepoTabNav(
     naddr: String,
     active_tab: String,
-    #[props(default = None)] issue_count: Option<u32>,
-    #[props(default = None)] pr_count: Option<u32>,
+    #[props(default = None)]
+    issue_count: Option<u32>,
+    #[props(default = None)]
+    pr_count: Option<u32>,
 ) -> Element {
     let mut show_overflow = use_signal(|| false);
-
-    // Define all tabs
     let tabs = [
         TabConfig {
             id: "overview",
@@ -77,20 +74,11 @@ pub fn RepoTabNav(
             count: None,
         },
     ];
-
-    // On desktop, show all tabs; on mobile, show overflow menu for PRs/Commits
-    let overflow_tabs = &tabs[3.min(tabs.len())..]; // PRs, Commits, etc.
-
+    let overflow_tabs = &tabs[3.min(tabs.len())..];
     rsx! {
-        div {
-            class: "flex items-center gap-1 border-b border-border",
-
-            // Primary tabs (overflow tabs hidden on mobile, shown in dropdown instead)
-            div {
-                class: "flex items-center",
-
-                for (index, tab) in tabs.iter().enumerate() {
-                    // Hide overflow tabs (index >= 3) on mobile - they appear in dropdown menu
+        div { class: "flex items-center gap-1 border-b border-border",
+            div { class: "flex items-center",
+                for (index , tab) in tabs.iter().enumerate() {
                     div {
                         key: "{tab.id}",
                         class: if index >= 3 { "hidden md:block" } else { "" },
@@ -101,19 +89,14 @@ pub fn RepoTabNav(
                     }
                 }
             }
-
-            // Mobile overflow menu (hidden on desktop via CSS in parent)
             if !overflow_tabs.is_empty() {
-                div {
-                    class: "md:hidden relative ml-auto",
-
+                div { class: "md:hidden relative ml-auto",
                     button {
                         class: "flex items-center gap-1 px-3 py-2 text-sm text-muted-foreground hover:text-foreground",
                         onclick: move |_| {
                             let current = *show_overflow.read();
                             show_overflow.set(!current);
                         },
-
                         svg {
                             class: "w-4 h-4",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -130,13 +113,10 @@ pub fn RepoTabNav(
                             circle { cx: "5", cy: "12", r: "1" }
                         }
                     }
-
-                    // Overflow dropdown
                     if *show_overflow.read() {
                         div {
                             class: "absolute right-0 top-full mt-1 w-48 bg-background border border-border rounded-lg shadow-lg z-50",
                             onclick: move |_| show_overflow.set(false),
-
                             for tab in overflow_tabs.iter() {
                                 OverflowTabItem {
                                     key: "{tab.id}",
@@ -151,7 +131,6 @@ pub fn RepoTabNav(
         }
     }
 }
-
 /// Individual tab item
 #[component]
 fn TabItem(config: TabConfig, is_active: bool) -> Element {
@@ -160,27 +139,16 @@ fn TabItem(config: TabConfig, is_active: bool) -> Element {
     } else {
         "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
     };
-
     rsx! {
-        Link {
-            to: config.route.clone(),
-            class: "{base_class}",
-
+        Link { to: config.route.clone(), class: "{base_class}",
             span {
                 class: "w-4 h-4 shrink-0",
-                dangerous_inner_html: "{config.icon}"
+                dangerous_inner_html: "{config.icon}",
             }
-
-            span {
-                class: "hidden sm:inline",
-                "{config.label}"
-            }
-
-            // Count badge
+            span { class: "hidden sm:inline", "{config.label}" }
             if let Some(count) = config.count {
                 if count > 0 {
-                    span {
-                        class: "ml-1 px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground",
+                    span { class: "ml-1 px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground",
                         "{count}"
                     }
                 }
@@ -188,7 +156,6 @@ fn TabItem(config: TabConfig, is_active: bool) -> Element {
         }
     }
 }
-
 /// Overflow menu tab item
 #[component]
 fn OverflowTabItem(config: TabConfig, is_active: bool) -> Element {
@@ -197,24 +164,16 @@ fn OverflowTabItem(config: TabConfig, is_active: bool) -> Element {
     } else {
         "flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground hover:bg-accent transition"
     };
-
     rsx! {
-        Link {
-            to: config.route.clone(),
-            class: "{base_class}",
-
+        Link { to: config.route.clone(), class: "{base_class}",
             span {
                 class: "w-4 h-4 shrink-0",
-                dangerous_inner_html: "{config.icon}"
+                dangerous_inner_html: "{config.icon}",
             }
-
             span { "{config.label}" }
-
-            // Count badge
             if let Some(count) = config.count {
                 if count > 0 {
-                    span {
-                        class: "ml-auto px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground",
+                    span { class: "ml-auto px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground",
                         "{count}"
                     }
                 }
@@ -222,7 +181,6 @@ fn OverflowTabItem(config: TabConfig, is_active: bool) -> Element {
         }
     }
 }
-
 /// Compact tab navigation for nested pages
 #[component]
 pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
@@ -265,20 +223,13 @@ pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
             },
         ),
     ];
-
     rsx! {
-        div {
-            class: "flex items-center gap-1 text-sm",
-
-            for (id, label, route) in tabs.iter() {
+        div { class: "flex items-center gap-1 text-sm",
+            for (id , label , route) in tabs.iter() {
                 Link {
                     key: "{id}",
                     to: route.clone(),
-                    class: if active_tab == *id {
-                        "px-2 py-1 rounded text-primary font-medium"
-                    } else {
-                        "px-2 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent/50 transition"
-                    },
+                    class: if active_tab == *id { "px-2 py-1 rounded text-primary font-medium" } else { "px-2 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
                     "{label}"
                 }
             }

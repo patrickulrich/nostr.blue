@@ -1,25 +1,22 @@
 use crate::stores::cashu::{self, TransferProgress, TRANSFER_PROGRESS};
 use crate::utils::shorten_url;
 use dioxus::prelude::*;
-
 /// Select a valid mint from the list, optionally excluding one mint
-fn select_valid_mint(current: &str, mints: &[String], exclude: Option<&str>) -> Option<String> {
-    // If current is valid and not excluded, keep it
-    if !current.is_empty() && mints.iter().any(|m| m == current) && (exclude != Some(current)) {
+fn select_valid_mint(
+    current: &str,
+    mints: &[String],
+    exclude: Option<&str>,
+) -> Option<String> {
+    if !current.is_empty() && mints.iter().any(|m| m == current)
+        && (exclude != Some(current))
+    {
         return Some(current.to_string());
     }
-
-    // Otherwise, find first valid alternative
-    mints
-        .iter()
-        .find(|m| exclude.is_none_or(|ex| *m != ex))
-        .cloned()
+    mints.iter().find(|m| exclude.is_none_or(|ex| *m != ex)).cloned()
 }
-
 #[component]
 pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
     let mut amount = use_signal(String::new);
-    // Use memo for reactive mint list that updates when WALLET_STATE changes
     let mints = use_memo(cashu::get_mints);
     let mut source_mint = use_signal(String::new);
     let mut target_mint = use_signal(String::new);
@@ -28,24 +25,16 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
     let mut fee_estimate = use_signal(|| Option::<u64>::None);
     let mut transfer_result = use_signal(|| Option::<cashu::TransferResult>::None);
     let mut is_estimating = use_signal(|| false);
-
-    // Read transfer progress for UI updates
     let progress = TRANSFER_PROGRESS.read().clone();
-
-    // Keep mints in sync - initialize and update when mint list changes
     use_effect(move || {
         let current_mints = mints();
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
-
-        // Initialize source mint if empty or invalid
         if source.is_empty() || !current_mints.contains(&source) {
             if let Some(first) = current_mints.first() {
                 source_mint.set(first.clone());
             }
         }
-
-        // Initialize target mint if empty or invalid (prefer different from source)
         if target.is_empty() || !current_mints.contains(&target) {
             let current_source = source_mint.read().clone();
             if let Some(new_target) = current_mints
@@ -56,35 +45,29 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                 target_mint.set(new_target.clone());
             }
         }
-
-        // Handle mint selection if current selections are still valid but could be better
         if let Some(new_source) = select_valid_mint(&source, &current_mints, None) {
             if new_source != source {
                 source_mint.set(new_source.clone());
             }
-
-            if let Some(new_target) = select_valid_mint(&target, &current_mints, Some(&new_source))
-            {
+            if let Some(new_target) = select_valid_mint(
+                &target,
+                &current_mints,
+                Some(&new_source),
+            ) {
                 if new_target != target {
                     target_mint.set(new_target);
                 }
             }
         }
     });
-
-    // Get source balance for display
     let source_balance = cashu::get_mint_balance(&source_mint.read().clone());
-
-    // Estimate fees when amount or mints change
     let on_estimate_fees = move |_| {
         if *is_estimating.read() || *is_transferring.read() {
             return;
         }
-
         let amount_str = amount.read().clone();
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
-
         let amount_sats = match amount_str.parse::<u64>() {
             Ok(a) if a > 0 => a,
             _ => {
@@ -92,15 +75,12 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                 return;
             }
         };
-
         if source.is_empty() || target.is_empty() || source == target {
             fee_estimate.set(None);
             return;
         }
-
         is_estimating.set(true);
         error_message.set(None);
-
         spawn(async move {
             match cashu::estimate_transfer_fees(source, target, amount_sats).await {
                 Ok((fee, _)) => {
@@ -115,16 +95,13 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
             }
         });
     };
-
     let on_transfer = move |_| {
         if *is_transferring.read() {
             return;
         }
-
         let amount_str = amount.read().clone();
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
-
         let amount_sats = match amount_str.parse::<u64>() {
             Ok(a) if a > 0 => a,
             _ => {
@@ -132,40 +109,39 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                 return;
             }
         };
-
         if source.is_empty() {
             error_message.set(Some("Please select a source mint".to_string()));
             return;
         }
-
         if target.is_empty() {
             error_message.set(Some("Please select a target mint".to_string()));
             return;
         }
-
         if source == target {
-            error_message.set(Some(
-                "Source and target mints must be different".to_string(),
-            ));
+            error_message
+                .set(Some("Source and target mints must be different".to_string()));
             return;
         }
-
-        // Check balance (including estimated fee)
         let balance = cashu::get_mint_balance(&source);
         let fee = fee_estimate.read().unwrap_or(0);
         let required = amount_sats.saturating_add(fee);
         if balance < required {
-            error_message.set(Some(format!(
-                "Insufficient balance. Have: {} sats, need: {} sats (incl. ~{} fee)",
-                balance, required, fee
-            )));
+            error_message
+                .set(
+                    Some(
+                        format!(
+                            "Insufficient balance. Have: {} sats, need: {} sats (incl. ~{} fee)",
+                            balance,
+                            required,
+                            fee,
+                        ),
+                    ),
+                );
             return;
         }
-
         is_transferring.set(true);
         error_message.set(None);
         transfer_result.set(None);
-
         spawn(async move {
             match cashu::transfer_between_mints(source, target, amount_sats).await {
                 Ok(result) => {
@@ -181,8 +157,6 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
             }
         });
     };
-
-    // Swap source and target mints
     let on_swap_mints = move |_| {
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
@@ -190,9 +164,7 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
         target_mint.set(source);
         fee_estimate.set(None);
     };
-
     rsx! {
-        // Modal overlay
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
             onclick: move |_| {
@@ -200,19 +172,11 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                     on_close.call(());
                 }
             },
-
-            // Modal content
             div {
                 class: "bg-card border border-border rounded-lg max-w-md w-full shadow-xl",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header
-                div {
-                    class: "px-6 py-4 border-b border-border flex items-center justify-between",
-                    h3 {
-                        class: "text-xl font-bold",
-                        "Transfer Between Mints"
-                    }
+                div { class: "px-6 py-4 border-b border-border flex items-center justify-between",
+                    h3 { class: "text-xl font-bold", "Transfer Between Mints" }
                     if !*is_transferring.read() {
                         button {
                             class: "text-2xl text-muted-foreground hover:text-foreground transition",
@@ -221,18 +185,10 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                 }
-
-                // Body
-                div {
-                    class: "p-6 space-y-4",
-
-                    // Source mint selection
+                div { class: "p-6 space-y-4",
                     if mints().len() >= 2 {
                         div {
-                            label {
-                                class: "block text-sm font-semibold mb-2",
-                                "From Mint"
-                            }
+                            label { class: "block text-sm font-semibold mb-2", "From Mint" }
                             select {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg",
                                 value: source_mint.read().clone(),
@@ -241,21 +197,16 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                                     fee_estimate.set(None);
                                 },
                                 for mint_url in mints().iter() {
-                                    option {
-                                        value: mint_url.clone(),
+                                    option { value: mint_url.clone(),
                                         "{shorten_url(mint_url, 30)} ({cashu::get_mint_balance(mint_url)} sats)"
                                     }
                                 }
                             }
-                            p {
-                                class: "text-xs text-muted-foreground mt-1",
+                            p { class: "text-xs text-muted-foreground mt-1",
                                 "Balance: {source_balance} sats"
                             }
                         }
-
-                        // Swap button
-                        div {
-                            class: "flex justify-center",
+                        div { class: "flex justify-center",
                             button {
                                 class: "p-2 text-muted-foreground hover:text-foreground transition rounded-full hover:bg-muted",
                                 onclick: on_swap_mints,
@@ -270,18 +221,13 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                                     path {
                                         stroke_linecap: "round",
                                         stroke_linejoin: "round",
-                                        d: "M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+                                        d: "M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4",
                                     }
                                 }
                             }
                         }
-
-                        // Target mint selection
                         div {
-                            label {
-                                class: "block text-sm font-semibold mb-2",
-                                "To Mint"
-                            }
+                            label { class: "block text-sm font-semibold mb-2", "To Mint" }
                             select {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg",
                                 value: target_mint.read().clone(),
@@ -291,8 +237,7 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                                 },
                                 for mint_url in mints().iter() {
                                     if *mint_url != *source_mint.read() {
-                                        option {
-                                            value: mint_url.clone(),
+                                        option { value: mint_url.clone(),
                                             "{shorten_url(mint_url, 30)} ({cashu::get_mint_balance(mint_url)} sats)"
                                         }
                                     }
@@ -300,25 +245,16 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                     } else {
-                        // Need at least 2 mints
-                        div {
-                            class: "bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4",
-                            p {
-                                class: "text-sm text-yellow-800 dark:text-yellow-200",
+                        div { class: "bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4",
+                            p { class: "text-sm text-yellow-800 dark:text-yellow-200",
                                 "You need at least 2 mints to transfer between them. Add another mint first."
                             }
                         }
                     }
-
-                    // Amount input
                     if mints().len() >= 2 {
                         div {
-                            label {
-                                class: "block text-sm font-semibold mb-2",
-                                "Amount (sats)"
-                            }
-                            div {
-                                class: "flex gap-2",
+                            label { class: "block text-sm font-semibold mb-2", "Amount (sats)" }
+                            div { class: "flex gap-2",
                                 input {
                                     class: "flex-1 px-4 py-3 bg-background border border-border rounded-lg text-lg",
                                     r#type: "number",
@@ -328,7 +264,7 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                                     oninput: move |evt| {
                                         amount.set(evt.value());
                                         fee_estimate.set(None);
-                                    }
+                                    },
                                 }
                                 button {
                                     class: "px-4 py-3 bg-muted hover:bg-muted/80 rounded-lg text-sm font-medium transition",
@@ -342,37 +278,34 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                                 }
                             }
                         }
-
-                        // Fee estimate display
                         if let Some(fee) = *fee_estimate.read() {
-                            div {
-                                class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3",
-                                p {
-                                    class: "text-sm text-blue-800 dark:text-blue-200",
+                            div { class: "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3",
+                                p { class: "text-sm text-blue-800 dark:text-blue-200",
                                     "Estimated fee: {fee} sats"
                                 }
                                 if let Ok(amt) = amount.read().parse::<u64>() {
-                                    p {
-                                        class: "text-xs text-blue-600 dark:text-blue-400 mt-1",
+                                    p { class: "text-xs text-blue-600 dark:text-blue-400 mt-1",
                                         "Total cost: {amt + fee} sats"
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Transfer progress
                     if *is_transferring.read() {
-                        div {
-                            class: "bg-muted rounded-lg p-4",
-                            p {
-                                class: "text-sm font-medium text-center",
+                        div { class: "bg-muted rounded-lg p-4",
+                            p { class: "text-sm font-medium text-center",
                                 match &progress {
                                     Some(TransferProgress::CreatingMintQuote) => "Creating invoice at target mint...",
-                                    Some(TransferProgress::CreatingMeltQuote) => "Creating payment quote at source...",
-                                    Some(TransferProgress::QuotesReady { .. }) => "Quotes ready, preparing transfer...",
+                                    Some(TransferProgress::CreatingMeltQuote) => {
+                                        "Creating payment quote at source..."
+                                    }
+                                    Some(TransferProgress::QuotesReady { .. }) => {
+                                        "Quotes ready, preparing transfer..."
+                                    }
                                     Some(TransferProgress::Melting) => "Paying Lightning invoice...",
-                                    Some(TransferProgress::WaitingForPayment) => "Waiting for payment confirmation...",
+                                    Some(TransferProgress::WaitingForPayment) => {
+                                        "Waiting for payment confirmation..."
+                                    }
                                     Some(TransferProgress::Minting) => "Minting tokens at target...",
                                     Some(TransferProgress::Completed { .. }) => "Transfer complete!",
                                     Some(TransferProgress::Failed { .. }) => "Transfer failed",
@@ -381,45 +314,27 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                     }
-
-                    // Error message
                     if let Some(msg) = error_message.read().as_ref() {
-                        div {
-                            class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
-                            div {
-                                class: "flex items-start gap-3",
+                        div { class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
+                            div { class: "flex items-start gap-3",
+                                div { class: "text-2xl", "⚠️" }
                                 div {
-                                    class: "text-2xl",
-                                    "⚠️"
-                                }
-                                div {
-                                    p {
-                                        class: "text-sm text-red-800 dark:text-red-200",
+                                    p { class: "text-sm text-red-800 dark:text-red-200",
                                         "{msg}"
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Success result
                     if let Some(result) = transfer_result.read().as_ref() {
-                        div {
-                            class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4",
-                            div {
-                                class: "flex items-start gap-3",
-                                div {
-                                    class: "text-2xl",
-                                    "✅"
-                                }
-                                div {
-                                    class: "flex-1",
-                                    p {
-                                        class: "text-sm font-semibold text-green-800 dark:text-green-200",
+                        div { class: "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4",
+                            div { class: "flex items-start gap-3",
+                                div { class: "text-2xl", "✅" }
+                                div { class: "flex-1",
+                                    p { class: "text-sm font-semibold text-green-800 dark:text-green-200",
                                         "Transfer complete!"
                                     }
-                                    div {
-                                        class: "text-xs text-green-700 dark:text-green-300 mt-2 space-y-1",
+                                    div { class: "text-xs text-green-700 dark:text-green-300 mt-2 space-y-1",
                                         p { "Sent: {result.amount_sent} sats" }
                                         p { "Received: {result.amount_received} sats" }
                                         p { "Fees: {result.fees_paid} sats" }
@@ -429,11 +344,8 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                 }
-
-                // Footer
                 if mints().len() >= 2 {
-                    div {
-                        class: "px-6 py-4 border-t border-border flex gap-3",
+                    div { class: "px-6 py-4 border-t border-border flex gap-3",
                         button {
                             class: "flex-1 px-4 py-3 bg-muted hover:bg-muted/80 rounded-lg font-medium transition",
                             onclick: move |_| on_close.call(()),
@@ -451,8 +363,7 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                 } else {
-                    div {
-                        class: "px-6 py-4 border-t border-border",
+                    div { class: "px-6 py-4 border-t border-border",
                         button {
                             class: "w-full px-4 py-3 bg-muted hover:bg-muted/80 rounded-lg font-medium transition",
                             onclick: move |_| on_close.call(()),

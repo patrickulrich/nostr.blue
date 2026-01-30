@@ -1,11 +1,9 @@
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use std::time::Duration;
-
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::list_encryption::get_all_list_members_with_status;
 use crate::utils::list_kinds::{get_p_tag_count, LIST_KINDS, NAMED_PEOPLE};
-
 /// User list data structure
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserList {
@@ -23,20 +21,15 @@ pub struct UserList {
     /// Cached total member count including private members (populated after decryption)
     pub total_member_count: Option<usize>,
 }
-
 impl UserList {
     /// Create a UserList from a Nostr event
     pub fn from_event(event: Event) -> Option<Self> {
-        // Must have a 'd' tag (identifier)
         let identifier = event
             .tags
             .iter()
             .find(|tag| tag.kind() == nostr_sdk::TagKind::d())
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())?;
-
-        // Get name tag first (NIP-51 standard), then title tag as fallback (deprecated)
-        // If neither exists, use identifier as fallback
         let name = event
             .tags
             .iter()
@@ -44,29 +37,27 @@ impl UserList {
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .or_else(|| {
-                // Fallback to deprecated "title" tag for backwards compatibility
                 event
                     .tags
                     .iter()
-                    .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("title"))
+                    .find(|tag| {
+                        tag.as_slice().first().map(|s| s.as_str()) == Some("title")
+                    })
                     .and_then(|tag| tag.content())
                     .map(|s| s.to_string())
             })
             .or_else(|| Some(identifier.clone()))
             .unwrap_or_else(|| "Untitled List".to_string());
-
-        // Get description tag
         let description = event
             .tags
             .iter()
-            .find(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("description"))
+            .find(|tag| {
+                tag.as_slice().first().map(|s| s.as_str()) == Some("description")
+            })
             .and_then(|tag| tag.content())
             .map(|s| s.to_string())
             .unwrap_or_default();
-
-        // Check if content is non-empty (indicates encrypted private members)
         let has_private_content = !event.content.is_empty();
-
         Some(UserList {
             id: event.id.to_string(),
             kind: event.kind.as_u16(),
@@ -77,12 +68,11 @@ impl UserList {
             created_at: event.created_at.as_secs(),
             author: event.pubkey.to_string(),
             has_private_content,
-            total_member_count: None, // Will be populated after decryption
+            total_member_count: None,
             event,
         })
     }
 }
-
 /// Hook to fetch all user lists (NIP-51)
 /// Returns (lists, loading, error, refresh)
 #[allow(clippy::type_complexity)]
@@ -96,33 +86,24 @@ pub fn use_user_lists() -> (
     let mut loading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let refresh_trigger = use_signal(|| 0u32);
-
     use_effect(move || {
-        // Re-run when auth changes OR refresh_trigger changes OR client initializes
         let _trigger = refresh_trigger.read();
         let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
-
         let auth = auth_store::AUTH_STATE.read();
         if !auth.is_authenticated {
             lists.set(Vec::new());
             return;
         }
-
-        // Don't fetch if client not initialized yet
-        // Effect will re-run when CLIENT_INITIALIZED changes
         if !client_ready {
-            loading.set(false); // Reset to avoid stuck spinner
+            loading.set(false);
             return;
         }
-
         let pubkey_str = match &auth.pubkey {
             Some(pk) => pk.clone(),
             None => return,
         };
-
         loading.set(true);
         error.set(None);
-
         spawn(async move {
             match fetch_user_lists(&pubkey_str).await {
                 Ok(fetched_lists) => {
@@ -137,10 +118,8 @@ pub fn use_user_lists() -> (
             loading.set(false);
         });
     });
-
     (lists, loading, error, refresh_trigger)
 }
-
 /// Fetch user lists from relays
 async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
     let client = nostr_client::NOSTR_CLIENT
@@ -148,106 +127,70 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-
-    let pubkey = PublicKey::parse(pubkey_str).map_err(|e| format!("Invalid pubkey: {}", e))?;
-
+    let pubkey = PublicKey::parse(pubkey_str)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
     log::info!("Fetching lists for {}", pubkey_str);
-
-    // Build filter for NIP-51 list kinds
-    // Use .kinds() for efficient batch kind filtering instead of loop
     let filter = Filter::new()
         .author(pubkey)
         .kinds(LIST_KINDS.iter().map(|&k| Kind::from(k)));
-
-    // Fetch events
     let events = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch events: {}", e))?;
-
-    // Parse events into UserList objects
     let mut lists: Vec<UserList> = events
         .into_iter()
         .filter_map(UserList::from_event)
         .collect();
-
-    // Populate total_member_count for people lists
-    // Public lists - computed synchronously first (no await needed)
     for list in &mut lists {
         if list.kind == NAMED_PEOPLE && !list.has_private_content {
-            // nostr-sdk pattern: only count p tags for people lists (not e, t, a)
             list.total_member_count = Some(get_p_tag_count(&list.tags));
         }
     }
-
-    // Private lists - concurrent decryption (nostr-sdk pattern: join_all)
     if *nostr_client::HAS_SIGNER.peek() {
-        // Collect indices and events for private lists
         let private_indices: Vec<usize> = lists
             .iter()
             .enumerate()
             .filter(|(_, list)| list.kind == NAMED_PEOPLE && list.has_private_content)
             .map(|(i, _)| i)
             .collect();
-
         if !private_indices.is_empty() {
-            // Pre-sized futures vec (nostr-sdk pattern)
             let mut futures = Vec::with_capacity(private_indices.len());
             for &idx in &private_indices {
                 futures.push(get_all_list_members_with_status(&lists[idx].event));
             }
-
-            // Join all concurrently instead of sequential await
             let results = futures::future::join_all(futures).await;
-
-            // Zip indices with results to update lists
             for (idx, result) in private_indices.into_iter().zip(results) {
                 match result {
                     Ok(r) => {
-                        // Only set count if decryption succeeded
-                        // Otherwise leave as None → UI shows "N+" fallback
                         if r.private_decryption_succeeded {
                             lists[idx].total_member_count = Some(r.members.len());
                         }
                     }
                     Err(e) => {
                         log::warn!(
-                            "Failed to get members for list '{}': {}",
-                            lists[idx].name,
-                            e
+                            "Failed to get members for list '{}': {}", lists[idx].name, e
                         );
-                        // Keep as None - will show public count with "+" indicator
                     }
                 }
             }
         }
     }
-    // If no signer, leave as None - UI shows public count with "+" indicator
-
-    // Sort by creation time (newest first)
     lists.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
     log::info!("Fetched {} lists", lists.len());
     Ok(lists)
 }
-
 /// Delete a list by publishing a deletion event (kind 5)
 pub async fn delete_list(event: &Event) -> Result<(), String> {
     use nostr_sdk::{EventBuilder, Kind, Tag, TagStandard};
-
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
         .clone();
-
     if !auth_store::is_authenticated() {
         return Err("Must be logged in to delete lists".to_string());
     }
-
     log::info!("Deleting list: {}", event.id);
-
-    // Build deletion event (kind 5)
     let tags = vec![
         Tag::event(event.id),
         Tag::from_standardized(TagStandard::Kind {
@@ -255,15 +198,11 @@ pub async fn delete_list(event: &Event) -> Result<(), String> {
             uppercase: false,
         }),
     ];
-
     let builder = EventBuilder::new(Kind::EventDeletion, "Deleted list").tags(tags);
-
-    // Publish deletion event
     client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish deletion: {}", e))?;
-
     log::info!("List deleted successfully");
     Ok(())
 }

@@ -1,13 +1,12 @@
 //! Wiki New/Edit Route
 //! Create or edit NIP-54 wiki pages (Kind 30818)
-
 use crate::components::icons::{
     AlertTriangleIcon, ArrowLeftIcon, BookOpenIcon, BookmarkIcon, CheckIcon, Link2Icon,
     PenSquareIcon,
 };
 use crate::components::{
-    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal, CitationSelection,
-    WikilinksList,
+    AsciiDocContent, BookPickerModal, BookSelection, CitationPickerModal,
+    CitationSelection, WikilinksList,
 };
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, wiki_store};
@@ -16,14 +15,11 @@ use dioxus::events::{KeyboardData, MouseData};
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlTextAreaElement;
-
 /// Wiki page editor
 #[component]
 pub fn WikiNew() -> Element {
     let nav = use_navigator();
     let auth = auth_store::AUTH_STATE.read();
-
-    // Editor state
     let mut title = use_signal(String::new);
     let mut identifier = use_signal(String::new);
     let mut summary = use_signal(String::new);
@@ -32,25 +28,16 @@ pub fn WikiNew() -> Element {
     let mut show_preview = use_signal(|| false);
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-
-    // Picker modal state
     let mut show_citation_picker = use_signal(|| false);
     let mut show_book_picker = use_signal(|| false);
     let mut cursor_position = use_signal(|| 0usize);
     let mut inline_trigger_prefix = use_signal(String::new);
-
-    // Redirect if not logged in
     if auth.pubkey.is_none() {
         return rsx! {
-            div {
-                class: "max-w-4xl mx-auto px-4 py-16 text-center",
+            div { class: "max-w-4xl mx-auto px-4 py-16 text-center",
                 AlertTriangleIcon { class: "w-16 h-16 text-muted-foreground mx-auto mb-4" }
-                h2 {
-                    class: "text-xl font-semibold text-foreground mb-2",
-                    "Login Required"
-                }
-                p {
-                    class: "text-muted-foreground mb-6",
+                h2 { class: "text-xl font-semibold text-foreground mb-2", "Login Required" }
+                p { class: "text-muted-foreground mb-6",
                     "You need to be logged in to create or edit wiki pages."
                 }
                 Link {
@@ -61,42 +48,32 @@ pub fn WikiNew() -> Element {
             }
         };
     }
-
-    // Auto-generate identifier from title
     use_effect(move || {
         if *auto_identifier.read() {
             let normalized = normalize_wiki_dtag(&title.read());
             identifier.set(normalized);
         }
     });
-
     let go_back = move |_| {
         nav.push(Route::WikiHome {});
     };
-
     let toggle_preview = move |_| {
         let current = *show_preview.read();
         show_preview.set(!current);
     };
-
     let handle_title_change = move |e: Event<FormData>| {
         title.set(e.value().clone());
     };
-
     let handle_identifier_change = move |e: Event<FormData>| {
         auto_identifier.set(false);
         identifier.set(e.value().clone());
     };
-
     let handle_summary_change = move |e: Event<FormData>| {
         summary.set(e.value().clone());
     };
-
     let handle_content_change = move |e: Event<FormData>| {
         let value = e.value().clone();
         content.set(value.clone());
-
-        // Check for inline triggers
         if value.ends_with("[[citation:") {
             inline_trigger_prefix.set("[[citation:".to_string());
             show_citation_picker.set(true);
@@ -105,43 +82,39 @@ pub fn WikiNew() -> Element {
             show_book_picker.set(true);
         }
     };
-
-    // Sync cursor position from textarea (for click events)
     let sync_cursor_click = move |_: Event<MouseData>| {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
                     if let Some(textarea) = elem.dyn_ref::<HtmlTextAreaElement>() {
-                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
+                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0)
+                            as usize;
                         cursor_position.set(pos);
                     }
                 }
             }
         }
     };
-
-    // Sync cursor position from textarea (for keyboard events)
     let sync_cursor_keyup = move |_: Event<KeyboardData>| {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
                     if let Some(textarea) = elem.dyn_ref::<HtmlTextAreaElement>() {
-                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0) as usize;
+                        let pos = textarea.selection_start().ok().flatten().unwrap_or(0)
+                            as usize;
                         cursor_position.set(pos);
                     }
                 }
             }
         }
     };
-
-    // Insert text at cursor position
     let mut insert_at_cursor = move |text: &str| {
         let current = content.read().clone();
         let pos = *cursor_position.read();
-
-        // Remove inline trigger prefix if present
         let prefix = inline_trigger_prefix.read().clone();
-        let (adjusted_content, adjusted_pos) = if !prefix.is_empty() && current.ends_with(&prefix) {
+        let (adjusted_content, adjusted_pos) = if !prefix.is_empty()
+            && current.ends_with(&prefix)
+        {
             let new_content = current[..current.len() - prefix.len()].to_string();
             let new_pos = pos.saturating_sub(prefix.len());
             inline_trigger_prefix.set(String::new());
@@ -149,43 +122,30 @@ pub fn WikiNew() -> Element {
         } else {
             (current, pos)
         };
-
-        let (before, after) = adjusted_content.split_at(adjusted_pos.min(adjusted_content.len()));
+        let (before, after) = adjusted_content
+            .split_at(adjusted_pos.min(adjusted_content.len()));
         let new_content = format!("{}{}{}", before, text, after);
         content.set(new_content);
     };
-
-    // Handle citation selection
     let handle_citation_selected = move |selection: CitationSelection| {
         log::info!(
-            "Inserting citation: {} (style: {:?})",
-            selection.identifier,
-            selection.style
+            "Inserting citation: {} (style: {:?})", selection.identifier, selection.style
         );
         insert_at_cursor(&selection.markup);
     };
-
-    // Handle book selection
     let handle_book_selected = move |selection: BookSelection| {
-        log::info!(
-            "Inserting book reference: {}",
-            selection.reference.display_text()
-        );
+        log::info!("Inserting book reference: {}", selection.reference.display_text());
         insert_at_cursor(&selection.markup);
     };
-
     let handle_submit = move |_| {
         if !*nostr_client::CLIENT_INITIALIZED.read() {
             error.set(Some("Client not initialized yet".to_string()));
             return;
         }
-
         let title_val = title.read().clone();
         let identifier_val = identifier.read().clone();
         let summary_val = summary.read().clone();
         let content_val = content.read().clone();
-
-        // Validation
         if title_val.trim().is_empty() {
             error.set(Some("Title is required".to_string()));
             return;
@@ -198,24 +158,21 @@ pub fn WikiNew() -> Element {
             error.set(Some("Content is required".to_string()));
             return;
         }
-
         spawn(async move {
             saving.set(true);
             error.set(None);
-
             let summary_opt = if summary_val.trim().is_empty() {
                 None
             } else {
                 Some(summary_val)
             };
-
             match wiki_store::publish_wiki_page(
-                &title_val,
-                &content_val,
-                Some(&identifier_val),
-                summary_opt.as_deref(),
-            )
-            .await
+                    &title_val,
+                    &content_val,
+                    Some(&identifier_val),
+                    summary_opt.as_deref(),
+                )
+                .await
             {
                 Ok(naddr) => {
                     log::info!("Published wiki page: {}", naddr);
@@ -230,26 +187,24 @@ pub fn WikiNew() -> Element {
             }
         });
     };
-
     rsx! {
-        div {
-            class: "max-w-4xl mx-auto px-4 py-6",
-
-            // Header
-            div {
-                class: "flex items-center justify-between mb-6",
+        div { class: "max-w-4xl mx-auto px-4 py-6",
+            div { class: "flex items-center justify-between mb-6",
                 button {
                     class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors",
                     onclick: go_back,
                     ArrowLeftIcon { class: "w-5 h-5" }
                     "Back to Wiki"
                 }
-                div {
-                    class: "flex items-center gap-2",
+                div { class: "flex items-center gap-2",
                     button {
                         class: format!(
                             "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors {}",
-                            if *show_preview.read() { "bg-primary text-primary-foreground" } else { "bg-accent hover:bg-accent/80" }
+                            if *show_preview.read() {
+                                "bg-primary text-primary-foreground"
+                            } else {
+                                "bg-accent hover:bg-accent/80"
+                            },
                         ),
                         onclick: toggle_preview,
                         if *show_preview.read() {
@@ -264,36 +219,32 @@ pub fn WikiNew() -> Element {
                         disabled: *saving.read(),
                         onclick: handle_submit,
                         CheckIcon { class: "w-5 h-5" }
-                        if *saving.read() { "Saving..." } else { "Publish" }
+                        if *saving.read() {
+                            "Saving..."
+                        } else {
+                            "Publish"
+                        }
                     }
                 }
             }
-
-            // Error display
             if let Some(ref e) = *error.read() {
-                div {
-                    class: "p-4 rounded-lg bg-destructive/10 text-destructive mb-6",
+                div { class: "p-4 rounded-lg bg-destructive/10 text-destructive mb-6",
                     "{e}"
                 }
             }
-
-            // Form / Preview
             if *show_preview.read() {
-                // Preview mode
-                div {
-                    class: "bg-card border border-border rounded-lg p-6",
-                    h1 {
-                        class: "text-3xl font-bold text-foreground mb-2",
-                        if title.read().is_empty() { "Untitled Page" } else { "{title}" }
-                    }
-                    if !summary.read().is_empty() {
-                        p {
-                            class: "text-muted-foreground mb-4",
-                            "{summary}"
+                div { class: "bg-card border border-border rounded-lg p-6",
+                    h1 { class: "text-3xl font-bold text-foreground mb-2",
+                        if title.read().is_empty() {
+                            "Untitled Page"
+                        } else {
+                            "{title}"
                         }
                     }
-                    div {
-                        class: "border-t border-border pt-4",
+                    if !summary.read().is_empty() {
+                        p { class: "text-muted-foreground mb-4", "{summary}" }
+                    }
+                    div { class: "border-t border-border pt-4",
                         AsciiDocContent {
                             content: content.read().clone(),
                             enable_wikilinks: true,
@@ -301,14 +252,9 @@ pub fn WikiNew() -> Element {
                     }
                 }
             } else {
-                // Edit mode
-                div {
-                    class: "space-y-6",
-
-                    // Title
+                div { class: "space-y-6",
                     div {
-                        label {
-                            class: "block text-sm font-medium text-foreground mb-2",
+                        label { class: "block text-sm font-medium text-foreground mb-2",
                             "Title"
                         }
                         input {
@@ -319,11 +265,8 @@ pub fn WikiNew() -> Element {
                             oninput: handle_title_change,
                         }
                     }
-
-                    // Identifier
                     div {
-                        label {
-                            class: "block text-sm font-medium text-foreground mb-2",
+                        label { class: "block text-sm font-medium text-foreground mb-2",
                             "Identifier (d-tag)"
                         }
                         input {
@@ -333,16 +276,12 @@ pub fn WikiNew() -> Element {
                             value: "{identifier}",
                             oninput: handle_identifier_change,
                         }
-                        p {
-                            class: "text-xs text-muted-foreground mt-1",
+                        p { class: "text-xs text-muted-foreground mt-1",
                             "This is used in wikilinks: [[{identifier}]] or [[{identifier}|display text]]"
                         }
                     }
-
-                    // Summary
                     div {
-                        label {
-                            class: "block text-sm font-medium text-foreground mb-2",
+                        label { class: "block text-sm font-medium text-foreground mb-2",
                             "Summary (optional)"
                         }
                         input {
@@ -353,17 +292,11 @@ pub fn WikiNew() -> Element {
                             oninput: handle_summary_change,
                         }
                     }
-
-                    // Content with side-by-side preview on desktop
                     div {
-                        label {
-                            class: "block text-sm font-medium text-foreground mb-2",
+                        label { class: "block text-sm font-medium text-foreground mb-2",
                             "Content (AsciiDoc)"
                         }
-
-                        // Editor toolbar
-                        div {
-                            class: "flex items-center gap-2 mb-2",
+                        div { class: "flex items-center gap-2 mb-2",
                             button {
                                 class: "px-3 py-1.5 text-sm bg-accent hover:bg-accent/80 rounded-md flex items-center gap-2 transition-colors",
                                 onclick: move |_| show_citation_picker.set(true),
@@ -378,18 +311,12 @@ pub fn WikiNew() -> Element {
                                 BookOpenIcon { class: "w-4 h-4" }
                                 "Insert Book Reference"
                             }
-                            span {
-                                class: "text-xs text-muted-foreground ml-2",
+                            span { class: "text-xs text-muted-foreground ml-2",
                                 "or type [[citation: or [[book: to trigger"
                             }
                         }
-
-                        div {
-                            class: "flex gap-4",
-
-                            // Editor
-                            div {
-                                class: "flex-1",
+                        div { class: "flex gap-4",
+                            div { class: "flex-1",
                                 textarea {
                                     id: "wiki-content-editor",
                                     class: "w-full h-96 px-4 py-3 bg-background border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring font-mono text-sm resize-y",
@@ -399,18 +326,15 @@ pub fn WikiNew() -> Element {
                                     onclick: sync_cursor_click,
                                     onkeyup: sync_cursor_keyup,
                                 }
-                                div {
-                                    class: "text-xs text-muted-foreground mt-2 space-y-1",
-                                    p { "Use AsciiDoc markup: = heading, *bold*, _italic_, `code`, [[wikilink]]" }
+                                div { class: "text-xs text-muted-foreground mt-2 space-y-1",
+                                    p {
+                                        "Use AsciiDoc markup: = heading, *bold*, _italic_, `code`, [[wikilink]]"
+                                    }
                                     p { "Links: [[target]] or [[target|display text]]" }
                                 }
-
-                                // Show detected wikilinks
                                 if !content.read().is_empty() {
-                                    div {
-                                        class: "mt-3 pt-3 border-t border-border",
-                                        div {
-                                            class: "flex items-center gap-2 text-xs text-muted-foreground mb-2",
+                                    div { class: "mt-3 pt-3 border-t border-border",
+                                        div { class: "flex items-center gap-2 text-xs text-muted-foreground mb-2",
                                             Link2Icon { class: "w-3 h-3" }
                                             "Links in this page:"
                                         }
@@ -421,19 +345,13 @@ pub fn WikiNew() -> Element {
                                     }
                                 }
                             }
-
-                            // Live preview (hidden on mobile)
-                            div {
-                                class: "hidden lg:block flex-1",
-                                div {
-                                    class: "h-96 overflow-y-auto border border-border rounded-lg p-4 bg-muted/20",
-                                    div {
-                                        class: "text-xs text-muted-foreground uppercase tracking-wider mb-2",
+                            div { class: "hidden lg:block flex-1",
+                                div { class: "h-96 overflow-y-auto border border-border rounded-lg p-4 bg-muted/20",
+                                    div { class: "text-xs text-muted-foreground uppercase tracking-wider mb-2",
                                         "Live Preview"
                                     }
                                     if content.read().is_empty() {
-                                        p {
-                                            class: "text-muted-foreground italic",
+                                        p { class: "text-muted-foreground italic",
                                             "Start typing to see a preview..."
                                         }
                                     } else {
@@ -448,18 +366,11 @@ pub fn WikiNew() -> Element {
                     }
                 }
             }
-
-            // Citation picker modal
             CitationPickerModal {
                 show: show_citation_picker,
                 on_select: handle_citation_selected,
             }
-
-            // Book picker modal
-            BookPickerModal {
-                show: show_book_picker,
-                on_select: handle_book_selected,
-            }
+            BookPickerModal { show: show_book_picker, on_select: handle_book_selected }
         }
     }
 }

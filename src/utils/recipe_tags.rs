@@ -1,6 +1,3 @@
-// Recipe tags for the /recipes feature
-// Uses "nostrcooking" tag prefix for Kind 30023 recipes
-
 /// A recipe category tag with optional emoji
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecipeTag {
@@ -11,13 +8,15 @@ pub struct RecipeTag {
     /// Optional emoji for display
     pub emoji: Option<&'static str>,
 }
-
 impl RecipeTag {
-    pub const fn new(name: &'static str, slug: &'static str, emoji: Option<&'static str>) -> Self {
+    pub const fn new(
+        name: &'static str,
+        slug: &'static str,
+        emoji: Option<&'static str>,
+    ) -> Self {
         Self { name, slug, emoji }
     }
 }
-
 /// All 171 curated recipe tags
 /// These are used for filtering and categorizing recipes
 pub static RECIPE_TAGS: &[RecipeTag] = &[
@@ -193,7 +192,6 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Healthy", "healthy", Some("🍏")),
     RecipeTag::new("Gluten Free", "gluten-free", Some("🥗")),
 ];
-
 /// A curated section of tags for the explore page
 #[derive(Clone, Debug)]
 pub struct TagSection {
@@ -201,7 +199,6 @@ pub struct TagSection {
     pub title: &'static str,
     pub tags: &'static [&'static str],
 }
-
 /// Curated tag sections for the /recipes explore page
 pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
     TagSection {
@@ -247,8 +244,17 @@ pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
         emoji: "🥩",
         title: "Proteins",
         tags: &[
-            "Beef", "Chicken", "Fish", "Lamb", "Pork", "Seafood", "Steak", "Turkey", "Duck",
-            "Eggs", "Tofu",
+            "Beef",
+            "Chicken",
+            "Fish",
+            "Lamb",
+            "Pork",
+            "Seafood",
+            "Steak",
+            "Turkey",
+            "Duck",
+            "Eggs",
+            "Tofu",
         ],
     },
     TagSection {
@@ -306,7 +312,6 @@ pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
         tags: &["Spicy", "Sweet", "Curry"],
     },
 ];
-
 /// Tag aliases for normalization (maps variations to canonical tag names)
 pub static TAG_ALIASES: &[(&str, &str)] = &[
     ("Spice", "Spicy"),
@@ -318,20 +323,15 @@ pub static TAG_ALIASES: &[(&str, &str)] = &[
     ("Middle Eastern", "Middle-Eastern"),
     ("MiddleEastern", "Middle-Eastern"),
 ];
-
 /// Find a tag by name (case-insensitive)
 pub fn find_tag(name: &str) -> Option<&'static RecipeTag> {
     let name_lower = name.to_lowercase();
-    RECIPE_TAGS
-        .iter()
-        .find(|t| t.name.to_lowercase() == name_lower)
+    RECIPE_TAGS.iter().find(|t| t.name.to_lowercase() == name_lower)
 }
-
 /// Find a tag by slug
 pub fn find_tag_by_slug(slug: &str) -> Option<&'static RecipeTag> {
     RECIPE_TAGS.iter().find(|t| t.slug == slug)
 }
-
 /// Normalize a tag name using aliases
 pub fn normalize_tag(name: &str) -> &str {
     TAG_ALIASES
@@ -340,7 +340,6 @@ pub fn normalize_tag(name: &str) -> &str {
         .map(|(_, canonical)| *canonical)
         .unwrap_or(name)
 }
-
 /// Get tags matching a search query (case-insensitive prefix match)
 pub fn search_tags(query: &str) -> Vec<&'static RecipeTag> {
     if query.is_empty() {
@@ -352,44 +351,34 @@ pub fn search_tags(query: &str) -> Vec<&'static RecipeTag> {
         .filter(|t| t.name.to_lowercase().starts_with(&query_lower))
         .collect()
 }
-
 /// Get the curated tags for a specific section by title
 pub fn get_section_tags(section_title: &str) -> Option<Vec<&'static RecipeTag>> {
     CURATED_TAG_SECTIONS
         .iter()
         .find(|s| s.title == section_title)
         .map(|section| {
-            section
-                .tags
-                .iter()
-                .filter_map(|name| find_tag(name))
-                .collect()
+            section.tags.iter().filter_map(|name| find_tag(name)).collect()
         })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_tag_count() {
         assert_eq!(RECIPE_TAGS.len(), 171);
     }
-
     #[test]
     fn test_find_tag() {
         let italian = find_tag("Italian");
         assert!(italian.is_some());
         assert_eq!(italian.unwrap().emoji, Some("🇮🇹"));
     }
-
     #[test]
     fn test_normalize_tag() {
         assert_eq!(normalize_tag("Spice"), "Spicy");
         assert_eq!(normalize_tag("Gluten-Free"), "Gluten Free");
-        assert_eq!(normalize_tag("Italian"), "Italian"); // No alias
+        assert_eq!(normalize_tag("Italian"), "Italian");
     }
-
     #[test]
     fn test_search_tags() {
         let results = search_tags("It");

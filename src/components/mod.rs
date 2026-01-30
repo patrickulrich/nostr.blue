@@ -1,6 +1,3 @@
-// UI Components
-// This module contains all reusable UI components
-
 pub mod article_card;
 pub mod article_content;
 pub mod comment_composer;
@@ -17,7 +14,6 @@ pub mod search_input;
 pub mod threaded_comment;
 pub mod trending_notes;
 pub mod video_card;
-// Live streaming components (NIP-53)
 pub mod album_card;
 pub mod artist_card;
 pub mod client_initializing;
@@ -54,7 +50,6 @@ pub mod wallet_balance_card;
 pub mod webbookmark_card;
 pub mod webbookmark_modal;
 pub mod zap_modal;
-// Cashu wallet components (eCash)
 pub mod add_to_list_modal;
 pub mod cashu;
 pub mod create_list_modal;
@@ -63,7 +58,7 @@ pub mod external_content_card;
 pub mod gif_upload_modal;
 pub mod nip_card;
 pub mod nwc_setup_modal;
-pub mod password_modal; // NIP-49 password entry for encrypted keys
+pub mod password_modal;
 pub mod podcast_add_feed_modal;
 pub mod podcast_chapters;
 pub mod podcast_episode_card;
@@ -75,39 +70,21 @@ pub mod podcast_transcript;
 pub mod podcast_v4v;
 pub mod radio_card;
 pub mod report_modal;
-
-// Badge components (NIP-58)
 pub mod badge_detail_modal;
 pub mod profile_badges;
-
-// Highlight components (NIP-84)
 pub mod highlight_card;
 pub mod highlight_modal;
-
-// Code/Git hosting components (NIP-34 + NIP-C0)
 pub mod code;
-
-// Publication components (NKBIP-01 Kind 30040/30041)
 pub mod asciidoc_content;
 pub mod publication_card;
 pub mod publication_section;
 pub mod publication_toc;
-
-// Wiki components (NIP-54 Kind 30818)
 pub mod wiki_backlinks;
 pub mod wiki_card;
 pub mod wiki_content;
-
-// Citation components (NKBIP-03 Kinds 30-33)
 pub mod citation;
-
-// Shop/Marketplace components (NIP-99)
 pub mod shop;
-
-// Book reference picker (NKBIP-08)
 pub mod book_picker_modal;
-
-// pub use note::NoteDisplay;
 pub use article_card::{ArticleCard, ArticleCardSkeleton};
 pub use article_content::ArticleContent;
 pub use comment_composer::CommentComposer;
@@ -122,7 +99,6 @@ pub use search_input::SearchInput;
 pub use threaded_comment::ThreadedComment;
 pub use trending_notes::TrendingNotes;
 pub use video_card::VideoCard;
-// Live streaming component re-exports
 pub use album_card::{AlbumCard, AlbumCardSkeleton};
 pub use artist_card::{ArtistCard, ArtistCardSkeleton};
 pub use client_initializing::ClientInitializing;
@@ -146,14 +122,12 @@ pub use article_cover_uploader::ArticleCoverUploader;
 pub mod publish_confirm_dialog;
 pub use publish_confirm_dialog::{PublishConfig, PublishConfirmDialog};
 pub mod markdown_toolbar;
-// Re-export toolbar and formatting utilities (some kept for future programmatic formatting features)
 #[allow(unused_imports)]
 pub use markdown_toolbar::{
     apply_markdown_format, get_textarea_cursor, set_textarea_cursor, MarkdownFormat,
     MarkdownToolbar,
 };
 pub mod nostr_mention_dialog;
-// MentionType kept for future mention type differentiation in UI
 #[allow(unused_imports)]
 pub use nostr_mention_dialog::{MentionSelection, MentionType, NostrMentionDialog};
 pub mod image_upload_dialog;
@@ -179,12 +153,12 @@ pub use radial_menu::RadialMenu;
 pub use token_list::TokenList;
 pub use transaction_history::TransactionHistory;
 pub use wallet_balance_card::WalletBalanceCard;
-// Cashu wallet component re-exports
 pub use add_to_list_modal::AddToListModal;
 pub use cashu::{
-    CashuAddMintModal, CashuCreateRequestModal, CashuMintDiscoveryModal, CashuOptimizeModal,
-    CashuPayRequestModal, CashuReceiveLightningModal, CashuReceiveModal, CashuSendLightningModal,
-    CashuSendModal, CashuSetupWizard, CashuTermsModal, CashuTokenCard, CashuTransferModal,
+    CashuAddMintModal, CashuCreateRequestModal, CashuMintDiscoveryModal,
+    CashuOptimizeModal, CashuPayRequestModal, CashuReceiveLightningModal,
+    CashuReceiveModal, CashuSendLightningModal, CashuSendModal, CashuSetupWizard,
+    CashuTermsModal, CashuTokenCard, CashuTransferModal,
 };
 pub use create_list_modal::CreateListModal;
 pub use nwc_setup_modal::NwcSetupModal;
@@ -197,16 +171,15 @@ pub use people_list_members_modal::PeopleListMembersModal;
 pub use poll_creator_modal::PollCreatorModal;
 pub mod dialog;
 pub mod modal;
-// Modal components kept for future dialog refactoring
 #[allow(unused_imports)]
 pub use modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 pub mod toast;
-
-// Podcast components
 pub use external_content_card::ExternalContentList;
 pub use podcast_add_feed_modal::PodcastAddFeedModal;
 pub use podcast_chapters::PodcastChapters;
-pub use podcast_episode_card::{DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton};
+pub use podcast_episode_card::{
+    DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
+};
 pub use podcast_episode_list::PodcastEpisodeList;
 pub use podcast_persons::{InlineCredits, PodcastPersons};
 pub use podcast_show_card::{PodcastShow, PodcastShowCard, PodcastShowCardSkeleton};
@@ -214,67 +187,46 @@ pub use podcast_soundbites::{FeaturedSoundbite, PodcastSoundbites};
 pub use podcast_transcript::PodcastTranscript;
 pub use podcast_v4v::{V4VBoostButton, V4VInfo};
 pub use radio_card::{RadioCard, RadioCardSkeleton};
-
-// Code/Git hosting component exports
 pub use code::{
     BranchSelector, CodeFileTree, CodeFileViewer, CodeFileViewerSkeleton, CodeIssueRow,
     CodePullRow, CodeRepoCard, CodeSnippetCard, CodeStatusBadge, FilePathBreadcrumb,
     FileTreeSkeleton,
 };
-
-// NIP components
 pub use nip_card::{CustomNipCard, NipCardSkeleton, OfficialNipCard};
-
-// Citation component re-exports (NKBIP-03 Kinds 30-33)
 pub use citation::{CitationPickerModal, CitationSelection};
-
-// Book reference picker (NKBIP-08)
 pub use book_picker_modal::{BookPickerModal, BookSelection};
-
-// Badge component exports (NIP-58)
 pub use profile_badges::ProfileBadgesSection;
-
-// Highlight component exports (NIP-84)
 #[allow(unused_imports)]
 pub use highlight_card::{HighlightCard, HighlightCardSkeleton};
 #[allow(unused_imports)]
 pub use highlight_modal::HighlightModal;
-
-// P2P trading components (NIP-69)
 pub mod p2p;
 pub use p2p::{
     P2PDepthChart, P2PDepthChartSkeleton, P2PLayerBadge, P2PNetworkBadge, P2POrderCard,
     P2POrderCardSkeleton, P2POrderFilters, P2PStatusBadge, P2PTypeBadge,
 };
-
-// Calendar/Events components (NIP-52 + NIP-53)
 pub mod calendar_mini;
 pub mod calendar_view;
 pub mod event_card;
 pub mod event_map;
-
 pub use calendar_mini::MiniCalendar;
 pub use calendar_view::{CalendarView, CalendarViewMode, CalendarViewSkeleton};
-#[allow(unused_imports)] // Skeleton re-exported for public API consistency
-pub use event_card::{EventCard, EventCardCompact, EventCardCompactSkeleton, EventCardSkeleton};
+#[allow(unused_imports)]
+pub use event_card::{
+    EventCard, EventCardCompact, EventCardCompactSkeleton, EventCardSkeleton,
+};
 pub use event_map::EventMap;
-
-// Community components (NIP-72)
 pub mod community;
 pub use community::{
     CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, CommunityPostCard,
-    CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline, JoinButton,
-    UserRoleBadge,
+    CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline,
+    JoinButton, UserRoleBadge,
 };
-
-// Pin Board components (Kind 33889 Pinstr-compatible)
 pub mod board_slideover;
 pub mod pin_board_card;
 pub mod pin_board_item_card;
 pub mod pin_board_item_selector;
 pub mod pin_menu;
-
-// Recipe components
 pub mod add_to_cookbook_modal;
 pub mod cookbook_card;
 pub mod create_cookbook_modal;
@@ -286,7 +238,6 @@ pub mod recipe_form;
 pub(crate) mod recipe_ingredients_editor;
 pub mod recipe_tag_chip;
 pub(crate) mod recipe_tag_selector;
-
 pub use add_to_cookbook_modal::AddToCookbookModal;
 pub use cookbook_card::{CookbookCard, CookbookCardSkeleton};
 pub use create_cookbook_modal::CreateCookbookModal;
@@ -295,32 +246,26 @@ pub use recipe_card::{RecipeCard, RecipeCardSkeleton};
 pub use recipe_detail_view::{RecipeDetailView, RecipeDetailViewSkeleton};
 pub use recipe_form::{RecipeForm, RecipeFormData};
 pub use recipe_tag_chip::RecipeTagChipExplore;
-// Note: RecipeIngredientsEditor, RecipeDirectionsEditor, RecipeTagSelector are internal to RecipeForm
-
-// Pinboard component exports
 pub use board_slideover::BoardSlideover;
 pub use pin_board_card::{HashtagBadge, PinBoardMosaicGrid};
 pub use pin_board_item_card::{PinCardMosaicSkeleton, PinMosaicGrid};
 pub use pin_menu::{PinMenu, PinToBoardRequest};
-
-// Publication component exports (NKBIP-01)
 pub use asciidoc_content::{AsciiDocContent, CitationMetadata, WikilinksList};
-pub use publication_card::{PublicationCardCompact, PublicationCardSkeleton, PublicationGrid};
+pub use publication_card::{
+    PublicationCardCompact, PublicationCardSkeleton, PublicationGrid,
+};
 pub use publication_section::{
-    PublicationSectionContent, PublicationSectionSkeleton, SectionMetadata, SectionNavigation,
-    SectionOutline,
+    PublicationSectionContent, PublicationSectionSkeleton, SectionMetadata,
+    SectionNavigation, SectionOutline,
 };
 pub use publication_toc::{
-    PublicationProgress, PublicationTocDynamic, PublicationTocHorizontal, PublicationTocSkeleton,
+    PublicationProgress, PublicationTocDynamic, PublicationTocHorizontal,
+    PublicationTocSkeleton,
 };
-
-// Wiki component exports (NIP-54)
 pub use wiki_backlinks::WikiBacklinks;
 pub use wiki_card::{WikiCardSearchResult, WikiCardSkeleton, WikiGrid, WikiMetadataCard};
 pub use wiki_content::{
     WikiForwardLinks, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };
-
-// PWA components
 pub mod pwa_update_banner;
 pub use pwa_update_banner::PwaUpdateBanner;

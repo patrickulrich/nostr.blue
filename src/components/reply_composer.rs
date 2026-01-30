@@ -1,6 +1,7 @@
 use crate::components::icons::{BarChartIcon, CameraIcon};
 use crate::components::{
-    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal, RichContent,
+    EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal,
+    RichContent,
 };
 use crate::stores::nostr_client::{publish_note_tracked, HAS_SIGNER};
 use crate::stores::pending_comments::{
@@ -15,11 +16,9 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Kind, Timestamp};
 use std::time::Duration;
-
 /// Extract relay hint for reply tagging (NIP-10)
 /// First tries to find a relay hint from parent's e-tags, then falls back to user's write relays
 fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
-    // Try parent's e-tags first for relay hints
     for tag in parent_tags.iter() {
         let tag_vec = tag.clone().to_vec();
         if tag_vec.len() >= 3 && tag_vec[0] == "e" && !tag_vec[2].is_empty() {
@@ -27,8 +26,6 @@ fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
             return tag_vec[2].clone();
         }
     }
-
-    // Fall back to user's first write relay
     let write_relays = relay::nip65::get_write_relays();
     let hint = write_relays.first().cloned().unwrap_or_default();
     if !hint.is_empty() {
@@ -36,9 +33,7 @@ fn get_relay_hint_for_reply(parent_tags: &nostr_sdk::Tags) -> String {
     }
     hint
 }
-
 const MAX_LENGTH: usize = 5000;
-
 #[component]
 pub fn ReplyComposer(
     reply_to: NostrEvent,
@@ -51,15 +46,13 @@ pub fn ReplyComposer(
     let mut uploaded_media = use_signal(Vec::<String>::new);
     let mut show_poll_modal = use_signal(|| false);
     let toast = consume_toast();
-
-    // Calculate total length including media URLs
     let content_len = content.read().len();
     let media_len = if !uploaded_media.read().is_empty() {
-        let separator_len = if content_len > 0 { 2 } else { 0 }; // "\n\n"
+        let separator_len = if content_len > 0 { 2 } else { 0 };
         let urls_with_newlines: usize = uploaded_media
             .read()
             .iter()
-            .map(|url| url.len() + 1) // +1 for '\n' after each URL
+            .map(|url| url.len() + 1)
             .sum();
         separator_len + urls_with_newlines
     } else {
@@ -70,9 +63,8 @@ pub fn ReplyComposer(
     let is_over_limit = char_count > MAX_LENGTH;
     let show_warning = remaining < 100 && !is_over_limit;
     let has_signer = *HAS_SIGNER.read();
-    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read() && has_signer;
-
-    // Determine counter color
+    let can_publish = char_count > 0 && !is_over_limit && !*is_publishing.read()
+        && has_signer;
     let counter_color = if is_over_limit {
         "text-red-500"
     } else if show_warning {
@@ -80,43 +72,27 @@ pub fn ReplyComposer(
     } else {
         "text-gray-500"
     };
-
-    // Get author info
     let author_pubkey = reply_to.pubkey.to_hex();
     let short_author = truncate_pubkey(&author_pubkey);
     let reply_content = reply_to.content.clone();
     let reply_tags: Vec<_> = reply_to.tags.iter().cloned().collect();
     let reply_id = reply_to.id.to_hex();
-
-    // Extract thread participants (author + anyone mentioned in the note)
     let mut thread_participants = Vec::new();
-    thread_participants.push(reply_to.pubkey); // Add author
-
-    // Add anyone mentioned in p tags using SDK's public_keys()
+    thread_participants.push(reply_to.pubkey);
     for public_key in reply_to.tags.public_keys() {
         if !thread_participants.contains(public_key) {
             thread_participants.push(*public_key);
         }
     }
-
     log::info!(
         "Reply composer: Extracted {} thread participants: author={}, others={:?}",
-        thread_participants.len(),
-        reply_to.pubkey.to_hex(),
-        thread_participants
-            .iter()
-            .skip(1)
-            .map(|pk| pk.to_hex())
-            .collect::<Vec<_>>()
+        thread_participants.len(), reply_to.pubkey.to_hex(), thread_participants.iter()
+        .skip(1).map(| pk | pk.to_hex()).collect::< Vec < _ >> ()
     );
-
-    // Handle media upload
     let handle_media_uploaded = move |url: String| {
         uploaded_media.write().push(url);
         show_media_uploader.set(false);
     };
-
-    // Handle removing uploaded media
     let mut handle_remove_media = move |index: usize| {
         let mut media = uploaded_media.write();
         if index < media.len() {
@@ -125,34 +101,19 @@ pub fn ReplyComposer(
             log::warn!("Attempted to remove media at invalid index: {}", index);
         }
     };
-
     let mut cursor_position = use_signal(|| 0usize);
-
-    // Helper to insert text at cursor position
     let mut insert_at_cursor = move |text: String| {
         let mut current = content.read().clone();
         let pos = *cursor_position.read();
-
-        // Ensure position is a valid UTF-8 char boundary
         let pos = to_char_boundary(&current, pos);
-
-        // Insert text
         current.insert_str(pos, &text);
-
-        // Update content
         content.set(current);
-
-        // Update cursor position to be after inserted text
         cursor_position.set(pos + text.len());
     };
-
-    // Helper to insert text with smart spacing (space before if needed, space after only if needed)
     let mut insert_with_spacing = move |text: String| {
         let mut text_with_space = text;
         let current = content.read().clone();
         let pos = to_char_boundary(&current, *cursor_position.read());
-
-        // Add space before if not at start and not preceded by whitespace
         if pos > 0 {
             if let Some(prev_char) = current[..pos].chars().last() {
                 if !prev_char.is_whitespace() {
@@ -160,8 +121,6 @@ pub fn ReplyComposer(
                 }
             }
         }
-
-        // Add space after only if next char exists and is not whitespace
         if pos < current.len() {
             if let Some(next_char) = current[pos..].chars().next() {
                 if !next_char.is_whitespace() {
@@ -169,34 +128,24 @@ pub fn ReplyComposer(
                 }
             }
         }
-
         insert_at_cursor(text_with_space);
     };
-
-    // Handler when emoji is selected
     let handle_emoji_selected = move |emoji: String| {
         insert_at_cursor(emoji);
     };
-
-    // Handler when GIF is selected
     let handle_gif_selected = move |gif_url: String| {
         log::info!("GIF URL inserted: {}", gif_url);
         insert_with_spacing(gif_url);
     };
-
-    // Handler when poll is created
     let handle_poll_created = move |nevent_ref: String| {
         log::info!("Poll reference inserted: {}", nevent_ref);
         insert_with_spacing(nevent_ref);
         show_poll_modal.set(false);
     };
-
     let handle_publish = {
         let toast_api = toast;
         move |_| {
             let mut content_value = content.read().clone();
-
-            // Append media URLs to content
             if !uploaded_media.read().is_empty() {
                 if !content_value.is_empty() {
                     content_value.push_str("\n\n");
@@ -206,67 +155,55 @@ pub fn ReplyComposer(
                     content_value.push('\n');
                 }
             }
-
             if content_value.is_empty() || is_over_limit {
                 return;
             }
-
-            // Get current user's pubkey for optimistic display
             let current_user_pubkey = match get_current_user_pubkey() {
                 SignerValidationResult::Ok(pk) => pk,
                 SignerValidationResult::InvalidPubkey => {
                     log::error!("Invalid pubkey in signer info");
-                    toast_api.error(
-                        "Unable to reply".to_string(),
-                        ToastOptions::new()
-                            .description("Invalid signer configuration")
-                            .duration(Duration::from_secs(3)),
-                    );
+                    toast_api
+                        .error(
+                            "Unable to reply".to_string(),
+                            ToastOptions::new()
+                                .description("Invalid signer configuration")
+                                .duration(Duration::from_secs(3)),
+                        );
                     return;
                 }
                 SignerValidationResult::NotSignedIn => {
                     log::error!("No signer info available");
-                    toast_api.error(
-                        "Unable to reply".to_string(),
-                        ToastOptions::new()
-                            .description("Please sign in first")
-                            .duration(Duration::from_secs(3)),
-                    );
+                    toast_api
+                        .error(
+                            "Unable to reply".to_string(),
+                            ToastOptions::new()
+                                .description("Please sign in first")
+                                .duration(Duration::from_secs(3)),
+                        );
                     return;
                 }
             };
-
             is_publishing.set(true);
-
             let event_id = reply_id.clone();
             let author_pk = author_pubkey.clone();
-
-            // Clone the tags from reply_to before moving into async block
             let parent_tags = reply_to.tags.clone();
             let reply_to_event = reply_to.clone();
-
-            // Generate unique local ID for tracking this pending comment
             let local_id = uuid::Uuid::new_v4().to_string();
-
-            // Check if the event we're replying to has a root marker
-            // to determine if this is a top-level reply or nested reply
-            let parent_root = parent_tags.iter().find_map(|tag| {
-                let tag_vec = tag.clone().to_vec();
-                if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
-                    Some(tag_vec[1].clone())
-                } else {
-                    None
-                }
-            });
-
-            // Determine the root event ID for optimistic update and cache invalidation
+            let parent_root = parent_tags
+                .iter()
+                .find_map(|tag| {
+                    let tag_vec = tag.clone().to_vec();
+                    if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "root" {
+                        Some(tag_vec[1].clone())
+                    } else {
+                        None
+                    }
+                });
             let thread_root_id = if let Some(root_id) = &parent_root {
                 root_id.clone()
             } else {
                 event_id.clone()
             };
-
-            // For optimistic updates, we need to know the root event ID as EventId
             let target_event_id = if let Ok(id) = EventId::from_hex(&thread_root_id) {
                 id
             } else {
@@ -274,11 +211,7 @@ pub fn ReplyComposer(
                 is_publishing.set(false);
                 return;
             };
-
-            // Determine if this is a nested reply (replying to a reply vs replying to root)
             let is_nested_reply = parent_root.is_some();
-
-            // Create pending comment for optimistic UI update
             let pending = PendingComment {
                 local_id: local_id.clone(),
                 content: content_value.clone(),
@@ -299,98 +232,74 @@ pub fn ReplyComposer(
                     None
                 },
             };
-
-            // Add to pending store immediately (optimistic update)
             add_pending_comment(pending);
-
-            // Clear form immediately for better UX
             content.set(String::new());
             uploaded_media.set(Vec::new());
             is_publishing.set(false);
             on_success.call(());
-
-            // Clone for async block
             let local_id_clone = local_id.clone();
             let content_for_publish = content_value.clone();
             let thread_root_id_clone = thread_root_id.clone();
-
-            // Get relay hint for better discoverability (NIP-10)
-            // Tries parent's e-tags first, falls back to user's write relays
             let relay_hint = get_relay_hint_for_reply(&parent_tags);
-
-            // Use spawn_forever so the task survives component unmount
             spawn_forever(async move {
-                // Build tags for reply following NIP-10 properly
                 let mut tags = Vec::new();
-
                 if let Some(root_id) = parent_root {
-                    // This is a nested reply (replying to a reply)
-                    // Add root marker for the thread root (with relay hint for discoverability)
-                    tags.push(vec![
-                        "e".to_string(),
-                        root_id,
-                        relay_hint.clone(),
-                        "root".to_string(),
-                    ]);
-                    // Add reply marker for the immediate parent (with relay hint)
-                    tags.push(vec![
-                        "e".to_string(),
-                        event_id.clone(),
-                        relay_hint.clone(),
-                        "reply".to_string(),
-                    ]);
+                    tags.push(
+                        vec![
+                            "e".to_string(),
+                            root_id,
+                            relay_hint.clone(),
+                            "root".to_string(),
+                        ],
+                    );
+                    tags.push(
+                        vec![
+                            "e".to_string(),
+                            event_id.clone(),
+                            relay_hint.clone(),
+                            "reply".to_string(),
+                        ],
+                    );
                 } else {
-                    // This is a direct reply to root
-                    // Use only root marker (not reply) with relay hint
-                    tags.push(vec![
-                        "e".to_string(),
-                        event_id.clone(),
-                        relay_hint.clone(),
-                        "root".to_string(),
-                    ]);
+                    tags.push(
+                        vec![
+                            "e".to_string(),
+                            event_id.clone(),
+                            relay_hint.clone(),
+                            "root".to_string(),
+                        ],
+                    );
                 }
-
-                // Collect all p tags from parent event plus the parent's author
-                // Start with the parent's author
                 tags.push(vec!["p".to_string(), author_pk.clone()]);
-
-                // Add all p tags from the parent event (to notify everyone in thread)
                 for tag in parent_tags.iter() {
                     let tag_vec = tag.clone().to_vec();
                     if tag_vec.len() >= 2 && tag_vec[0] == "p" {
                         let pubkey = tag_vec[1].clone();
-                        // Don't duplicate the author we already added
                         if pubkey != author_pk {
                             tags.push(vec!["p".to_string(), pubkey]);
                         }
                     }
                 }
-
                 match publish_note_tracked(content_for_publish, tags).await {
                     Ok(result) => {
                         log::info!(
-                            "Reply published: {} ({}/{} relays)",
-                            result.event_id,
-                            result.success_count(),
-                            result.total_attempted()
+                            "Reply published: {} ({}/{} relays)", result.event_id, result
+                            .success_count(), result.total_attempted()
                         );
-
                         if result.has_failures() {
                             for (relay, error) in &result.failed_relays {
                                 log::warn!("Relay {} failed for reply: {}", relay, error);
                             }
                         }
-
-                        // Invalidate thread tree cache to ensure fresh data on next view
-                        if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
+                        if let Ok(root_event_id) = EventId::from_hex(
+                            &thread_root_id_clone,
+                        ) {
                             invalidate_thread_tree_cache(&root_event_id);
                             log::debug!(
                                 "Invalidated thread tree cache for root: {}",
                                 thread_root_id_clone
                             );
                         }
-
-                        // Update pending comment status
                         match EventId::from_hex(&result.event_id) {
                             Ok(event_id_parsed) => {
                                 update_pending_status(
@@ -400,9 +309,8 @@ pub fn ReplyComposer(
                             }
                             Err(e) => {
                                 log::error!(
-                                    "Failed to parse published event ID '{}': {}",
-                                    result.event_id,
-                                    e
+                                    "Failed to parse published event ID '{}': {}", result
+                                    .event_id, e
                                 );
                                 update_pending_status(
                                     &local_id_clone,
@@ -410,9 +318,6 @@ pub fn ReplyComposer(
                                 );
                             }
                         }
-                        // Note: We don't remove the pending comment here. It will remain visible
-                        // until the page is refreshed or navigated away. The merge function will
-                        // skip duplicates once the relay data is fetched on next load.
                     }
                     Err(e) => {
                         log::error!("Failed to publish reply: {}", e);
@@ -425,68 +330,46 @@ pub fn ReplyComposer(
             });
         }
     };
-
     let handle_cancel = move |_| {
         content.set(String::new());
         uploaded_media.set(Vec::new());
         show_media_uploader.set(false);
         on_close.call(());
     };
-
     rsx! {
-        // Modal overlay
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-16 px-4",
             onclick: move |_| on_close.call(()),
-
-            // Modal content
             div {
                 class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header
-                div {
-                    class: "flex items-center justify-between p-4 border-b border-border",
-                    h3 {
-                        class: "text-lg font-bold",
-                        "Reply"
-                    }
+                div { class: "flex items-center justify-between p-4 border-b border-border",
+                    h3 { class: "text-lg font-bold", "Reply" }
                     button {
                         class: "p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition",
                         onclick: handle_cancel,
                         "✕"
                     }
                 }
-
-                // Original note preview
-                div {
-                    class: "p-4 bg-gray-50 dark:bg-gray-900 border-b border-border",
-                    div {
-                        class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                div { class: "p-4 bg-gray-50 dark:bg-gray-900 border-b border-border",
+                    div { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
                         "Replying to @{short_author}"
                     }
-                    div {
-                        class: "text-sm text-gray-700 dark:text-gray-300 line-clamp-3 overflow-hidden",
+                    div { class: "text-sm text-gray-700 dark:text-gray-300 line-clamp-3 overflow-hidden",
                         RichContent {
                             content: reply_content.clone(),
-                            tags: reply_tags.clone()
+                            tags: reply_tags.clone(),
                         }
                     }
                 }
-
                 if !has_signer {
-                    div {
-                        class: "text-center py-8 text-muted-foreground p-4",
+                    div { class: "text-center py-8 text-muted-foreground p-4",
                         p { "Sign in to reply" }
                     }
                 } else {
-                    // Reply composer
-                    div {
-                        class: "p-4",
-
-                        // Mention Autocomplete Textarea
+                    div { class: "p-4",
                         MentionAutocomplete {
-                            content: content,
+                            content,
                             on_input: move |new_value: String| {
                                 content.set(new_value);
                             },
@@ -494,39 +377,27 @@ pub fn ReplyComposer(
                             rows: 6,
                             disabled: *is_publishing.read(),
                             thread_participants: thread_participants.clone(),
-                            cursor_position: cursor_position
+                            cursor_position,
                         }
-
-                        // Character counter
-                        div {
-                            class: "text-sm {counter_color}",
+                        div { class: "text-sm {counter_color}",
                             if is_over_limit {
                                 span { "Over limit by {char_count - MAX_LENGTH}" }
                             } else {
                                 span { "{char_count} / {MAX_LENGTH}" }
                             }
                         }
-
-                        // Media uploader
                         if *show_media_uploader.read() {
-                            div {
-                                class: "mt-3",
+                            div { class: "mt-3",
                                 MediaUploader {
                                     on_upload: handle_media_uploaded,
-                                    button_label: "Upload Media"
+                                    button_label: "Upload Media",
                                 }
                             }
                         }
-
-                        // Display uploaded media
                         if !uploaded_media.read().is_empty() {
-                            div {
-                                class: "mt-3 space-y-2",
-                                p {
-                                    class: "text-sm font-medium",
-                                    "Uploaded Media:"
-                                }
-                                for (index, url) in uploaded_media.read().iter().enumerate() {
+                            div { class: "mt-3 space-y-2",
+                                p { class: "text-sm font-medium", "Uploaded Media:" }
+                                for (index , url) in uploaded_media.read().iter().enumerate() {
                                     div {
                                         key: "{index}",
                                         class: "flex items-center gap-2 p-2 bg-accent rounded-lg",
@@ -550,22 +421,10 @@ pub fn ReplyComposer(
                                 }
                             }
                         }
-
-                        // Actions
-                        div {
-                            class: "mt-3 flex items-center justify-between",
-
-                            // Left side - Media buttons (icon-only)
-                            div {
-                                class: "flex gap-2",
-
-                                // Media upload toggle button (icon-only)
+                        div { class: "mt-3 flex items-center justify-between",
+                            div { class: "flex gap-2",
                                 button {
-                                    class: if *show_media_uploader.read() {
-                                        "p-2 rounded-full bg-primary text-primary-foreground transition"
-                                    } else {
-                                        "p-2 rounded-full hover:bg-accent transition"
-                                    },
+                                    class: if *show_media_uploader.read() { "p-2 rounded-full bg-primary text-primary-foreground transition" } else { "p-2 rounded-full hover:bg-accent transition" },
                                     title: "Add media",
                                     onclick: move |_| {
                                         let current = *show_media_uploader.read();
@@ -574,20 +433,14 @@ pub fn ReplyComposer(
                                     disabled: *is_publishing.read(),
                                     CameraIcon { class: "w-5 h-5".to_string() }
                                 }
-
-                                // Emoji picker (icon-only)
                                 EmojiPicker {
                                     on_emoji_selected: handle_emoji_selected,
-                                    icon_only: true
+                                    icon_only: true,
                                 }
-
-                                // GIF picker (icon-only)
                                 GifPicker {
                                     on_gif_selected: handle_gif_selected,
-                                    icon_only: true
+                                    icon_only: true,
                                 }
-
-                                // Poll button (icon-only)
                                 button {
                                     class: "p-2 rounded-full hover:bg-accent transition",
                                     title: "Create poll",
@@ -597,29 +450,19 @@ pub fn ReplyComposer(
                                     BarChartIcon { class: "w-5 h-5".to_string() }
                                 }
                             }
-
-                            // Right side - Action buttons
-                            div {
-                                class: "flex gap-2",
-
-                                // Cancel button
+                            div { class: "flex gap-2",
                                 button {
                                     class: "px-4 py-2 text-sm font-medium hover:bg-accent rounded-full transition",
                                     onclick: handle_cancel,
                                     disabled: *is_publishing.read(),
                                     "Cancel"
                                 }
-
-                                // Reply button
                                 button {
                                     class: "px-6 py-2 text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition flex items-center gap-2",
                                     disabled: !can_publish,
                                     onclick: handle_publish,
-
                                     if *is_publishing.read() {
-                                        span {
-                                            class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
-                                        }
+                                        span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
                                         "Replying..."
                                     } else {
                                         "Reply"
@@ -631,15 +474,9 @@ pub fn ReplyComposer(
                 }
             }
         }
-
-        // Poll creator modal
-        PollCreatorModal {
-            show: show_poll_modal,
-            on_poll_created: handle_poll_created
-        }
+        PollCreatorModal { show: show_poll_modal, on_poll_created: handle_poll_created }
     }
 }
-
 /// Find the nearest valid UTF-8 char boundary at or before the given byte position.
 /// This prevents panics when inserting text at cursor positions in strings with
 /// multi-byte characters (emojis, accented characters, etc.).
@@ -650,7 +487,6 @@ fn to_char_boundary(s: &str, pos: usize) -> usize {
     if s.is_char_boundary(pos) {
         return pos;
     }
-    // Scan backwards at most 3 bytes (UTF-8 chars are max 4 bytes)
     for offset in 1..=3 {
         if pos >= offset && s.is_char_boundary(pos - offset) {
             return pos - offset;

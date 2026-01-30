@@ -7,10 +7,10 @@
 //! - Chapters list with images and links
 //! - Zap/reaction buttons (Nostr episodes)
 //! - Share functionality
-
 use crate::components::{
-    icons, ContentShareModal, ContentType, DisplayEpisode, FeaturedSoundbite, InlineCredits,
-    PodcastChapters, PodcastPersons, PodcastSoundbites, PodcastTranscript, V4VBoostButton, V4VInfo,
+    icons, ContentShareModal, ContentType, DisplayEpisode, FeaturedSoundbite,
+    InlineCredits, PodcastChapters, PodcastPersons, PodcastSoundbites, PodcastTranscript,
+    V4VBoostButton, V4VInfo,
 };
 use crate::routes::Route;
 use crate::services::podcast_rss::{self, format_duration};
@@ -19,88 +19,56 @@ use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
 use std::time::Duration;
-
-// ============================================================================
-// Nostr Episode Detail (by naddr/coordinate)
-// ============================================================================
-
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastNostrEpisodeDetailProps {
     /// Episode naddr or coordinate
     pub naddr: String,
 }
-
 /// Detail page for a Nostr podcast episode
 #[component]
 pub fn PodcastNostrEpisodeDetail(props: PodcastNostrEpisodeDetailProps) -> Element {
     let naddr = props.naddr.clone();
-
-    // State for episode data
-    let mut episode_data = use_signal(|| None::<Result<(DisplayEpisode, PodcastMetadata), String>>);
+    let mut episode_data = use_signal(|| {
+        None::<Result<(DisplayEpisode, PodcastMetadata), String>>
+    });
     let mut loading = use_signal(|| true);
-
-    // Fetch episode when client is initialized
     use_effect(move || {
         let naddr = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
         loading.set(true);
-
         spawn(async move {
             let result = fetch_nostr_episode(&naddr).await;
             episode_data.set(Some(result));
             loading.set(false);
         });
     });
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header with back button
+        div { class: "min-h-screen",
             EpisodeDetailHeader {}
-
-            // Content
             if !*nostr_client::CLIENT_INITIALIZED.read() || *loading.read() {
                 EpisodeDetailSkeleton {}
             } else {
                 match episode_data.read().as_ref() {
                     Some(Ok((episode, metadata))) => rsx! {
-                        EpisodeDetailContent {
-                            episode: episode.clone(),
-                            podcast_metadata: Some(metadata.clone())
-                        }
+                        EpisodeDetailContent { episode: episode.clone(), podcast_metadata: Some(metadata.clone()) }
                     },
                     Some(Err(e)) => rsx! {
-                        div {
-                            class: "p-4 text-center",
-                            div {
-                                class: "text-destructive mb-2",
-                                "Failed to load episode"
-                            }
-                            div {
-                                class: "text-sm text-muted-foreground",
-                                "{e}"
-                            }
+                        div { class: "p-4 text-center",
+                            div { class: "text-destructive mb-2", "Failed to load episode" }
+                            div { class: "text-sm text-muted-foreground", "{e}" }
                         }
                     },
                     None => rsx! {
                         EpisodeDetailSkeleton {}
-                    }
+                    },
                 }
             }
         }
     }
 }
-
-// ============================================================================
-// RSS Episode Detail (by feed URL and episode GUID)
-// ============================================================================
-
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastRssEpisodeDetailProps {
     /// Podcast GUID or feed URL
@@ -108,254 +76,146 @@ pub struct PodcastRssEpisodeDetailProps {
     /// Episode GUID
     pub episode_id: String,
 }
-
 /// Detail page for an RSS podcast episode
 #[component]
 pub fn PodcastRssEpisodeDetail(props: PodcastRssEpisodeDetailProps) -> Element {
     let podcast_id = props.podcast_id.clone();
     let episode_id = props.episode_id.clone();
-
-    // Fetch episode data - wait for authentication since Podcast Index API requires NIP-98
     let episode_data = use_resource(move || {
         let podcast_id = podcast_id.clone();
         let episode_id = episode_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = nostr_client::has_signer();
         async move {
-            // Wait for nostr client AND signer - NIP-98 auth requires a signer
             if !client_initialized {
                 return Err("Waiting for client initialization...".to_string());
             }
             if !has_signer {
                 return Err("Please sign in to view episode details.".to_string());
             }
-
             fetch_rss_episode(&podcast_id, &episode_id).await
         }
     });
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header with back button
+        div { class: "min-h-screen",
             EpisodeDetailHeader {}
-
-            // Content
             match &*episode_data.read() {
                 Some(Ok(episode)) => rsx! {
-                    EpisodeDetailContent {
-                        episode: episode.clone(),
-                        podcast_metadata: None
-                    }
+                    EpisodeDetailContent { episode: episode.clone(), podcast_metadata: None }
                 },
                 Some(Err(e)) => rsx! {
-                    div {
-                        class: "p-4 text-center",
-                        div {
-                            class: "text-destructive mb-2",
-                            "Failed to load episode"
-                        }
-                        div {
-                            class: "text-sm text-muted-foreground",
-                            "{e}"
-                        }
+                    div { class: "p-4 text-center",
+                        div { class: "text-destructive mb-2", "Failed to load episode" }
+                        div { class: "text-sm text-muted-foreground", "{e}" }
                     }
                 },
                 None => rsx! {
                     EpisodeDetailSkeleton {}
-                }
+                },
             }
         }
     }
 }
-
-// ============================================================================
-// Shared Components
-// ============================================================================
-
 /// Episode detail header with back button
 #[component]
 fn EpisodeDetailHeader() -> Element {
     rsx! {
-        div {
-            class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-            div {
-                class: "p-4 flex items-center gap-4",
+        div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+            div { class: "p-4 flex items-center gap-4",
                 Link {
                     to: Route::PodcastHome {},
                     class: "p-2 hover:bg-muted rounded-full transition",
-                    dangerous_inner_html: icons::ARROW_LEFT
+                    dangerous_inner_html: icons::ARROW_LEFT,
                 }
-                h1 {
-                    class: "text-xl font-bold",
-                    "Episode"
-                }
+                h1 { class: "text-xl font-bold", "Episode" }
             }
         }
     }
 }
-
 #[derive(Props, Clone, PartialEq)]
 struct EpisodeDetailContentProps {
     episode: DisplayEpisode,
     #[props(default)]
     podcast_metadata: Option<PodcastMetadata>,
 }
-
 /// Main episode detail content
 #[component]
 fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
     let episode = props.episode.clone();
     let _auth = auth_store::AUTH_STATE.read();
     let player_state = music_player::MUSIC_PLAYER.read();
-
     let mut show_chapters = use_signal(|| true);
     let mut show_share_modal = use_signal(|| false);
-
-    // Check if this episode is currently playing
     let is_current_track = player_state
         .current_track
         .as_ref()
         .map(|t| t.id == episode.id)
         .unwrap_or(false);
-
     let is_playing = is_current_track && player_state.is_playing;
-
-    // Get current playback time if this is the current track
-    let current_time = if is_current_track {
-        player_state.current_time
-    } else {
-        0.0
-    };
-
-    // Episode image with fallback
+    let current_time = if is_current_track { player_state.current_time } else { 0.0 };
     let image_url = episode
         .image
         .clone()
         .or(episode.podcast_image.clone())
         .unwrap_or_else(|| {
-            format!(
-                "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-                episode.id
-            )
+            format!("https://api.dicebear.com/7.x/shapes/svg?seed={}", episode.id)
         });
-
-    // Format duration
     let duration_str = episode
         .duration
         .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
-
-    // Track for playback
     let track = episode.to_music_track();
-
     rsx! {
         div {
-            // Hero section with artwork
-            div {
-                class: "relative",
-
-                // Background gradient
-                div {
-                    class: "absolute inset-0 h-64 bg-gradient-to-b from-primary/20 to-background"
-                }
-
-                // Content
-                div {
-                    class: "relative p-6",
-
-                    div {
-                        class: "flex flex-col md:flex-row gap-6 items-start",
-
-                        // Large episode artwork
-                        div {
-                            class: "w-full md:w-64 shrink-0",
+            div { class: "relative",
+                div { class: "absolute inset-0 h-64 bg-gradient-to-b from-primary/20 to-background" }
+                div { class: "relative p-6",
+                    div { class: "flex flex-col md:flex-row gap-6 items-start",
+                        div { class: "w-full md:w-64 shrink-0",
                             img {
                                 src: "{image_url}",
                                 alt: "{episode.title}",
-                                class: "w-full aspect-square rounded-lg object-cover shadow-lg"
+                                class: "w-full aspect-square rounded-lg object-cover shadow-lg",
                             }
                         }
-
-                        // Episode info
-                        div {
-                            class: "flex-1 min-w-0",
-
-                            // Podcast title (link)
-                            div {
-                                class: "text-sm text-muted-foreground mb-1 hover:text-primary cursor-pointer",
+                        div { class: "flex-1 min-w-0",
+                            div { class: "text-sm text-muted-foreground mb-1 hover:text-primary cursor-pointer",
                                 "{episode.podcast_title}"
                             }
-
-                            // Episode title
-                            h1 {
-                                class: "text-2xl md:text-3xl font-bold mb-2",
-                                "{episode.title}"
-                            }
-
-                            // Meta info
-                            div {
-                                class: "flex items-center gap-4 text-sm text-muted-foreground mb-4 flex-wrap",
-
+                            h1 { class: "text-2xl md:text-3xl font-bold mb-2", "{episode.title}" }
+                            div { class: "flex items-center gap-4 text-sm text-muted-foreground mb-4 flex-wrap",
                                 if let Some(ref date) = episode.pub_date {
-                                    span {
-                                        "{date}"
-                                    }
+                                    span { "{date}" }
                                 }
-
-                                span {
-                                    "{duration_str}"
-                                }
-
+                                span { "{duration_str}" }
                                 if let Some(season) = episode.season {
-                                    span {
-                                        "Season {season}"
-                                    }
+                                    span { "Season {season}" }
                                 }
-
                                 if let Some(ep_num) = episode.episode_number {
-                                    span {
-                                        "Episode {ep_num}"
-                                    }
+                                    span { "Episode {ep_num}" }
                                 }
                             }
-
-                            // Inline credits (guests) if available
                             if !episode.persons.is_empty() {
-                                div {
-                                    class: "mb-3",
-                                    InlineCredits {
-                                        persons: episode.persons.clone()
-                                    }
+                                div { class: "mb-3",
+                                    InlineCredits { persons: episode.persons.clone() }
                                 }
                             }
-
-                            // Feature badges
-                            div {
-                                class: "flex items-center gap-2 mb-4 flex-wrap",
-
+                            div { class: "flex items-center gap-2 mb-4 flex-wrap",
                                 if episode.chapters_url.is_some() {
-                                    span {
-                                        class: "px-2 py-1 text-xs bg-blue-500/20 text-blue-400 rounded-full font-medium flex items-center gap-1",
+                                    span { class: "px-2 py-1 text-xs bg-blue-500/20 text-blue-400 rounded-full font-medium flex items-center gap-1",
                                         "Chapters"
                                     }
                                 }
-
                                 if episode.has_transcript {
-                                    span {
-                                        class: "px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded-full font-medium",
+                                    span { class: "px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded-full font-medium",
                                         "Transcript"
                                     }
                                 }
-
                                 if !episode.soundbites.is_empty() {
-                                    span {
-                                        class: "px-2 py-1 text-xs bg-pink-500/20 text-pink-400 rounded-full font-medium",
+                                    span { class: "px-2 py-1 text-xs bg-pink-500/20 text-pink-400 rounded-full font-medium",
                                         "{episode.soundbites.len()} Clips"
                                     }
                                 }
-
                                 if episode.value.is_some() {
                                     span {
                                         class: "px-2 py-1 text-xs bg-amber-500/20 text-amber-400 rounded-full font-medium flex items-center gap-1",
@@ -364,12 +224,7 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                     }
                                 }
                             }
-
-                            // Action buttons
-                            div {
-                                class: "flex items-center gap-3",
-
-                                // Play button
+                            div { class: "flex items-center gap-3",
                                 button {
                                     class: "flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-full font-semibold hover:bg-primary/90 transition",
                                     onclick: {
@@ -385,19 +240,17 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                     if is_playing {
                                         span {
                                             class: "w-5 h-5",
-                                            dangerous_inner_html: icons::PAUSE
+                                            dangerous_inner_html: icons::PAUSE,
                                         }
                                         "Pause"
                                     } else {
                                         span {
                                             class: "w-5 h-5",
-                                            dangerous_inner_html: icons::PLAY
+                                            dangerous_inner_html: icons::PLAY,
                                         }
                                         "Play"
                                     }
                                 }
-
-                                // V4V Boost button (if V4V available)
                                 if let Some(ref value_block) = episode.value {
                                     {
                                         let boost_episode = episode.clone();
@@ -406,29 +259,24 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                                                 value_block: value_block.clone(),
                                                 on_boost: move |amount| {
                                                     log::info!("Boost of {} sats requested", amount);
-                                                    // Show zap dialog with the track loaded
                                                     let track = boost_episode.to_music_track();
                                                     music_player::show_zap_dialog_for_track(Some(track));
-                                                }
+                                                },
                                             }
                                         }
                                     }
                                 }
-
-                                // Share button
                                 button {
                                     class: "p-3 hover:bg-muted rounded-full transition",
                                     title: "Share",
                                     onclick: move |_| show_share_modal.set(true),
-                                    dangerous_inner_html: icons::SHARE
+                                    dangerous_inner_html: icons::SHARE,
                                 }
                             }
                         }
                     }
                 }
             }
-
-            // Share modal - compute URL outside the if block (RSX doesn't allow let bindings inside)
             {
                 let share_url = match &episode.source {
                     nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
@@ -436,15 +284,17 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                     }
                     nostr_music::TrackSource::RssPodcast { podcast_id, episode_guid, .. } => {
                         if let Some(id) = podcast_id {
-                            format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                                id, urlencoding::encode(episode_guid))
+                            format!(
+                                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                                id,
+                                urlencoding::encode(episode_guid),
+                            )
                         } else {
                             episode.audio_url.clone()
                         }
                     }
                     _ => episode.audio_url.clone(),
                 };
-
                 rsx! {
                     if *show_share_modal.read() {
                         ContentShareModal {
@@ -452,43 +302,31 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                             url: share_url,
                             content_type: ContentType::PodcastEpisode,
                             image_url: episode.image.clone().or(episode.podcast_image.clone()),
-                            on_close: move |_| show_share_modal.set(false)
+                            on_close: move |_| show_share_modal.set(false),
                         }
                     }
                 }
             }
-
-            // Now Playing info (current chapter + inline transcript) when this episode is playing
             if is_current_track && is_playing {
-                div {
-                    class: "border-b border-border bg-primary/5",
-
-                    div {
-                        class: "px-6 py-3",
-
-                        // Note: Chapter display requires loaded chapter data
-                        // The PodcastChapters component below handles chapter loading and display
+                div { class: "border-b border-border bg-primary/5",
+                    div { class: "px-6 py-3",
                         if episode.chapters_url.is_some() {
-                            div {
-                                class: "flex items-center gap-2 text-xs text-muted-foreground mb-2",
+                            div { class: "flex items-center gap-2 text-xs text-muted-foreground mb-2",
                                 span {
                                     class: "text-primary",
-                                    dangerous_inner_html: icons::MUSIC_NOTE
+                                    dangerous_inner_html: icons::MUSIC_NOTE,
                                 }
                                 span { "See chapters below" }
                             }
                         }
-
-                        // Show a featured soundbite preview if available
                         if !episode.soundbites.is_empty() {
                             if let Some(first_soundbite) = episode.soundbites.first() {
-                                div {
-                                    class: "mt-2",
+                                div { class: "mt-2",
                                     FeaturedSoundbite {
                                         soundbite: first_soundbite.clone(),
                                         episode_title: episode.title.clone(),
                                         podcast_title: episode.podcast_title.clone(),
-                                        image_url: episode.image.clone()
+                                        image_url: episode.image.clone(),
                                     }
                                 }
                             }
@@ -496,205 +334,118 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                     }
                 }
             }
-
-            // Chapters section (if available)
             if let Some(ref chapters_url) = episode.chapters_url {
-                div {
-                    class: "border-b border-border",
-
-                    // Section header
+                div { class: "border-b border-border",
                     div {
                         class: "px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-muted/30 transition",
                         onclick: move |_| {
                             let current = *show_chapters.read();
                             show_chapters.set(!current);
                         },
-
-                        h2 {
-                            class: "font-semibold text-lg",
-                            "Chapters"
-                        }
-
+                        h2 { class: "font-semibold text-lg", "Chapters" }
                         span {
                             class: "text-muted-foreground transition-transform",
                             style: if *show_chapters.read() { "" } else { "transform: rotate(180deg)" },
-                            dangerous_inner_html: icons::CHEVRON_UP
+                            dangerous_inner_html: icons::CHEVRON_UP,
                         }
                     }
-
-                    // Chapter list
                     if *show_chapters.read() {
-                        div {
-                            class: "px-6 pb-4",
+                        div { class: "px-6 pb-4",
                             PodcastChapters {
                                 chapters_url: chapters_url.clone(),
-                                current_time: current_time
+                                current_time,
                             }
                         }
                     }
                 }
             }
-
-            // Transcript section (if available)
             if !episode.transcripts.is_empty() {
-                div {
-                    class: "border-b border-border",
-
-                    // Section header
-                    div {
-                        class: "px-6 py-4",
-                        h2 {
-                            class: "font-semibold text-lg",
-                            "Transcript"
-                        }
+                div { class: "border-b border-border",
+                    div { class: "px-6 py-4",
+                        h2 { class: "font-semibold text-lg", "Transcript" }
                     }
-
-                    // Transcript viewer
-                    div {
-                        class: "px-6 pb-4",
+                    div { class: "px-6 pb-4",
                         PodcastTranscript {
                             transcripts: episode.transcripts.clone(),
-                            current_time: current_time
+                            current_time,
                         }
                     }
                 }
             }
-
-            // Soundbites section (if available)
             if !episode.soundbites.is_empty() {
-                div {
-                    class: "border-b border-border",
-
-                    div {
-                        class: "px-6 py-4",
+                div { class: "border-b border-border",
+                    div { class: "px-6 py-4",
                         PodcastSoundbites {
                             soundbites: episode.soundbites.clone(),
-                            episode_title: Some(episode.title.clone())
+                            episode_title: Some(episode.title.clone()),
                         }
                     }
                 }
             }
-
-            // Guests/Persons section (if available)
             if !episode.persons.is_empty() {
-                div {
-                    class: "border-b border-border",
-
-                    div {
-                        class: "px-6 py-4",
-                        h2 {
-                            class: "font-semibold text-lg mb-3",
-                            "Guests"
-                        }
-                        PodcastPersons {
-                            persons: episode.persons.clone()
-                        }
+                div { class: "border-b border-border",
+                    div { class: "px-6 py-4",
+                        h2 { class: "font-semibold text-lg mb-3", "Guests" }
+                        PodcastPersons { persons: episode.persons.clone() }
                     }
                 }
             }
-
-            // V4V / Value info section (if available)
             if let Some(ref value_block) = episode.value {
-                div {
-                    class: "border-b border-border",
-
-                    div {
-                        class: "px-6 py-4",
-                        h2 {
-                            class: "font-semibold text-lg mb-3",
-                            "Support"
-                        }
+                div { class: "border-b border-border",
+                    div { class: "px-6 py-4",
+                        h2 { class: "font-semibold text-lg mb-3", "Support" }
                         V4VInfo {
                             value_block: value_block.clone(),
-                            show_details: true
+                            show_details: true,
                         }
                     }
                 }
             }
-
-            // Description/Show notes
             if let Some(ref description) = episode.description {
-                div {
-                    class: "px-6 py-6",
-
-                    h2 {
-                        class: "font-semibold text-lg mb-4",
-                        "Show Notes"
-                    }
-
-                    div {
-                        class: "prose prose-sm dark:prose-invert max-w-none text-muted-foreground",
-                        // Render HTML content safely (or just as text for now)
-                        p {
-                            "{description}"
-                        }
+                div { class: "px-6 py-6",
+                    h2 { class: "font-semibold text-lg mb-4", "Show Notes" }
+                    div { class: "prose prose-sm dark:prose-invert max-w-none text-muted-foreground",
+                        p { "{description}" }
                     }
                 }
             }
-
-            // Space for player at bottom
-            div {
-                class: "h-24"
-            }
+            div { class: "h-24" }
         }
     }
 }
-
 /// Skeleton loader for episode detail
 #[component]
 fn EpisodeDetailSkeleton() -> Element {
     rsx! {
-        div {
-            class: "animate-pulse",
-
-            // Hero section skeleton
-            div {
-                class: "p-6",
-                div {
-                    class: "flex flex-col md:flex-row gap-6",
-
-                    // Artwork skeleton
-                    div {
-                        class: "w-full md:w-64 aspect-square bg-muted rounded-lg"
-                    }
-
-                    // Info skeleton
-                    div {
-                        class: "flex-1 space-y-3",
+        div { class: "animate-pulse",
+            div { class: "p-6",
+                div { class: "flex flex-col md:flex-row gap-6",
+                    div { class: "w-full md:w-64 aspect-square bg-muted rounded-lg" }
+                    div { class: "flex-1 space-y-3",
                         div { class: "h-4 bg-muted rounded w-32" }
                         div { class: "h-8 bg-muted rounded w-3/4" }
-                        div {
-                            class: "flex gap-2",
+                        div { class: "flex gap-2",
                             div { class: "h-4 bg-muted rounded w-24" }
                             div { class: "h-4 bg-muted rounded w-16" }
                         }
-                        div {
-                            class: "flex gap-2",
+                        div { class: "flex gap-2",
                             div { class: "h-6 bg-muted rounded-full w-20" }
                             div { class: "h-6 bg-muted rounded-full w-16" }
                         }
-                        div {
-                            class: "flex gap-3 mt-4",
+                        div { class: "flex gap-3 mt-4",
                             div { class: "h-12 bg-muted rounded-full w-32" }
                             div { class: "h-12 bg-muted rounded-full w-12" }
                         }
                     }
                 }
             }
-
-            // Chapters skeleton
-            div {
-                class: "px-6 py-4 border-t border-border",
+            div { class: "px-6 py-4 border-t border-border",
                 div { class: "h-6 bg-muted rounded w-24 mb-4" }
-                div {
-                    class: "space-y-2",
+                div { class: "space-y-2",
                     for i in 0..5 {
-                        div {
-                            key: "{i}",
-                            class: "flex gap-3 p-2",
+                        div { key: "{i}", class: "flex gap-3 p-2",
                             div { class: "w-12 h-12 bg-muted rounded" }
-                            div {
-                                class: "flex-1 space-y-1",
+                            div { class: "flex-1 space-y-1",
                                 div { class: "h-4 bg-muted rounded w-3/4" }
                                 div { class: "h-3 bg-muted rounded w-1/2" }
                             }
@@ -703,10 +454,7 @@ fn EpisodeDetailSkeleton() -> Element {
                     }
                 }
             }
-
-            // Description skeleton
-            div {
-                class: "px-6 py-6 border-t border-border space-y-2",
+            div { class: "px-6 py-6 border-t border-border space-y-2",
                 div { class: "h-6 bg-muted rounded w-32 mb-4" }
                 div { class: "h-4 bg-muted rounded w-full" }
                 div { class: "h-4 bg-muted rounded w-5/6" }
@@ -715,133 +463,105 @@ fn EpisodeDetailSkeleton() -> Element {
         }
     }
 }
-
-// ============================================================================
-// Data Fetching
-// ============================================================================
-
 /// Fetch Nostr podcast episode by naddr/coordinate
-async fn fetch_nostr_episode(naddr: &str) -> Result<(DisplayEpisode, PodcastMetadata), String> {
-    // Parse the coordinate (format: "30054:pubkey:d-tag" or naddr)
+async fn fetch_nostr_episode(
+    naddr: &str,
+) -> Result<(DisplayEpisode, PodcastMetadata), String> {
     let (pubkey, d_tag) = parse_coordinate(naddr)?;
-
-    // Fetch episode event
     let episode_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
         .custom_tag(SingleLetterTag::from_char('d').unwrap(), d_tag.clone())
         .limit(1);
-
-    let episode_events =
-        nostr_client::fetch_events_aggregated(episode_filter, Duration::from_secs(10)).await?;
-
+    let episode_events = nostr_client::fetch_events_aggregated(
+            episode_filter,
+            Duration::from_secs(10),
+        )
+        .await?;
     let episode_event = episode_events
         .first()
         .ok_or_else(|| "Episode not found".to_string())?;
-
     let episode = podcast::parse_podcast_episode(episode_event)?;
-
-    // Also fetch podcast metadata
     let metadata_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
         .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
         .limit(1);
-
-    let metadata_events =
-        nostr_client::fetch_events_aggregated(metadata_filter, Duration::from_secs(5)).await?;
-
+    let metadata_events = nostr_client::fetch_events_aggregated(
+            metadata_filter,
+            Duration::from_secs(5),
+        )
+        .await?;
     let metadata = if let Some(meta_event) = metadata_events.first() {
         podcast::parse_podcast_metadata(meta_event).ok()
     } else {
         None
     };
-
-    // Fallback metadata
-    let metadata = metadata.unwrap_or_else(|| PodcastMetadata {
-        title: "Unknown Podcast".to_string(),
-        description: None,
-        author: None,
-        image: None,
-        language: None,
-        categories: Vec::new(),
-        explicit: false,
-        website: None,
-        funding: Vec::new(),
-        value: None,
-        pubkey: pubkey.clone(),
-        d_tag: "".to_string(),
-        created_at: 0,
-    });
-
-    let display_episode =
-        DisplayEpisode::from_nostr_episode(&episode, &metadata.title, metadata.image.as_deref());
-
+    let metadata = metadata
+        .unwrap_or_else(|| PodcastMetadata {
+            title: "Unknown Podcast".to_string(),
+            description: None,
+            author: None,
+            image: None,
+            language: None,
+            categories: Vec::new(),
+            explicit: false,
+            website: None,
+            funding: Vec::new(),
+            value: None,
+            pubkey: pubkey.clone(),
+            d_tag: "".to_string(),
+            created_at: 0,
+        });
+    let display_episode = DisplayEpisode::from_nostr_episode(
+        &episode,
+        &metadata.title,
+        metadata.image.as_deref(),
+    );
     Ok((display_episode, metadata))
 }
-
 /// Fetch RSS podcast episode by podcast ID (numeric Podcast Index ID) or feed URL and episode GUID
-async fn fetch_rss_episode(podcast_id: &str, episode_id: &str) -> Result<DisplayEpisode, String> {
+async fn fetch_rss_episode(
+    podcast_id: &str,
+    episode_id: &str,
+) -> Result<DisplayEpisode, String> {
     use crate::services::podcast_index;
-
-    // Decode the episode_id (GUID) first
     let decoded_episode_id = urlencoding::decode(episode_id)
         .map_err(|e| format!("Invalid episode ID encoding: {}", e))?
         .into_owned();
-
-    // Check if podcast_id is a numeric Podcast Index feed ID
     if let Ok(feed_id) = podcast_id.parse::<u64>() {
         log::info!(
-            "Fetching episode via Podcast Index API: feed_id={}, episode_id={}",
-            feed_id,
+            "Fetching episode via Podcast Index API: feed_id={}, episode_id={}", feed_id,
             decoded_episode_id
         );
-
-        // Get podcast metadata from Podcast Index
         let feed = podcast_index::get_podcast_by_id(feed_id).await?;
-
-        // Get episodes and find the matching one by Podcast Index episode ID
         let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await?;
-
-        // Find episode by Podcast Index episode ID (which is what we store as episode_guid in TrackSource)
         let episode = episodes
             .iter()
             .find(|ep| ep.id.to_string() == decoded_episode_id)
             .ok_or_else(|| format!("Episode not found: {}", decoded_episode_id))?;
-
         return Ok(DisplayEpisode::from_podcast_index_episode(episode, &feed));
     }
-
-    // Fall back to treating podcast_id as a URL-encoded feed URL
     let feed_url = urlencoding::decode(podcast_id)
         .map_err(|e| format!("Invalid podcast URL encoding: {}", e))?
         .into_owned();
-
     log::info!(
-        "Fetching episode via RSS feed: url={}, episode_guid={}",
-        feed_url,
+        "Fetching episode via RSS feed: url={}, episode_guid={}", feed_url,
         decoded_episode_id
     );
-
     let podcast = podcast_rss::fetch_podcast_feed(&feed_url).await?;
-
-    // Find the episode by GUID
     let episode = podcast
         .episodes
         .iter()
         .find(|ep| ep.guid == decoded_episode_id)
         .ok_or_else(|| "Episode not found".to_string())?;
-
     Ok(DisplayEpisode::from_rss_episode(episode, &podcast))
 }
-
 /// Parse coordinate string into pubkey and d-tag
 fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
     use nostr::prelude::*;
-
-    // Handle naddr format
     if coord.starts_with("naddr") {
-        let nip19 = Nip19::from_bech32(coord).map_err(|e| format!("Invalid naddr: {}", e))?;
-
+        let nip19 = Nip19::from_bech32(coord)
+            .map_err(|e| format!("Invalid naddr: {}", e))?;
         match nip19 {
             Nip19::Coordinate(nip19_coord) => {
                 let pubkey = nip19_coord.coordinate.public_key.to_hex();
@@ -851,17 +571,13 @@ fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
             _ => Err("Expected naddr coordinate".to_string()),
         }
     } else {
-        // Handle coordinate format: "KIND:PUBKEY:D-TAG" (splitn to handle identifiers with colons)
         let parts: Vec<&str> = coord.splitn(3, ':').collect();
         if parts.len() >= 3 {
             return Ok((parts[1].to_string(), parts[2].to_string()));
         }
-
-        // Try as just "PUBKEY:D-TAG"
         if parts.len() == 2 {
             return Ok((parts[0].to_string(), parts[1].to_string()));
         }
-
         Err(format!("Invalid coordinate format: {}", coord))
     }
 }

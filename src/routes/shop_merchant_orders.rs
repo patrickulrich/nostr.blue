@@ -1,5 +1,4 @@
 //! Shop Merchant Orders - Seller's incoming orders
-
 use crate::components::shop::OrderStatusBadge;
 use crate::routes::Route;
 use crate::stores::shop_store::{
@@ -10,7 +9,6 @@ use crate::utils::nip99::{
     extract_product_name_from_coordinate, OrderStatus, ShippingStatus, ShopOrder,
 };
 use dioxus::prelude::*;
-
 /// Merchant orders page
 #[component]
 pub fn ShopMerchantOrders() -> Element {
@@ -18,25 +16,17 @@ pub fn ShopMerchantOrders() -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut filter = use_signal(|| OrderFilter::All);
-
-    // Order detail modal state
     let mut selected_order = use_signal(|| None::<ShopOrder>);
     let mut updating = use_signal(|| false);
     let mut tracking_number = use_signal(String::new);
     let mut carrier = use_signal(String::new);
-
-    // Fetch orders and listen for updates on mount
     use_effect(move || {
         spawn(async move {
             loading.set(true);
             error.set(None);
-
-            // First, listen for any new order messages via NIP-17
             if let Err(e) = listen_for_order_updates().await {
                 log::warn!("Failed to fetch order updates: {}", e);
             }
-
-            // Then fetch all seller orders
             match fetch_seller_orders().await {
                 Ok(o) => orders.set(o),
                 Err(e) => {
@@ -47,8 +37,6 @@ pub fn ShopMerchantOrders() -> Element {
             loading.set(false);
         });
     });
-
-    // Filter orders
     let filtered_orders = {
         let all = orders.read();
         let f = *filter.read();
@@ -63,16 +51,13 @@ pub fn ShopMerchantOrders() -> Element {
             .cloned()
             .collect::<Vec<_>>()
     };
-
     let pending_count = orders
         .read()
         .iter()
         .filter(|o| o.status == OrderStatus::Pending)
         .count();
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -84,17 +69,13 @@ pub fn ShopMerchantOrders() -> Element {
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
                     h1 { class: "text-xl font-bold flex-1", "My Shop" }
-
-                    // Refresh button
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition",
                         disabled: *loading.read(),
                         onclick: move |_| {
                             spawn(async move {
                                 loading.set(true);
-                                // Listen for updates first
                                 let _ = listen_for_order_updates().await;
-                                // Then refresh orders
                                 if let Ok(o) = fetch_seller_orders().await {
                                     orders.set(o);
                                 }
@@ -108,8 +89,6 @@ pub fn ShopMerchantOrders() -> Element {
                         }
                     }
                 }
-
-                // Tab navigation
                 div { class: "flex border-b border-border",
                     Link {
                         to: Route::ShopMerchant {},
@@ -127,35 +106,35 @@ pub fn ShopMerchantOrders() -> Element {
                         }
                     }
                 }
-
-                // Filter tabs
                 div { class: "flex overflow-x-auto gap-2 px-4 py-3",
-                    for f in [OrderFilter::All, OrderFilter::Pending, OrderFilter::Confirmed, OrderFilter::Processing, OrderFilter::Completed] {
+                    for f in [
+                        OrderFilter::All,
+                        OrderFilter::Pending,
+                        OrderFilter::Confirmed,
+                        OrderFilter::Processing,
+                        OrderFilter::Completed,
+                    ]
+                    {
                         button {
                             key: "{f.label()}",
-                            class: if *filter.read() == f {
-                                "px-3 py-1 text-sm bg-blue-500 text-white rounded-full whitespace-nowrap"
-                            } else {
-                                "px-3 py-1 text-sm bg-muted hover:bg-accent rounded-full whitespace-nowrap transition"
-                            },
+                            class: if *filter.read() == f { "px-3 py-1 text-sm bg-blue-500 text-white rounded-full whitespace-nowrap" } else { "px-3 py-1 text-sm bg-muted hover:bg-accent rounded-full whitespace-nowrap transition" },
                             onclick: move |_| filter.set(f),
                             "{f.label()}"
                         }
                     }
                 }
             }
-
-            // Orders list
             div { class: "p-4",
                 if *loading.read() {
-                    // Loading skeleton
                     div { class: "space-y-4",
                         for i in 0..4 {
-                            div { key: "{i}", class: "h-32 bg-muted rounded-lg animate-pulse" }
+                            div {
+                                key: "{i}",
+                                class: "h-32 bg-muted rounded-lg animate-pulse",
+                            }
                         }
                     }
                 } else if let Some(err) = error.read().as_ref() {
-                    // Error state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "😢" }
                         h2 { class: "text-xl font-semibold mb-2", "Failed to load orders" }
@@ -177,7 +156,6 @@ pub fn ShopMerchantOrders() -> Element {
                         }
                     }
                 } else if filtered_orders.is_empty() {
-                    // Empty state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "📦" }
                         h2 { class: "text-xl font-semibold mb-2",
@@ -196,7 +174,6 @@ pub fn ShopMerchantOrders() -> Element {
                         }
                     }
                 } else {
-                    // Orders list
                     div { class: "space-y-4",
                         for order in filtered_orders.iter() {
                             div {
@@ -210,8 +187,6 @@ pub fn ShopMerchantOrders() -> Element {
                                         selected_order.set(Some(order.clone()));
                                     }
                                 },
-
-                                // Order header
                                 div { class: "flex items-start justify-between mb-3",
                                     {
                                         let order_id_short = if order.order_id.len() > 8 {
@@ -224,24 +199,16 @@ pub fn ShopMerchantOrders() -> Element {
                                             .unwrap_or_else(|| "Unknown".to_string());
                                         rsx! {
                                             div {
-                                                p { class: "font-medium text-sm font-mono",
-                                                    "#{order_id_short}"
-                                                }
-                                                p { class: "text-xs text-muted-foreground",
-                                                    "{created_date}"
-                                                }
+                                                p { class: "font-medium text-sm font-mono", "#{order_id_short}" }
+                                                p { class: "text-xs text-muted-foreground", "{created_date}" }
                                             }
                                         }
                                     }
                                     OrderStatusBadge { status: order.status }
                                 }
-
-                                // Items summary
                                 div { class: "text-sm text-muted-foreground mb-2",
                                     "{order.items.len()} item(s)"
                                 }
-
-                                // Total
                                 div { class: "flex items-center justify-between",
                                     span { class: "text-amber-500 font-medium",
                                         "⚡{order.amount_sats} sats"
@@ -253,9 +220,7 @@ pub fn ShopMerchantOrders() -> Element {
                                             order.buyer_pubkey.clone()
                                         };
                                         rsx! {
-                                            span { class: "text-xs text-muted-foreground",
-                                                "from {buyer_short}"
-                                            }
+                                            span { class: "text-xs text-muted-foreground", "from {buyer_short}" }
                                         }
                                     }
                                 }
@@ -264,17 +229,13 @@ pub fn ShopMerchantOrders() -> Element {
                     }
                 }
             }
-
-            // Order detail modal
             if let Some(order) = selected_order.read().as_ref() {
-                div { class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
+                div {
+                    class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
                     onclick: move |_| selected_order.set(None),
-
                     div {
                         class: "bg-background rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto",
                         onclick: move |e| e.stop_propagation(),
-
-                        // Modal header
                         div { class: "sticky top-0 bg-background border-b border-border p-4 flex items-center justify-between",
                             h2 { class: "text-lg font-semibold", "Order Details" }
                             button {
@@ -283,10 +244,7 @@ pub fn ShopMerchantOrders() -> Element {
                                 crate::components::icons::XIcon { class: "w-5 h-5" }
                             }
                         }
-
-                        // Modal content
                         div { class: "p-4 space-y-4",
-                            // Order info
                             div { class: "space-y-2",
                                 div { class: "flex items-center justify-between",
                                     span { class: "text-sm text-muted-foreground", "Order ID" }
@@ -298,17 +256,19 @@ pub fn ShopMerchantOrders() -> Element {
                                 }
                                 div { class: "flex items-center justify-between",
                                     span { class: "text-sm text-muted-foreground", "Total" }
-                                    span { class: "text-amber-500 font-medium", "⚡{order.amount_sats} sats" }
+                                    span { class: "text-amber-500 font-medium",
+                                        "⚡{order.amount_sats} sats"
+                                    }
                                 }
                             }
-
-                            // Items
                             div { class: "border-t border-border pt-4",
                                 h3 { class: "font-medium mb-2", "Items" }
                                 div { class: "space-y-2",
                                     for item in order.items.iter() {
                                         {
-                                            let product_name = extract_product_name_from_coordinate(&item.product_coordinate);
+                                            let product_name = extract_product_name_from_coordinate(
+                                                &item.product_coordinate,
+                                            );
                                             rsx! {
                                                 div { class: "flex items-center justify-between text-sm",
                                                     span { "{product_name} x{item.quantity}" }
@@ -318,28 +278,20 @@ pub fn ShopMerchantOrders() -> Element {
                                     }
                                 }
                             }
-
-                            // Buyer info
                             div { class: "border-t border-border pt-4",
                                 h3 { class: "font-medium mb-2", "Buyer" }
                                 p { class: "text-sm font-mono text-muted-foreground",
                                     "{order.buyer_pubkey}"
                                 }
                             }
-
-                            // Shipping info (if physical)
                             if let Some(addr) = &order.shipping_address {
                                 div { class: "border-t border-border pt-4",
                                     h3 { class: "font-medium mb-2", "Shipping Address" }
                                     p { class: "text-sm whitespace-pre-wrap", "{addr}" }
                                 }
                             }
-
-                            // Status update form
                             div { class: "border-t border-border pt-4 space-y-4",
                                 h3 { class: "font-medium", "Update Status" }
-
-                                // Status buttons
                                 div { class: "flex flex-wrap gap-2",
                                     if order.status == OrderStatus::Pending {
                                         button {
@@ -352,15 +304,16 @@ pub fn ShopMerchantOrders() -> Element {
                                                     let oid = order_id.clone();
                                                     spawn(async move {
                                                         if let Err(e) = update_order_status(
-                                                            &oid,
-                                                            OrderStatus::Confirmed,
-                                                            None,
-                                                            None,
-                                                            None,
-                                                        ).await {
+                                                                &oid,
+                                                                OrderStatus::Confirmed,
+                                                                None,
+                                                                None,
+                                                                None,
+                                                            )
+                                                            .await
+                                                        {
                                                             log::error!("Failed to update order: {}", e);
                                                         }
-                                                        // Refresh orders
                                                         if let Ok(o) = fetch_seller_orders().await {
                                                             orders.set(o);
                                                         }
@@ -383,12 +336,14 @@ pub fn ShopMerchantOrders() -> Element {
                                                     let oid = order_id.clone();
                                                     spawn(async move {
                                                         if let Err(e) = update_order_status(
-                                                            &oid,
-                                                            OrderStatus::Processing,
-                                                            None,
-                                                            None,
-                                                            None,
-                                                        ).await {
+                                                                &oid,
+                                                                OrderStatus::Processing,
+                                                                None,
+                                                                None,
+                                                                None,
+                                                            )
+                                                            .await
+                                                        {
                                                             log::error!("Failed to update order: {}", e);
                                                         }
                                                         if let Ok(o) = fetch_seller_orders().await {
@@ -403,7 +358,6 @@ pub fn ShopMerchantOrders() -> Element {
                                         }
                                     }
                                     if order.status == OrderStatus::Processing {
-                                        // Shipping form
                                         div { class: "w-full space-y-3",
                                             div { class: "grid grid-cols-2 gap-2",
                                                 input {
@@ -411,14 +365,14 @@ pub fn ShopMerchantOrders() -> Element {
                                                     class: "px-3 py-2 bg-muted rounded-lg text-sm",
                                                     placeholder: "Tracking number",
                                                     value: "{tracking_number}",
-                                                    oninput: move |e| tracking_number.set(e.value())
+                                                    oninput: move |e| tracking_number.set(e.value()),
                                                 }
                                                 input {
                                                     r#type: "text",
                                                     class: "px-3 py-2 bg-muted rounded-lg text-sm",
                                                     placeholder: "Carrier (USPS, FedEx...)",
                                                     value: "{carrier}",
-                                                    oninput: move |e| carrier.set(e.value())
+                                                    oninput: move |e| carrier.set(e.value()),
                                                 }
                                             }
                                             button {
@@ -429,16 +383,26 @@ pub fn ShopMerchantOrders() -> Element {
                                                     move |_| {
                                                         updating.set(true);
                                                         let oid = order_id.clone();
-                                                        let track = if tracking_number.read().is_empty() { None } else { Some(tracking_number.read().clone()) };
-                                                        let carr = if carrier.read().is_empty() { None } else { Some(carrier.read().clone()) };
+                                                        let track = if tracking_number.read().is_empty() {
+                                                            None
+                                                        } else {
+                                                            Some(tracking_number.read().clone())
+                                                        };
+                                                        let carr = if carrier.read().is_empty() {
+                                                            None
+                                                        } else {
+                                                            Some(carrier.read().clone())
+                                                        };
                                                         spawn(async move {
                                                             if let Err(e) = update_order_status(
-                                                                &oid,
-                                                                OrderStatus::Processing,
-                                                                Some(ShippingStatus::Shipped),
-                                                                track,
-                                                                carr,
-                                                            ).await {
+                                                                    &oid,
+                                                                    OrderStatus::Processing,
+                                                                    Some(ShippingStatus::Shipped),
+                                                                    track,
+                                                                    carr,
+                                                                )
+                                                                .await
+                                                            {
                                                                 log::error!("Failed to update order: {}", e);
                                                             }
                                                             if let Ok(o) = fetch_seller_orders().await {
@@ -453,14 +417,11 @@ pub fn ShopMerchantOrders() -> Element {
                                             }
                                         }
                                     }
-                                    // Complete Order: Only available after shipping for physical orders,
-                                    // or after processing for digital orders
                                     {
                                         let has_shipping = order.shipping_address.is_some();
                                         let is_shipped = order.shipping_status == Some(ShippingStatus::Shipped);
                                         let can_complete = order.status == OrderStatus::Processing
                                             && (!has_shipping || is_shipped);
-
                                         rsx! {
                                             if can_complete {
                                                 button {
@@ -473,12 +434,14 @@ pub fn ShopMerchantOrders() -> Element {
                                                             let oid = order_id.clone();
                                                             spawn(async move {
                                                                 if let Err(e) = update_order_status(
-                                                                    &oid,
-                                                                    OrderStatus::Completed,
-                                                                    Some(ShippingStatus::Delivered),
-                                                                    None,
-                                                                    None,
-                                                                ).await {
+                                                                        &oid,
+                                                                        OrderStatus::Completed,
+                                                                        Some(ShippingStatus::Delivered),
+                                                                        None,
+                                                                        None,
+                                                                    )
+                                                                    .await
+                                                                {
                                                                     log::error!("Failed to update order: {}", e);
                                                                 }
                                                                 if let Ok(o) = fetch_seller_orders().await {
@@ -489,7 +452,11 @@ pub fn ShopMerchantOrders() -> Element {
                                                             });
                                                         }
                                                     },
-                                                    if has_shipping { "Mark Delivered" } else { "Complete Order" }
+                                                    if has_shipping {
+                                                        "Mark Delivered"
+                                                    } else {
+                                                        "Complete Order"
+                                                    }
                                                 }
                                             }
                                         }
@@ -503,7 +470,6 @@ pub fn ShopMerchantOrders() -> Element {
         }
     }
 }
-
 /// Order filter options
 #[derive(Clone, Copy, PartialEq)]
 enum OrderFilter {
@@ -513,7 +479,6 @@ enum OrderFilter {
     Processing,
     Completed,
 }
-
 impl OrderFilter {
     fn label(&self) -> &'static str {
         match self {

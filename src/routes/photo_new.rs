@@ -1,7 +1,6 @@
 use crate::components::MediaUploader;
 use crate::stores::auth_store;
 use dioxus::prelude::*;
-
 #[component]
 pub fn PhotoNew() -> Element {
     let navigator = navigator();
@@ -13,66 +12,50 @@ pub fn PhotoNew() -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut show_image_uploader = use_signal(|| true);
     let mut error_message = use_signal(|| Option::<String>::None);
-
-    // Check if user is authenticated
-    let is_authenticated = use_memo(move || auth_store::AUTH_STATE.read().is_authenticated);
-
-    // Validation
-    let can_publish =
-        title.read().chars().count() > 0 && !image_urls.read().is_empty() && !*is_publishing.read();
-
-    // Handle close
+    let is_authenticated = use_memo(move || {
+        auth_store::AUTH_STATE.read().is_authenticated
+    });
+    let can_publish = title.read().chars().count() > 0 && !image_urls.read().is_empty()
+        && !*is_publishing.read();
     let handle_close = move |_| {
         navigator.go_back();
     };
-
-    // Handle image upload
     let handle_image_uploaded = move |url: String| {
         let mut urls = image_urls.write();
         urls.push(url.clone());
         log::info!("Image added: {}", url);
-        // Keep uploader open for more images
     };
-
-    // Handle remove image
     let mut handle_remove_image = move |index: usize| {
         let mut urls = image_urls.write();
         if index < urls.len() {
             urls.remove(index);
         }
     };
-
-    // Handle publishing
     let handle_publish = move |_| {
         if !can_publish {
             return;
         }
-
         let title_val = title.read().clone();
         let caption_val = caption.read().clone();
         let image_urls_val = image_urls.read().clone();
         let hashtags_val = hashtags.read().clone();
         let location_val = location.read().clone();
-
         is_publishing.set(true);
         error_message.set(None);
-
         spawn(async move {
-            // Parse hashtags
             let tags_vec: Vec<String> = hashtags_val
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
-
             match crate::stores::nostr_client::publish_picture(
-                title_val,
-                caption_val,
-                image_urls_val,
-                tags_vec,
-                location_val,
-            )
-            .await
+                    title_val,
+                    caption_val,
+                    image_urls_val,
+                    tags_vec,
+                    location_val,
+                )
+                .await
             {
                 Ok(event_id) => {
                     log::info!("Picture post published successfully: {}", event_id);
@@ -87,56 +70,35 @@ pub fn PhotoNew() -> Element {
             }
         });
     };
-
-    // Redirect if not authenticated
     use_effect(move || {
         if !*is_authenticated.read() {
-            navigator.push(crate::routes::Route::Home {
-                list: String::new(),
-            });
+            navigator
+                .push(crate::routes::Route::Home {
+                    list: String::new(),
+                });
         }
     });
-
     if !*is_authenticated.read() {
         return rsx! {
-            div { class: "flex items-center justify-center h-screen",
-                "Redirecting..."
-            }
+            div { class: "flex items-center justify-center h-screen", "Redirecting..." }
         };
     }
-
     rsx! {
-        div {
-            class: "min-h-screen bg-background",
-
-            // Header
-            div {
-                class: "border-b border-border bg-background sticky top-0 z-10",
-                div {
-                    class: "max-w-4xl mx-auto px-4 py-4 flex items-center justify-between",
-
-                    div {
-                        class: "flex items-center gap-4",
+        div { class: "min-h-screen bg-background",
+            div { class: "border-b border-border bg-background sticky top-0 z-10",
+                div { class: "max-w-4xl mx-auto px-4 py-4 flex items-center justify-between",
+                    div { class: "flex items-center gap-4",
                         button {
                             class: "text-muted-foreground hover:text-foreground transition",
                             onclick: handle_close,
                             crate::components::icons::ArrowLeftIcon { class: "w-6 h-6".to_string() }
                         }
-                        h1 {
-                            class: "text-2xl font-bold",
-                            "Share Photo"
-                        }
+                        h1 { class: "text-2xl font-bold", "Share Photo" }
                     }
-
                     button {
-                        class: if can_publish {
-                            "px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition"
-                        } else {
-                            "px-6 py-2 bg-gray-300 text-gray-500 font-bold rounded-full cursor-not-allowed"
-                        },
+                        class: if can_publish { "px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition" } else { "px-6 py-2 bg-gray-300 text-gray-500 font-bold rounded-full cursor-not-allowed" },
                         disabled: !can_publish,
                         onclick: handle_publish,
-
                         if *is_publishing.read() {
                             "Publishing..."
                         } else {
@@ -145,33 +107,17 @@ pub fn PhotoNew() -> Element {
                     }
                 }
             }
-
-            // Main content
-            div {
-                class: "max-w-4xl mx-auto px-4 py-8",
-
-                // Error message
+            div { class: "max-w-4xl mx-auto px-4 py-8",
                 if let Some(err) = error_message.read().as_ref() {
-                    div {
-                        class: "mb-4 p-4 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg text-red-800 dark:text-red-200",
+                    div { class: "mb-4 p-4 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg text-red-800 dark:text-red-200",
                         "{err}"
                     }
                 }
-
-                div {
-                    class: "space-y-6",
-
-                    // Image uploader
+                div { class: "space-y-6",
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Images * (upload one or more)"
-                        }
-
-                        // Display uploaded images
+                        label { class: "block text-sm font-medium mb-2", "Images * (upload one or more)" }
                         if !image_urls.read().is_empty() {
-                            div {
-                                class: "grid grid-cols-2 md:grid-cols-3 gap-4 mb-4",
+                            div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 mb-4",
                                 for (index , url) in image_urls.read().iter().enumerate() {
                                     div {
                                         key: "{url}",
@@ -193,7 +139,7 @@ pub fn PhotoNew() -> Element {
                                                 path {
                                                     stroke_linecap: "round",
                                                     stroke_linejoin: "round",
-                                                    d: "M6 18L18 6M6 6l12 12"
+                                                    d: "M6 18L18 6M6 6l12 12",
                                                 }
                                             }
                                         }
@@ -201,14 +147,9 @@ pub fn PhotoNew() -> Element {
                                 }
                             }
                         }
-
-                        // Image uploader
                         if *show_image_uploader.read() {
-                            MediaUploader {
-                                on_upload: handle_image_uploaded,
-                            }
+                            MediaUploader { on_upload: handle_image_uploaded }
                         }
-
                         if !*show_image_uploader.read() {
                             button {
                                 class: "px-4 py-2 bg-accent hover:bg-accent/80 text-foreground rounded-lg transition",
@@ -217,13 +158,8 @@ pub fn PhotoNew() -> Element {
                             }
                         }
                     }
-
-                    // Title
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Title *"
-                        }
+                        label { class: "block text-sm font-medium mb-2", "Title *" }
                         input {
                             r#type: "text",
                             class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
@@ -232,13 +168,8 @@ pub fn PhotoNew() -> Element {
                             oninput: move |e| title.set(e.value()),
                         }
                     }
-
-                    // Caption/Description
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Caption (optional)"
-                        }
+                        label { class: "block text-sm font-medium mb-2", "Caption (optional)" }
                         textarea {
                             class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                             rows: 4,
@@ -247,13 +178,8 @@ pub fn PhotoNew() -> Element {
                             oninput: move |e| caption.set(e.value()),
                         }
                     }
-
-                    // Location
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Location (optional)"
-                        }
+                        label { class: "block text-sm font-medium mb-2", "Location (optional)" }
                         input {
                             r#type: "text",
                             class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
@@ -262,13 +188,8 @@ pub fn PhotoNew() -> Element {
                             oninput: move |e| location.set(e.value()),
                         }
                     }
-
-                    // Hashtags
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Hashtags (optional)"
-                        }
+                        label { class: "block text-sm font-medium mb-2", "Hashtags (optional)" }
                         input {
                             r#type: "text",
                             class: "w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",

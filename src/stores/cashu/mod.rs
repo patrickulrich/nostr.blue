@@ -13,7 +13,6 @@
 //! - Adaptive proof pagination
 //! - Fee estimation including P2PK overhead
 //! - Dust consolidation
-
 pub mod address;
 pub mod auth;
 pub mod auth_cache;
@@ -48,25 +47,18 @@ pub mod token;
 pub mod transfer;
 pub mod types;
 pub mod ws;
-
-// Re-export commonly used types
 pub use types::*;
-// Error types available internally via super::errors
-// pub use errors::{CashuWalletError, CashuResult};
 pub use signals::*;
-
-// Re-export main public functions
 pub use init::{accept_terms, check_terms_accepted, create_wallet, init_wallet};
 pub use lightning::{
     check_mint_quote_status, create_melt_quote, create_mint_quote, melt_tokens,
     mint_tokens_from_quote,
 };
 #[allow(unused_imports)]
-// Public API: get_mint_spendable_balance may be used by external callers
 pub use mint_mgmt::{
     add_mint, consolidate_all_mints, discover_mints, get_mint_balance, get_mint_info,
-    get_mint_proof_count, get_mint_spendable_balance, get_mint_unit_spendable_balance, get_mints,
-    get_total_proof_count, remove_mint,
+    get_mint_proof_count, get_mint_spendable_balance, get_mint_unit_spendable_balance,
+    get_mints, get_total_proof_count, remove_mint,
 };
 #[allow(unused_imports)]
 pub use mint_mgmt::{check_keyset_collision, KeysetCollision};
@@ -75,161 +67,115 @@ pub use mpp::{
     mint_supports_mpp, MppQuoteInfo,
 };
 pub use payment_request::{
-    cancel_payment_request, create_payment_request, parse_payment_request, pay_payment_request,
-    wait_for_nostr_payment,
+    cancel_payment_request, create_payment_request, parse_payment_request,
+    pay_payment_request, wait_for_nostr_payment,
 };
-#[allow(unused_imports)] // receive_tokens is simpler API for future use
+#[allow(unused_imports)]
 pub use receive::{
-    preview_token, receive_tokens, receive_tokens_with_options, ReceiveTokensOptions, TokenPreview,
+    preview_token, receive_tokens, receive_tokens_with_options, ReceiveTokensOptions,
+    TokenPreview,
 };
 pub use recovery::{cleanup_spent_proofs, refresh_wallet};
 pub use send::{estimate_send_fee, get_wallet_pubkey, send_tokens, send_tokens_p2pk};
 pub use send::{extract_y_values_from_token, watch_sent_token_claims};
 pub use transfer::{estimate_transfer_fees, transfer_between_mints};
-// Internal helpers used by cashu_cdk_bridge and other modules
 #[allow(unused_imports)]
 pub use events::queue_event_for_retry;
 #[allow(unused_imports)]
 pub use lightning::create_history_event_with_type;
 #[allow(unused_imports)]
 pub use proofs::cdk_proof_to_proof_data;
-// =============================================================================
-// NUT-17 WebSocket Subscriptions (Real-time state sync)
-// =============================================================================
-
-// NUT-17 support detection and proof state functions
-// Note: ProofState renamed to MintProofState to avoid conflict with types::ProofState
 #[allow(unused_imports)]
 pub use self::ws::{
     mint_supports_websocket, poll_proof_states, subscribe_to_proof_states,
     ProofState as MintProofState, ProofStateNotification,
 };
-
-// =============================================================================
-// Advanced CDK features (planned, not yet wired to UI)
-// =============================================================================
-
-// Auth types for protected mints (NUT-21/22)
-// Core types are re-exported from CDK
 #[allow(unused_imports)]
 pub use auth::{
-    // Header helpers
-    add_auth_header,
-    add_auth_header_for,
-    blind_auth_token_count,
-    check_operation_auth,
-    clear_mint_auth_state,
-    // Discovery and validation
-    discover_mint_auth,
-    ensure_auth_available,
-    get_auth_for_endpoint,
-    // Token management
-    get_blind_auth_for_request,
-    get_mint_auth_state,
-    has_blind_auth_tokens,
-    is_auth_required_error,
-    is_protected_mint,
-    mint_requires_auth,
-    // Parsing
-    parse_auth_from_mint_info,
-    set_mint_auth_state,
-    AuthProof,
-    // CDK types
-    AuthRequired,
-    AuthToken,
-    BlindAuthSettings,
-    BlindAuthToken,
-    ClearAuthSettings,
-    HttpMethod,
-    // Local state management
-    MintAuthState,
-    ProtectedEndpoint,
-    RoutePath,
-    MINT_AUTH_STATES,
+    add_auth_header, add_auth_header_for, blind_auth_token_count, check_operation_auth,
+    clear_mint_auth_state, discover_mint_auth, ensure_auth_available,
+    get_auth_for_endpoint, get_blind_auth_for_request, get_mint_auth_state,
+    has_blind_auth_tokens, is_auth_required_error, is_protected_mint, mint_requires_auth,
+    parse_auth_from_mint_info, set_mint_auth_state, AuthProof, AuthRequired, AuthToken,
+    BlindAuthSettings, BlindAuthToken, ClearAuthSettings, HttpMethod, MintAuthState,
+    ProtectedEndpoint, RoutePath, MINT_AUTH_STATES,
 };
-// Keyset migration (NUT-13 compliant)
 #[allow(unused_imports)]
 pub use keyset::{
-    get_active_keyset_ids, get_migration_recommendation, migrate_inactive_proofs, refresh_keysets,
-    should_migrate, KeysetMigrationResult, KeysetRefreshResult,
+    get_active_keyset_ids, get_migration_recommendation, migrate_inactive_proofs,
+    refresh_keysets, should_migrate, KeysetMigrationResult, KeysetRefreshResult,
 };
-// Spending conditions with SIG_ALL (NUT-10/11)
 #[allow(unused_imports)]
 pub use spending_conditions::{
-    build_sig_all_message_for_melt, build_sig_all_message_for_swap, create_multisig_sig_all,
-    create_p2pk_sig_all, sign_sig_all_message, verify_sig_all_signatures, ExtendedConditions,
-    SigFlag,
+    build_sig_all_message_for_melt, build_sig_all_message_for_swap,
+    create_multisig_sig_all, create_p2pk_sig_all, sign_sig_all_message,
+    verify_sig_all_signatures, ExtendedConditions, SigFlag,
 };
-// Denomination strategies
 #[allow(unused_imports)]
 pub use denomination::{
     estimate_proof_count, DenominationStrategy, OperationType as DenomOperationType,
     CONSOLIDATION_THRESHOLD,
 };
-// Direct swap operations
 #[allow(unused_imports)]
-pub use swap::{execute_swap, swap_optimize_denominations, swap_refresh, SwapOptions, SwapResult};
-// Mint capabilities
+pub use swap::{
+    execute_swap, swap_optimize_denominations, swap_refresh, SwapOptions, SwapResult,
+};
 #[allow(unused_imports)]
 pub use capabilities::{
-    check_melt_limits, check_mint_limits, check_operation_supported, get_mint_capabilities,
-    supports_mpp, supports_p2pk, supports_restore, MintCapabilities, Nut, OperationKind,
+    check_melt_limits, check_mint_limits, check_operation_supported,
+    get_mint_capabilities, supports_mpp, supports_p2pk, supports_restore,
+    MintCapabilities, Nut, OperationKind,
 };
-// Quote management
 #[allow(unused_imports)]
 pub use quotes::{
     check_quote_validity, cleanup_all_expired_quotes, cleanup_expired_melt_quotes,
-    cleanup_expired_mint_quotes, find_melt_quote, find_mint_quote, format_expiry, get_quote_stats,
-    is_quote_expired, QuoteStats, QuoteValidity,
+    cleanup_expired_mint_quotes, find_melt_quote, find_mint_quote, format_expiry,
+    get_quote_stats, is_quote_expired, QuoteStats, QuoteValidity,
 };
-// Proof state recovery
 #[allow(unused_imports)]
 pub use proof_recovery::{
-    detect_stuck_proofs, find_pending_spent_proofs, find_reserved_proofs, get_recovery_stats,
-    recover_pending_spent_proofs, recover_reserved_proofs, run_full_recovery, ProofRecoveryResult,
+    detect_stuck_proofs, find_pending_spent_proofs, find_reserved_proofs,
+    get_recovery_stats, recover_pending_spent_proofs, recover_reserved_proofs,
+    run_full_recovery, ProofRecoveryResult,
 };
-// Fee estimation
 #[allow(unused_imports)]
 pub use fees::{
     calculate_proof_fee, compare_mint_fees, estimate_htlc_fee, estimate_multisig_fee,
-    estimate_p2pk_receive_fee, estimate_p2pk_send_fee, estimate_simple_send_fee, estimate_swap_fee,
-    find_cheapest_mint, get_mint_fee_ppk, FeeEstimate, MintFeeSummary, P2pkComplexity,
+    estimate_p2pk_receive_fee, estimate_p2pk_send_fee, estimate_simple_send_fee,
+    estimate_swap_fee, find_cheapest_mint, get_mint_fee_ppk, FeeEstimate, MintFeeSummary,
+    P2pkComplexity,
 };
-// Adaptive pagination
 #[allow(unused_imports)]
 pub use pagination::{
-    batch_proofs, batch_proofs_adaptive, batch_proofs_for_mint, fetch_mint_limits, get_batch_size,
-    get_optimal_batch_size, MintLimits, ProofPaginator,
+    batch_proofs, batch_proofs_adaptive, batch_proofs_for_mint, fetch_mint_limits,
+    get_batch_size, get_optimal_batch_size, MintLimits, ProofPaginator,
 };
-// Dust consolidation
 #[allow(unused_imports)]
 pub use dust::{
-    consolidate_all_dust, consolidate_dust, find_dust_proofs, get_all_dust_stats, get_dust_stats,
-    get_total_dust_stats, should_consolidate_dust, DustConsolidationResult, DustStats,
-    DEFAULT_DUST_THRESHOLD,
+    consolidate_all_dust, consolidate_dust, find_dust_proofs, get_all_dust_stats,
+    get_dust_stats, get_total_dust_stats, should_consolidate_dust,
+    DustConsolidationResult, DustStats, DEFAULT_DUST_THRESHOLD,
 };
-// Enriched history
 #[allow(unused_imports)]
 pub use enriched_history::{
-    create_lightning_receive_history, create_lightning_send_history, create_p2pk_send_history,
-    create_swap_history, enrich_history_item, Direction as HistoryDirection, EnrichedHistoryItem,
-    KeysetInfo, SwapDetails, SwapReason, TransactionType as HistoryTransactionType,
+    create_lightning_receive_history, create_lightning_send_history,
+    create_p2pk_send_history, create_swap_history, enrich_history_item,
+    Direction as HistoryDirection, EnrichedHistoryItem, KeysetInfo, SwapDetails,
+    SwapReason, TransactionType as HistoryTransactionType,
 };
-// Auth token caching
 #[allow(unused_imports)]
 pub use auth_cache::{
-    cache_tokens, cached_token_count, cleanup_auth_cache, clear_mint_tokens, get_auth_cache_stats,
-    get_cached_token, has_cached_tokens, needs_token_replenishment, AuthCacheStats, BlindAuthCache,
-    CachedAuthToken,
+    cache_tokens, cached_token_count, cleanup_auth_cache, clear_mint_tokens,
+    get_auth_cache_stats, get_cached_token, has_cached_tokens, needs_token_replenishment,
+    AuthCacheStats, BlindAuthCache, CachedAuthToken,
 };
-// NIP-61 Nutzap support
-// Note: Some exports are for public API / future use (e.g., sending nutzaps from profiles/posts)
 #[allow(unused_imports)]
 pub use nutzap::{
-    fetch_nutzap_info, fetch_pending_nutzaps, get_nutzap_p2pk_pubkey, process_nutzap_event,
-    publish_nutzap_info, redeem_nutzap, send_nutzap, start_nutzap_subscription,
-    validate_nutzap_recipient, validate_nutzap_recipient_with_info, NutzapInfo, NutzapMint,
-    NutzapRedeemResult, NutzapSendResult, NutzapStatus, PendingNutzap,
+    fetch_nutzap_info, fetch_pending_nutzaps, get_nutzap_p2pk_pubkey,
+    process_nutzap_event, publish_nutzap_info, redeem_nutzap, send_nutzap,
+    start_nutzap_subscription, validate_nutzap_recipient,
+    validate_nutzap_recipient_with_info, NutzapInfo, NutzapMint, NutzapRedeemResult,
+    NutzapSendResult, NutzapStatus, PendingNutzap,
 };
 #[allow(unused_imports)]
 pub use nutzap_signals::{
@@ -238,10 +184,6 @@ pub use nutzap_signals::{
     update_pending_nutzap_status, MY_NUTZAP_INFO, NUTZAP_AUTO_REDEEM, NUTZAP_ENABLED,
     NUTZAP_INFO_CACHE, NUTZAP_SUBSCRIPTION_ACTIVE, PENDING_NUTZAPS,
 };
-
-// Internal helpers (shared by submodules, not exported)
 pub(crate) mod internal;
-
-// Utility functions
 mod utils;
 pub use utils::{mint_matches, normalize_mint_url};

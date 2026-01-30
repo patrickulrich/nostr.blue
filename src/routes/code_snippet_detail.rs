@@ -1,7 +1,6 @@
 //! Code Snippet Detail Page
 //!
 //! View a single NIP-C0 code snippet (Kind 1337).
-
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_snippet_by_id;
@@ -9,51 +8,34 @@ use crate::stores::{nostr_client, profiles::PROFILE_CACHE};
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::DisplaySnippet;
 use dioxus::prelude::*;
-
 /// Code snippet detail page component
 #[component]
 pub fn CodeSnippetDetail(note_id: String) -> Element {
     let copied = use_signal(|| false);
-
-    // Snippet state
     let mut snippet_result = use_signal(|| None::<Result<DisplaySnippet, String>>);
-
-    // Clone for effect
     let note_id_for_effect = note_id.clone();
-
-    // Fetch snippet - wait for client initialization
     use_effect(move || {
         let id = note_id_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
         spawn(async move {
             let result = fetch_snippet_by_id(&id).await;
             snippet_result.set(Some(result));
         });
     });
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-                div {
-                    class: "p-4 flex items-center justify-between",
-                    div {
-                        class: "flex items-center gap-3",
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                div { class: "p-4 flex items-center justify-between",
+                    div { class: "flex items-center gap-3",
                         Link {
                             to: Route::CodeSnippets {},
                             class: "text-muted-foreground hover:text-foreground",
-                            dangerous_inner_html: icons::ARROW_LEFT
+                            dangerous_inner_html: icons::ARROW_LEFT,
                         }
-                        h1 {
-                            class: "text-xl font-bold flex items-center gap-2",
+                        h1 { class: "text-xl font-bold flex items-center gap-2",
                             svg {
                                 class: "w-5 h-5",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -73,22 +55,14 @@ pub fn CodeSnippetDetail(note_id: String) -> Element {
                     }
                 }
             }
-
-            // Content
-            div {
-                class: "p-4",
+            div { class: "p-4",
                 match &*snippet_result.read() {
                     Some(Ok(s)) => rsx! {
-                        SnippetContent {
-                            snippet: s.clone(),
-                            copied: copied,
-                        }
+                        SnippetContent { snippet: s.clone(), copied }
                     },
                     Some(Err(e)) => rsx! {
-                        div {
-                            class: "text-center py-12",
-                            div {
-                                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
+                        div { class: "text-center py-12",
+                            div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
                                 svg {
                                     class: "w-8 h-8 text-destructive",
                                     xmlns: "http://www.w3.org/2000/svg",
@@ -101,17 +75,23 @@ pub fn CodeSnippetDetail(note_id: String) -> Element {
                                     stroke_linecap: "round",
                                     stroke_linejoin: "round",
                                     circle { cx: "12", cy: "12", r: "10" }
-                                    line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                                    line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                                    line {
+                                        x1: "12",
+                                        y1: "8",
+                                        x2: "12",
+                                        y2: "12",
+                                    }
+                                    line {
+                                        x1: "12",
+                                        y1: "16",
+                                        x2: "12.01",
+                                        y2: "16",
+                                    }
                                 }
                             }
                             h3 { class: "font-semibold text-lg mb-2", "Snippet Not Found" }
                             p { class: "text-muted-foreground text-sm mb-4", "{e}" }
-                            Link {
-                                to: Route::CodeSnippets {},
-                                class: "text-primary hover:underline",
-                                "← Back to Snippets"
-                            }
+                            Link { to: Route::CodeSnippets {}, class: "text-primary hover:underline", "← Back to Snippets" }
                         }
                     },
                     None => rsx! {
@@ -122,16 +102,13 @@ pub fn CodeSnippetDetail(note_id: String) -> Element {
         }
     }
 }
-
 #[component]
 fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
-    // Get author profile from cache
     let author_profile = PROFILE_CACHE.read().peek(&snippet.pubkey).cloned();
     let display_name = author_profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| snippet.pubkey_display());
-
     #[allow(unused_variables)]
     let code_for_copy = snippet.code.clone();
     let handle_copy = move |_| {
@@ -142,12 +119,13 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
             let clipboard = navigator.clipboard();
             let code_to_copy = code_for_copy.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let _ =
-                    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&code_to_copy)).await;
+                let _ = wasm_bindgen_futures::JsFuture::from(
+                        clipboard.write_text(&code_to_copy),
+                    )
+                    .await;
             });
         }
         copied.set(true);
-        // Reset after 2 seconds
         spawn(async move {
             #[cfg(target_arch = "wasm32")]
             {
@@ -156,25 +134,20 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
             copied.set(false);
         });
     };
-
     rsx! {
-        div {
-            class: "space-y-6",
-
-            // Header with author and metadata
-            div {
-                class: "flex items-start justify-between",
-                div {
-                    class: "flex items-center gap-3",
-                    // Author avatar
+        div { class: "space-y-6",
+            div { class: "flex items-start justify-between",
+                div { class: "flex items-center gap-3",
                     Link {
-                        to: Route::Profile { pubkey: snippet.pubkey.clone() },
+                        to: Route::Profile {
+                            pubkey: snippet.pubkey.clone(),
+                        },
                         class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden",
                         if let Some(picture) = author_profile.as_ref().and_then(|p| p.picture.as_ref()) {
                             img {
                                 class: "w-full h-full object-cover",
                                 src: "{picture}",
-                                alt: "Author"
+                                alt: "Author",
                             }
                         } else {
                             span { class: "text-lg", "{display_name.chars().next().unwrap_or('?')}" }
@@ -182,77 +155,47 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                     }
                     div {
                         Link {
-                            to: Route::Profile { pubkey: snippet.pubkey.clone() },
+                            to: Route::Profile {
+                                pubkey: snippet.pubkey.clone(),
+                            },
                             class: "font-medium hover:underline",
                             "{display_name}"
                         }
-                        div {
-                            class: "text-sm text-muted-foreground",
+                        div { class: "text-sm text-muted-foreground",
                             {format_relative_time_or(snippet.created_at, "Unknown")}
                         }
                     }
                 }
-
-                // Kind badge
-                div {
-                    class: "px-2 py-1 text-xs rounded-full bg-green-500/10 text-green-500 border border-green-500/20",
+                div { class: "px-2 py-1 text-xs rounded-full bg-green-500/10 text-green-500 border border-green-500/20",
                     "Kind 1337"
                 }
             }
-
-            // Snippet name and description
             if let Some(name) = &snippet.name {
-                h2 {
-                    class: "text-xl font-semibold",
-                    "{name}"
-                }
+                h2 { class: "text-xl font-semibold", "{name}" }
             }
-
             if let Some(description) = &snippet.description {
-                p {
-                    class: "text-muted-foreground",
-                    "{description}"
-                }
+                p { class: "text-muted-foreground", "{description}" }
             }
-
-            // Metadata badges
-            div {
-                class: "flex flex-wrap gap-2",
-
-                // Language badge
+            div { class: "flex flex-wrap gap-2",
                 if let Some(lang) = snippet.display_language() {
-                    span {
-                        class: "px-2 py-1 text-xs rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                    span { class: "px-2 py-1 text-xs rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20",
                         "{lang}"
                     }
                 }
-
-                // Extension badge
                 if let Some(ext) = &snippet.extension {
-                    span {
-                        class: "px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground",
+                    span { class: "px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground",
                         ".{ext}"
                     }
                 }
-
-                // License badge
                 if let Some(license) = &snippet.license {
-                    span {
-                        class: "px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground",
+                    span { class: "px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground",
                         "{license}"
                     }
                 }
             }
-
-            // Code block
-            div {
-                class: "border border-border rounded-lg overflow-hidden",
-
-                // Header with language and copy button
-                div {
-                    class: "px-4 py-2 bg-muted/50 border-b border-border flex items-center justify-between",
-                    span {
-                        class: "text-sm text-muted-foreground",
+            div { class: "border border-border rounded-lg overflow-hidden",
+                div { class: "px-4 py-2 bg-muted/50 border-b border-border flex items-center justify-between",
+                    span { class: "text-sm text-muted-foreground",
                         if let Some(name) = &snippet.name {
                             "{name}"
                         } else if let Some(lang) = snippet.display_language() {
@@ -291,32 +234,28 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                                 stroke_width: "2",
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
-                                rect { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }
+                                rect {
+                                    x: "9",
+                                    y: "9",
+                                    width: "13",
+                                    height: "13",
+                                    rx: "2",
+                                    ry: "2",
+                                }
                                 path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
                             }
                             "Copy"
                         }
                     }
                 }
-
-                // Code content
-                pre {
-                    class: "p-4 overflow-x-auto text-sm font-mono bg-background",
-                    code {
-                        "{snippet.code}"
-                    }
+                pre { class: "p-4 overflow-x-auto text-sm font-mono bg-background",
+                    code { "{snippet.code}" }
                 }
             }
-
-            // Dependencies
             if !snippet.dependencies.is_empty() {
                 div {
-                    h3 {
-                        class: "font-medium mb-2 text-sm",
-                        "Dependencies"
-                    }
-                    div {
-                        class: "flex flex-wrap gap-2",
+                    h3 { class: "font-medium mb-2 text-sm", "Dependencies" }
+                    div { class: "flex flex-wrap gap-2",
                         for dep in snippet.dependencies.iter() {
                             span {
                                 key: "{dep}",
@@ -327,8 +266,6 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                     }
                 }
             }
-
-            // Repository link
             if let Some(repo) = &snippet.repo {
                 div {
                     a {
@@ -354,18 +291,10 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
                     }
                 }
             }
-
-            // Share section
-            div {
-                class: "pt-4 border-t border-border",
-                h3 {
-                    class: "font-medium mb-2 text-sm",
-                    "Share this snippet"
-                }
-                div {
-                    class: "flex items-center gap-2",
-                    code {
-                        class: "flex-1 px-3 py-2 bg-muted rounded text-xs font-mono overflow-x-auto",
+            div { class: "pt-4 border-t border-border",
+                h3 { class: "font-medium mb-2 text-sm", "Share this snippet" }
+                div { class: "flex items-center gap-2",
+                    code { class: "flex-1 px-3 py-2 bg-muted rounded text-xs font-mono overflow-x-auto",
                         "nostr:note1{snippet.event_id.chars().take(8).collect::<String>()}..."
                     }
                 }
@@ -373,18 +302,12 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
         }
     }
 }
-
 #[component]
 fn LoadingSkeleton() -> Element {
     rsx! {
-        div {
-            class: "space-y-6 animate-pulse",
-
-            // Header skeleton
-            div {
-                class: "flex items-start justify-between",
-                div {
-                    class: "flex items-center gap-3",
+        div { class: "space-y-6 animate-pulse",
+            div { class: "flex items-start justify-between",
+                div { class: "flex items-center gap-3",
                     div { class: "w-10 h-10 rounded-full bg-muted" }
                     div {
                         div { class: "h-4 bg-muted rounded w-24 mb-2" }
@@ -393,27 +316,17 @@ fn LoadingSkeleton() -> Element {
                 }
                 div { class: "h-6 bg-muted rounded w-16" }
             }
-
-            // Title skeleton
             div { class: "h-6 bg-muted rounded w-1/3" }
             div { class: "h-4 bg-muted rounded w-2/3" }
-
-            // Badges skeleton
-            div {
-                class: "flex gap-2",
+            div { class: "flex gap-2",
                 div { class: "h-6 bg-muted rounded w-16" }
                 div { class: "h-6 bg-muted rounded w-12" }
             }
-
-            // Code block skeleton
-            div {
-                class: "border border-border rounded-lg overflow-hidden",
-                div {
-                    class: "px-4 py-2 bg-muted/50 border-b border-border",
+            div { class: "border border-border rounded-lg overflow-hidden",
+                div { class: "px-4 py-2 bg-muted/50 border-b border-border",
                     div { class: "h-4 bg-muted rounded w-24" }
                 }
-                div {
-                    class: "p-4 space-y-2",
+                div { class: "p-4 space-y-2",
                     div { class: "h-3 bg-muted rounded w-full" }
                     div { class: "h-3 bg-muted rounded w-5/6" }
                     div { class: "h-3 bg-muted rounded w-4/6" }

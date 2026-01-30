@@ -10,27 +10,18 @@
 //!
 //! This module provides data structures and parsing functions for a full
 //! decentralized marketplace implementation on Nostr.
-
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-
 /// Get current Unix timestamp in seconds
 /// Uses js_sys for WASM environments, std::time for native builds
 pub fn now_secs() -> u64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        (js_sys::Date::now() / 1000.0) as u64
-    }
+    #[cfg(target_arch = "wasm32")] { (js_sys::Date::now() / 1000.0) as u64 }
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
     }
 }
-
 /// Extract product display name from NIP-99 coordinate (30402:pubkey:d-tag)
 ///
 /// Parses the d-tag from a coordinate string and converts dashes to spaces
@@ -42,18 +33,12 @@ pub fn now_secs() -> u64 {
 /// assert_eq!(extract_product_name_from_coordinate(coord), "vintage-camera");
 /// ```
 pub fn extract_product_name_from_coordinate(coordinate: &str) -> String {
-    // Use splitn(3, ':') to handle identifiers containing colons
     coordinate
         .splitn(3, ':')
         .nth(2)
         .map(|s| s.to_string())
         .unwrap_or_else(|| coordinate.to_string())
 }
-
-// ============================================================================
-// Event Kind Constants
-// ============================================================================
-
 /// Product listing (addressable)
 pub const KIND_PRODUCT: u16 = 30402;
 /// Product collection (addressable)
@@ -66,11 +51,6 @@ pub const KIND_REVIEW: u16 = 31555;
 pub const KIND_ORDER_MESSAGE: u16 = 16;
 /// Payment receipts (encrypted via NIP-17)
 pub const KIND_PAYMENT_RECEIPT: u16 = 17;
-
-// ============================================================================
-// Enums
-// ============================================================================
-
 /// Product type classification
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -80,7 +60,6 @@ pub enum ProductType {
     Variable,
     Variation,
 }
-
 impl ProductType {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -89,7 +68,6 @@ impl ProductType {
             ProductType::Variation => "variation",
         }
     }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "simple" => Some(ProductType::Simple),
@@ -99,13 +77,11 @@ impl ProductType {
         }
     }
 }
-
 impl std::fmt::Display for ProductType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 /// Product format (digital vs physical)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -114,7 +90,6 @@ pub enum ProductFormat {
     Digital,
     Physical,
 }
-
 impl ProductFormat {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -122,7 +97,6 @@ impl ProductFormat {
             ProductFormat::Physical => "physical",
         }
     }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "digital" => Some(ProductFormat::Digital),
@@ -130,22 +104,18 @@ impl ProductFormat {
             _ => None,
         }
     }
-
     pub fn is_digital(&self) -> bool {
         matches!(self, ProductFormat::Digital)
     }
-
     pub fn is_physical(&self) -> bool {
         matches!(self, ProductFormat::Physical)
     }
 }
-
 impl std::fmt::Display for ProductFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 /// Product visibility status
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -155,7 +125,6 @@ pub enum ProductVisibility {
     OnSale,
     PreOrder,
 }
-
 impl ProductVisibility {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -164,7 +133,6 @@ impl ProductVisibility {
             ProductVisibility::PreOrder => "pre-order",
         }
     }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "hidden" => Some(ProductVisibility::Hidden),
@@ -173,18 +141,15 @@ impl ProductVisibility {
             _ => None,
         }
     }
-
     pub fn is_visible(&self) -> bool {
         !matches!(self, ProductVisibility::Hidden)
     }
 }
-
 impl std::fmt::Display for ProductVisibility {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 /// Shipping service type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -195,7 +160,6 @@ pub enum ShippingService {
     Overnight,
     Pickup,
 }
-
 impl ShippingService {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -205,7 +169,6 @@ impl ShippingService {
             ShippingService::Pickup => "pickup",
         }
     }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "standard" => Some(ShippingService::Standard),
@@ -216,13 +179,11 @@ impl ShippingService {
         }
     }
 }
-
 impl std::fmt::Display for ShippingService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 /// Order status from marketplace spec
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -234,7 +195,6 @@ pub enum OrderStatus {
     Completed,
     Cancelled,
 }
-
 impl OrderStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -245,7 +205,6 @@ impl OrderStatus {
             OrderStatus::Cancelled => "cancelled",
         }
     }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "pending" => Some(OrderStatus::Pending),
@@ -256,7 +215,6 @@ impl OrderStatus {
             _ => None,
         }
     }
-
     pub fn is_active(&self) -> bool {
         matches!(
             self,
@@ -264,13 +222,11 @@ impl OrderStatus {
         )
     }
 }
-
 impl std::fmt::Display for OrderStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 /// Shipping status
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -281,7 +237,6 @@ pub enum ShippingStatus {
     Delivered,
     Exception,
 }
-
 impl ShippingStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -291,7 +246,6 @@ impl ShippingStatus {
             ShippingStatus::Exception => "exception",
         }
     }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "processing" => Some(ShippingStatus::Processing),
@@ -302,13 +256,11 @@ impl ShippingStatus {
         }
     }
 }
-
 impl std::fmt::Display for ShippingStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
 /// Order message type (for Kind 16)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderMessageType {
@@ -318,7 +270,6 @@ pub enum OrderMessageType {
     ShippingUpdate = 4,
     Message = 5,
 }
-
 impl OrderMessageType {
     /// Parse from numeric type value (per market-spec protocol)
     /// Used when receiving messages encoded with numeric type IDs
@@ -332,7 +283,6 @@ impl OrderMessageType {
             _ => None,
         }
     }
-
     /// Parse from string representation
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -344,7 +294,6 @@ impl OrderMessageType {
             _ => None,
         }
     }
-
     /// Convert to string for JSON serialization
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -356,17 +305,11 @@ impl OrderMessageType {
         }
     }
 }
-
 impl std::fmt::Display for OrderMessageType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
-
-// ============================================================================
-// Data Structures
-// ============================================================================
-
 /// Product price with currency and optional subscription frequency
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProductPrice {
@@ -377,7 +320,6 @@ pub struct ProductPrice {
     /// Optional subscription frequency (ISO 8601 duration: D, W, M, Y)
     pub frequency: Option<String>,
 }
-
 impl ProductPrice {
     pub fn new(amount: f64, currency: &str) -> Self {
         Self {
@@ -386,7 +328,6 @@ impl ProductPrice {
             frequency: None,
         }
     }
-
     pub fn with_frequency(amount: f64, currency: &str, frequency: &str) -> Self {
         Self {
             amount,
@@ -394,39 +335,38 @@ impl ProductPrice {
             frequency: Some(frequency.to_string()),
         }
     }
-
     /// Display price with currency
     pub fn display(&self) -> String {
-        if self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat") {
+        if self.currency.eq_ignore_ascii_case("sats")
+            || self.currency.eq_ignore_ascii_case("sat")
+        {
             format!("{:.0} sats", self.amount)
         } else {
             format!("{:.2} {}", self.amount, self.currency)
         }
     }
-
     /// Check if this is a subscription product
     pub fn is_subscription(&self) -> bool {
         self.frequency.is_some()
     }
-
     /// Get price in satoshis
     /// Returns the amount directly if currency is sats/sat
     /// Converts from fiat using exchange rate if available
     /// Returns None if conversion is not possible (no exchange rate)
     pub fn to_sats(&self) -> Option<u64> {
-        if self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat") {
+        if self.currency.eq_ignore_ascii_case("sats")
+            || self.currency.eq_ignore_ascii_case("sat")
+        {
             return Some(self.amount as u64);
         }
-        // Try to convert from fiat using exchange rate
         crate::services::btc_price::fiat_to_sats(self.amount, &self.currency)
     }
-
     /// Check if this price is in sats (no conversion needed)
     pub fn is_sats(&self) -> bool {
-        self.currency.eq_ignore_ascii_case("sats") || self.currency.eq_ignore_ascii_case("sat")
+        self.currency.eq_ignore_ascii_case("sats")
+            || self.currency.eq_ignore_ascii_case("sat")
     }
 }
-
 impl Default for ProductPrice {
     fn default() -> Self {
         Self {
@@ -436,7 +376,6 @@ impl Default for ProductPrice {
         }
     }
 }
-
 /// Product image with optional dimensions and sorting order
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProductImage {
@@ -444,18 +383,15 @@ pub struct ProductImage {
     pub dimensions: Option<String>,
     pub sort_order: Option<i32>,
 }
-
 /// Product specification (key-value pair)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProductSpec {
     pub key: String,
     pub value: String,
 }
-
 /// Product parsed from Kind 30402 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Product {
-    // Core identifiers
     /// Unique product identifier (d-tag)
     pub d_tag: String,
     /// Event ID (hex)
@@ -468,14 +404,10 @@ pub struct Product {
     pub coordinate: String,
     /// Created timestamp
     pub created_at: u64,
-
-    // Required fields
     /// Product title
     pub title: String,
     /// Price information
     pub price: ProductPrice,
-
-    // Optional fields
     /// Product description (markdown content)
     pub description: Option<String>,
     /// Short summary
@@ -510,8 +442,6 @@ pub struct Product {
     pub dimensions: Option<(String, String)>,
     /// Product condition (new, like_new, used, fair, refurbished)
     pub condition: Option<String>,
-
-    // Digital delivery fields
     /// Download URL for digital products (sent after purchase)
     pub download_url: Option<String>,
     /// License key for software products
@@ -523,29 +453,24 @@ pub struct Product {
     /// MIME type (e.g., "application/pdf", "video/mp4")
     pub file_type: Option<String>,
 }
-
 impl Product {
     /// Check if product is in stock
     pub fn is_in_stock(&self) -> bool {
         self.stock.map(|s| s > 0).unwrap_or(true)
     }
-
     /// Check if product is visible
     pub fn is_visible(&self) -> bool {
         self.visibility.is_visible()
     }
-
     /// Check if product requires shipping
     pub fn requires_shipping(&self) -> bool {
         self.format.is_physical()
     }
-
     /// Check if this is a digital product with delivery content
     pub fn has_digital_delivery(&self) -> bool {
         self.format == ProductFormat::Digital
             && (self.download_url.is_some() || self.license_key.is_some())
     }
-
     /// Get download info for display
     pub fn get_download_info(&self) -> Option<String> {
         if let Some(ref file_type) = self.file_type {
@@ -560,7 +485,6 @@ impl Product {
         }
     }
 }
-
 /// Format file size in human-readable format
 fn format_file_size(bytes: u64) -> String {
     if bytes < 1024 {
@@ -573,23 +497,17 @@ fn format_file_size(bytes: u64) -> String {
         format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
-
 /// Product Collection parsed from Kind 30405 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProductCollection {
-    // Identifiers
     pub d_tag: String,
     pub event_id: String,
     pub pubkey: String,
     pub naddr: String,
     pub coordinate: String,
     pub created_at: u64,
-
-    // Required fields
     pub title: String,
-    pub products: Vec<String>, // Product coordinates
-
-    // Optional fields
+    pub products: Vec<String>,
     pub description: Option<String>,
     pub summary: Option<String>,
     pub image: Option<String>,
@@ -597,32 +515,26 @@ pub struct ProductCollection {
     pub geohash: Option<String>,
     pub shipping_options: Vec<String>,
 }
-
 /// Shipping Option parsed from Kind 30406 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShippingOption {
-    // Identifiers
     pub d_tag: String,
     pub event_id: String,
     pub pubkey: String,
     pub naddr: String,
     pub coordinate: String,
     pub created_at: u64,
-
-    // Required fields
     pub title: String,
     pub base_price: f64,
     pub currency: String,
-    pub countries: Vec<String>, // ISO 3166-1 alpha-2 codes
+    pub countries: Vec<String>,
     pub service: ShippingService,
-
-    // Optional fields
     pub description: Option<String>,
     pub carrier: Option<String>,
-    pub regions: Vec<String>, // ISO 3166-2 codes
+    pub regions: Vec<String>,
     pub duration_min: Option<u32>,
     pub duration_max: Option<u32>,
-    pub duration_unit: Option<String>, // H, D, W
+    pub duration_unit: Option<String>,
     pub location: Option<String>,
     pub geohash: Option<String>,
     pub weight_min: Option<(f64, String)>,
@@ -633,13 +545,11 @@ pub struct ShippingOption {
     pub price_per_volume: Option<(f64, String)>,
     pub price_per_distance: Option<(f64, String)>,
 }
-
 impl ShippingOption {
     /// Display price with currency
     pub fn display_price(&self) -> String {
         format!("{:.2} {}", self.base_price, self.currency)
     }
-
     /// Convert shipping price to satoshis
     /// Returns None if currency is not supported or conversion fails
     pub fn to_sats(&self) -> Option<u64> {
@@ -647,10 +557,8 @@ impl ShippingOption {
         if currency_upper == "SATS" || currency_upper == "SAT" {
             return Some(self.base_price as u64);
         }
-        // Convert fiat to sats using exchange rate
         crate::services::btc_price::fiat_to_sats(self.base_price, &self.currency)
     }
-
     /// Display delivery estimate
     pub fn display_duration(&self) -> Option<String> {
         match (self.duration_min, self.duration_max, &self.duration_unit) {
@@ -667,21 +575,15 @@ impl ShippingOption {
         }
     }
 }
-
 /// Product Review parsed from Kind 31555 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProductReview {
-    // Identifiers
     pub d_tag: String,
     pub event_id: String,
     pub reviewer_pubkey: String,
     pub created_at: u64,
-
-    // Required fields
     pub product_coordinate: String,
-    pub thumb_rating: f64, // 0 or 1
-
-    // Optional fields
+    pub thumb_rating: f64,
     pub content: String,
     pub value_rating: Option<f64>,
     pub quality_rating: Option<f64>,
@@ -689,14 +591,12 @@ pub struct ProductReview {
     pub communication_rating: Option<f64>,
     pub custom_ratings: Vec<(String, f64)>,
 }
-
 impl ProductReview {
     /// Calculate total score per market-spec formula
     /// Total = (Thumb × 0.5) + (0.5 × (Σ(Category Ratings) ÷ Number of Categories))
     pub fn total_score(&self) -> f64 {
         let mut category_sum = 0.0;
         let mut category_count = 0;
-
         if let Some(v) = self.value_rating {
             category_sum += v;
             category_count += 1;
@@ -717,27 +617,23 @@ impl ProductReview {
             category_sum += v;
             category_count += 1;
         }
-
         if category_count == 0 {
             self.thumb_rating
         } else {
             (self.thumb_rating * 0.5) + (0.5 * (category_sum / category_count as f64))
         }
     }
-
     /// Convert 0-1 score to 5-star rating
     pub fn as_stars(&self) -> f64 {
         self.total_score() * 5.0
     }
 }
-
 /// Order item in an order
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrderItem {
     pub product_coordinate: String,
     pub quantity: u32,
 }
-
 /// Shopping cart item
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CartItem {
@@ -745,141 +641,78 @@ pub struct CartItem {
     pub quantity: u32,
     pub selected_shipping: Option<String>,
 }
-
 impl CartItem {
     /// Calculate line total in original currency
     pub fn line_total(&self) -> f64 {
         self.product.price.amount * self.quantity as f64
     }
 }
-
 /// Shop Order
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShopOrder {
-    // Identifiers
     pub order_id: String,
     pub buyer_pubkey: String,
     pub merchant_pubkey: String,
-
-    // Order details
     pub items: Vec<OrderItem>,
     pub amount_sats: u64,
     pub status: OrderStatus,
     pub shipping_status: Option<ShippingStatus>,
-
-    // Shipping
     pub shipping_option: Option<String>,
     pub shipping_address: Option<String>,
     pub tracking_number: Option<String>,
     pub carrier: Option<String>,
-
-    // Contact
     pub email: Option<String>,
     pub phone: Option<String>,
-
-    // Timestamps
     pub created_at: u64,
     pub updated_at: u64,
     pub paid_at: Option<u64>,
     pub shipped_at: Option<u64>,
     pub delivered_at: Option<u64>,
-
-    // Notes
     pub note: Option<String>,
-
-    // Digital delivery (populated when merchant sends delivery info)
     pub download_url: Option<String>,
     pub license_key: Option<String>,
 }
-
-// ============================================================================
-// Parsing Functions
-// ============================================================================
-
 /// Parse a Kind 30402 event into a Product
 pub fn parse_product(event: &Event) -> Result<Product, String> {
     if event.kind.as_u16() != KIND_PRODUCT {
-        return Err(format!(
-            "Expected kind {}, got {}",
-            KIND_PRODUCT,
-            event.kind.as_u16()
-        ));
+        return Err(
+            format!("Expected kind {}, got {}", KIND_PRODUCT, event.kind.as_u16()),
+        );
     }
-
     let pubkey = event.pubkey.to_hex();
-
-    // Required: d-tag
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
-
-    // Required: title
     let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
-
-    // Required: price [amount, currency, frequency?]
     let price = parse_price_tag(event).ok_or("Missing or invalid 'price' tag")?;
-
-    // Build coordinate and naddr
     let coordinate = format!("{}:{}:{}", KIND_PRODUCT, pubkey, d_tag);
     let naddr = build_naddr(&pubkey, &d_tag, KIND_PRODUCT).unwrap_or_default();
-
-    // Optional: type [type, format]
     let (product_type, format) = parse_type_tag(event);
-
-    // Optional: visibility
     let visibility = get_tag_value(event, "visibility")
         .and_then(|s| ProductVisibility::from_str(&s))
         .unwrap_or_default();
-
-    // Optional: stock
     let stock = get_tag_value(event, "stock").and_then(|s| s.parse().ok());
-
-    // Optional: summary
     let summary = get_tag_value(event, "summary");
-
-    // Optional: images
     let images = parse_image_tags(event);
-
-    // Optional: specs
     let specs = parse_spec_tags(event);
-
-    // Optional: categories (t tags)
     let categories = get_all_tag_values(event, "t");
-
-    // Optional: shipping_option tags
     let shipping_options = get_all_tag_values(event, "shipping_option");
-
-    // Optional: collection references (a tags starting with 30405:)
     let collections = get_all_tag_values(event, "a")
         .into_iter()
         .filter(|a| a.starts_with("30405:"))
         .collect();
-
-    // Optional: parent product reference (a tag starting with 30402:)
     let parent_product = get_all_tag_values(event, "a")
         .into_iter()
         .find(|a| a.starts_with("30402:"));
-
-    // Optional: location
     let location = get_tag_value(event, "location");
-
-    // Optional: geohash
     let geohash = get_tag_value(event, "g");
-
-    // Optional: weight
     let weight = parse_weight_tag(event, "weight");
-
-    // Optional: dimensions
     let dimensions = parse_dim_tag(event);
-
-    // Optional: condition
     let condition = get_tag_value(event, "condition");
-
-    // Digital delivery fields
     let download_url = get_tag_value(event, "download");
     let license_key = get_tag_value(event, "license");
     let content_hash = parse_hash_tag(event, "sha256");
     let file_size = get_tag_value(event, "size").and_then(|s| s.parse().ok());
-    let file_type = get_tag_value(event, "type").or_else(|| get_tag_value(event, "mime"));
-
+    let file_type = get_tag_value(event, "type")
+        .or_else(|| get_tag_value(event, "mime"));
     Ok(Product {
         d_tag,
         event_id: event.id.to_hex(),
@@ -913,35 +746,22 @@ pub fn parse_product(event: &Event) -> Result<Product, String> {
         file_type,
     })
 }
-
 /// Parse a Kind 30405 event into a ProductCollection
 pub fn parse_collection(event: &Event) -> Result<ProductCollection, String> {
     if event.kind.as_u16() != KIND_COLLECTION {
-        return Err(format!(
-            "Expected kind {}, got {}",
-            KIND_COLLECTION,
-            event.kind.as_u16()
-        ));
+        return Err(
+            format!("Expected kind {}, got {}", KIND_COLLECTION, event.kind.as_u16()),
+        );
     }
-
     let pubkey = event.pubkey.to_hex();
-
-    // Required: d-tag
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
-
-    // Required: title
     let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
-
-    // Required: product references (a tags)
     let products = get_all_tag_values(event, "a")
         .into_iter()
         .filter(|a| a.starts_with("30402:"))
         .collect();
-
-    // Build coordinate and naddr
     let coordinate = format!("{}:{}:{}", KIND_COLLECTION, pubkey, d_tag);
     let naddr = build_naddr(&pubkey, &d_tag, KIND_COLLECTION).unwrap_or_default();
-
     Ok(ProductCollection {
         d_tag,
         event_id: event.id.to_hex(),
@@ -959,47 +779,28 @@ pub fn parse_collection(event: &Event) -> Result<ProductCollection, String> {
         shipping_options: get_all_tag_values(event, "shipping_option"),
     })
 }
-
 /// Parse a Kind 30406 event into a ShippingOption
 pub fn parse_shipping(event: &Event) -> Result<ShippingOption, String> {
     if event.kind.as_u16() != KIND_SHIPPING {
-        return Err(format!(
-            "Expected kind {}, got {}",
-            KIND_SHIPPING,
-            event.kind.as_u16()
-        ));
+        return Err(
+            format!("Expected kind {}, got {}", KIND_SHIPPING, event.kind.as_u16()),
+        );
     }
-
     let pubkey = event.pubkey.to_hex();
-
-    // Required: d-tag
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
-
-    // Required: title
     let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
-
-    // Required: price [base_cost, currency]
-    let (base_price, currency) =
-        parse_shipping_price_tag(event).ok_or("Missing or invalid 'price' tag")?;
-
-    // Required: country
+    let (base_price, currency) = parse_shipping_price_tag(event)
+        .ok_or("Missing or invalid 'price' tag")?;
     let countries = get_tag_values(event, "country");
     if countries.is_empty() {
         return Err("Missing required 'country' tag".to_string());
     }
-
-    // Required: service
     let service = get_tag_value(event, "service")
         .and_then(|s| ShippingService::from_str(&s))
         .ok_or("Missing or invalid 'service' tag")?;
-
-    // Build coordinate and naddr
     let coordinate = format!("{}:{}:{}", KIND_SHIPPING, pubkey, d_tag);
     let naddr = build_naddr(&pubkey, &d_tag, KIND_SHIPPING).unwrap_or_default();
-
-    // Optional: duration [min, max, unit]
     let (duration_min, duration_max, duration_unit) = parse_duration_tag(event);
-
     Ok(ShippingOption {
         d_tag,
         event_id: event.id.to_hex(),
@@ -1029,39 +830,26 @@ pub fn parse_shipping(event: &Event) -> Result<ShippingOption, String> {
         price_per_distance: parse_price_unit_tag(event, "price-distance"),
     })
 }
-
 /// Parse a Kind 31555 event into a ProductReview
 pub fn parse_review(event: &Event) -> Result<ProductReview, String> {
     if event.kind.as_u16() != KIND_REVIEW {
-        return Err(format!(
-            "Expected kind {}, got {}",
-            KIND_REVIEW,
-            event.kind.as_u16()
-        ));
+        return Err(
+            format!("Expected kind {}, got {}", KIND_REVIEW, event.kind.as_u16()),
+        );
     }
-
-    // Required: d-tag (product reference)
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
-
-    // The d-tag should be "a:30402:pubkey:product-d-tag"
     let product_coordinate = if let Some(stripped) = d_tag.strip_prefix("a:") {
         stripped.to_string()
     } else {
         d_tag.clone()
     };
-
-    // Required: rating with "thumb" label
-    let thumb_rating = parse_rating_tag(event, "thumb").ok_or("Missing required 'thumb' rating")?;
-
-    // Optional category ratings
+    let thumb_rating = parse_rating_tag(event, "thumb")
+        .ok_or("Missing required 'thumb' rating")?;
     let value_rating = parse_rating_tag(event, "value");
     let quality_rating = parse_rating_tag(event, "quality");
     let delivery_rating = parse_rating_tag(event, "delivery");
     let communication_rating = parse_rating_tag(event, "communication");
-
-    // Custom ratings
     let custom_ratings = parse_custom_ratings(event);
-
     Ok(ProductReview {
         d_tag,
         event_id: event.id.to_hex(),
@@ -1077,11 +865,6 @@ pub fn parse_review(event: &Event) -> Result<ProductReview, String> {
         custom_ratings,
     })
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
 /// Get a tag value by name (first value after tag name)
 fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
     event
@@ -1090,7 +873,6 @@ fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
         .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
 }
-
 /// Get all values from a single tag (for multi-value tags like country)
 fn get_tag_values(event: &Event, tag_name: &str) -> Vec<String> {
     event
@@ -1100,7 +882,6 @@ fn get_tag_values(event: &Event, tag_name: &str) -> Vec<String> {
         .map(|t| t.as_slice()[1..].iter().map(|s| s.to_string()).collect())
         .unwrap_or_default()
 }
-
 /// Get values from all tags with the same name (for repeatable tags like image, t)
 fn get_all_tag_values(event: &Event, tag_name: &str) -> Vec<String> {
     event
@@ -1110,46 +891,40 @@ fn get_all_tag_values(event: &Event, tag_name: &str) -> Vec<String> {
         .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
         .collect()
 }
-
 /// Parse price tag: ["price", amount, currency, frequency?]
 fn parse_price_tag(event: &Event) -> Option<ProductPrice> {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("price"))?;
-
     let slice = tag.as_slice();
     let amount = slice.get(1)?.parse::<f64>().ok()?;
     let currency = slice.get(2)?;
     let frequency = slice.get(3).filter(|s| !s.is_empty());
-
-    Some(match frequency {
-        Some(freq) => ProductPrice::with_frequency(amount, currency, freq),
-        None => ProductPrice::new(amount, currency),
-    })
+    Some(
+        match frequency {
+            Some(freq) => ProductPrice::with_frequency(amount, currency, freq),
+            None => ProductPrice::new(amount, currency),
+        },
+    )
 }
-
 /// Parse shipping price tag: ["price", base_cost, currency]
 fn parse_shipping_price_tag(event: &Event) -> Option<(f64, String)> {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("price"))?;
-
     let slice = tag.as_slice();
     let base_price = slice.get(1)?.parse::<f64>().ok()?;
     let currency = slice.get(2)?.to_string();
-
     Some((base_price, currency))
 }
-
 /// Parse type tag: ["type", type, format]
 fn parse_type_tag(event: &Event) -> (ProductType, ProductFormat) {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("type"));
-
     match tag {
         Some(t) => {
             let slice = t.as_slice();
@@ -1166,7 +941,6 @@ fn parse_type_tag(event: &Event) -> (ProductType, ProductFormat) {
         None => (ProductType::default(), ProductFormat::default()),
     }
 }
-
 /// Parse image tags: ["image", url, dimensions?, sort_order?]
 fn parse_image_tags(event: &Event) -> Vec<ProductImage> {
     event
@@ -1189,7 +963,6 @@ fn parse_image_tags(event: &Event) -> Vec<ProductImage> {
         })
         .collect()
 }
-
 /// Parse spec tags: ["spec", key, value]
 fn parse_spec_tags(event: &Event) -> Vec<ProductSpec> {
     event
@@ -1204,39 +977,31 @@ fn parse_spec_tags(event: &Event) -> Vec<ProductSpec> {
         })
         .collect()
 }
-
 /// Parse weight tag: ["weight", value, unit]
 fn parse_weight_tag(event: &Event, tag_name: &str) -> Option<(f64, String)> {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))?;
-
     let slice = tag.as_slice();
     let value = slice.get(1)?.parse::<f64>().ok()?;
     let unit = slice.get(2)?.to_string();
-
     Some((value, unit))
 }
-
 /// Parse dim tag: ["dim", l×w×h, unit]
 fn parse_dim_tag(event: &Event) -> Option<(String, String)> {
     parse_dim_tag_named(event, "dim")
 }
-
 fn parse_dim_tag_named(event: &Event, tag_name: &str) -> Option<(String, String)> {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))?;
-
     let slice = tag.as_slice();
     let dims = slice.get(1)?.to_string();
     let unit = slice.get(2)?.to_string();
-
     Some((dims, unit))
 }
-
 /// Parse hash tag: ["hash", algorithm, value] -> returns value if algorithm matches
 fn parse_hash_tag(event: &Event, algorithm: &str) -> Option<String> {
     event
@@ -1249,14 +1014,12 @@ fn parse_hash_tag(event: &Event, algorithm: &str) -> Option<String> {
         })
         .and_then(|t| t.as_slice().get(2).map(|s| s.to_string()))
 }
-
 /// Parse duration tag: ["duration", min, max, unit]
 fn parse_duration_tag(event: &Event) -> (Option<u32>, Option<u32>, Option<String>) {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("duration"));
-
     match tag {
         Some(t) => {
             let slice = t.as_slice();
@@ -1268,21 +1031,17 @@ fn parse_duration_tag(event: &Event) -> (Option<u32>, Option<u32>, Option<String
         None => (None, None, None),
     }
 }
-
 /// Parse price-per-unit tag: ["price-weight", price, unit]
 fn parse_price_unit_tag(event: &Event, tag_name: &str) -> Option<(f64, String)> {
     let tag = event
         .tags
         .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))?;
-
     let slice = tag.as_slice();
     let price = slice.get(1)?.parse::<f64>().ok()?;
     let unit = slice.get(2)?.to_string();
-
     Some((price, unit))
 }
-
 /// Parse rating tag with specific category: ["rating", score, category]
 fn parse_rating_tag(event: &Event, category: &str) -> Option<f64> {
     event
@@ -1292,11 +1051,9 @@ fn parse_rating_tag(event: &Event, category: &str) -> Option<f64> {
         .find(|t| t.as_slice().get(2).map(|s| s.as_str()) == Some(category))
         .and_then(|t| t.as_slice().get(1)?.parse::<f64>().ok())
 }
-
 /// Parse custom rating tags (not thumb, value, quality, delivery, communication)
 fn parse_custom_ratings(event: &Event) -> Vec<(String, f64)> {
     let standard_categories = ["thumb", "value", "quality", "delivery", "communication"];
-
     event
         .tags
         .iter()
@@ -1305,7 +1062,6 @@ fn parse_custom_ratings(event: &Event) -> Vec<(String, f64)> {
             let slice = t.as_slice();
             let score = slice.get(1)?.parse::<f64>().ok()?;
             let category = slice.get(2)?.to_string();
-
             if standard_categories.contains(&category.as_str()) {
                 None
             } else {
@@ -1314,7 +1070,6 @@ fn parse_custom_ratings(event: &Event) -> Vec<(String, f64)> {
         })
         .collect()
 }
-
 /// Build naddr from pubkey and d-tag
 fn build_naddr(pubkey: &str, d_tag: &str, kind: u16) -> Option<String> {
     let pk = PublicKey::from_hex(pubkey).ok()?;
@@ -1322,66 +1077,34 @@ fn build_naddr(pubkey: &str, d_tag: &str, kind: u16) -> Option<String> {
     let nip19 = Nip19Coordinate::new(coordinate, vec![]);
     nip19.to_bech32().ok()
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_product_type_from_str() {
         assert_eq!(ProductType::from_str("simple"), Some(ProductType::Simple));
-        assert_eq!(
-            ProductType::from_str("variable"),
-            Some(ProductType::Variable)
-        );
-        assert_eq!(
-            ProductType::from_str("variation"),
-            Some(ProductType::Variation)
-        );
+        assert_eq!(ProductType::from_str("variable"), Some(ProductType::Variable));
+        assert_eq!(ProductType::from_str("variation"), Some(ProductType::Variation));
     }
-
     #[test]
     fn test_product_format_from_str() {
-        assert_eq!(
-            ProductFormat::from_str("digital"),
-            Some(ProductFormat::Digital)
-        );
-        assert_eq!(
-            ProductFormat::from_str("physical"),
-            Some(ProductFormat::Physical)
-        );
+        assert_eq!(ProductFormat::from_str("digital"), Some(ProductFormat::Digital));
+        assert_eq!(ProductFormat::from_str("physical"), Some(ProductFormat::Physical));
     }
-
     #[test]
     fn test_product_price_display() {
         let price = ProductPrice::new(100.0, "USD");
         assert_eq!(price.display(), "100.00 USD");
-
         let sats_price = ProductPrice::new(10000.0, "sats");
         assert_eq!(sats_price.display(), "10000 sats");
     }
-
     #[test]
     fn test_order_status_from_str() {
         assert_eq!(OrderStatus::from_str("pending"), Some(OrderStatus::Pending));
-        assert_eq!(
-            OrderStatus::from_str("confirmed"),
-            Some(OrderStatus::Confirmed)
-        );
-        assert_eq!(
-            OrderStatus::from_str("cancelled"),
-            Some(OrderStatus::Cancelled)
-        );
-        assert_eq!(
-            OrderStatus::from_str("canceled"),
-            Some(OrderStatus::Cancelled)
-        );
+        assert_eq!(OrderStatus::from_str("confirmed"), Some(OrderStatus::Confirmed));
+        assert_eq!(OrderStatus::from_str("cancelled"), Some(OrderStatus::Cancelled));
+        assert_eq!(OrderStatus::from_str("canceled"), Some(OrderStatus::Cancelled));
     }
-
     #[test]
     fn test_review_total_score() {
         let review = ProductReview {
@@ -1398,27 +1121,15 @@ mod tests {
             communication_rating: Some(0.9),
             custom_ratings: vec![],
         };
-
-        // (1.0 * 0.5) + (0.5 * ((0.8 + 1.0 + 0.6 + 0.9) / 4))
-        // = 0.5 + (0.5 * 0.825)
-        // = 0.5 + 0.4125
-        // = 0.9125
         assert!((review.total_score() - 0.9125).abs() < 0.001);
     }
-
     #[test]
     fn test_shipping_service_from_str() {
         assert_eq!(
             ShippingService::from_str("standard"),
-            Some(ShippingService::Standard)
+            Some(ShippingService::Standard),
         );
-        assert_eq!(
-            ShippingService::from_str("express"),
-            Some(ShippingService::Express)
-        );
-        assert_eq!(
-            ShippingService::from_str("pickup"),
-            Some(ShippingService::Pickup)
-        );
+        assert_eq!(ShippingService::from_str("express"), Some(ShippingService::Express));
+        assert_eq!(ShippingService::from_str("pickup"), Some(ShippingService::Pickup));
     }
 }

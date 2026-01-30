@@ -4,94 +4,65 @@ use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum StatusFilter {
     Live,
     Upcoming,
     All,
 }
-
 #[component]
 pub fn VideosLive() -> Element {
-    // Following streams state
     let mut following_streams = use_signal(Vec::<Event>::new);
     let mut loading_following = use_signal(|| false);
     let mut has_more_following = use_signal(|| true);
     let mut oldest_timestamp_following = use_signal(|| None::<u64>);
     let mut error_following = use_signal(|| None::<String>);
-
-    // Global streams state
     let mut global_streams = use_signal(Vec::<Event>::new);
     let mut loading_global = use_signal(|| false);
     let mut has_more_global = use_signal(|| true);
     let mut oldest_timestamp_global = use_signal(|| None::<u64>);
     let mut error_global = use_signal(|| None::<String>);
-
     let mut status_filter = use_signal(|| StatusFilter::Live);
     let mut refresh_trigger = use_signal(|| 0);
-
-    // Request IDs for preventing stale results
     let mut request_id_following = use_signal(|| 0u32);
     let mut request_id_global = use_signal(|| 0u32);
-
-    // Track last intentional load triggers
     let mut last_loaded_following = use_signal(|| (0u32, StatusFilter::Live));
     let mut last_loaded_global = use_signal(|| (0u32, StatusFilter::Live));
-
-    // Load following streams
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_status = *status_filter.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
-        // Guard: Only reload if intentional change or no data
         let (last_refresh, last_status) = *last_loaded_following.peek();
         let has_data = !following_streams.peek().is_empty();
-
         let status_changed = current_status != last_status;
         let refresh_changed = refresh != last_refresh;
-
         if has_data && !status_changed && !refresh_changed {
             log::debug!("Skipping following streams re-load: data already present");
             return;
         }
-
-        // Update last loaded trigger
         last_loaded_following.set((refresh, current_status));
-
-        // Generate request ID for stale request prevention
         let current_id = *request_id_following.peek() + 1;
         request_id_following.set(current_id);
-
-        // Only show loading if no data exists
         if !has_data {
             loading_following.set(true);
         }
         error_following.set(None);
         oldest_timestamp_following.set(None);
         has_more_following.set(true);
-
         spawn(async move {
-            // Check if this request is still current
             if *request_id_following.peek() != current_id {
                 log::debug!("Discarding stale following streams request {}", current_id);
                 return;
             }
-
             match load_following_streams(None, current_status).await {
                 Ok((events, next_until, hit_limit, did_fallback)) => {
-                    // If fallback occurred, clear the following streams to avoid duplicate with global
-                    // This happens when user has no contacts
                     if did_fallback {
                         log::info!("No contacts, hiding Following streams section");
                         following_streams.set(Vec::new());
                     } else {
-                        // Set cursor from raw data, not filtered results
                         oldest_timestamp_following.set(next_until);
                         has_more_following.set(hit_limit);
                         following_streams.set(events);
@@ -105,56 +76,38 @@ pub fn VideosLive() -> Element {
             }
         });
     });
-
-    // Load global streams
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_status = *status_filter.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
-        // Guard: Only reload if intentional change or no data
         let (last_refresh, last_status) = *last_loaded_global.peek();
         let has_data = !global_streams.peek().is_empty();
-
         let status_changed = current_status != last_status;
         let refresh_changed = refresh != last_refresh;
-
         if has_data && !status_changed && !refresh_changed {
             log::debug!("Skipping global streams re-load: data already present");
             return;
         }
-
-        // Update last loaded trigger
         last_loaded_global.set((refresh, current_status));
-
-        // Generate request ID for stale request prevention
         let current_id = *request_id_global.peek() + 1;
         request_id_global.set(current_id);
-
-        // Only show loading if no data exists
         if !has_data {
             loading_global.set(true);
         }
         error_global.set(None);
         oldest_timestamp_global.set(None);
         has_more_global.set(true);
-
         spawn(async move {
-            // Check if this request is still current
             if *request_id_global.peek() != current_id {
                 log::debug!("Discarding stale global streams request {}", current_id);
                 return;
             }
-
             match load_global_streams(None, current_status).await {
                 Ok((events, next_until, hit_limit)) => {
-                    // Set cursor from raw data, not filtered results
                     oldest_timestamp_global.set(next_until);
-
                     has_more_global.set(hit_limit);
                     global_streams.set(events);
                     loading_global.set(false);
@@ -166,37 +119,26 @@ pub fn VideosLive() -> Element {
             }
         });
     });
-
-    // Load more following streams
     let mut load_more_following = move || {
         if *loading_following.read() || !*has_more_following.read() {
             return;
         }
-
         let until = *oldest_timestamp_following.read();
         let current_status = *status_filter.read();
-
         loading_following.set(true);
-
         spawn(async move {
-            // Note: During pagination, we ignore the fallback flag since we already showed following section
             match load_following_streams(until, current_status).await {
                 Ok((new_events, next_until, hit_limit, _did_fallback)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = following_streams.read();
                         current.iter().map(|e| e.id).collect()
                     };
-
                     let unique_events: Vec<_> = new_events
                         .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
-
-                    // Set cursor from raw data, not filtered results
                     oldest_timestamp_following.set(next_until);
-
                     has_more_following.set(hit_limit);
-
                     if !unique_events.is_empty() {
                         let mut current = following_streams.read().clone();
                         current.extend(unique_events);
@@ -211,18 +153,13 @@ pub fn VideosLive() -> Element {
             }
         });
     };
-
-    // Load more global streams
     let mut load_more_global = move || {
         if *loading_global.read() || !*has_more_global.read() {
             return;
         }
-
         let until = *oldest_timestamp_global.read();
         let current_status = *status_filter.read();
-
         loading_global.set(true);
-
         spawn(async move {
             match load_global_streams(until, current_status).await {
                 Ok((new_events, next_until, hit_limit)) => {
@@ -230,17 +167,12 @@ pub fn VideosLive() -> Element {
                         let current = global_streams.read();
                         current.iter().map(|e| e.id).collect()
                     };
-
                     let unique_events: Vec<_> = new_events
                         .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
-
-                    // Set cursor from raw data, not filtered results
                     oldest_timestamp_global.set(next_until);
-
                     has_more_global.set(hit_limit);
-
                     if !unique_events.is_empty() {
                         let mut current = global_streams.read().clone();
                         current.extend(unique_events);
@@ -255,21 +187,11 @@ pub fn VideosLive() -> Element {
             }
         });
     };
-
-    // Note: Infinite scroll handled by individual "Load more" buttons for each section
-
     rsx! {
-        div {
-            class: "min-h-screen bg-background",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
-                div {
-                    class: "px-6 py-4 flex items-center justify-between max-w-[1600px] mx-auto",
-
-                    h1 {
-                        class: "text-2xl font-bold flex items-center gap-3",
+        div { class: "min-h-screen bg-background",
+            div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
+                div { class: "px-6 py-4 flex items-center justify-between max-w-[1600px] mx-auto",
+                    h1 { class: "text-2xl font-bold flex items-center gap-3",
                         svg {
                             class: "w-7 h-7",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -280,16 +202,12 @@ pub fn VideosLive() -> Element {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
                                 stroke_width: "2",
-                                d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
                             }
                         }
                         "Live Streams"
                     }
-
-                    div {
-                        class: "flex items-center gap-3",
-
-                        // Create Stream button
+                    div { class: "flex items-center gap-3",
                         if auth_store::AUTH_STATE.read().is_authenticated {
                             Link {
                                 to: Route::LiveStreamNew {},
@@ -297,7 +215,6 @@ pub fn VideosLive() -> Element {
                                 "Create Stream"
                             }
                         }
-
                         button {
                             class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
                             disabled: *loading_following.read() || *loading_global.read(),
@@ -307,9 +224,7 @@ pub fn VideosLive() -> Element {
                             },
                             title: "Refresh",
                             if *loading_following.read() || *loading_global.read() {
-                                span {
-                                    class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin"
-                                }
+                                span { class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin" }
                             } else {
                                 crate::components::icons::RefreshIcon { class: "w-5 h-5" }
                             }
@@ -317,92 +232,56 @@ pub fn VideosLive() -> Element {
                     }
                 }
             }
-
-            // Content
-            div {
-                class: "max-w-[1600px] mx-auto px-6 py-6",
-
+            div { class: "max-w-[1600px] mx-auto px-6 py-6",
                 if !*nostr_client::CLIENT_INITIALIZED.read() {
                     ClientInitializing {}
                 } else {
-                    // Status filter tabs
-                    div {
-                        class: "flex gap-2 mb-6",
+                    div { class: "flex gap-2 mb-6",
                         button {
-                            class: if *status_filter.read() == StatusFilter::Live {
-                                "px-4 py-2 bg-red-600 text-white font-medium rounded-lg"
-                            } else {
-                                "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition"
-                            },
+                            class: if *status_filter.read() == StatusFilter::Live { "px-4 py-2 bg-red-600 text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
                             onclick: move |_| status_filter.set(StatusFilter::Live),
                             "🔴 Live"
                         }
                         button {
-                            class: if *status_filter.read() == StatusFilter::Upcoming {
-                                "px-4 py-2 bg-blue-600 text-white font-medium rounded-lg"
-                            } else {
-                                "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition"
-                            },
+                            class: if *status_filter.read() == StatusFilter::Upcoming { "px-4 py-2 bg-blue-600 text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
                             onclick: move |_| status_filter.set(StatusFilter::Upcoming),
                             "Upcoming"
                         }
                         button {
-                            class: if *status_filter.read() == StatusFilter::All {
-                                "px-4 py-2 bg-primary text-white font-medium rounded-lg"
-                            } else {
-                                "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition"
-                            },
+                            class: if *status_filter.read() == StatusFilter::All { "px-4 py-2 bg-primary text-white font-medium rounded-lg" } else { "px-4 py-2 bg-accent hover:bg-accent/80 font-medium rounded-lg transition" },
                             onclick: move |_| status_filter.set(StatusFilter::All),
                             "All"
                         }
                     }
-
-                    // Following section - only show if loading or has streams
-                    if *loading_following.read() || !following_streams.read().is_empty() || error_following.read().is_some() {
-                        div {
-                            class: "mb-12",
-                            h2 {
-                                class: "text-xl font-bold mb-4",
-                                "Following"
-                            }
-
+                    if *loading_following.read() || !following_streams.read().is_empty()
+                        || error_following.read().is_some()
+                    {
+                        div { class: "mb-12",
+                            h2 { class: "text-xl font-bold mb-4", "Following" }
                             if *loading_following.read() && following_streams.read().is_empty() {
-                                div {
-                                    class: "flex items-center justify-center py-20",
-                                    div {
-                                        class: "w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
-                                    }
+                                div { class: "flex items-center justify-center py-20",
+                                    div { class: "w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" }
                                 }
                             } else if let Some(err) = error_following.read().as_ref() {
-                                div {
-                                    class: "text-center py-20 text-muted-foreground",
+                                div { class: "text-center py-20 text-muted-foreground",
                                     "Error loading streams: {err}"
                                 }
                             } else {
-                                div {
-                                    class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
+                                div { class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                     for event in following_streams.read().iter() {
                                         MiniLiveStreamCard {
                                             key: "{event.id}",
-                                            event: event.clone()
+                                            event: event.clone(),
                                         }
                                     }
                                 }
-
-                                // Loading indicator
                                 if *loading_following.read() {
-                                    div {
-                                        class: "flex items-center justify-center py-8",
-                                        div {
-                                            class: "w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
-                                        }
+                                    div { class: "flex items-center justify-center py-8",
+                                        div { class: "w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" }
                                     }
                                 }
-
-                                // Load more button
                                 if *has_more_following.read() && !*loading_following.read() {
-                                    div {
-                                        class: "flex justify-center mt-6",
+                                    div { class: "flex justify-center mt-6",
                                         button {
                                             class: "px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                             onclick: move |_| load_more_following(),
@@ -413,56 +292,36 @@ pub fn VideosLive() -> Element {
                             }
                         }
                     }
-
-                    // Global section
                     div {
-                        h2 {
-                            class: "text-xl font-bold mb-4",
-                            "Global"
-                        }
-
+                        h2 { class: "text-xl font-bold mb-4", "Global" }
                         if *loading_global.read() && global_streams.read().is_empty() {
-                            div {
-                                class: "flex items-center justify-center py-20",
-                                div {
-                                    class: "w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
-                                }
+                            div { class: "flex items-center justify-center py-20",
+                                div { class: "w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" }
                             }
                         } else if let Some(err) = error_global.read().as_ref() {
-                            div {
-                                class: "text-center py-20 text-muted-foreground",
+                            div { class: "text-center py-20 text-muted-foreground",
                                 "Error loading streams: {err}"
                             }
                         } else if global_streams.read().is_empty() {
-                            div {
-                                class: "text-center py-20 text-muted-foreground",
+                            div { class: "text-center py-20 text-muted-foreground",
                                 "No global streams found"
                             }
                         } else {
-                            div {
-                                class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
+                            div { class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for event in global_streams.read().iter() {
                                     MiniLiveStreamCard {
                                         key: "{event.id}",
-                                        event: event.clone()
+                                        event: event.clone(),
                                     }
                                 }
                             }
-
-                            // Loading indicator
                             if *loading_global.read() {
-                                div {
-                                    class: "flex items-center justify-center py-8",
-                                    div {
-                                        class: "w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"
-                                    }
+                                div { class: "flex items-center justify-center py-8",
+                                    div { class: "w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" }
                                 }
                             }
-
-                            // Load more button
                             if *has_more_global.read() && !*loading_global.read() {
-                                div {
-                                    class: "flex justify-center mt-6",
+                                div { class: "flex justify-center mt-6",
                                     button {
                                         class: "px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                         onclick: move |_| load_more_global(),
@@ -477,9 +336,6 @@ pub fn VideosLive() -> Element {
         }
     }
 }
-
-// Helper functions to load streams
-
 /// Returns (events, next_until, hit_limit, did_fallback)
 async fn load_following_streams(
     until: Option<u64>,
@@ -490,64 +346,44 @@ async fn load_following_streams(
         .pubkey
         .clone()
         .ok_or("Not authenticated")?;
-
-    // Fetch contacts
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
-            log::warn!(
-                "Failed to fetch contacts: {}, falling back to global feed",
-                e
-            );
-            let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
+            log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
+            let (events, next_until, hit_limit) = load_global_streams(until, status)
+                .await?;
             return Ok((events, next_until, hit_limit, true));
         }
     };
-
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global streams");
         let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
         return Ok((events, next_until, hit_limit, true));
     }
-
-    // Parse contact pubkeys into a HashSet for efficient lookup
     let followed_pubkeys: std::collections::HashSet<String> = contacts
         .iter()
         .filter_map(|contact| PublicKey::parse(contact).ok().map(|pk| pk.to_string()))
         .collect();
-
     if followed_pubkeys.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
         let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
         return Ok((events, next_until, hit_limit, true));
     }
-
-    // Fetch all recent livestream events (we'll filter client-side)
-    // We need to fetch more than just author-filtered to catch streams where the creator is in p tag
-    let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(100); // Fetch more since we'll filter client-side
-
+    let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(100);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-
-    // Compute pagination from raw events BEFORE filtering
     let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
     let hit_limit = events.len() >= 100;
-
-    // Filter events where either the publisher OR the creator (p tag) is followed
     let following_events: Vec<Event> = events
         .into_iter()
         .filter(|event| {
-            // Check if publisher is followed
             if followed_pubkeys.contains(&event.pubkey.to_string()) {
                 return true;
             }
-
-            // Check if creator (first p tag) is followed
             for tag in event.tags.iter() {
                 let tag_vec = tag.clone().to_vec();
                 if tag_vec.first().map(|s| s.as_str()) == Some("p") {
@@ -556,66 +392,65 @@ async fn load_following_streams(
                             return true;
                         }
                     }
-                    break; // Only check first p tag
+                    break;
                 }
             }
-
             false
         })
         .collect();
-
     let filtered_events = filter_by_status(following_events, status);
-
     Ok((filtered_events, next_until, hit_limit, false))
 }
-
 async fn load_global_streams(
     until: Option<u64>,
     status: StatusFilter,
 ) -> Result<(Vec<Event>, Option<u64>, bool), String> {
-    // Fetch only livestream events (Kind 30311) so pagination reflects actual livestream availability
     let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(50);
-
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
         .await
         .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-
-    // Compute next_until from raw events BEFORE filtering
     let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
-
-    // Base has_more on raw page size, not filtered results
     let hit_limit = events.len() >= 50;
     let filtered_events = filter_by_status(events, status);
-
     Ok((filtered_events, next_until, hit_limit))
 }
-
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {
     match status {
         StatusFilter::All => events,
-        StatusFilter::Live => events
-            .into_iter()
-            .filter(|event| {
-                event.tags.iter().any(|tag| {
-                    let tag_vec = tag.clone().to_vec();
-                    tag_vec.first().map(|s| s.as_str()) == Some("status")
-                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("live".to_string())
+        StatusFilter::Live => {
+            events
+                .into_iter()
+                .filter(|event| {
+                    event
+                        .tags
+                        .iter()
+                        .any(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            tag_vec.first().map(|s| s.as_str()) == Some("status")
+                                && tag_vec.get(1).map(|s| s.to_lowercase())
+                                    == Some("live".to_string())
+                        })
                 })
-            })
-            .collect(),
-        StatusFilter::Upcoming => events
-            .into_iter()
-            .filter(|event| {
-                event.tags.iter().any(|tag| {
-                    let tag_vec = tag.clone().to_vec();
-                    tag_vec.first().map(|s| s.as_str()) == Some("status")
-                        && tag_vec.get(1).map(|s| s.to_lowercase()) == Some("planned".to_string())
+                .collect()
+        }
+        StatusFilter::Upcoming => {
+            events
+                .into_iter()
+                .filter(|event| {
+                    event
+                        .tags
+                        .iter()
+                        .any(|tag| {
+                            let tag_vec = tag.clone().to_vec();
+                            tag_vec.first().map(|s| s.as_str()) == Some("status")
+                                && tag_vec.get(1).map(|s| s.to_lowercase())
+                                    == Some("planned".to_string())
+                        })
                 })
-            })
-            .collect(),
+                .collect()
+        }
     }
 }

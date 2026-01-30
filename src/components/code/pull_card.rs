@@ -1,80 +1,48 @@
 //! Code Pull Request Card Component
 //!
 //! Displays NIP-34 Git patches/PRs in cards.
-
 use super::status_badge::{status_color_class, BadgeSize, CodeStatusBadge};
 use crate::routes::Route;
 use crate::utils::format::truncate_commit;
 use crate::utils::nip34::PullRequest;
 use dioxus::prelude::*;
-
 /// Pull request card component for lists
 #[component]
 pub fn CodePullCard(pr: PullRequest) -> Element {
-    // Extract title from content - skip empty lines to find actual content
     let title = pr
         .content
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("Untitled patch")
         .to_string();
-
     rsx! {
         Link {
-            to: Route::CodePullDetail { note_id: pr.event_id.clone() },
+            to: Route::CodePullDetail {
+                note_id: pr.event_id.clone(),
+            },
             class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
-
-            // Header with status and title
-            div {
-                class: "flex items-start gap-3",
-
-                // Status badge
-                CodeStatusBadge {
-                    status: pr.status,
-                    size: BadgeSize::Small,
-                }
-
-                // Title and metadata
-                div {
-                    class: "flex-1 min-w-0",
-
-                    h3 {
-                        class: "font-medium text-foreground line-clamp-2",
-                        "{title}"
-                    }
-
-                    // Metadata row
-                    div {
-                        class: "mt-1 flex items-center gap-2 text-sm text-muted-foreground",
-
+            div { class: "flex items-start gap-3",
+                CodeStatusBadge { status: pr.status, size: BadgeSize::Small }
+                div { class: "flex-1 min-w-0",
+                    h3 { class: "font-medium text-foreground line-clamp-2", "{title}" }
+                    div { class: "mt-1 flex items-center gap-2 text-sm text-muted-foreground",
                         span { "#{pr.event_id_short()}" }
                         span { "·" }
                         span { "by {pr.pubkey_display()}" }
-
-                        // Commit info if available
                         if let Some(ref commit) = pr.commit {
                             span { "·" }
-                            span {
-                                class: "font-mono text-xs",
-                                "{truncate_commit(commit)}"
-                            }
+                            span { class: "font-mono text-xs", "{truncate_commit(commit)}" }
                         }
                     }
                 }
             }
-
-            // Labels and cover letter indicator
-            div {
-                class: "mt-2 flex items-center gap-2",
-
+            div { class: "mt-2 flex items-center gap-2",
                 if pr.is_cover_letter {
-                    span {
-                        class: "px-2 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                    span { class: "px-2 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20",
                         "Cover Letter"
                     }
                 }
-
-                for (idx, label) in pr.labels.iter().enumerate() {
+                for (idx , label) in pr.labels.iter().enumerate() {
                     span {
                         key: "{idx}_{label}",
                         class: "px-2 py-0.5 text-xs rounded-full bg-accent text-accent-foreground",
@@ -85,24 +53,21 @@ pub fn CodePullCard(pr: PullRequest) -> Element {
         }
     }
 }
-
 /// Compact PR row for tables
 #[component]
 pub fn CodePullRow(pr: PullRequest) -> Element {
-    // Extract title from content - skip empty lines to find actual content
     let title = pr
         .content
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("Untitled patch")
         .to_string();
-
     rsx! {
         Link {
-            to: Route::CodePullDetail { note_id: pr.event_id.clone() },
+            to: Route::CodePullDetail {
+                note_id: pr.event_id.clone(),
+            },
             class: "flex items-center gap-3 p-2 hover:bg-accent/50 transition rounded",
-
-            // Status indicator (use merge icon for PRs)
             svg {
                 class: format!("w-4 h-4 {}", status_color_class(pr.status)),
                 xmlns: "http://www.w3.org/2000/svg",
@@ -114,33 +79,22 @@ pub fn CodePullRow(pr: PullRequest) -> Element {
                 stroke_width: "2",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
-                // Git pull request icon
                 circle { cx: "18", cy: "18", r: "3" }
                 circle { cx: "6", cy: "6", r: "3" }
                 path { d: "M13 6h3a2 2 0 0 1 2 2v7" }
-                line { x1: "6", y1: "9", x2: "6", y2: "21" }
+                line {
+                    x1: "6",
+                    y1: "9",
+                    x2: "6",
+                    y2: "21",
+                }
             }
-
-            // Title
-            span {
-                class: "flex-1 truncate",
-                "{title}"
-            }
-
-            // Cover letter badge
+            span { class: "flex-1 truncate", "{title}" }
             if pr.is_cover_letter {
-                span {
-                    class: "text-xs text-blue-500",
-                    "CL"
-                }
+                span { class: "text-xs text-blue-500", "CL" }
             }
-
-            // Commit hash
             if let Some(ref commit) = pr.commit {
-                span {
-                    class: "font-mono text-xs text-muted-foreground",
-                    "{truncate_commit(commit)}"
-                }
+                span { class: "font-mono text-xs text-muted-foreground", "{truncate_commit(commit)}" }
             }
         }
     }

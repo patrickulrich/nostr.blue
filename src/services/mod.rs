@@ -15,7 +15,7 @@ pub mod podcast_index;
 pub mod podcast_rss;
 pub mod profile_search;
 pub mod profile_stats;
-pub mod scheduler; // Background task scheduler
-pub mod search_relays; // Shared search relay connection caching
+pub mod scheduler;
+pub mod search_relays;
 pub mod trending;
-pub mod wavlake; // HelloAO Bible API (WASM-only due to gloo_net/web_sys)
+pub mod wavlake;

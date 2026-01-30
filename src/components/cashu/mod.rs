@@ -2,7 +2,6 @@
 //!
 //! This module contains all eCash/Cashu-related UI components
 //! for the wallet functionality.
-
 pub mod add_mint_modal;
 pub mod create_request_modal;
 pub mod mint_discovery_modal;
@@ -21,8 +20,6 @@ pub mod token_card;
 pub mod transfer_modal;
 pub mod wallet_health;
 pub mod wallet_health_modal;
-
-// Re-export main component types for convenience
 pub use add_mint_modal::CashuAddMintModal;
 pub use create_request_modal::CashuCreateRequestModal;
 pub use mint_discovery_modal::CashuMintDiscoveryModal;
@@ -38,8 +35,7 @@ pub use token_card::CashuTokenCard;
 pub use transfer_modal::CashuTransferModal;
 pub use wallet_health::WalletHealthIndicator;
 pub use wallet_health_modal::WalletHealthModal;
-// NIP-61 Nutzap components
 pub use nutzap_inbox::{NutzapBadge, NutzapInbox};
 #[allow(unused_imports)]
-pub use nutzap_send_modal::NutzapSendModal; // For future use when sending nutzaps from profile/post
+pub use nutzap_send_modal::NutzapSendModal;
 pub use nutzap_settings_modal::NutzapSettingsModal;

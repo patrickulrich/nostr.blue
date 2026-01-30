@@ -1,7 +1,6 @@
 //! Content Menu Component
 //! A reusable dropdown menu for Wiki, Recipe, Publication, and other content types
 //! Similar to NoteMenu but designed for addressable events with naddr
-
 use crate::components::icons::MoreHorizontalIcon;
 use crate::components::pin_board_item_selector::PinToBoardModal;
 use crate::components::{AddToListModal, ReportModal};
@@ -11,10 +10,9 @@ use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::nips::nip19::ToBech32;
 use std::time::Duration;
-
 /// Content type for the menu - determines labels and behavior
 #[derive(Clone, Copy, PartialEq, Debug)]
-#[allow(dead_code)] // Variants for future content type integrations
+#[allow(dead_code)]
 pub enum ContentMenuType {
     Wiki,
     Recipe,
@@ -25,7 +23,6 @@ pub enum ContentMenuType {
     CodeRepo,
     Citation,
 }
-
 impl ContentMenuType {
     /// Get display name for this content type
     pub fn display_name(&self) -> &'static str {
@@ -40,7 +37,6 @@ impl ContentMenuType {
             ContentMenuType::Citation => "citation",
         }
     }
-
     /// Convert to PinContentType for pin board integration
     pub fn to_pin_content_type(self) -> PinContentType {
         match self {
@@ -51,11 +47,10 @@ impl ContentMenuType {
             ContentMenuType::CalendarEvent => PinContentType::CalendarEvent,
             ContentMenuType::Badge => PinContentType::Badge,
             ContentMenuType::CodeRepo => PinContentType::CodeRepo,
-            ContentMenuType::Citation => PinContentType::Article, // Citations are metadata, map to Article
+            ContentMenuType::Citation => PinContentType::Article,
         }
     }
 }
-
 #[derive(Props, Clone, PartialEq)]
 pub struct ContentMenuProps {
     /// Type of content (Wiki, Recipe, Publication, etc.)
@@ -71,7 +66,6 @@ pub struct ContentMenuProps {
     #[props(default)]
     pub title: Option<String>,
 }
-
 #[component]
 pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let mut is_open = use_signal(|| false);
@@ -81,11 +75,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let mut show_report_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
     let mut show_pin_to_board_modal = use_signal(|| false);
-
-    // Get toast API at component level
     let toast = consume_toast();
-
-    // Clone props for use in closures
     let content_type = props.content_type;
     let author_pubkey = props.author_pubkey.clone();
     let author_pubkey_follow_check = author_pubkey.clone();
@@ -94,135 +84,107 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let author_pubkey_modal = author_pubkey.clone();
     let author_pubkey_modal_list = author_pubkey.clone();
     let naddr = props.naddr.clone();
-    // event_id is hex format, used for ReportModal and AddToListModal which require EventId
     let event_id_hex = props.event_id.clone().unwrap_or_default();
-
-    // Pre-compute the normalized naddr for both rendering check and onclick handler
-    // Strip any existing nostr: prefix (case-insensitive) to prevent double-prefix
     let clean_naddr: String = if naddr.to_ascii_lowercase().starts_with("nostr:") {
-        naddr
-            .split_once(':')
-            .map(|(_, rest)| rest)
-            .unwrap_or(&naddr)
-            .to_string()
+        naddr.split_once(':').map(|(_, rest)| rest).unwrap_or(&naddr).to_string()
     } else {
         naddr.clone()
     };
     let clean_naddr_copy = clean_naddr.clone();
-
-    // Determine if we have something to copy (for conditional rendering)
     let has_copyable_link = !clean_naddr.is_empty() || !event_id_hex.is_empty();
     let event_id_hex_copy = event_id_hex.clone();
-
-    // Check follow status on mount
-    use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
-        spawn(async move {
-            match nostr_client::is_following(pubkey).await {
-                Ok(following) => {
-                    is_following.set(following);
-                    is_loading_follow_state.set(false);
-                }
-                Err(e) => {
-                    log::warn!("Failed to check follow status: {}", e);
-                    is_loading_follow_state.set(false);
-                }
-            }
-        });
-    }));
-
+    use_effect(
+        use_reactive(
+            &author_pubkey_follow_check,
+            move |pubkey| {
+                spawn(async move {
+                    match nostr_client::is_following(pubkey).await {
+                        Ok(following) => {
+                            is_following.set(following);
+                            is_loading_follow_state.set(false);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to check follow status: {}", e);
+                            is_loading_follow_state.set(false);
+                        }
+                    }
+                });
+            },
+        ),
+    );
     let content_name = content_type.display_name();
-    // Use provided title or fall back to generic content type name
-    // Filter out empty/whitespace-only titles
     let pin_title = props
         .title
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| content_name.to_string());
-
     rsx! {
-        div {
-            class: "relative",
-
-            // Menu button
+        div { class: "relative",
             button {
                 class: "p-2 rounded-full hover:bg-accent transition-colors text-muted-foreground hover:text-foreground",
                 onclick: move |e: MouseEvent| {
                     e.stop_propagation();
                     is_open.set(!is_open());
                 },
-                MoreHorizontalIcon {
-                    class: "h-5 w-5".to_string(),
-                    filled: false
-                }
+                MoreHorizontalIcon { class: "h-5 w-5".to_string(), filled: false }
             }
-
-            // Dropdown menu
             if *is_open.read() {
-                // Backdrop to close menu when clicking outside
                 div {
                     class: "fixed inset-0 z-40",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
                         is_open.set(false);
-                    }
+                    },
                 }
-
-                // Menu content
-                div {
-                    class: "absolute right-0 mt-2 w-48 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
-
-                    // Follow/Unfollow user
+                div { class: "absolute right-0 mt-2 w-48 bg-background border border-border rounded-lg shadow-lg z-50 py-1",
                     button {
                         class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
                         disabled: *is_loading_follow_state.read() || *is_updating_follow.read() || !*HAS_SIGNER.read(),
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
-
                             if !*HAS_SIGNER.read() {
                                 log::warn!("Cannot follow/unfollow user: No signer connected");
                                 return;
                             }
-
                             let pubkey = author_pubkey_follow_action.clone();
                             let currently_following = *is_following.read();
                             let toast_api = toast;
-
                             is_updating_follow.set(true);
                             is_open.set(false);
-
                             spawn(async move {
                                 let result = if currently_following {
                                     nostr_client::unfollow_user(pubkey.clone()).await
                                 } else {
                                     nostr_client::follow_user(pubkey.clone()).await
                                 };
-
                                 match result {
                                     Ok(_) => {
                                         is_following.set(!currently_following);
-                                        log::info!("{} user: {}",
-                                            if currently_following { "Unfollowed" } else { "Followed" },
-                                            pubkey
+                                        log::info!(
+                                            "{} user: {}", if currently_following { "Unfollowed" } else {
+                                            "Followed" }, pubkey
                                         );
                                     }
                                     Err(e) => {
-                                        log::error!("Failed to {} user: {}",
-                                            if currently_following { "unfollow" } else { "follow" },
-                                            e
+                                        log::error!(
+                                            "Failed to {} user: {}", if currently_following { "unfollow" }
+                                            else { "follow" }, e
                                         );
-                                        toast_api.error(
-                                            format!("Failed to {} user: {}",
-                                                if currently_following { "unfollow" } else { "follow" },
-                                                e),
-                                            ToastOptions::new()
-                                        );
+                                        toast_api
+                                            .error(
+                                                format!(
+                                                    "Failed to {} user: {}",
+                                                    if currently_following { "unfollow" } else { "follow" },
+                                                    e,
+                                                ),
+                                                ToastOptions::new(),
+                                            );
                                     }
                                 }
                                 is_updating_follow.set(false);
                             });
                         },
-                        span {
-                            class: "text-sm",
+                        span { class: "text-sm",
                             {
                                 if *is_loading_follow_state.read() {
                                     "Loading...".to_string()
@@ -240,8 +202,6 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                             }
                         }
                     }
-
-                    // Add to list (if we have a hex event_id)
                     if !event_id_hex.is_empty() {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
@@ -250,14 +210,9 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 show_add_to_list_modal.set(true);
                                 is_open.set(false);
                             },
-                            span {
-                                class: "text-sm",
-                                "Add to list"
-                            }
+                            span { class: "text-sm", "Add to list" }
                         }
                     }
-
-                    // Pin to Board
                     if *HAS_SIGNER.read() {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
@@ -266,119 +221,105 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 show_pin_to_board_modal.set(true);
                                 is_open.set(false);
                             },
-                            span {
-                                class: "text-sm",
-                                "Pin to Board"
-                            }
+                            span { class: "text-sm", "Pin to Board" }
                         }
                     }
-
-                    // Copy Link (naddr or event_id fallback)
-                    // Only show if we have something to copy (pre-computed clean_naddr or event_id)
                     if has_copyable_link {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2",
                             onclick: move |e: MouseEvent| {
                                 e.stop_propagation();
                                 is_open.set(false);
-
-                                // Use pre-computed clean_naddr (already stripped of nostr: prefix)
                                 let naddr_to_copy = clean_naddr_copy.clone();
                                 let event_id_fallback = event_id_hex_copy.clone();
                                 let toast_api = toast;
-
-                                // Create nostr: URI - prefer naddr, fall back to note1 (bech32)
                                 let nostr_uri = if !naddr_to_copy.is_empty() {
                                     format!("nostr:{}", naddr_to_copy)
                                 } else if !event_id_fallback.is_empty() {
-                                    // Convert hex to bech32 (note1...) per NIP-19/NIP-21
                                     match nostr_sdk::EventId::from_hex(&event_id_fallback) {
-                                        Ok(eid) => match eid.to_bech32() {
-                                            Ok(bech32) => format!("nostr:{}", bech32),
-                                            Err(e) => {
-                                                log::error!("Failed to encode event ID to bech32: {}", e);
-                                                toast_api.error(
+                                        Ok(eid) => {
+                                            match eid.to_bech32() {
+                                                Ok(bech32) => format!("nostr:{}", bech32),
+                                                Err(e) => {
+                                                    log::error!("Failed to encode event ID to bech32: {}", e);
+                                                    toast_api
+                                                        .error(
+                                                            "Failed to copy link".to_string(),
+                                                            ToastOptions::new()
+                                                                .description("Could not encode event ID".to_string())
+                                                                .duration(Duration::from_secs(2))
+                                                                .permanent(false),
+                                                        );
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to parse event ID {}: {}", event_id_fallback, e);
+                                            toast_api
+                                                .error(
                                                     "Failed to copy link".to_string(),
                                                     ToastOptions::new()
-                                                        .description("Could not encode event ID".to_string())
+                                                        .description("Could not parse event ID".to_string())
                                                         .duration(Duration::from_secs(2))
                                                         .permanent(false),
                                                 );
-                                                return;
-                                            }
-                                        },
-                                        Err(e) => {
-                                            log::error!("Failed to parse event ID {}: {}", event_id_fallback, e);
-                                            toast_api.error(
-                                                "Failed to copy link".to_string(),
-                                                ToastOptions::new()
-                                                    .description("Could not parse event ID".to_string())
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
                                             return;
                                         }
                                     }
                                 } else {
-                                    return; // Nothing to copy
+                                    return;
                                 };
-
-                                // Copy to clipboard (await the promise for proper error handling)
                                 spawn(async move {
                                     let Some(window) = web_sys::window() else {
-                                        toast_api.error(
-                                            "Clipboard not available".to_string(),
-                                            ToastOptions::new()
-                                                .description("Browser window not accessible".to_string())
-                                                .duration(Duration::from_secs(2))
-                                                .permanent(false),
-                                        );
+                                        toast_api
+                                            .error(
+                                                "Clipboard not available".to_string(),
+                                                ToastOptions::new()
+                                                    .description("Browser window not accessible".to_string())
+                                                    .duration(Duration::from_secs(2))
+                                                    .permanent(false),
+                                            );
                                         return;
                                     };
                                     let clipboard = window.navigator().clipboard();
                                     let promise = clipboard.write_text(&nostr_uri);
                                     match wasm_bindgen_futures::JsFuture::from(promise).await {
                                         Ok(_) => {
-                                            toast_api.success(
-                                                "Copied!".to_string(),
-                                                ToastOptions::new()
-                                                    .description(format!("Link to {} copied to clipboard", content_name))
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
+                                            toast_api
+                                                .success(
+                                                    "Copied!".to_string(),
+                                                    ToastOptions::new()
+                                                        .description(
+                                                            format!("Link to {} copied to clipboard", content_name),
+                                                        )
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
                                         }
                                         Err(_) => {
-                                            toast_api.error(
-                                                "Failed to copy".to_string(),
-                                                ToastOptions::new()
-                                                    .description("Could not access clipboard".to_string())
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
+                                            toast_api
+                                                .error(
+                                                    "Failed to copy".to_string(),
+                                                    ToastOptions::new()
+                                                        .description("Could not access clipboard".to_string())
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
                                         }
                                     }
                                 });
                             },
-                            span {
-                                class: "text-sm",
-                                "Copy link"
-                            }
+                            span { class: "text-sm", "Copy link" }
                         }
                     }
-
-                    // Divider
-                    div {
-                        class: "h-px bg-border my-1"
-                    }
-
-                    // Block user (requires signer)
+                    div { class: "h-px bg-border my-1" }
                     if *HAS_SIGNER.read() {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground",
                             onclick: move |e: MouseEvent| {
                                 e.stop_propagation();
                                 is_open.set(false);
-
                                 let pubkey = author_pubkey_block.clone();
                                 let toast = toast;
                                 spawn(async move {
@@ -389,19 +330,18 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                         }
                                         Err(e) => {
                                             log::error!("Failed to block user: {}", e);
-                                            toast.error(format!("Failed to block user: {}", e), ToastOptions::new());
+                                            toast
+                                                .error(
+                                                    format!("Failed to block user: {}", e),
+                                                    ToastOptions::new(),
+                                                );
                                         }
                                     }
                                 });
                             },
-                            span {
-                                class: "text-sm",
-                                "Block author"
-                            }
+                            span { class: "text-sm", "Block author" }
                         }
                     }
-
-                    // Report content (only if we have a hex event_id)
                     if !event_id_hex.is_empty() {
                         button {
                             class: "w-full text-left px-4 py-2 hover:bg-accent transition-colors flex items-center gap-2 text-red-500 hover:text-red-600",
@@ -410,40 +350,34 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                 show_report_modal.set(true);
                                 is_open.set(false);
                             },
-                            span {
-                                class: "text-sm",
-                                "Report {content_name}"
-                            }
+                            span { class: "text-sm", "Report {content_name}" }
                         }
                     }
                 }
             }
         }
-
-        // Report Modal (requires hex event_id for NIP-56 reporting)
         if *show_report_modal.read() {
             ReportModal {
                 event_id: event_id_hex.clone(),
                 author_pubkey: author_pubkey_modal.clone(),
                 on_close: move |_| {
                     show_report_modal.set(false);
-                }
+                },
             }
         }
-
-        // Add to List Modal (requires hex event_id)
         if *show_add_to_list_modal.read() {
             AddToListModal {
                 event_id: event_id_hex.clone(),
                 author_pubkey: author_pubkey_modal_list.clone(),
-                on_close: move |_| show_add_to_list_modal.set(false)
+                on_close: move |_| show_add_to_list_modal.set(false),
             }
         }
-
-        // Pin to Board Modal (UX Fix #15 - use clean_naddr to avoid double nostr: prefix)
         if *show_pin_to_board_modal.read() {
             PinToBoardModal {
-                reference: PinReference::Coordinate { address: clean_naddr.clone(), relay_hint: None },
+                reference: PinReference::Coordinate {
+                    address: clean_naddr.clone(),
+                    relay_hint: None,
+                },
                 content_type: content_type.to_pin_content_type(),
                 title: Some(pin_title.clone()),
                 on_close: move |_| show_pin_to_board_modal.set(false),
