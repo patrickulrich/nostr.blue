@@ -14,14 +14,18 @@ use crate::utils::{event::is_voice_message, ThreadNode};
 use dioxus::events::MediaData;
 use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
-use nostr_sdk::{Filter, Kind};
+use nostr_sdk::{Event as NostrEvent, Filter, Kind};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
 
 const MAX_DEPTH: usize = 8;
 
 #[component]
-pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
+pub fn ThreadedComment(
+    node: ThreadNode,
+    depth: usize,
+    #[props(default)] on_reply: Option<EventHandler<NostrEvent>>,
+) -> Element {
     let event = &node.event;
     let children = &node.children;
     let author_pubkey = event.pubkey;
@@ -556,6 +560,7 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                             key: "{child.event.id}",
                             node: child.clone(),
                             depth: depth + 1,
+                            on_reply,
                         }
                     }
                 }
@@ -578,10 +583,14 @@ pub fn ThreadedComment(node: ThreadNode, depth: usize) -> Element {
                 on_close: move |_| {
                     show_reply_modal.set(false);
                 },
-                on_success: move |_| {
+                on_success: move |reply_event: NostrEvent| {
                     show_reply_modal.set(false);
                     let current = *reply_count.read();
                     reply_count.set(current + 1);
+                    // Bubble up the reply event for optimistic update
+                    if let Some(handler) = on_reply.as_ref() {
+                        handler.call(reply_event);
+                    }
                 },
             }
         }

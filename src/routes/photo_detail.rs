@@ -206,19 +206,17 @@ pub fn PhotoDetail(photo_id: String) -> Element {
                                 div { class: "text-center py-8 text-muted-foreground",
                                     "No comments yet. Be the first to comment!"
                                 }
-                            } else {
-                                {
-                                    let comment_vec = comments.read().clone();
-                                    let thread_tree = build_thread_tree(comment_vec, &event.id);
-                                    rsx! {
-                                        div { class: "divide-y divide-border",
-                                            for node in thread_tree {
-                                                ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
-                                            }
+                            } else {{
+                                let comment_vec = comments.read().clone();
+                                let thread_tree = build_thread_tree(comment_vec, &event.id);
+                                rsx! {
+                                    div { class: "divide-y divide-border",
+                                        for node in thread_tree {
+                                            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
                                         }
                                     }
                                 }
-                            }
+                            }}
                         }
                     }
                     if *show_comment_composer.read() {

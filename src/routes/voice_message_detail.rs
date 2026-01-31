@@ -203,39 +203,37 @@ pub fn VoiceMessageDetail(voice_id: String) -> Element {
                                 div { class: "text-center py-8 text-muted-foreground",
                                     "No replies yet. Be the first to reply!"
                                 }
-                            } else {
-                                {
-                                    let reply_vec = replies.read().clone();
-                                    let thread_tree = build_thread_tree(reply_vec.clone(), &event.id);
-                                    rsx! {
-                                        div { class: "divide-y divide-border",
-                                            for node in thread_tree {
-                                                {
-                                                    let event_kind = node.event.kind;
-                                                    if event_kind == Kind::VoiceMessageReply {
-                                                        rsx! {
-                                                            div { key: "{node.event.id}", class: "py-4",
-                                                                VoiceMessageCard { event: node.event.clone() }
-                                                                if !node.children.is_empty() {
-                                                                    div { class: "ml-4 border-l-2 border-border pl-4",
-                                                                        for child in &node.children {
-                                                                            {render_reply_node(child)}
-                                                                        }
+                            } else {{
+                                let reply_vec = replies.read().clone();
+                                let thread_tree = build_thread_tree(reply_vec.clone(), &event.id);
+                                rsx! {
+                                    div { class: "divide-y divide-border",
+                                        for node in thread_tree {
+                                            {
+                                                let event_kind = node.event.kind;
+                                                if event_kind == Kind::VoiceMessageReply {
+                                                    rsx! {
+                                                        div { key: "{node.event.id}", class: "py-4",
+                                                            VoiceMessageCard { event: node.event.clone() }
+                                                            if !node.children.is_empty() {
+                                                                div { class: "ml-4 border-l-2 border-border pl-4",
+                                                                    for child in &node.children {
+                                                                        {render_reply_node(child)}
                                                                     }
                                                                 }
                                                             }
                                                         }
-                                                    } else {
-                                                        rsx! {
-                                                            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
-                                                        }
+                                                    }
+                                                } else {
+                                                    rsx! {
+                                                        ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            }
+                            }}
                         }
                     }
                     if *show_voice_reply_composer.read() {

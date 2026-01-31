@@ -427,49 +427,56 @@ pub fn ArticleDetail(naddr: String) -> Element {
                                                 p { class: "text-muted-foreground", "Loading comments..." }
                                             }
                                         }
-                                    } else {
-                                        {
-                                            let comment_vec = comments.read().clone();
-                                            let thread_tree = build_thread_tree(comment_vec, &event.id);
+                                    } else {{
+                                        let comment_vec = comments.read().clone();
+                                        let thread_tree = build_thread_tree(comment_vec, &event.id);
+                                        let article_event_id = event.id;
+                                        if thread_tree.is_empty() {
                                             rsx! {
-                                                if thread_tree.is_empty() {
-                                                    div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                                        p { "No comments yet" }
-                                                        p { class: "text-sm", "Be the first to comment!" }
-                                                    }
-                                                } else {
-                                                    div { class: "divide-y divide-border",
-                                                        for node in thread_tree {
-                                                            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
+                                                div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                                    p { "No comments yet" }
+                                                    p { class: "text-sm", "Be the first to comment!" }
+                                                }
+                                            }
+                                        } else {
+                                            rsx! {
+                                                div { class: "divide-y divide-border",
+                                                    for node in thread_tree {
+                                                        ThreadedComment {
+                                                            key: "{node.event.id}",
+                                                            node: node.clone(),
+                                                            depth: 0,
+                                                            on_reply: move |reply_event: NostrEvent| {
+                                                                // Add the reply optimistically
+                                                                // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                                                let already_exists = comments.read().iter().any(|e| e.id == reply_event.id);
+                                                                if !already_exists {
+                                                                    log::info!("Adding comment reply optimistically: {}", reply_event.id.to_hex());
+                                                                    comments.write().push(reply_event);
+                                                                    crate::utils::thread_tree::invalidate_thread_tree_cache(&article_event_id);
+                                                                }
+                                                            },
                                                         }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
+                                    }}
                                 }
                                 if *show_comment_composer.read() {
                                     CommentComposer {
                                         comment_on: event.clone(),
                                         parent_comment: None,
                                         on_close: move |_| show_comment_composer.set(false),
-                                        on_success: move |_| {
+                                        on_success: move |comment_event: NostrEvent| {
                                             show_comment_composer.set(false);
-                                            let event_id = event.id;
-                                            spawn(async move {
-                                                loading_comments.set(true);
-                                                let filter = Filter::new().kind(Kind::Comment).event(event_id).limit(500);
-                                                if let Ok(mut comment_events) = nostr_client::fetch_events_aggregated(
-                                                        filter,
-                                                        Duration::from_secs(10),
-                                                    )
-                                                    .await
-                                                {
-                                                    comment_events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-                                                    comments.set(comment_events);
-                                                }
-                                                loading_comments.set(false);
-                                            });
+                                            // Add the comment optimistically
+                                            // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                            let already_exists = comments.read().iter().any(|e| e.id == comment_event.id);
+                                            if !already_exists {
+                                                log::info!("Adding comment optimistically: {}", comment_event.id.to_hex());
+                                                comments.write().push(comment_event);
+                                            }
                                         },
                                     }
                                 }

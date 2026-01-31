@@ -186,14 +186,34 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                     let tag = Tag::custom(TagKind::a(), vec![tag_clone.clone()]);
                     let builder = EventBuilder::new(Kind::from(1311), content.clone())
                         .tag(tag);
-                    match client.send_event_builder(builder).await {
-                        Ok(event_id) => {
-                            log::info!("Chat message sent: {:?}", event_id);
-                            message_input.set(String::new());
-                            // Message will arrive via real-time subscription
+                    // Sign first to get the full event
+                    match client.sign_event_builder(builder).await {
+                        Ok(event) => {
+                            // Send the signed event
+                            match client.send_event(&event).await {
+                                Ok(output) => {
+                                    log::info!("Chat message sent: {:?}", output.id());
+                                    message_input.set(String::new());
+                                    // Add to messages immediately (optimistic update)
+                                    // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                    let already_exists = messages.read().iter().any(|e| e.id == event.id);
+                                    if !already_exists {
+                                        let mut msgs = messages.write();
+                                        msgs.push(event);
+                                        // Enforce 200 message limit
+                                        let len = msgs.len();
+                                        if len > 200 {
+                                            msgs.drain(0..(len - 200));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to send chat message: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
-                            log::error!("Failed to send chat message: {}", e);
+                            log::error!("Failed to sign chat message: {}", e);
                         }
                     }
                 }

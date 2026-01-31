@@ -322,30 +322,42 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                             p { class: "text-muted-foreground", "Loading replies..." }
                         }
                     }
-                } else {
-                    {
-                        let reply_vec = replies.read().clone();
-                        let thread_tree = build_thread_tree(reply_vec, &event.id);
+                } else {{
+                    let reply_vec = replies.read().clone();
+                    let thread_tree = build_thread_tree(reply_vec, &event.id);
+                    let root_event_id = event.id;
+                    if thread_tree.is_empty() {
                         rsx! {
-                            if thread_tree.is_empty() {
-                                div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                    p { "No replies yet" }
-                                    p { class: "text-sm", "Be the first to reply!" }
-                                }
-                            } else {
-                                div { class: "divide-y divide-border",
-                                    for node in thread_tree {
-                                        ThreadedComment {
-                                            key: "{node.event.id}",
-                                            node: node.clone(),
-                                            depth: 0,
-                                        }
+                            div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                p { "No replies yet" }
+                                p { class: "text-sm", "Be the first to reply!" }
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div { class: "divide-y divide-border",
+                                for node in thread_tree {
+                                    ThreadedComment {
+                                        key: "{node.event.id}",
+                                        node: node.clone(),
+                                        depth: 0,
+                                        on_reply: move |reply_event: NostrEvent| {
+                                            // Add the reply optimistically
+                                            // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                            let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
+                                            if !already_exists {
+                                                log::info!("Adding reply optimistically: {}", reply_event.id.to_hex());
+                                                replies.write().push(reply_event);
+                                                // Invalidate thread tree cache
+                                                crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);
+                                            }
+                                        },
                                     }
                                 }
                             }
                         }
                     }
-                }
+                }}
             }
         }
     }

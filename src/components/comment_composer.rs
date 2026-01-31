@@ -17,7 +17,7 @@ pub fn CommentComposer(
     /// Optional parent comment (if replying to another comment)
     parent_comment: Option<NostrEvent>,
     on_close: EventHandler<()>,
-    on_success: EventHandler<()>,
+    on_success: EventHandler<NostrEvent>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut show_media_uploader = use_signal(|| false);
@@ -158,10 +158,6 @@ pub fn CommentComposer(
             let content_for_publish = content_value.clone();
             let toast_for_async = toast_api;
 
-            content.set(String::new());
-            uploaded_media.set(Vec::new());
-            on_success.call(());
-
             spawn(async move {
                 let client = match get_client() {
                     Some(c) => c,
@@ -173,6 +169,7 @@ pub fn CommentComposer(
                                 .description("Client not initialized")
                                 .duration(Duration::from_secs(3)),
                         );
+                        is_publishing.set(false);
                         return;
                     }
                 };
@@ -185,14 +182,34 @@ pub fn CommentComposer(
 
                 let builder = EventBuilder::comment(content_for_publish, comment_to, root);
 
-                match client.send_event_builder(builder).await {
-                    Ok(send_output) => {
-                        log::info!("NIP-22 comment published: {}", send_output.id().to_hex());
-                        // Invalidate cache so new comments appear on refresh
-                        invalidate_thread_tree_cache(&target_event.id);
+                // Sign the event first to get the full event
+                match client.sign_event_builder(builder).await {
+                    Ok(signed_event) => {
+                        // Send the signed event
+                        match client.send_event(&signed_event).await {
+                            Ok(send_output) => {
+                                log::info!("NIP-22 comment published: {}", send_output.id().to_hex());
+                                // Invalidate cache so new comments appear on refresh
+                                invalidate_thread_tree_cache(&target_event.id);
+                                // Clear UI and call on_success with signed event for optimistic update
+                                // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                content.set(String::new());
+                                uploaded_media.set(Vec::new());
+                                on_success.call(signed_event);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to send comment: {}", e);
+                                toast_for_async.error(
+                                    "Failed to publish".to_string(),
+                                    ToastOptions::new()
+                                        .description(format!("{}", e))
+                                        .duration(Duration::from_secs(3)),
+                                );
+                            }
+                        }
                     }
                     Err(e) => {
-                        log::error!("Failed to publish comment: {}", e);
+                        log::error!("Failed to sign comment: {}", e);
                         toast_for_async.error(
                             "Failed to publish".to_string(),
                             ToastOptions::new()
@@ -201,6 +218,7 @@ pub fn CommentComposer(
                         );
                     }
                 }
+                is_publishing.set(false);
             });
         }
     };

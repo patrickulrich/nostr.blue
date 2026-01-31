@@ -291,26 +291,26 @@ fn LandscapePlayer(event: Event) -> Element {
                                 p { class: "text-muted-foreground", "Loading comments..." }
                             }
                         }
-                    } else {
-                        {
-                            let comment_vec = comments.read().clone();
-                            let thread_tree = build_thread_tree(comment_vec, &event_id);
+                    } else {{
+                        let comment_vec = comments.read().clone();
+                        let thread_tree = build_thread_tree(comment_vec, &event_id);
+                        if thread_tree.is_empty() {
                             rsx! {
-                                if thread_tree.is_empty() {
-                                    div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                        p { "No comments yet" }
-                                        p { class: "text-sm", "Be the first to comment!" }
-                                    }
-                                } else {
-                                    div { class: "divide-y divide-border",
-                                        for node in thread_tree {
-                                            ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
-                                        }
+                                div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                    p { "No comments yet" }
+                                    p { class: "text-sm", "Be the first to comment!" }
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                div { class: "divide-y divide-border",
+                                    for node in thread_tree {
+                                        ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
                                     }
                                 }
                             }
                         }
-                    }
+                    }}
                 }
                 if *show_comment_composer.read() {
                     CommentComposer {
@@ -975,26 +975,26 @@ fn VideoInfo(
                                         p { class: "text-muted-foreground", "Loading comments..." }
                                     }
                                 }
-                            } else {
-                                {
-                                    let comment_vec = comments.read().clone();
-                                    let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
+                            } else {{
+                                let comment_vec = comments.read().clone();
+                                let thread_tree = build_thread_tree(comment_vec, &event_id_parsed);
+                                if thread_tree.is_empty() {
                                     rsx! {
-                                        if thread_tree.is_empty() {
-                                            div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
-                                                p { "No comments yet" }
-                                                p { class: "text-sm", "Be the first to comment!" }
-                                            }
-                                        } else {
-                                            div { class: "divide-y divide-border",
-                                                for node in thread_tree {
-                                                    ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
-                                                }
+                                        div { class: "flex flex-col items-center justify-center py-10 px-4 text-center text-muted-foreground",
+                                            p { "No comments yet" }
+                                            p { class: "text-sm", "Be the first to comment!" }
+                                        }
+                                    }
+                                } else {
+                                    rsx! {
+                                        div { class: "divide-y divide-border",
+                                            for node in thread_tree {
+                                                ThreadedComment { key: "{node.event.id}", node: node.clone(), depth: 0 }
                                             }
                                         }
                                     }
                                 }
-                            }
+                            }}
                         }
                         div { class: "sticky bottom-0 bg-card border-t border-border px-6 py-4 flex items-center justify-end gap-3 z-10",
                             button {

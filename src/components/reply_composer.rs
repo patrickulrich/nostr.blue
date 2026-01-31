@@ -2,7 +2,7 @@ use crate::components::icons::{BarChartIcon, CameraIcon};
 use crate::components::{
     EmojiPicker, GifPicker, MediaUploader, MentionAutocomplete, PollCreatorModal, RichContent,
 };
-use crate::stores::nostr_client::{publish_note_tracked, HAS_SIGNER};
+use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::relay;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;
 use crate::utils::truncate_pubkey;
@@ -34,7 +34,7 @@ const MAX_LENGTH: usize = 5000;
 pub fn ReplyComposer(
     reply_to: NostrEvent,
     on_close: EventHandler<()>,
-    on_success: EventHandler<()>,
+    on_success: EventHandler<NostrEvent>,
 ) -> Element {
     let mut content = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
@@ -191,74 +191,116 @@ pub fn ReplyComposer(
             event_id.clone()
         };
 
-        content.set(String::new());
-        uploaded_media.set(Vec::new());
-        is_publishing.set(false);
-        on_success.call(());
-
         let content_for_publish = content_value.clone();
         let thread_root_id_clone = thread_root_id.clone();
         let relay_hint = get_relay_hint_for_reply(&parent_tags);
 
         spawn(async move {
-            let mut tags = Vec::new();
+            let client = match get_client() {
+                Some(c) => c,
+                None => {
+                    log::error!("Client not initialized");
+                    is_publishing.set(false);
+                    return;
+                }
+            };
+
+            // Build tags for the reply
+            let mut tags: Vec<Tag> = Vec::new();
             if let Some(root_id) = parent_root {
-                tags.push(vec![
-                    "e".to_string(),
-                    root_id,
-                    relay_hint.clone(),
-                    "root".to_string(),
-                ]);
-                tags.push(vec![
-                    "e".to_string(),
-                    event_id.clone(),
-                    relay_hint.clone(),
-                    "reply".to_string(),
-                ]);
-            } else {
-                tags.push(vec![
-                    "e".to_string(),
-                    event_id.clone(),
-                    relay_hint.clone(),
-                    "root".to_string(),
-                ]);
+                if let Ok(root_event_id) = EventId::from_hex(&root_id) {
+                    let relay_url = if relay_hint.is_empty() {
+                        None
+                    } else {
+                        RelayUrl::parse(&relay_hint).ok()
+                    };
+                    tags.push(Tag::from_standardized_without_cell(TagStandard::Event {
+                        event_id: root_event_id,
+                        relay_url: relay_url.clone(),
+                        marker: Some(Marker::Root),
+                        public_key: None,
+                        uppercase: false,
+                    }));
+                    if let Ok(reply_event_id) = EventId::from_hex(&event_id) {
+                        tags.push(Tag::from_standardized_without_cell(TagStandard::Event {
+                            event_id: reply_event_id,
+                            relay_url,
+                            marker: Some(Marker::Reply),
+                            public_key: None,
+                            uppercase: false,
+                        }));
+                    }
+                }
+            } else if let Ok(reply_event_id) = EventId::from_hex(&event_id) {
+                let relay_url = if relay_hint.is_empty() {
+                    None
+                } else {
+                    RelayUrl::parse(&relay_hint).ok()
+                };
+                tags.push(Tag::from_standardized_without_cell(TagStandard::Event {
+                    event_id: reply_event_id,
+                    relay_url,
+                    marker: Some(Marker::Root),
+                    public_key: None,
+                    uppercase: false,
+                }));
             }
-            tags.push(vec!["p".to_string(), author_pk.clone()]);
+            if let Ok(pk) = PublicKey::from_hex(&author_pk) {
+                tags.push(Tag::public_key(pk));
+            }
             for tag in parent_tags.iter() {
                 let tag_vec = tag.clone().to_vec();
                 if tag_vec.len() >= 2 && tag_vec[0] == "p" {
                     let pubkey = tag_vec[1].clone();
                     if pubkey != author_pk {
-                        tags.push(vec!["p".to_string(), pubkey]);
+                        if let Ok(pk) = PublicKey::from_hex(&pubkey) {
+                            tags.push(Tag::public_key(pk));
+                        }
                     }
                 }
             }
-            match publish_note_tracked(content_for_publish, tags).await {
-                Ok(result) => {
-                    log::info!(
-                        "Reply published: {} ({}/{} relays)",
-                        result.event_id,
-                        result.success_count(),
-                        result.total_attempted()
-                    );
-                    if result.has_failures() {
-                        for (relay, error) in &result.failed_relays {
-                            log::warn!("Relay {} failed for reply: {}", relay, error);
+
+            let builder = EventBuilder::text_note(&content_for_publish).tags(tags);
+
+            // Sign the event first to get the full event
+            match client.sign_event_builder(builder).await {
+                Ok(signed_event) => {
+                    // Send the signed event
+                    match client.send_event(&signed_event).await {
+                        Ok(output) => {
+                            log::info!(
+                                "Reply published: {} ({}/{} relays)",
+                                output.id().to_hex(),
+                                output.success.len(),
+                                output.success.len() + output.failed.len()
+                            );
+                            for (relay, error) in &output.failed {
+                                log::warn!("Relay {} failed for reply: {}", relay, error);
+                            }
+                            // Invalidate cache so new replies appear on refresh
+                            if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
+                                invalidate_thread_tree_cache(&root_event_id);
+                                log::debug!(
+                                    "Invalidated thread tree cache for root: {}",
+                                    thread_root_id_clone
+                                );
+                            }
+                            // Clear UI and call on_success with the signed event for optimistic update
+                            // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                            content.set(String::new());
+                            uploaded_media.set(Vec::new());
+                            on_success.call(signed_event);
                         }
-                    }
-                    // Invalidate cache so new replies appear on refresh
-                    if let Ok(root_event_id) = EventId::from_hex(&thread_root_id_clone) {
-                        invalidate_thread_tree_cache(&root_event_id);
-                        log::debug!(
-                            "Invalidated thread tree cache for root: {}",
-                            thread_root_id_clone
-                        );
+                        Err(e) => {
+                            log::error!("Failed to send reply: {}", e);
+                        }
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to publish reply: {}", e);
+                    log::error!("Failed to sign reply: {}", e);
                 }
             }
+            is_publishing.set(false);
         });
     };
 
