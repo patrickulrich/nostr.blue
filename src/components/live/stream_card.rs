@@ -58,12 +58,20 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         .map(|url| url.to_string())
         .collect();
     log::debug!("Parsed stream relays: {:?}", relays);
+
+    // Extract streaming URL manually to handle multiple streaming tags
+    // nostr-sdk's LiveEvent parser takes the last streaming tag, but events may have
+    // multiple streaming tags (e.g., HLS + MOQ). Prefer HTTP/HTTPS URLs since that's
+    // what our video player supports.
+    let streaming_url = extract_playable_streaming_url(event)
+        .or_else(|| live_event.streaming.map(|url| url.to_string()));
+
     Some(LiveStreamMeta {
         d_tag: live_event.id,
         title: live_event.title,
         summary: live_event.summary,
         image: live_event.image.map(|(url, _dims)| url.to_string()),
-        streaming_url: live_event.streaming.map(|url| url.to_string()),
+        streaming_url,
         status: effective_status,
         current_participants: live_event.current_participants,
         starts: live_event.starts,
@@ -72,6 +80,33 @@ pub fn parse_live_stream_event(event: &NostrEvent) -> Option<LiveStreamMeta> {
         host_verified,
         relays,
     })
+}
+
+/// Extract a playable streaming URL from event tags.
+/// Prefers HTTP/HTTPS URLs over other schemes (like moq://) since our video player
+/// only supports HTTP-based streaming (HLS, DASH, MP4, etc.).
+fn extract_playable_streaming_url(event: &NostrEvent) -> Option<String> {
+    let streaming_urls: Vec<String> = event
+        .tags
+        .iter()
+        .filter(|tag| tag.as_slice().first().map(|s| s.as_str()) == Some("streaming"))
+        .filter_map(|tag| tag.as_slice().get(1).map(|s| s.to_string()))
+        .collect();
+
+    if streaming_urls.is_empty() {
+        return None;
+    }
+
+    // Prefer HTTP/HTTPS URLs (playable by our video player)
+    for url in &streaming_urls {
+        let url_lower = url.to_lowercase();
+        if url_lower.starts_with("http://") || url_lower.starts_with("https://") {
+            return Some(url.clone());
+        }
+    }
+
+    // Fallback to first URL if no HTTP/HTTPS found
+    streaming_urls.into_iter().next()
 }
 #[component]
 pub fn LiveStreamCard(event: NostrEvent) -> Element {

@@ -2,7 +2,9 @@ use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
+use dioxus_core::use_drop;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, TagKind, Timestamp};
+use std::collections::HashSet;
 use std::time::Duration;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum StatusFilter {
@@ -28,6 +30,8 @@ pub fn VideosLive() -> Element {
     let mut request_id_global = use_signal(|| 0u32);
     let mut last_loaded_following = use_signal(|| (0u32, StatusFilter::Live));
     let mut last_loaded_global = use_signal(|| (0u32, StatusFilter::Live));
+    let mut stream_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let mut followed_pubkeys_cache: Signal<Option<HashSet<String>>> = use_signal(|| None);
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_status = *status_filter.read();
@@ -58,7 +62,7 @@ pub fn VideosLive() -> Element {
                 return;
             }
             match load_following_streams(None, current_status).await {
-                Ok((events, next_until, hit_limit, did_fallback)) => {
+                Ok((events, next_until, hit_limit, did_fallback, followed_pks)) => {
                     if did_fallback {
                         log::info!("No contacts, hiding Following streams section");
                         following_streams.set(Vec::new());
@@ -66,6 +70,10 @@ pub fn VideosLive() -> Element {
                         oldest_timestamp_following.set(next_until);
                         has_more_following.set(hit_limit);
                         following_streams.set(events);
+                    }
+                    // Cache followed pubkeys for real-time streaming
+                    if let Some(pks) = followed_pks {
+                        followed_pubkeys_cache.set(Some(pks));
                     }
                     loading_following.set(false);
                 }
@@ -119,6 +127,80 @@ pub fn VideosLive() -> Element {
             }
         });
     });
+    // Set up real-time subscription for stream updates
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+
+        // Only set up once
+        if stream_sub_id.peek().is_some() {
+            return;
+        }
+
+        spawn(async move {
+            if let Some(client) = nostr_client::get_client() {
+                let filter = Filter::new()
+                    .kind(Kind::Custom(30311))
+                    .since(Timestamp::now())
+                    .limit(0);
+
+                match client.subscribe(filter, None).await {
+                    Ok(output) => {
+                        let subscription_id = output.val;
+                        stream_sub_id.set(Some(subscription_id.clone()));
+                        log::debug!("Subscribed for live stream updates");
+
+                        let mut notifications = client.notifications();
+                        while let Ok(notification) = notifications.recv().await {
+                            if let RelayPoolNotification::Event {
+                                subscription_id: sub_id,
+                                event,
+                                ..
+                            } = notification
+                            {
+                                if sub_id == subscription_id {
+                                    let current_filter = *status_filter.peek();
+                                    let followed = followed_pubkeys_cache.peek().clone();
+
+                                    // Upsert into global (always)
+                                    upsert_stream_event(
+                                        &mut global_streams,
+                                        (*event).clone(),
+                                        current_filter,
+                                    );
+
+                                    // Upsert into following (if followed)
+                                    if let Some(ref followed_set) = followed {
+                                        if followed_set.contains(&event.pubkey.to_hex()) {
+                                            upsert_stream_event(
+                                                &mut following_streams,
+                                                (*event).clone(),
+                                                current_filter,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => log::error!("Failed to subscribe for stream updates: {}", e),
+                }
+            }
+        });
+    });
+    // Clean up subscription on unmount
+    use_drop(move || {
+        if let Some(sub_id) = stream_sub_id.peek().clone() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    client.unsubscribe(&sub_id).await;
+                    log::debug!("Cleaned up stream subscription");
+                }
+            });
+        }
+    });
     let mut load_more_following = move || {
         if *loading_following.read() || !*has_more_following.read() {
             return;
@@ -128,7 +210,7 @@ pub fn VideosLive() -> Element {
         loading_following.set(true);
         spawn(async move {
             match load_following_streams(until, current_status).await {
-                Ok((new_events, next_until, hit_limit, _did_fallback)) => {
+                Ok((new_events, next_until, hit_limit, _did_fallback, _followed_pks)) => {
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = following_streams.read();
                         current.iter().map(|e| e.id).collect()
@@ -336,11 +418,11 @@ pub fn VideosLive() -> Element {
         }
     }
 }
-/// Returns (events, next_until, hit_limit, did_fallback)
+/// Returns (events, next_until, hit_limit, did_fallback, followed_pubkeys)
 async fn load_following_streams(
     until: Option<u64>,
     status: StatusFilter,
-) -> Result<(Vec<Event>, Option<u64>, bool, bool), String> {
+) -> Result<(Vec<Event>, Option<u64>, bool, bool, Option<HashSet<String>>), String> {
     let pubkey_str = auth_store::AUTH_STATE
         .read()
         .pubkey
@@ -352,13 +434,13 @@ async fn load_following_streams(
             log::warn!("Failed to fetch contacts: {}, falling back to global feed", e);
             let (events, next_until, hit_limit) = load_global_streams(until, status)
                 .await?;
-            return Ok((events, next_until, hit_limit, true));
+            return Ok((events, next_until, hit_limit, true, None));
         }
     };
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global streams");
         let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
-        return Ok((events, next_until, hit_limit, true));
+        return Ok((events, next_until, hit_limit, true, None));
     }
     let followed_pubkeys: std::collections::HashSet<String> = contacts
         .iter()
@@ -367,7 +449,7 @@ async fn load_following_streams(
     if followed_pubkeys.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
         let (events, next_until, hit_limit) = load_global_streams(until, status).await?;
-        return Ok((events, next_until, hit_limit, true));
+        return Ok((events, next_until, hit_limit, true, None));
     }
     let mut filter = Filter::new().kind(Kind::Custom(30311)).limit(100);
     if let Some(until_ts) = until {
@@ -399,7 +481,7 @@ async fn load_following_streams(
         })
         .collect();
     let filtered_events = filter_by_status(following_events, status);
-    Ok((filtered_events, next_until, hit_limit, false))
+    Ok((filtered_events, next_until, hit_limit, false, Some(followed_pubkeys)))
 }
 async fn load_global_streams(
     until: Option<u64>,
@@ -452,5 +534,54 @@ fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {
                 })
                 .collect()
         }
+    }
+}
+
+fn get_stream_d_tag(event: &Event) -> Option<String> {
+    event
+        .tags
+        .iter()
+        .find(|tag| tag.kind() == TagKind::d())
+        .and_then(|tag| tag.content().map(|s| s.to_string()))
+}
+
+fn upsert_stream_event(
+    streams: &mut Signal<Vec<Event>>,
+    new_event: Event,
+    status_filter: StatusFilter,
+) {
+    // First check if it passes the current filter
+    let filtered_events = filter_by_status(vec![new_event.clone()], status_filter);
+    let filtered_event = match filtered_events.into_iter().next() {
+        Some(e) => e,
+        None => {
+            // Event doesn't pass filter - remove it if it exists (status changed)
+            let new_d_tag = get_stream_d_tag(&new_event);
+            let new_pubkey = new_event.pubkey;
+            streams.write().retain(|e| {
+                !(e.pubkey == new_pubkey && get_stream_d_tag(e) == new_d_tag)
+            });
+            return;
+        }
+    };
+
+    let new_d_tag = get_stream_d_tag(&filtered_event);
+    let new_pubkey = filtered_event.pubkey;
+
+    let mut current = streams.write();
+    // Find existing event with same pubkey + d-tag (replaceable event identity)
+    if let Some(idx) = current
+        .iter()
+        .position(|e| e.pubkey == new_pubkey && get_stream_d_tag(e) == new_d_tag)
+    {
+        // Replace only if newer
+        if filtered_event.created_at > current[idx].created_at {
+            current[idx] = filtered_event;
+            log::debug!("Updated existing stream");
+        }
+    } else {
+        // New stream
+        current.push(filtered_event);
+        log::debug!("Added new stream via streaming");
     }
 }
