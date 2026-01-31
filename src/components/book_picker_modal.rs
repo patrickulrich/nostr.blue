@@ -303,11 +303,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut handle_chapter_click = move |chapter: String| {
         if is_valid_book_id(&chapter) {
             selected_chapter.set(Some(chapter));
-            // Don't clear book_id_error - let the validation effect handle it
         } else {
             log::warn!("Invalid chapter id: {}", chapter);
             selected_chapter.set(None);
-            book_id_error.set(true);
         }
     };
     let handle_insert = move |_| {

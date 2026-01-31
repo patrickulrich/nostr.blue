@@ -46,11 +46,19 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
         let amount_sats = match amount_str.parse::<u64>() {
             Ok(a) if a > 0 => a,
             _ => {
+                // Invalidate in-flight requests and clear loading state
+                let next_id = fee_request_id.peek().wrapping_add(1);
+                fee_request_id.set(next_id);
+                is_estimating_fee.set(false);
                 estimated_fee.set(None);
                 return;
             }
         };
         if mint.is_empty() {
+            // Invalidate in-flight requests and clear loading state
+            let next_id = fee_request_id.peek().wrapping_add(1);
+            fee_request_id.set(next_id);
+            is_estimating_fee.set(false);
             estimated_fee.set(None);
             return;
         }

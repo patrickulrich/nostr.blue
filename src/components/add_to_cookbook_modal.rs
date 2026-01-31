@@ -46,6 +46,9 @@ pub fn AddToCookbookModal(
         use_reactive!(|(client_init, has_signer, loaded)| {
             // Handle signer changes FIRST - allows transition from signed-in to signed-out
             if !has_signer {
+                // Invalidate any in-flight fetches
+                let next_gen = *fetch_generation.peek() + 1;
+                fetch_generation.set(next_gen);
                 cookbooks_loading.set(false);
                 needs_signin.set(true);
                 cookbooks.set(Vec::new());
@@ -93,7 +96,6 @@ pub fn AddToCookbookModal(
                         fetch_error.set(Some(
                             "Failed to load cookbooks. Please try again.".to_string(),
                         ));
-                        has_loaded.set(false);
                     }
                 }
                 cookbooks_loading.set(false);

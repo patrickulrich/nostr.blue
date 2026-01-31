@@ -112,6 +112,9 @@ async fn poll_mint_quote_http(
                     quote_info.set(None);
                     break;
                 }
+                // Log and show transient error, then continue retrying
+                log::warn!("Failed to check quote status: {}", e);
+                mint_status.set(Some("Network error, retrying...".to_string()));
             }
         }
 
