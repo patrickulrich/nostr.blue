@@ -4,6 +4,11 @@ use crate::utils::shorten_url;
 use dioxus::prelude::*;
 use qrcode::{render::svg, QrCode};
 
+/// Pre-mint delay for WebSocket path in milliseconds. WebSocket uses shorter delay
+/// because payment confirmation is real-time. HTTP fallback loop uses 2000ms
+/// (hardcoded in loop) to allow more time for mint state propagation between polls.
+const WS_PRE_MINT_DELAY_MS: u32 = 1000;
+
 /// Result of attempting to mint tokens after payment detection
 enum MintResult {
     Success(u64),
@@ -115,7 +120,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                 match try_mint_tokens(
                                                     mint_url.clone(),
                                                     quote_id.clone(),
-                                                    1000,
+                                                    WS_PRE_MINT_DELAY_MS,
                                                     is_cancelled,
                                                 ).await {
                                                     MintResult::Success(amount) => {
@@ -173,7 +178,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                 match try_mint_tokens(
                                                     mint_url.clone(),
                                                     quote_id.clone(),
-                                                    1000,
+                                                    WS_PRE_MINT_DELAY_MS,
                                                     is_cancelled,
                                                 ).await {
                                                     MintResult::Success(amount) => {
@@ -534,6 +539,6 @@ fn generate_qr_svg(data: &str) -> String {
                 .build();
             svg
         }
-        Err(_) => "<div>Failed to generate QR code</div>".to_string(),
+        Err(_) => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"#ffffff\"/><text x=\"100\" y=\"100\" text-anchor=\"middle\" fill=\"#666666\" font-size=\"14\">QR Error</text></svg>".to_string(),
     }
 }

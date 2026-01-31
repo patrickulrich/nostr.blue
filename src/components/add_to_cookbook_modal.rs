@@ -50,6 +50,12 @@ pub fn AddToCookbookModal(
                 needs_signin.set(true);
                 cookbooks.set(Vec::new());
                 has_loaded.set(false);
+                // Reset create-related state when signer is lost
+                create_new.set(false);
+                new_title.set(String::new());
+                new_description.set(String::new());
+                new_image_url.set(None);
+                error.set(None);
                 return;
             }
 

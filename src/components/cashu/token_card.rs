@@ -53,6 +53,7 @@ fn extract_mint_hostname(url: &str) -> String {
 }
 use crate::utils::clipboard::copy_to_clipboard;
 /// Parsed token information
+#[derive(Clone, PartialEq)]
 struct ParsedTokenInfo {
     amount: u64,
     mint_url: String,
@@ -84,10 +85,12 @@ pub fn CashuTokenCard(token: String) -> Element {
     let mut copied = use_signal(|| false);
     let toast = consume_toast();
     let has_signer = use_memo(move || *HAS_SIGNER.read());
-    let parsed = parse_token(&token);
+    let token_for_memo = token.clone();
+    let parsed = use_memo(move || parse_token(&token_for_memo));
     let handle_claim = {
         let token = token.clone();
         let unit_for_claim = parsed
+            .read()
             .as_ref()
             .map(|info| unit_display(&info.unit).to_string())
             .unwrap_or_else(|| "sats".to_string());
@@ -148,7 +151,8 @@ pub fn CashuTokenCard(token: String) -> Element {
             });
         }
     };
-    if let Some(info) = parsed {
+    let parsed_info = parsed.read().clone();
+    if let Some(info) = parsed_info {
         let mint_display = extract_mint_hostname(&info.mint_url);
         let amount_display = format_amount(info.amount);
         let unit_str = unit_display(&info.unit);

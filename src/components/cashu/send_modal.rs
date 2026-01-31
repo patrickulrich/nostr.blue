@@ -9,8 +9,8 @@ use std::rc::Rc;
 #[component]
 pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
     let mut amount = use_signal(String::new);
-    let mints = cashu::get_mints();
-    let mut selected_mint = use_signal(|| mints.first().cloned().unwrap_or_default());
+    let mints = use_memo(cashu::get_mints);
+    let mut selected_mint = use_signal(|| mints.read().first().cloned().unwrap_or_default());
     let mut is_sending = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut token_result = use_signal(|| Option::<String>::None);
@@ -184,14 +184,14 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                             oninput: move |evt| amount.set(evt.value()),
                         }
                     }
-                    if !mints.is_empty() {
+                    if !mints.read().is_empty() {
                         div {
                             label { class: "block text-sm font-semibold mb-2", "Select Mint" }
                             select {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg",
                                 value: selected_mint.read().clone(),
                                 onchange: move |evt| selected_mint.set(evt.value()),
-                                for mint_url in mints.iter() {
+                                for mint_url in mints.read().iter() {
                                     option { value: mint_url.clone(), "{shorten_url(mint_url, 35)}" }
                                 }
                             }
@@ -394,7 +394,8 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                         "Cancel"
                     }
                     {
-                        let is_disabled = *is_sending.read() || amount.read().is_empty()
+                        let is_disabled = *is_sending.read()
+                            || amount.read().parse::<u64>().map_or(true, |a| a == 0)
                             || (*p2pk_enabled.read() && recipient_pubkey.read().is_empty());
                         rsx! {
                             button {

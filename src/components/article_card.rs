@@ -6,6 +6,7 @@ use crate::utils::article_meta::{
 };
 use crate::utils::{format_relative_time_or, is_valid_http_url, truncate_pubkey};
 use dioxus::prelude::*;
+use nostr::prelude::{Coordinate, Nip19Coordinate, ToBech32};
 use nostr_sdk::Event as NostrEvent;
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
@@ -44,7 +45,6 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
     let naddr_opt = identifier
         .clone()
         .and_then(|id| {
-            use nostr::prelude::*;
             let coord = Coordinate::new(event.kind, event.pubkey).identifier(id);
             let relays = vec![];
             let nip19_coord = Nip19Coordinate::new(coord, relays);

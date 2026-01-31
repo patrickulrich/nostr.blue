@@ -235,6 +235,12 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             sections.is_empty() && ! is_valid_book_sections(& sections)); }
         ),
     );
+    // Validate selected_publication d_tag in an effect (side effects don't belong in memos)
+    use_effect(move || {
+        if let Some(pub_) = selected_publication.read().as_ref() {
+            book_id_error.set(!is_valid_book_id(&pub_.d_tag));
+        }
+    });
     let book_reference = use_memo(move || {
         selected_publication
             .read()
@@ -242,10 +248,8 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             .and_then(|pub_| {
                 if !is_valid_book_id(&pub_.d_tag) {
                     log::warn!("Invalid publication d_tag: {}", pub_.d_tag);
-                    book_id_error.set(true);
                     return None;
                 }
-                book_id_error.set(false);
                 let mut reference = BookReference::new(&pub_.d_tag);
                 let version_input = selected_version.read();
                 if !version_input.is_empty() && is_valid_book_version(&version_input) {
@@ -295,7 +299,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         selected_version.set(String::new());
     };
     let mut handle_chapter_click = move |chapter: String| {
-        selected_chapter.set(Some(chapter));
+        if is_valid_book_id(&chapter) {
+            selected_chapter.set(Some(chapter));
+            book_id_error.set(false);
+        } else {
+            log::warn!("Invalid chapter id: {}", chapter);
+            selected_chapter.set(None);
+            book_id_error.set(true);
+        }
     };
     let handle_insert = move |_| {
         if *has_validation_error.read() {

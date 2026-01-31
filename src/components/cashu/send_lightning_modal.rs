@@ -500,9 +500,14 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                     class: "w-full px-4 py-3 bg-background border border-border rounded-lg",
                                     value: selected_mint.read().clone(),
                                     onchange: move |evt| selected_mint.set(evt.value()),
-                                    for mint_url in mints.iter() {
-                                        option { value: mint_url.clone(),
-                                            "{shorten_url(mint_url, 30)} ({get_mint_balance(&mint_balances.read(), mint_url)} sats)"
+                                    {
+                                        let mint_balances_snapshot = mint_balances.read();
+                                        rsx! {
+                                            for mint_url in mints.iter() {
+                                                option { value: mint_url.clone(),
+                                                    "{shorten_url(mint_url, 30)} ({get_mint_balance(&mint_balances_snapshot, mint_url)} sats)"
+                                                }
+                                            }
                                         }
                                     }
                                 }
