@@ -1,4 +1,5 @@
 use crate::components::icons;
+use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
 use crate::utils::radio::NowPlaying;
@@ -20,6 +21,7 @@ fn format_time(seconds: f64) -> String {
 pub fn PersistentMusicPlayer() -> Element {
     let state = MUSIC_PLAYER.read().clone();
     let mut is_seeking = use_signal(|| false);
+    let mut show_share_modal = use_signal(|| false);
     let audio_id = "global-music-player-audio";
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
@@ -269,6 +271,30 @@ pub fn PersistentMusicPlayer() -> Element {
         };
     }
     let track = state.current_track.as_ref().unwrap();
+    let (share_url, share_content_type) = match &track.source {
+        crate::stores::nostr_music::TrackSource::Wavlake { .. } => {
+            (format!("https://nostr.blue/music/track/{}", track.id), ContentType::MusicTrack)
+        }
+        crate::stores::nostr_music::TrackSource::Nostr { coordinate, .. } => {
+            (format!("https://nostr.blue/music/track/{}", coordinate), ContentType::MusicTrack)
+        }
+        crate::stores::nostr_music::TrackSource::NostrPodcast { coordinate, .. } => {
+            (format!("https://nostr.blue/podcast/episode/{}", coordinate), ContentType::PodcastEpisode)
+        }
+        crate::stores::nostr_music::TrackSource::RssPodcast { feed_url, episode_guid, podcast_id, .. } => {
+            if let Some(id) = podcast_id {
+                (format!("https://nostr.blue/podcast/rss/{}/episode/{}", id, urlencoding::encode(episode_guid)), ContentType::PodcastEpisode)
+            } else {
+                (format!("https://nostr.blue/podcast/rss/episode?feed={}&ep={}", urlencoding::encode(feed_url), urlencoding::encode(episode_guid)), ContentType::PodcastEpisode)
+            }
+        }
+        crate::stores::nostr_music::TrackSource::RssMusic { feed_id, episode_id, .. } => {
+            (format!("https://nostr.blue/music/track/rss:{}:{}", feed_id, episode_id), ContentType::MusicTrack)
+        }
+        crate::stores::nostr_music::TrackSource::Radio { d_tag, .. } => {
+            (format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag)), ContentType::MusicTrack)
+        }
+    };
     let progress = if state.duration > 0.0 {
         (state.current_time / state.duration * 100.0).min(100.0)
     } else {
@@ -600,19 +626,9 @@ pub fn PersistentMusicPlayer() -> Element {
                 div { class: "flex items-center gap-1",
                     button {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
-                        title: "Vote for this track",
-                        onclick: {
-                            let vote_track = track.clone();
-                            move |_| {
-                                let t = vote_track.clone();
-                                spawn(async move {
-                                    if let Err(e) = music_player::vote_for_music(&t).await {
-                                        log::error!("Vote failed: {}", e);
-                                    }
-                                });
-                            }
-                        },
-                        dangerous_inner_html: icons::HEART,
+                        title: "Share",
+                        onclick: move |_| show_share_modal.set(true),
+                        dangerous_inner_html: icons::SHARE,
                     }
                     button {
                         class: "h-8 w-8 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground transition-colors",
@@ -626,6 +642,15 @@ pub fn PersistentMusicPlayer() -> Element {
                         dangerous_inner_html: icons::X,
                     }
                 }
+            }
+        }
+        if *show_share_modal.read() {
+            ContentShareModal {
+                title: format!("{} - {}", track.title, track.artist),
+                url: share_url.clone(),
+                content_type: share_content_type,
+                image_url: track.album_art_url.clone(),
+                on_close: move |_| show_share_modal.set(false),
             }
         }
     }
