@@ -165,7 +165,6 @@ fn AdminBadge(count: u32) -> Element {
 pub fn CommunityCardWithMembership(data: CommunityWithMembership) -> Element {
     let community = &data.community;
     let membership_status = &data.membership_status;
-    let _is_pinned = data.is_pinned;
     let pending_count = data.pending_request_count;
     let show_role_badge = !matches!(membership_status, MembershipStatus::None);
     let role = membership_status_to_role(membership_status);

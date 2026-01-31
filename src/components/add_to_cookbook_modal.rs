@@ -42,19 +42,44 @@ pub fn AddToCookbookModal(
     let has_signer = *HAS_SIGNER.read();
     let loaded = *has_loaded.read();
     use_effect(
-        use_reactive!(
-            | (client_init, has_signer, loaded) | {
-                if loaded { return; }
-                if !client_init { cookbooks_loading.set(false); return; }
-                if !has_signer {
-            cookbooks_loading.set(false); needs_signin.set(true); return; } needs_signin
-            .set(false); has_loaded.set(true); cookbooks_loading.set(true); spawn(async
-            move { match pin_boards_store::fetch_user_cookbooks(). await { Ok(books) => {
-            cookbooks.set(books); } Err(e) => {
-            log::error!("Failed to fetch user cookbooks: {}", e); fetch_error
-            .set(Some("Failed to load cookbooks. Please try again.".to_string(),));
-            has_loaded.set(false); } } cookbooks_loading.set(false); }); }
-        ),
+        use_reactive!(|(client_init, has_signer, loaded)| {
+            // Handle signer changes FIRST - allows transition from signed-in to signed-out
+            if !has_signer {
+                cookbooks_loading.set(false);
+                needs_signin.set(true);
+                cookbooks.set(Vec::new());
+                has_loaded.set(false);
+                return;
+            }
+
+            // Then handle loading
+            if loaded {
+                return;
+            }
+            if !client_init {
+                cookbooks_loading.set(false);
+                return;
+            }
+
+            needs_signin.set(false);
+            has_loaded.set(true);
+            cookbooks_loading.set(true);
+            spawn(async move {
+                match pin_boards_store::fetch_user_cookbooks().await {
+                    Ok(books) => {
+                        cookbooks.set(books);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to fetch user cookbooks: {}", e);
+                        fetch_error.set(Some(
+                            "Failed to load cookbooks. Please try again.".to_string(),
+                        ));
+                        has_loaded.set(false);
+                    }
+                }
+                cookbooks_loading.set(false);
+            });
+        }),
     );
     let recipe_naddr_for_add = recipe_naddr.clone();
     let recipe_naddr_for_create = recipe_naddr.clone();

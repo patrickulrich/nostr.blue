@@ -13,8 +13,29 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut copied = use_signal(|| false);
     let mut copy_error = use_signal(|| Option::<String>::None);
-    let progress = cashu::PAYMENT_REQUEST_PROGRESS.read();
     let balance = WALLET_BALANCES.read().available;
+
+    // Memoize payment_received for reactivity
+    let payment_received = use_memo(move || {
+        matches!(
+            &*cashu::PAYMENT_REQUEST_PROGRESS.read(),
+            Some(PaymentRequestProgress::Received { .. })
+        )
+    });
+
+    let received_amount = use_memo(move || {
+        if let Some(PaymentRequestProgress::Received { amount }) =
+            &*cashu::PAYMENT_REQUEST_PROGRESS.read()
+        {
+            Some(*amount)
+        } else {
+            None
+        }
+    });
+
+    // Read progress for status display
+    let progress = cashu::PAYMENT_REQUEST_PROGRESS.read();
+
     let handle_create = move |_| {
         if *is_creating.read() {
             return;
@@ -111,15 +132,6 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
         }
         on_close.call(());
     };
-    let payment_received = matches!(
-        &*progress,
-        Some(PaymentRequestProgress::Received { .. })
-    );
-    let received_amount = if let Some(PaymentRequestProgress::Received { amount }) = &*progress {
-        Some(*amount)
-    } else {
-        None
-    };
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
@@ -138,11 +150,11 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                         "X"
                     }
                 }
-                if payment_received {
+                if payment_received() {
                     div { class: "text-center py-8",
                         div { class: "text-6xl mb-4", "🎉" }
                         h3 { class: "text-xl font-bold text-green-500 mb-2", "Payment Received!" }
-                        if let Some(amount) = received_amount {
+                        if let Some(amount) = received_amount() {
                             p { class: "text-lg", "{amount} sats received" }
                         }
                         button {

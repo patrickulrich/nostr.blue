@@ -31,23 +31,54 @@ pub fn NutzapSendModal(
     let recipient_pubkey_for_effect = recipient_pubkey.clone();
     let client_initialized = *crate::stores::nostr_client::CLIENT_INITIALIZED.read();
     use_effect(
-        use_reactive!(
-            | (recipient_pubkey_for_effect, client_initialized,) | { if !
-            client_initialized {
-            log::debug!("Waiting for client initialization before fetching nutzap info");
-            return; } let recipient = recipient_pubkey_for_effect.clone(); let version =
-            * request_version.peek() + 1; request_version.set(version); spawn(async move
-            { is_loading_info.set(true); load_error.set(None); recipient_info.set(None);
-            compatible_mint.set(None); match cashu::fetch_nutzap_info(& recipient). await
-            { Ok(info) => { if * request_version.peek() != version {
-            log::debug!("Stale nutzap fetch discarded (v{} != current)", version);
-            return; } match cashu::validate_nutzap_recipient_with_info(& info) { Ok(mint)
-            => { compatible_mint.set(Some(mint)); } Err(e) => {
-            log::warn!("No compatible mint for nutzap: {}", e); } } recipient_info
-            .set(Some(info)); } Err(e) => { if * request_version.peek() != version {
-            return; } load_error.set(Some(e)); } } if * request_version.peek() == version
-            { is_loading_info.set(false); } }); }
-        ),
+        use_reactive!(|(recipient_pubkey_for_effect, client_initialized,)| {
+            if !client_initialized {
+                log::debug!("Waiting for client initialization before fetching nutzap info");
+                return;
+            }
+
+            let recipient = recipient_pubkey_for_effect.clone();
+            // Use peek() to read without creating dependency, then increment
+            let version = *request_version.peek() + 1;
+            request_version.set(version);
+
+            spawn(async move {
+                is_loading_info.set(true);
+                load_error.set(None);
+                recipient_info.set(None);
+                compatible_mint.set(None);
+
+                match cashu::fetch_nutzap_info(&recipient).await {
+                    Ok(info) => {
+                        // Stale check: use peek() to avoid subscription in async
+                        if *request_version.peek() != version {
+                            log::debug!(
+                                "Stale nutzap fetch discarded (v{} != current)",
+                                version
+                            );
+                            return;
+                        }
+                        match cashu::validate_nutzap_recipient_with_info(&info) {
+                            Ok(mint) => compatible_mint.set(Some(mint)),
+                            Err(e) => {
+                                log::warn!("No compatible mint for nutzap: {}", e);
+                            }
+                        }
+                        recipient_info.set(Some(info));
+                    }
+                    Err(e) => {
+                        if *request_version.peek() != version {
+                            return;
+                        }
+                        load_error.set(Some(e));
+                    }
+                }
+
+                if *request_version.peek() == version {
+                    is_loading_info.set(false);
+                }
+            });
+        }),
     );
     let on_send = {
         let recipient_pubkey = recipient_pubkey.clone();

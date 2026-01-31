@@ -105,7 +105,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 title.set(c.base.title.clone());
                                 author.set(c.base.author.clone());
                                 cited_text.set(c.base.content.clone());
-                                conversation_summary.set(String::new());
+                                // Preserve existing summary on edit
+                                conversation_summary
+                                    .set(c.base.summary.clone().unwrap_or_default());
                                 prompt_url.set(c.url.clone().unwrap_or_default());
                             }
                         }

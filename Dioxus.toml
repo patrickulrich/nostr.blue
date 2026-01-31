@@ -10,7 +10,7 @@ title = "nostr.blue - Decentralized Social Network"
 base_path = ""
 
 [web.watcher]
-watch_path = ["src", "public"]
+watch_path = ["src", "public", "assets"]
 reload_html = true
 index_on_404 = true
 

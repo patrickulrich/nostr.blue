@@ -42,12 +42,17 @@ pub fn BadgeDetailModal(
     );
     use_effect(move || {
         let current_state = *processing_state.read();
-        if let Some(task) = timeout_task.write().take() {
-            task.cancel();
-        }
+
+        // Only spawn timer when entering non-Idle state (avoids unnecessary work)
         if current_state != ProcessingState::Idle {
+            // Cancel any existing timer
+            if let Some(task) = timeout_task.write().take() {
+                task.cancel();
+            }
+            // Spawn new timer
             let task = spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(10_000).await;
+                // Use peek() in async to avoid subscription
                 if *processing_state.peek() != ProcessingState::Idle {
                     log::warn!("Processing state timed out, resetting to Idle");
                     processing_state.set(ProcessingState::Idle);
@@ -62,28 +67,71 @@ pub fn BadgeDetailModal(
     let mut fetch_task: Signal<Option<Task>> = use_signal(|| None);
     let mut target_pubkey: Signal<String> = use_signal(|| badge_pubkey.clone());
     use_effect(
-        use_reactive!(
-            | badge_pubkey | { if let Some(existing_task) = fetch_task.write().take() {
-            existing_task.cancel(); } target_pubkey.set(badge_pubkey.clone());
-            issuer_profile.set(None); if let Some(profile) = profiles::get_profile(&
-            badge_pubkey) { issuer_profile.set(Some(profile)); } else { let pubkey_str =
-            badge_pubkey.clone(); let new_task = spawn(async move { let pubkey = match
-            PublicKey::from_hex(& pubkey_str).or_else(| _ | PublicKey::from_bech32(&
-            pubkey_str)) { Ok(pk) => pk, Err(e) => {
-            log::warn!("Invalid issuer pubkey: {}", e); return; } }; let client = match
-            get_client() { Some(c) => c, None => {
-            log::error!("Client not initialized, cannot fetch issuer metadata"); return;
-            } }; match client.database().metadata(pubkey). await { Ok(Some(metadata)) =>
-            { if * target_pubkey.read() == pubkey_str { issuer_profile
-            .set(Some(metadata)); } return; } Ok(None) => {} Err(e) => {
-            log::warn!("Database fetch failed for {}: {}", pubkey_str, e); } } match
-            client.fetch_metadata(pubkey, Duration::from_secs(5)). await {
-            Ok(Some(metadata)) => { if * target_pubkey.read() == pubkey_str {
-            issuer_profile.set(Some(metadata)); } } Ok(None) => {
-            log::debug!("No metadata found for {}", pubkey_str); } Err(e) => {
-            log::warn!("Network fetch failed for {}: {}", pubkey_str, e); } } });
-            fetch_task.set(Some(new_task)); } }
-        ),
+        use_reactive!(|badge_pubkey| {
+            if let Some(existing_task) = fetch_task.write().take() {
+                existing_task.cancel();
+            }
+            target_pubkey.set(badge_pubkey.clone());
+            issuer_profile.set(None);
+            if let Some(profile) = profiles::get_profile(&badge_pubkey) {
+                issuer_profile.set(Some(profile));
+            } else {
+                let pubkey_str = badge_pubkey.clone();
+                let new_task = spawn(async move {
+                    let pubkey = match PublicKey::from_hex(&pubkey_str)
+                        .or_else(|_| PublicKey::from_bech32(&pubkey_str))
+                    {
+                        Ok(pk) => pk,
+                        Err(e) => {
+                            log::warn!("Invalid issuer pubkey: {}", e);
+                            return;
+                        }
+                    };
+                    let client = match get_client() {
+                        Some(c) => c,
+                        None => {
+                            log::error!(
+                                "Client not initialized, cannot fetch issuer metadata"
+                            );
+                            return;
+                        }
+                    };
+                    match client.database().metadata(pubkey).await {
+                        Ok(Some(metadata)) => {
+                            // Use peek() to avoid subscription in async context
+                            if *target_pubkey.peek() == pubkey_str {
+                                issuer_profile.set(Some(metadata));
+                            }
+                            return;
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            log::warn!("Database fetch failed for {}: {}", pubkey_str, e);
+                        }
+                    }
+                    // Staleness check before network fetch
+                    if *target_pubkey.peek() != pubkey_str {
+                        log::debug!("Pubkey changed during DB lookup, skipping network fetch");
+                        return;
+                    }
+                    match client.fetch_metadata(pubkey, Duration::from_secs(5)).await {
+                        Ok(Some(metadata)) => {
+                            // Use peek() to avoid subscription in async context
+                            if *target_pubkey.peek() == pubkey_str {
+                                issuer_profile.set(Some(metadata));
+                            }
+                        }
+                        Ok(None) => {
+                            log::debug!("No metadata found for {}", pubkey_str);
+                        }
+                        Err(e) => {
+                            log::warn!("Network fetch failed for {}: {}", pubkey_str, e);
+                        }
+                    }
+                });
+                fetch_task.set(Some(new_task));
+            }
+        }),
     );
     let issuer_name = issuer_profile
         .read()

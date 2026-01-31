@@ -66,6 +66,13 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
                     selected_style.set(CitationStyle::End);
                     search_query.set(String::new());
                     search_results.set(Vec::new());
+                } else {
+                    // Cleanup on hide - reset all modal state
+                    loading.set(false);
+                    selected_citation.set(None);
+                    selected_style.set(CitationStyle::End);
+                    search_query.set(String::new());
+                    search_results.set(Vec::new());
                 }
             },
         ),

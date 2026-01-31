@@ -94,7 +94,9 @@ pub fn CashuOptimizeModal(on_close: EventHandler<()>) -> Element {
                         }
                         div { class: "space-y-2",
                             for (mint , result) in results.read().iter() {
-                                div { class: "flex flex-col py-2 border-b border-border last:border-0",
+                                div {
+                                    key: "{mint}",
+                                    class: "flex flex-col py-2 border-b border-border last:border-0",
                                     div { class: "flex justify-between items-center text-sm",
                                         span { class: "text-muted-foreground truncate max-w-[200px]",
                                             "{shorten_url(mint, 30)}"
@@ -117,7 +119,9 @@ pub fn CashuOptimizeModal(on_close: EventHandler<()>) -> Element {
                             h4 { class: "text-sm font-semibold mb-3", "Current Proof Distribution" }
                             div { class: "space-y-2 text-sm",
                                 for (mint , count) in mint_proof_counts.iter() {
-                                    div { class: "flex justify-between",
+                                    div {
+                                        key: "{mint}",
+                                        class: "flex justify-between",
                                         span { class: "text-muted-foreground truncate max-w-[200px]",
                                             "{shorten_url(mint, 30)}"
                                         }

@@ -80,7 +80,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
             }
         }
     });
-    let selected_mint_balance = {
+    let selected_mint_balance = use_memo(move || {
         let mint = selected_mint.read().clone();
         mint_balances
             .read()
@@ -88,7 +88,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
             .find(|(url, _)| *url == mint)
             .map(|(_, b)| *b)
             .unwrap_or(0)
-    };
+    });
     let on_create_quote = move |_| {
         let invoice_str = invoice.read().clone().trim().to_string();
         let mint = selected_mint.read().clone();
@@ -507,7 +507,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                     }
                                 }
                                 p { class: "text-xs text-muted-foreground mt-1",
-                                    "Selected mint balance: {selected_mint_balance} sats"
+                                    "Selected mint balance: {selected_mint_balance()} sats"
                                 }
                             }
                         }
@@ -521,19 +521,27 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                         }
                                     }
                                 } else {
-                                    div { class: "bg-background border border-border rounded-lg p-3 space-y-2",
-                                        for (mint_url , balance) in mpp_mint_balances.read().iter() {
-                                            div { class: "flex justify-between text-sm",
-                                                span { class: "text-muted-foreground truncate max-w-[200px]",
-                                                    "{shorten_url(mint_url, 30)}"
+                                    {
+                                        // Read mpp_mint_balances once to avoid double read
+                                        let mpp_balances = mpp_mint_balances.read();
+                                        let total_mpp: u64 = mpp_balances.iter().map(|(_, b)| *b).sum();
+
+                                        rsx! {
+                                            div { class: "bg-background border border-border rounded-lg p-3 space-y-2",
+                                                for (mint_url , balance) in mpp_balances.iter() {
+                                                    div {
+                                                        key: "{mint_url}",
+                                                        class: "flex justify-between text-sm",
+                                                        span { class: "text-muted-foreground truncate max-w-[200px]",
+                                                            "{shorten_url(mint_url, 30)}"
+                                                        }
+                                                        span { class: "font-mono", "{balance} sats" }
+                                                    }
                                                 }
-                                                span { class: "font-mono", "{balance} sats" }
-                                            }
-                                        }
-                                        div { class: "border-t border-border pt-2 flex justify-between text-sm font-semibold",
-                                            span { "MPP Balance:" }
-                                            span { class: "font-mono",
-                                                "{mpp_mint_balances.read().iter().map(|(_, b)| b).sum::<u64>()} sats"
+                                                div { class: "border-t border-border pt-2 flex justify-between text-sm font-semibold",
+                                                    span { "MPP Balance:" }
+                                                    span { class: "font-mono", "{total_mpp} sats" }
+                                                }
                                             }
                                         }
                                     }

@@ -30,30 +30,15 @@ pub fn CashuTransferModal(on_close: EventHandler<()>) -> Element {
         let current_mints = mints();
         let source = source_mint.read().clone();
         let target = target_mint.read().clone();
-        if source.is_empty() || !current_mints.contains(&source) {
-            if let Some(first) = current_mints.first() {
-                source_mint.set(first.clone());
-            }
-        }
-        if target.is_empty() || !current_mints.contains(&target) {
-            let current_source = source_mint.read().clone();
-            if let Some(new_target) = current_mints
-                .iter()
-                .find(|m| **m != current_source)
-                .or(current_mints.first())
-            {
-                target_mint.set(new_target.clone());
-            }
-        }
+
+        // Single validation path using the helper
         if let Some(new_source) = select_valid_mint(&source, &current_mints, None) {
             if new_source != source {
                 source_mint.set(new_source.clone());
             }
-            if let Some(new_target) = select_valid_mint(
-                &target,
-                &current_mints,
-                Some(&new_source),
-            ) {
+            if let Some(new_target) =
+                select_valid_mint(&target, &current_mints, Some(&new_source))
+            {
                 if new_target != target {
                     target_mint.set(new_target);
                 }

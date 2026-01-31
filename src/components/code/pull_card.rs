@@ -9,12 +9,7 @@ use dioxus::prelude::*;
 /// Pull request card component for lists
 #[component]
 pub fn CodePullCard(pr: PullRequest) -> Element {
-    let title = pr
-        .content
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("Untitled patch")
-        .to_string();
+    let title = pr.display_title();
     rsx! {
         Link {
             to: Route::CodePullDetail {
@@ -56,12 +51,7 @@ pub fn CodePullCard(pr: PullRequest) -> Element {
 /// Compact PR row for tables
 #[component]
 pub fn CodePullRow(pr: PullRequest) -> Element {
-    let title = pr
-        .content
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("Untitled patch")
-        .to_string();
+    let title = pr.display_title();
     rsx! {
         Link {
             to: Route::CodePullDetail {
