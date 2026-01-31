@@ -1303,6 +1303,116 @@ pub fn TrashIcon(props: IconProps) -> Element {
         }
     }
 }
+/// Download icon - arrow pointing down into tray
+#[component]
+pub fn DownloadIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
+            polyline { points: "7 10 12 15 17 10" }
+            line {
+                x1: "12",
+                x2: "12",
+                y1: "15",
+                y2: "3",
+            }
+        }
+    }
+}
+/// File icon - generic document
+#[component]
+pub fn FileIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }
+            polyline { points: "14 2 14 8 20 8" }
+        }
+    }
+}
+/// FileText icon - document with lines
+#[component]
+pub fn FileTextIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            path { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }
+            polyline { points: "14 2 14 8 20 8" }
+            line {
+                x1: "16",
+                x2: "8",
+                y1: "13",
+                y2: "13",
+            }
+            line {
+                x1: "16",
+                x2: "8",
+                y1: "17",
+                y2: "17",
+            }
+            line {
+                x1: "10",
+                x2: "8",
+                y1: "9",
+                y2: "9",
+            }
+        }
+    }
+}
+/// Printer icon - for print to PDF
+#[component]
+pub fn PrinterIcon(props: IconProps) -> Element {
+    rsx! {
+        svg {
+            class: "{props.class}",
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            polyline { points: "6 9 6 2 18 2 18 9" }
+            path { d: "M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" }
+            rect {
+                width: "12",
+                height: "8",
+                x: "6",
+                y: "14",
+            }
+        }
+    }
+}
 /// Nostr.blue mini logo - small "N" in blue circle for minicard previews
 #[component]
 pub fn NostrBlueMiniLogo(

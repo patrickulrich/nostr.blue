@@ -5,8 +5,8 @@ use crate::components::icons::{
     PenSquareIcon, ShareIcon, UserIcon, XIcon,
 };
 use crate::components::{
-    ShareModal, WikiBacklinks, WikiForwardLinks, WikiMetadataCard, WikiOutline,
-    WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
+    ShareModal, WikiBacklinks, WikiDownloadMenu, WikiForwardLinks, WikiMetadataCard,
+    WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };
 use crate::routes::Route;
 use crate::stores::wiki_store::{self, CachedWikiPage, WikiMetadata};
@@ -79,6 +79,9 @@ pub fn WikiDetail(identifier: String) -> Element {
                             PenSquareIcon { class: "w-4 h-4" }
                             "Edit"
                         }
+                    }
+                    if let Some(ref wiki_page) = *page.read() {
+                        WikiDownloadMenu { page: wiki_page.clone() }
                     }
                     if page.read().is_some() {
                         button {

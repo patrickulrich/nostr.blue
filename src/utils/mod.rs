@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod content_parser;
 pub mod data_state;
 pub mod date_helpers;
+pub mod download;
 pub mod duration;
 pub mod error;
 pub mod event;

@@ -83,6 +83,7 @@ pub mod publication_toc;
 pub mod wiki_backlinks;
 pub mod wiki_card;
 pub mod wiki_content;
+pub mod wiki_download_menu;
 pub mod citation;
 pub mod shop;
 pub mod book_picker_modal;
@@ -269,5 +270,6 @@ pub use wiki_card::{WikiCardSearchResult, WikiCardSkeleton, WikiGrid, WikiMetada
 pub use wiki_content::{
     WikiForwardLinks, WikiOutline, WikiPageContent, WikiPageNotFound, WikiPageSkeleton,
 };
+pub use wiki_download_menu::WikiDownloadMenu;
 pub mod pwa_update_banner;
 pub use pwa_update_banner::PwaUpdateBanner;
