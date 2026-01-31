@@ -99,10 +99,14 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
             return;
         }
         // Use sanitize_lightning_invoice which handles all Lightning prefixes (lnbc, lntb, lnbcrt, lnsb)
-        if sanitize_lightning_invoice(&invoice_str).is_none() {
-            error_message.set(Some("Invalid lightning invoice format".to_string()));
-            return;
-        }
+        // and returns the normalized (uppercase) invoice
+        let sanitized_invoice = match sanitize_lightning_invoice(&invoice_str) {
+            Some(inv) => inv,
+            None => {
+                error_message.set(Some("Invalid lightning invoice format".to_string()));
+                return;
+            }
+        };
         is_creating_quote.set(true);
         error_message.set(None);
         payment_result.set(None);
@@ -114,7 +118,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                     return;
                 }
                 spawn(async move {
-                    match create_melt_quote(mint, invoice_str).await {
+                    match create_melt_quote(mint, sanitized_invoice).await {
                         Ok(q) => {
                             quote_info.set(Some(q));
                             mpp_quote.set(None);
@@ -136,7 +140,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                     return;
                 }
                 spawn(async move {
-                    match create_mpp_melt_quotes(invoice_str, allocations).await {
+                    match create_mpp_melt_quotes(sanitized_invoice, allocations).await {
                         Ok(q) => {
                             mpp_quote.set(Some(q));
                             quote_info.set(None);

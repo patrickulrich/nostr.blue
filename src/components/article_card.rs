@@ -44,6 +44,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
         .to_string();
     let naddr_opt = identifier
         .clone()
+        .filter(|id| !id.trim().is_empty())
         .and_then(|id| {
             let coord = Coordinate::new(event.kind, event.pubkey).identifier(id);
             let relays = vec![];

@@ -86,6 +86,7 @@ pub fn AddToCookbookModal(
                 match result {
                     Ok(books) => {
                         cookbooks.set(books);
+                        fetch_error.set(None);
                     }
                     Err(e) => {
                         log::error!("Failed to fetch user cookbooks: {}", e);

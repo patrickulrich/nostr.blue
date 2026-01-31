@@ -26,7 +26,7 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
         is_mounted_cleanup.set(false);
     });
     use_effect(move || {
-        let current_mints = cashu::get_mints();
+        let current_mints = mints.read().clone(); // Reactive - reads from memo
         let current_selection = selected_mint.read().clone();
         if current_selection.is_empty() {
             if let Some(first_mint) = current_mints.first() {

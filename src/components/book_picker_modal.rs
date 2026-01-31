@@ -236,7 +236,9 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
         ),
     );
     // Validate selected_publication d_tag in an effect (side effects don't belong in memos)
+    // Track selected_chapter to re-validate when "Entire book" is selected
     use_effect(move || {
+        let _ = selected_chapter.read(); // Establish dependency on chapter changes
         if let Some(pub_) = selected_publication.read().as_ref() {
             book_id_error.set(!is_valid_book_id(&pub_.d_tag));
         }
@@ -301,7 +303,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut handle_chapter_click = move |chapter: String| {
         if is_valid_book_id(&chapter) {
             selected_chapter.set(Some(chapter));
-            book_id_error.set(false);
+            // Don't clear book_id_error - let the validation effect handle it
         } else {
             log::warn!("Invalid chapter id: {}", chapter);
             selected_chapter.set(None);
