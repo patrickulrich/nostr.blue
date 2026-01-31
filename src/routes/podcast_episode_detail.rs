@@ -179,8 +179,20 @@ fn EpisodeDetailContent(props: EpisodeDetailContentProps) -> Element {
                             }
                         }
                         div { class: "flex-1 min-w-0",
-                            div { class: "text-sm text-muted-foreground mb-1 hover:text-primary cursor-pointer",
-                                "{episode.podcast_title}"
+                            {
+                                if let nostr_music::TrackSource::RssPodcast { podcast_id: Some(id), .. } = &episode.source {
+                                    rsx! {
+                                        Link {
+                                            to: Route::PodcastRssFeedDetail { podcast_id: id.to_string() },
+                                            class: "text-sm text-muted-foreground mb-1 hover:text-primary transition",
+                                            "{episode.podcast_title}"
+                                        }
+                                    }
+                                } else {
+                                    rsx! {
+                                        div { class: "text-sm text-muted-foreground mb-1", "{episode.podcast_title}" }
+                                    }
+                                }
                             }
                             h1 { class: "text-2xl md:text-3xl font-bold mb-2", "{episode.title}" }
                             div { class: "flex items-center gap-4 text-sm text-muted-foreground mb-4 flex-wrap",
