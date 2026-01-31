@@ -1,15 +1,11 @@
 //! Mini Calendar Component
 //!
 //! A compact calendar for sidebar navigation
-
+use crate::utils::date_helpers::{
+    get_day_number, get_month_dates, get_month_from_date, get_today,
+};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-use crate::utils::date_helpers::{get_today, get_month_from_date, get_day_number, get_month_dates};
-
-// ============================================================================
-// Component
-// ============================================================================
-
 /// Props for MiniCalendar
 #[derive(Props, Clone, PartialEq)]
 pub struct MiniCalendarProps {
@@ -25,31 +21,22 @@ pub struct MiniCalendarProps {
     #[props(default)]
     pub on_month_change: Option<EventHandler<String>>,
 }
-
 /// Mini calendar for sidebar
 #[component]
 pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
-    // Clone props for use in closures and rsx
     let selected_date_for_effect = props.selected_date.clone();
     let selected_date_for_highlight = props.selected_date.clone();
     let event_dates = props.event_dates.clone();
     let on_date_select_handler = props.on_date_select;
-
-    // Parse the selected date to get year/month for display
     let mut display_date = use_signal(|| props.selected_date.clone());
-
-    // When selected_date changes, update display
-    // Only re-run when selected_date prop changes (not every render)
-    use_effect(use_reactive!(|selected_date_for_effect| {
-        display_date.set(selected_date_for_effect.clone());
-    }));
-
+    use_effect(
+        use_reactive!(
+            | selected_date_for_effect | { display_date.set(selected_date_for_effect
+            .clone()); }
+        ),
+    );
     let today = get_today();
-
-    // Get month dates (6 weeks)
     let month_dates = use_memo(move || get_month_dates(&display_date.read()));
-
-    // Parse display month info
     let month_info = use_memo(move || {
         let date = display_date.read();
         let parts: Vec<&str> = date.split('-').collect();
@@ -61,16 +48,25 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
             (2024, 1)
         }
     });
-
     let (year, month) = *month_info.read();
     let current_month = month;
-
-    let month_names = ["January", "February", "March", "April", "May", "June",
-                       "July", "August", "September", "October", "November", "December"];
-    // Safe bounds check for month index (1-12 maps to 0-11)
-    let month_name = month_names.get((month.saturating_sub(1)) as usize).unwrap_or(&"Unknown");
-
-    // Navigation handlers
+    let month_names = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let month_name = month_names
+        .get((month.saturating_sub(1)) as usize)
+        .unwrap_or(&"Unknown");
     let go_prev_month = {
         let on_month_change = props.on_month_change;
         move |_| {
@@ -83,7 +79,6 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
             }
         }
     };
-
     let go_next_month = {
         let on_month_change = props.on_month_change;
         move |_| {
@@ -96,7 +91,6 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
             }
         }
     };
-
     let go_today = {
         let on_date_select = props.on_date_select;
         move |_| {
@@ -107,16 +101,9 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
             }
         }
     };
-
     rsx! {
-        div {
-            class: "mini-calendar bg-card rounded-lg border border-border p-3",
-
-            // Header with navigation
-            div {
-                class: "flex items-center justify-between mb-3",
-
-                // Previous month
+        div { class: "mini-calendar bg-card rounded-lg border border-border p-3",
+            div { class: "flex items-center justify-between mb-3",
                 button {
                     class: "p-1 hover:bg-accent rounded transition",
                     aria_label: "Previous month",
@@ -131,19 +118,15 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                         path {
                             stroke_linecap: "round",
                             stroke_linejoin: "round",
-                            d: "M15 19l-7-7 7-7"
+                            d: "M15 19l-7-7 7-7",
                         }
                     }
                 }
-
-                // Month/Year display
                 button {
                     class: "text-sm font-medium hover:bg-accent px-2 py-1 rounded transition",
                     onclick: go_today,
                     "{month_name} {year}"
                 }
-
-                // Next month
                 button {
                     class: "p-1 hover:bg-accent rounded transition",
                     aria_label: "Next month",
@@ -158,26 +141,19 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                         path {
                             stroke_linecap: "round",
                             stroke_linejoin: "round",
-                            d: "M9 5l7 7-7 7"
+                            d: "M9 5l7 7-7 7",
                         }
                     }
                 }
             }
-
-            // Weekday headers
-            div {
-                class: "grid grid-cols-7 mb-1",
+            div { class: "grid grid-cols-7 mb-1",
                 for day in ["S", "M", "T", "W", "T", "F", "S"] {
-                    div {
-                        class: "text-center text-xs text-muted-foreground font-medium",
+                    div { class: "text-center text-xs text-muted-foreground font-medium",
                         "{day}"
                     }
                 }
             }
-
-            // Date grid
-            div {
-                class: "grid grid-cols-7 gap-0.5",
+            div { class: "grid grid-cols-7 gap-0.5",
                 for date in month_dates.read().iter() {
                     {
                         let is_today = *date == today;
@@ -185,16 +161,20 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                         let is_other_month = get_month_from_date(date) != current_month;
                         let has_events = event_dates.contains(date);
                         let day_num = get_day_number(date);
-
                         rsx! {
                             button {
                                 key: "{date}",
                                 class: format!(
                                     "w-7 h-7 text-xs rounded-full flex items-center justify-center relative transition {}",
-                                    if is_selected { "bg-primary text-primary-foreground" }
-                                    else if is_today { "bg-accent font-bold" }
-                                    else if is_other_month { "text-muted-foreground/50" }
-                                    else { "hover:bg-accent" }
+                                    if is_selected {
+                                        "bg-primary text-primary-foreground"
+                                    } else if is_today {
+                                        "bg-accent font-bold"
+                                    } else if is_other_month {
+                                        "text-muted-foreground/50"
+                                    } else {
+                                        "hover:bg-accent"
+                                    },
                                 ),
                                 onclick: {
                                     let date = date.clone();
@@ -205,14 +185,9 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
                                         }
                                     }
                                 },
-
                                 "{day_num}"
-
-                                // Event indicator dot
                                 if has_events && !is_selected {
-                                    div {
-                                        class: "absolute bottom-0.5 w-1 h-1 bg-primary rounded-full"
-                                    }
+                                    div { class: "absolute bottom-0.5 w-1 h-1 bg-primary rounded-full" }
                                 }
                             }
                         }
@@ -222,22 +197,15 @@ pub fn MiniCalendar(props: MiniCalendarProps) -> Element {
         }
     }
 }
-
 /// Skeleton loader
 #[component]
 pub fn MiniCalendarSkeleton() -> Element {
     rsx! {
-        div {
-            class: "animate-pulse bg-card rounded-lg border border-border p-3",
-            div {
-                class: "h-6 bg-muted rounded mb-3"
-            }
-            div {
-                class: "grid grid-cols-7 gap-1",
+        div { class: "animate-pulse bg-card rounded-lg border border-border p-3",
+            div { class: "h-6 bg-muted rounded mb-3" }
+            div { class: "grid grid-cols-7 gap-1",
                 for _ in 0..42 {
-                    div {
-                        class: "w-7 h-7 bg-muted rounded-full"
-                    }
+                    div { class: "w-7 h-7 bg-muted rounded-full" }
                 }
             }
         }

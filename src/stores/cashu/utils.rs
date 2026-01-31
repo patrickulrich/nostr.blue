@@ -1,57 +1,42 @@
 //! Cashu wallet utility functions
-
-// Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
-
 use nostr_sdk::types::url::Url;
-
 /// Normalize a mint URL to prevent duplicates like "mint.coinos.io" vs "mint.coinos.io/"
 /// This should be called when storing or comparing mint URLs.
 pub fn normalize_mint_url(url: &str) -> String {
     let mut normalized = url.trim().to_string();
-
-    // Remove trailing slashes
     while normalized.ends_with('/') {
         normalized.pop();
     }
-
-    // Ensure https:// prefix if no scheme
     if !normalized.starts_with("http://") && !normalized.starts_with("https://") {
         normalized = format!("https://{}", normalized);
     }
-
-    // Lowercase the host portion for consistency
     if let Ok(parsed) = Url::parse(&normalized) {
         if let Some(host) = parsed.host_str() {
-            let lowercase_host = host.to_lowercase();
-            normalized = normalized.replacen(host, &lowercase_host, 1);
+            let scheme = parsed.scheme();
+            let port_str = parsed.port().map(|p| format!(":{}", p)).unwrap_or_default();
+            let path = parsed.path();
+            let path_str = if path == "/" { "" } else { path };
+            normalized = format!("{}://{}{}{}", scheme, host, port_str, path_str);
         }
     }
-
     normalized
 }
-
 /// Check if a mint URL matches a normalized mint URL
 /// Used for filtering tokens where stored URLs might not be normalized
 #[inline]
 pub fn mint_matches(stored_mint: &str, normalized_mint: &str) -> bool {
     normalize_mint_url(stored_mint) == normalized_mint
 }
-
 /// Get current timestamp in seconds
 pub fn now_secs() -> u64 {
-    js_sys::Date::now() as u64 / 1000
+    #[cfg(target_arch = "wasm32")] { js_sys::Date::now() as u64 / 1000 }
+    #[cfg(not(target_arch = "wasm32"))] { chrono::Utc::now().timestamp() as u64 }
 }
-
 /// Get current timestamp using chrono (for non-WASM contexts)
 pub fn chrono_now_secs() -> u64 {
     chrono::Utc::now().timestamp() as u64
 }
-
-// =============================================================================
-// Batched Proof Validation
-// =============================================================================
-
 /// Result of validating proofs with a mint
 #[derive(Clone, Debug, Default)]
 pub struct ProofValidationResult {
@@ -64,7 +49,6 @@ pub struct ProofValidationResult {
     /// Total sats removed (spent proofs)
     pub spent_sats: u64,
 }
-
 /// Validate proofs with mint using batch pagination
 ///
 /// Chunks proofs into batches of MAX_SYNC_INPUT_SIZE to avoid mint API limits
@@ -73,93 +57,66 @@ pub async fn validate_proofs_batched(
     wallet: &cdk::Wallet,
     proofs: Vec<cdk::nuts::Proof>,
 ) -> Result<ProofValidationResult, String> {
-    use cdk::nuts::State;
     use super::signals::MAX_SYNC_INPUT_SIZE;
-
+    use cdk::nuts::State;
     if proofs.is_empty() {
         return Ok(ProofValidationResult::default());
     }
-
     log::debug!(
-        "Validating {} proofs in batches of {}",
-        proofs.len(),
-        MAX_SYNC_INPUT_SIZE
+        "Validating {} proofs in batches of {}", proofs.len(), MAX_SYNC_INPUT_SIZE
     );
-
     let mut result = ProofValidationResult::default();
     let mut valid_proofs = Vec::with_capacity(proofs.len());
-
-    // Process in batches
     for (batch_idx, batch) in proofs.chunks(MAX_SYNC_INPUT_SIZE).enumerate() {
-        log::debug!(
-            "Validating batch {} ({} proofs)",
-            batch_idx + 1,
-            batch.len()
-        );
-
-        // Check proof states with mint (NUT-07)
+        log::debug!("Validating batch {} ({} proofs)", batch_idx + 1, batch.len());
         let states = match wallet.check_proofs_spent(batch.to_vec()).await {
             Ok(s) => s,
             Err(e) => {
-                log::warn!("Failed to check proof states for batch {}: {}", batch_idx, e);
-                // On error, assume all proofs in batch are valid (fail-safe)
+                log::warn!(
+                    "Failed to check proof states for batch {}: {}", batch_idx, e
+                );
                 valid_proofs.extend(batch.iter().cloned());
                 continue;
             }
         };
-
-        // Filter proofs by state
         for (proof, state_info) in batch.iter().zip(states.iter()) {
             match state_info.state {
                 State::Spent => {
                     result.spent_count += 1;
                     result.spent_sats += u64::from(proof.amount);
                     log::debug!(
-                        "Proof {} is spent ({} sats)",
-                        &proof.secret.to_string()[..8],
+                        "Proof {} is spent ({} sats)", & proof.secret.to_string() [..8],
                         u64::from(proof.amount)
                     );
                 }
                 State::Pending => {
                     result.pending_count += 1;
-                    // Keep pending proofs - they might still complete
                     valid_proofs.push(proof.clone());
                     log::debug!(
-                        "Proof {} is pending at mint",
-                        &proof.secret.to_string()[..8]
+                        "Proof {} is pending at mint", & proof.secret.to_string() [..8]
                     );
                 }
                 State::Unspent => {
                     valid_proofs.push(proof.clone());
                 }
                 _ => {
-                    // Unknown state - keep the proof
                     valid_proofs.push(proof.clone());
                 }
             }
         }
     }
-
     result.valid_proofs = valid_proofs;
-
     if result.spent_count > 0 {
         log::info!(
             "Proof validation complete: {} valid, {} spent ({} sats removed), {} pending",
-            result.valid_proofs.len(),
-            result.spent_count,
-            result.spent_sats,
-            result.pending_count
+            result.valid_proofs.len(), result.spent_count, result.spent_sats, result
+            .pending_count
         );
     } else {
-        log::debug!(
-            "All {} proofs validated as unspent",
-            result.valid_proofs.len()
-        );
+        log::debug!("All {} proofs validated as unspent", result.valid_proofs.len());
     }
-
     Ok(result)
 }
-
 /// Validate and filter proofs, returning only spendable ones
 ///
 /// Convenience wrapper that just returns valid proofs without the stats.
@@ -170,11 +127,6 @@ pub async fn validate_and_filter_proofs(
     let result = validate_proofs_batched(wallet, proofs).await?;
     Ok(result.valid_proofs)
 }
-
-// =============================================================================
-// Counter/Signature Healing
-// =============================================================================
-
 /// Check if error indicates counter/signature desync
 ///
 /// These errors mean the mint has already seen these blind signatures.
@@ -185,21 +137,18 @@ pub async fn validate_and_filter_proofs(
 /// Solution: Increment counter and retry with fresh signatures.
 pub fn should_heal_outputs_error(error: &str) -> bool {
     let lower = error.to_lowercase();
-    lower.contains("already signed")
-        || lower.contains("duplicate key")
+    lower.contains("already signed") || lower.contains("duplicate key")
         || lower.contains("outputs have already been signed")
         || lower.contains("blind signature already exists")
         || lower.contains("blinded message already used")
         || lower.contains("already exists in database")
 }
-
 /// Counter healing retry loop result
 #[derive(Debug)]
 pub struct CounterHealResult<T> {
     pub result: T,
     pub heal_attempts: u32,
 }
-
 /// Execute an operation with counter healing retry
 ///
 /// If the operation fails with a signature desync error, this will:
@@ -218,17 +167,14 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
     E: std::fmt::Display,
 {
-    use super::types::{MAX_COUNTER_HEAL_ATTEMPTS, COUNTER_HEAL_INCREMENTS};
-
+    use super::types::{COUNTER_HEAL_INCREMENTS, MAX_COUNTER_HEAL_ATTEMPTS};
     let mut heal_attempt = 0u32;
-
     loop {
         match operation().await {
             Ok(result) => {
                 if heal_attempt > 0 {
                     log::info!(
-                        "Counter healing succeeded after {} attempt(s)",
-                        heal_attempt
+                        "Counter healing succeeded after {} attempt(s)", heal_attempt
                     );
                 }
                 return Ok(CounterHealResult {
@@ -238,41 +184,37 @@ where
             }
             Err(e) => {
                 let error_str = e.to_string();
-
-                if should_heal_outputs_error(&error_str) && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS {
-                    let increment = match COUNTER_HEAL_INCREMENTS.get(heal_attempt as usize) {
+                if should_heal_outputs_error(&error_str)
+                    && heal_attempt < MAX_COUNTER_HEAL_ATTEMPTS
+                {
+                    let increment = match COUNTER_HEAL_INCREMENTS
+                        .get(heal_attempt as usize)
+                    {
                         Some(&inc) => inc,
                         None => {
-                            log::error!("Counter heal increment not found for attempt {}", heal_attempt);
+                            log::error!(
+                                "Counter heal increment not found for attempt {}",
+                                heal_attempt
+                            );
                             return Err(e);
                         }
                     };
                     log::warn!(
                         "Counter desync detected (attempt {}/{}), incrementing keyset counter by {}",
-                        heal_attempt + 1,
-                        MAX_COUNTER_HEAL_ATTEMPTS,
-                        increment
+                        heal_attempt + 1, MAX_COUNTER_HEAL_ATTEMPTS, increment
                     );
-
-                    // Increment the keyset counter to skip over used outputs
                     if let Err(incr_err) = wallet
                         .localstore
                         .increment_keyset_counter(keyset_id, increment)
                         .await
                     {
-                        // IMPORTANT: Returning original error `e` because function is generic over E
-                        // and we cannot change the error type. The counter increment failure is the
-                        // TRUE cause - callers should grep logs for "COUNTER_INCREMENT_FAILED".
                         log::error!(
                             "COUNTER_INCREMENT_FAILED: keyset={}, increment={}, counter_error='{}', triggering_error='{}'",
                             keyset_id, increment, incr_err, e
                         );
                         return Err(e);
                     }
-
                     heal_attempt += 1;
-
-                    // Brief delay before retry to avoid rapid-fire requests to mint
                     #[cfg(target_arch = "wasm32")]
                     {
                         gloo_timers::future::TimeoutFuture::new(500).await;
@@ -281,100 +223,81 @@ where
                     {
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     }
-
-                    // Continue to next iteration to retry
                 } else {
-                    // Not a counter error or max retries exceeded
                     return Err(e);
                 }
             }
         }
     }
 }
-
 /// Sanitize a Cashu token string by removing all whitespace
 /// and validating the format prefix.
 ///
 /// Returns the sanitized token string if valid, or an error message if invalid.
 pub fn sanitize_and_validate_token(token_string: &str) -> Result<String, String> {
-    // Remove all whitespace (spaces, tabs, newlines)
     let sanitized: String = token_string
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
-
     if sanitized.is_empty() {
         return Err("Token string is empty".to_string());
     }
-
-    // Validate token format prefix
     if !sanitized.starts_with("cashuA") && !sanitized.starts_with("cashuB") {
-        return Err(format!(
-            "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
-            sanitized.chars().take(10).collect::<String>()
-        ));
+        return Err(
+            format!(
+                "Invalid token format. Must start with 'cashuA' or 'cashuB', got: '{}'",
+                sanitized.chars().take(10).collect::<String>(),
+            ),
+        );
     }
-
     Ok(sanitized)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_normalize_mint_url() {
-        assert_eq!(
-            normalize_mint_url("mint.example.com"),
-            "https://mint.example.com"
-        );
+        assert_eq!(normalize_mint_url("mint.example.com"), "https://mint.example.com");
         assert_eq!(
             normalize_mint_url("https://mint.example.com/"),
-            "https://mint.example.com"
+            "https://mint.example.com",
         );
         assert_eq!(
             normalize_mint_url("https://MINT.Example.COM"),
-            "https://mint.example.com"
+            "https://mint.example.com",
         );
         assert_eq!(
             normalize_mint_url("  https://mint.example.com/  "),
-            "https://mint.example.com"
+            "https://mint.example.com",
         );
     }
-
     #[test]
     fn test_mint_matches() {
         assert!(mint_matches("https://mint.example.com/", "https://mint.example.com"));
         assert!(mint_matches("mint.example.com", "https://mint.example.com"));
         assert!(!mint_matches("https://other.mint.com", "https://mint.example.com"));
     }
-
     #[test]
     fn test_sanitize_and_validate_token() {
-        // Valid tokens
         assert_eq!(
             sanitize_and_validate_token("cashuAtoken123"),
-            Ok("cashuAtoken123".to_string())
+            Ok("cashuAtoken123".to_string()),
         );
         assert_eq!(
             sanitize_and_validate_token("cashuBtoken456"),
-            Ok("cashuBtoken456".to_string())
+            Ok("cashuBtoken456".to_string()),
         );
-
-        // Whitespace removal
         assert_eq!(
             sanitize_and_validate_token("  cashuA token 123  "),
-            Ok("cashuAtoken123".to_string())
+            Ok("cashuAtoken123".to_string()),
         );
         assert_eq!(
             sanitize_and_validate_token("cashuB\ntoken\t456"),
-            Ok("cashuBtoken456".to_string())
+            Ok("cashuBtoken456".to_string()),
         );
-
-        // Invalid tokens
         assert!(sanitize_and_validate_token("").is_err());
         assert!(sanitize_and_validate_token("   ").is_err());
         assert!(sanitize_and_validate_token("invalidtoken").is_err());
-        assert!(sanitize_and_validate_token("cashu123").is_err()); // Wrong prefix
+        assert!(sanitize_and_validate_token("cashu123").is_err());
     }
 }

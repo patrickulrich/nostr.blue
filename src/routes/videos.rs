@@ -1,19 +1,17 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, feed_cache, nostr_client};
-use crate::stores::feed_cache::FeedCacheKey;
-use crate::utils::FeedItem;
 use crate::components::{ClientInitializing, MiniLiveStreamCard};
+use crate::stores::feed_cache::FeedCacheKey;
+use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
-use nostr_sdk::{Event, Filter, Kind, Timestamp, PublicKey};
+use crate::utils::FeedItem;
+use dioxus::prelude::*;
+use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
 use wasm_bindgen::JsCast;
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
     Following,
     Global,
 }
-
 impl FeedType {
     fn label(&self) -> &'static str {
         match self {
@@ -22,46 +20,28 @@ impl FeedType {
         }
     }
 }
-
 #[component]
 pub fn Videos() -> Element {
-    // State for featured landscape videos
     let mut featured_landscape = use_signal(Vec::<Event>::new);
     let mut loading_featured = use_signal(|| false);
-
-    // State for recent verts section
     let mut recent_verts = use_signal(Vec::<Event>::new);
     let mut loading_recent_verts = use_signal(|| false);
-
-    // State for combined feed
     let mut feed_events = use_signal(Vec::<Event>::new);
     let mut loading_feed = use_signal(|| false);
     let mut feed_type = use_signal(|| FeedType::Following);
     let mut show_dropdown = use_signal(|| false);
     let mut refresh_trigger = use_signal(|| 0);
-
-    // Pagination state
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
-
     let mut error = use_signal(|| None::<String>);
-
-    // Request ID for preventing stale results when feed type changes rapidly
     let mut request_id = use_signal(|| 0u32);
-
-    // Track last intentional load trigger to guard against spurious re-triggers
     let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
-
-    // Load featured landscape videos on mount
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
         loading_featured.set(true);
-
         spawn(async move {
             match load_featured_content().await {
                 Ok(landscape) => {
@@ -75,17 +55,12 @@ pub fn Videos() -> Element {
             }
         });
     });
-
-    // Load recent verts on mount
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
         loading_recent_verts.set(true);
-
         spawn(async move {
             match load_recent_verts().await {
                 Ok(verts) => {
@@ -99,99 +74,83 @@ pub fn Videos() -> Element {
             }
         });
     });
-
-    // Load combined feed when feed type changes or refresh is triggered
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
-        // Guard: Only reload if intentional change or no data
         let (last_refresh, last_feed) = *last_loaded_trigger.peek();
         let has_data = !feed_events.peek().is_empty();
-
         let feed_type_changed = current_feed_type != last_feed;
         let refresh_changed = refresh != last_refresh;
-
         if has_data && !feed_type_changed && !refresh_changed {
-            log::debug!("Skipping videos feed re-load: data already present, no intentional change");
+            log::debug!(
+                "Skipping videos feed re-load: data already present, no intentional change"
+            );
             return;
         }
-
-        // Update last loaded trigger
         last_loaded_trigger.set((refresh, current_feed_type));
-
-        // Generate request ID for stale request prevention
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
-
-        // Always set loading (shows spinner during refresh)
         loading_feed.set(true);
-        // Clear feed only when switching types; keep visible during same-feed refresh
-        // (Dioxus pattern: clear data before async to prevent stale UI)
         if feed_type_changed {
             feed_events.set(Vec::new());
         }
         error.set(None);
         oldest_timestamp.set(None);
         has_more.set(true);
-
         spawn(async move {
-            // Check if this request is still current
             if *request_id.peek() != current_id {
                 log::debug!("Discarding stale videos feed request {}", current_id);
                 return;
             }
-
-            // Determine cache key
             let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
             let cache_key = match current_feed_type {
-                FeedType::Following => FeedCacheKey::Videos { pubkey: pubkey_str },
+                FeedType::Following => {
+                    FeedCacheKey::Videos {
+                        pubkey: pubkey_str,
+                    }
+                }
                 FeedType::Global => FeedCacheKey::VideosGlobal,
             };
-
-            // STEP 1: Load from cache instantly
             let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
                 .await
                 .unwrap_or_default();
-
-            // Check staleness after cache load
             if *request_id.peek() != current_id {
-                log::debug!("Discarding stale videos feed request {} after cache load", current_id);
+                log::debug!(
+                    "Discarding stale videos feed request {} after cache load",
+                    current_id
+                );
                 return;
             }
-
             if !cached_items.is_empty() {
                 log::info!("Loaded {} videos from cache", cached_items.len());
-                let cached_events: Vec<Event> = cached_items.iter().map(|i| i.event().clone()).collect();
-
-                // Seed pagination from cache to enable proper pagination on cached data
+                let cached_events: Vec<Event> = cached_items
+                    .iter()
+                    .map(|i| i.event().clone())
+                    .collect();
                 if let Some(oldest) = cached_events.iter().map(|e| e.created_at).min() {
                     oldest_timestamp.set(Some(oldest.as_secs().saturating_sub(1)));
                 }
-
                 feed_events.set(cached_events);
             }
-
-            // STEP 2: Load from network
             let result = match current_feed_type {
                 FeedType::Following => load_following_videos(None).await,
-                FeedType::Global => load_global_videos(None).await.map(|(e, h)| (e, h, false)),
+                FeedType::Global => {
+                    load_global_videos(None).await.map(|(e, h)| (e, h, false))
+                }
             };
-
-            // Check staleness after network load
             if *request_id.peek() != current_id {
-                log::debug!("Discarding stale videos feed request {} after network load", current_id);
+                log::debug!(
+                    "Discarding stale videos feed request {} after network load",
+                    current_id
+                );
                 return;
             }
-
             match result {
                 Ok((video_events, page_has_more, did_fallback)) => {
-                    // Compute effective cache key based on fallback
                     let effective_cache_key = if did_fallback {
                         log::info!("No contacts, switched to Global videos feed");
                         feed_type.set(FeedType::Global);
@@ -199,28 +158,27 @@ pub fn Videos() -> Element {
                     } else {
                         cache_key.clone()
                     };
-
                     if let Some(last_event) = video_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                     }
-
-                    // STEP 3: Store to cache using effective key
-                    let feed_items: Vec<FeedItem> = video_events.iter()
+                    let feed_items: Vec<FeedItem> = video_events
+                        .iter()
                         .map(|e| FeedItem::OriginalPost(e.clone()))
                         .collect();
                     let cache_key_for_store = effective_cache_key;
                     spawn(async move {
-                        let _ = feed_cache::store_feed_items(&cache_key_for_store, &feed_items).await;
+                        let _ = feed_cache::store_feed_items(
+                                &cache_key_for_store,
+                                &feed_items,
+                            )
+                            .await;
                         let _ = feed_cache::run_eviction_if_needed().await;
                     });
-
-                    // Use the has_more flag from the loader which checks if either query hit its limit
                     has_more.set(page_has_more);
                     feed_events.set(video_events);
                     loading_feed.set(false);
                 }
                 Err(e) => {
-                    // On error, keep cached data visible if we have it
                     if cached_items.is_empty() {
                         error.set(Some(e));
                     } else {
@@ -231,57 +189,42 @@ pub fn Videos() -> Element {
             }
         });
     });
-
-    // Load more function for infinite scroll
     let mut load_more = move || {
         if *loading_feed.read() || !*has_more.read() {
             return;
         }
-
-        // Need a valid oldest_timestamp for pagination
-        // If None, initial load hasn't completed yet
         let until = match *oldest_timestamp.read() {
             Some(ts) => Some(ts),
             None => return,
         };
         let current_feed_type = *feed_type.read();
-
         loading_feed.set(true);
-
         spawn(async move {
-            // Note: During pagination, we ignore the fallback flag since feed_type is already set
             let result = match current_feed_type {
-                FeedType::Following => load_following_videos(until).await.map(|(e, h, _)| (e, h)),
+                FeedType::Following => {
+                    load_following_videos(until).await.map(|(e, h, _)| (e, h))
+                }
                 FeedType::Global => load_global_videos(until).await,
             };
-
             match result {
                 Ok((new_events, page_has_more)) => {
-                    // Filter out duplicates by checking existing event IDs
                     let existing_ids: std::collections::HashSet<_> = {
                         let current = feed_events.read();
                         current.iter().map(|e| e.id).collect()
                     };
-
-                    let unique_events: Vec<_> = new_events.into_iter()
+                    let unique_events: Vec<_> = new_events
+                        .into_iter()
                         .filter(|e| !existing_ids.contains(&e.id))
                         .collect();
-
                     if unique_events.is_empty() {
-                        // No new unique events, stop pagination
                         has_more.set(false);
                         loading_feed.set(false);
                         log::info!("No new unique videos found, stopping pagination");
                     } else {
-                        // Update timestamp from last unique event
                         if let Some(last_event) = unique_events.last() {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
-
-                        // Use the has_more flag from the loader which checks if either query hit its limit
                         has_more.set(page_has_more);
-
-                        // Append only unique events
                         let mut current = feed_events.read().clone();
                         current.extend(unique_events);
                         feed_events.set(current);
@@ -295,23 +238,14 @@ pub fn Videos() -> Element {
             }
         });
     };
-
     rsx! {
-        div {
-            class: "min-h-screen bg-background",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
-                div {
-                    class: "px-6 py-4 flex items-center justify-between max-w-[1600px] mx-auto",
-
-                    h1 {
-                        class: "text-2xl font-bold flex items-center gap-3",
+        div { class: "min-h-screen bg-background",
+            div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",
+                div { class: "px-6 py-4 flex items-center justify-between max-w-[1600px] mx-auto",
+                    h1 { class: "text-2xl font-bold flex items-center gap-3",
                         crate::components::icons::VideoIcon { class: "w-7 h-7" }
                         "Videos"
                     }
-
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
                         disabled: *loading_featured.read() || *loading_recent_verts.read() || *loading_feed.read(),
@@ -321,79 +255,49 @@ pub fn Videos() -> Element {
                         },
                         title: "Refresh",
                         if *loading_featured.read() || *loading_recent_verts.read() || *loading_feed.read() {
-                            span {
-                                class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin"
-                            }
+                            span { class: "inline-block w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin" }
                         } else {
                             crate::components::icons::RefreshIcon { class: "w-5 h-5" }
                         }
                     }
                 }
             }
-
-            // Content
-            div {
-                class: "max-w-[1600px] mx-auto px-6 py-6",
-
+            div { class: "max-w-[1600px] mx-auto px-6 py-6",
                 if !*nostr_client::CLIENT_INITIALIZED.read() {
                     ClientInitializing {}
                 } else {
-                    // Featured Landscape Videos Section
                     if !featured_landscape.read().is_empty() {
-                        div {
-                            class: "mb-8",
-                            h2 {
-                                class: "text-xl font-semibold mb-4",
-                                "Recent Videos"
-                            }
-                            div {
-                                class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                        div { class: "mb-8",
+                            h2 { class: "text-xl font-semibold mb-4", "Recent Videos" }
+                            div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
                                 for event in featured_landscape.read().iter().take(3) {
                                     LandscapeVideoCard {
                                         key: "{event.id}",
                                         event: event.clone(),
-                                        feed_type: *feed_type.read()
+                                        feed_type: *feed_type.read(),
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Recent Verts Section
                     if !recent_verts.read().is_empty() {
-                        div {
-                            class: "mb-8",
-                            h2 {
-                                class: "text-xl font-semibold mb-4",
-                                "Recent Verts"
-                            }
-                            div {
-                                class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
+                        div { class: "mb-8",
+                            h2 { class: "text-xl font-semibold mb-4", "Recent Verts" }
+                            div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3",
                                 for event in recent_verts.read().iter().take(5) {
                                     VertsVideoCard {
                                         key: "{event.id}",
                                         event: event.clone(),
-                                        feed_type: FeedType::Following
+                                        feed_type: FeedType::Following,
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Combined Feed Section
-                    div {
-                        class: "mt-8",
-
-                        // Feed selector
-                        div {
-                            class: "flex items-center justify-between mb-4",
-                            h2 {
-                                class: "text-xl font-semibold",
-                                "All Videos"
-                            }
-
-                            div {
-                                class: "relative",
+                    div { class: "mt-8",
+                        div { class: "flex items-center justify-between mb-4",
+                            h2 { class: "text-xl font-semibold", "All Videos" }
+                            div { class: "relative",
                                 button {
                                     class: "flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg transition",
                                     onclick: move |_| {
@@ -407,11 +311,8 @@ pub fn Videos() -> Element {
                                         crate::components::icons::ChevronDownIcon { class: "w-4 h-4" }
                                     }
                                 }
-
                                 if *show_dropdown.read() {
-                                    div {
-                                        class: "absolute top-full right-0 mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[200px] overflow-hidden z-50",
-
+                                    div { class: "absolute top-full right-0 mt-2 bg-card border border-border rounded-lg shadow-lg min-w-[200px] overflow-hidden z-50",
                                         button {
                                             class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
                                             onclick: move |_| {
@@ -419,12 +320,8 @@ pub fn Videos() -> Element {
                                                 show_dropdown.set(false);
                                             },
                                             div {
-                                                div {
-                                                    class: "font-medium",
-                                                    "Following"
-                                                }
-                                                div {
-                                                    class: "text-xs text-muted-foreground",
+                                                div { class: "font-medium", "Following" }
+                                                div { class: "text-xs text-muted-foreground",
                                                     "Videos from people you follow"
                                                 }
                                             }
@@ -432,11 +329,7 @@ pub fn Videos() -> Element {
                                                 crate::components::icons::CheckIcon { class: "w-5 h-5" }
                                             }
                                         }
-
-                                        div {
-                                            class: "border-t border-border"
-                                        }
-
+                                        div { class: "border-t border-border" }
                                         button {
                                             class: "w-full px-4 py-3 text-left hover:bg-accent transition flex items-center justify-between",
                                             onclick: move |_| {
@@ -444,12 +337,8 @@ pub fn Videos() -> Element {
                                                 show_dropdown.set(false);
                                             },
                                             div {
-                                                div {
-                                                    class: "font-medium",
-                                                    "Global"
-                                                }
-                                                div {
-                                                    class: "text-xs text-muted-foreground",
+                                                div { class: "font-medium", "Global" }
+                                                div { class: "text-xs text-muted-foreground",
                                                     "Videos from everyone"
                                                 }
                                             }
@@ -461,85 +350,62 @@ pub fn Videos() -> Element {
                                 }
                             }
                         }
-
-                        // Combined feed grid
                         if let Some(err) = error.read().as_ref() {
-                            div {
-                                class: "text-center py-12",
-                                div {
-                                    class: "text-destructive mb-2",
-                                    "Error: {err}"
-                                }
+                            div { class: "text-center py-12",
+                                div { class: "text-destructive mb-2", "Error: {err}" }
                             }
                         } else if feed_events.read().is_empty() && !*loading_feed.read() {
-                            div {
-                                class: "text-center py-12",
-                                div {
-                                    class: "mb-4 flex justify-center",
+                            div { class: "text-center py-12",
+                                div { class: "mb-4 flex justify-center",
                                     crate::components::icons::VideoIcon { class: "w-24 h-24 text-muted-foreground" }
                                 }
-                                h3 {
-                                    class: "text-xl font-semibold mb-2",
-                                    "No videos yet"
-                                }
-                                p {
-                                    class: "text-muted-foreground",
-                                    "Videos will appear here"
-                                }
+                                h3 { class: "text-xl font-semibold mb-2", "No videos yet" }
+                                p { class: "text-muted-foreground", "Videos will appear here" }
                             }
                         } else {
-                            // Unified feed with landscape, verts, and livestreams mixed together in a single grid
-                            div {
-                                class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
+                            div { class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for event in feed_events.read().iter() {
                                     if event.kind == Kind::Custom(30311) {
-                                        // Only show LIVE streams on the videos page
                                         {
-                                            let is_live = event.tags.iter().any(|tag| {
-                                                let slice = tag.as_slice();
-                                                slice.first().map(|s| s.as_str()) == Some("status") &&
-                                                slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
-                                            });
-
+                                            let is_live = event
+                                                .tags
+                                                .iter()
+                                                .any(|tag| {
+                                                    let slice = tag.as_slice();
+                                                    slice.first().map(|s| s.as_str()) == Some("status")
+                                                        && slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
+                                                });
                                             if is_live {
                                                 rsx! {
-                                                    MiniLiveStreamCard {
-                                                        key: "{event.id}",
-                                                        event: event.clone()
-                                                    }
+                                                    MiniLiveStreamCard { key: "{event.id}", event: event.clone() }
                                                 }
                                             } else {
-                                                rsx! { }
+                                                rsx! {}
                                             }
                                         }
                                     } else if event.kind == Kind::Custom(22) {
                                         VertsVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
-                                            feed_type: *feed_type.read()
+                                            feed_type: *feed_type.read(),
                                         }
                                     } else if event.kind == Kind::Custom(21) {
                                         LandscapeVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
-                                            feed_type: *feed_type.read()
+                                            feed_type: *feed_type.read(),
                                         }
                                     }
                                 }
                             }
-
-                            // Load more button
                             if *has_more.read() {
-                                div {
-                                    class: "flex justify-center mt-8",
+                                div { class: "flex justify-center mt-8",
                                     button {
                                         class: "px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
                                         disabled: *loading_feed.read(),
                                         onclick: move |_| load_more(),
                                         if *loading_feed.read() {
-                                            span {
-                                                class: "inline-block w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin mr-2"
-                                            }
+                                            span { class: "inline-block w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin mr-2" }
                                             "Loading..."
                                         } else {
                                             "Load More"
@@ -554,7 +420,6 @@ pub fn Videos() -> Element {
         }
     }
 }
-
 #[component]
 fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let video_meta = parse_video_meta(&event);
@@ -563,79 +428,89 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
-
-    // Fetch author metadata
-    use_effect(use_reactive(&author_pubkey, move |pubkey_str| {
-        spawn(async move {
-            if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
-                let filter = Filter::new()
-                    .author(pubkey)
-                    .kind(Kind::Metadata)
-                    .limit(1);
-
-                if let Ok(events) = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5)).await {
-                    if let Some(event) = events.into_iter().next() {
-                        if let Ok(metadata) = serde_json::from_str::<nostr_sdk::Metadata>(&event.content) {
-                            author_metadata.set(Some(metadata));
-                        }
-                    }
-                }
-            }
-        });
-    }));
-
-    // Play/pause video on hover (only if no thumbnail)
-    use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
-        let id = video_element_id_for_effect.clone();
-        spawn(async move {
-            if let Some(window) = web_sys::window() {
-                if let Some(document) = window.document() {
-                    if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
-                            if hovering {
-                                let _ = video.play();
-                            } else {
-                                let _ = video.pause();
-                                video.set_current_time(0.0);
+    use_effect(
+        use_reactive(
+            &author_pubkey,
+            move |pubkey_str| {
+                spawn(async move {
+                    if let Ok(pubkey) = PublicKey::parse(&pubkey_str) {
+                        let filter = Filter::new()
+                            .author(pubkey)
+                            .kind(Kind::Metadata)
+                            .limit(1);
+                        if let Ok(events) = nostr_client::fetch_events_aggregated(
+                                filter,
+                                Duration::from_secs(5),
+                            )
+                            .await
+                        {
+                            if let Some(event) = events.into_iter().next() {
+                                if let Ok(metadata) = serde_json::from_str::<
+                                    nostr_sdk::Metadata,
+                                >(&event.content) {
+                                    author_metadata.set(Some(metadata));
+                                }
                             }
                         }
                     }
-                }
-            }
-        });
-    }));
-
-    let display_name = author_metadata.read().as_ref()
+                });
+            },
+        ),
+    );
+    use_effect(
+        use_reactive(
+            &*is_hovering.read(),
+            move |hovering| {
+                let id = video_element_id_for_effect.clone();
+                spawn(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Some(document) = window.document() {
+                            if let Some(element) = document.get_element_by_id(&id) {
+                                if let Ok(video) = element
+                                    .dyn_into::<web_sys::HtmlVideoElement>()
+                                {
+                                    if hovering {
+                                        let _ = video.play();
+                                    } else {
+                                        let _ = video.pause();
+                                        video.set_current_time(0.0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            },
+        ),
+    );
+    let display_name = author_metadata
+        .read()
+        .as_ref()
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| {
             let pk = event.pubkey.to_string();
             truncate_pubkey(&pk)
         });
-
     let video_id = event.id.to_hex();
     let feed_param = match feed_type {
         FeedType::Following => "following",
         FeedType::Global => "global",
     };
-
     rsx! {
         div {
             class: "group cursor-pointer",
             onmouseenter: move |_| is_hovering.set(true),
             onmouseleave: move |_| is_hovering.set(false),
-
             Link {
-                to: crate::routes::Route::VideoDetail { video_id: format!("{}?feed={}", video_id, feed_param) },
-
-                div {
-                    class: "relative aspect-video bg-muted rounded-lg overflow-hidden mb-3",
-
-                    // Show thumbnail if available, otherwise show video (first frame until hover)
+                to: crate::routes::Route::VideoDetail {
+                    video_id: format!("{}?feed={}", video_id, feed_param),
+                },
+                div { class: "relative aspect-video bg-muted rounded-lg overflow-hidden mb-3",
                     if let Some(thumbnail) = &video_meta.thumbnail {
                         img {
                             src: "{thumbnail}",
                             alt: "{video_meta.title.as_deref().unwrap_or(\"Video\")}",
-                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
                         }
                     } else if let Some(url) = &video_meta.url {
                         video {
@@ -643,42 +518,29 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
                             class: "w-full h-full object-cover",
                             src: "{url}",
                             muted: true,
-                            loop: true,
+                            r#loop: true,
                             playsinline: true,
                             preload: "metadata",
                         }
                     } else {
-                        div {
-                            class: "w-full h-full flex items-center justify-center bg-muted",
+                        div { class: "w-full h-full flex items-center justify-center bg-muted",
                             crate::components::icons::VideoIcon { class: "w-12 h-12 text-muted-foreground" }
                         }
                     }
-
-                    // Duration badge
                     if let Some(duration) = &video_meta.duration {
-                        div {
-                            class: "absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded",
+                        div { class: "absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded",
                             "{duration}"
                         }
                     }
                 }
-
-                // Video info
                 div {
                     if let Some(title) = &video_meta.title {
-                        h3 {
-                            class: "font-semibold line-clamp-2 mb-1 group-hover:text-primary transition",
+                        h3 { class: "font-semibold line-clamp-2 mb-1 group-hover:text-primary transition",
                             "{title}"
                         }
                     }
-
-                    p {
-                        class: "text-sm text-muted-foreground mb-1",
-                        "{display_name}"
-                    }
-
-                    p {
-                        class: "text-xs text-muted-foreground",
+                    p { class: "text-sm text-muted-foreground mb-1", "{display_name}" }
+                    p { class: "text-xs text-muted-foreground",
                         {format_relative_time_or(event.created_at.as_secs(), "just now")}
                     }
                 }
@@ -686,59 +548,58 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
         }
     }
 }
-
 #[component]
 fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
     let video_meta = parse_video_meta(&event);
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
-
-    // Play/pause video on hover (only if no thumbnail)
-    use_effect(use_reactive(&*is_hovering.read(), move |hovering| {
-        let id = video_element_id_for_effect.clone();
-        spawn(async move {
-            if let Some(window) = web_sys::window() {
-                if let Some(document) = window.document() {
-                    if let Some(element) = document.get_element_by_id(&id) {
-                        if let Ok(video) = element.dyn_into::<web_sys::HtmlVideoElement>() {
-                            if hovering {
-                                let _ = video.play();
-                            } else {
-                                let _ = video.pause();
-                                video.set_current_time(0.0);
+    use_effect(
+        use_reactive(
+            &*is_hovering.read(),
+            move |hovering| {
+                let id = video_element_id_for_effect.clone();
+                spawn(async move {
+                    if let Some(window) = web_sys::window() {
+                        if let Some(document) = window.document() {
+                            if let Some(element) = document.get_element_by_id(&id) {
+                                if let Ok(video) = element
+                                    .dyn_into::<web_sys::HtmlVideoElement>()
+                                {
+                                    if hovering {
+                                        let _ = video.play();
+                                    } else {
+                                        let _ = video.pause();
+                                        video.set_current_time(0.0);
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
-        });
-    }));
-
+                });
+            },
+        ),
+    );
     let video_id = event.id.to_hex();
     let feed_param = match feed_type {
         FeedType::Following => "following",
         FeedType::Global => "global",
     };
-
     rsx! {
         div {
             class: "group cursor-pointer",
             onmouseenter: move |_| is_hovering.set(true),
             onmouseleave: move |_| is_hovering.set(false),
-
             Link {
-                to: crate::routes::Route::VideoDetail { video_id: format!("{}?feed={}", video_id, feed_param) },
-
-                div {
-                    class: "relative aspect-[9/16] bg-muted rounded-lg overflow-hidden mb-2",
-
-                    // Show thumbnail if available, otherwise show video (first frame until hover)
+                to: crate::routes::Route::VideoDetail {
+                    video_id: format!("{}?feed={}", video_id, feed_param),
+                },
+                div { class: "relative aspect-[9/16] bg-muted rounded-lg overflow-hidden mb-2",
                     if let Some(thumbnail) = &video_meta.thumbnail {
                         img {
                             src: "{thumbnail}",
                             alt: "{video_meta.title.as_deref().unwrap_or(\"Vert\")}",
-                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
                         }
                     } else if let Some(url) = &video_meta.url {
                         video {
@@ -746,29 +607,22 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
                             class: "w-full h-full object-cover",
                             src: "{url}",
                             muted: true,
-                            loop: true,
+                            r#loop: true,
                             playsinline: true,
                             preload: "metadata",
                         }
                     } else {
-                        div {
-                            class: "w-full h-full flex items-center justify-center bg-muted",
+                        div { class: "w-full h-full flex items-center justify-center bg-muted",
                             crate::components::icons::VideoIcon { class: "w-8 h-8 text-muted-foreground" }
                         }
                     }
-
-                    // Verts indicator
-                    div {
-                        class: "absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded flex items-center gap-1",
+                    div { class: "absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded flex items-center gap-1",
                         crate::components::icons::VideoIcon { class: "w-3 h-3" }
                         "Vert"
                     }
                 }
-
-                // Title only for verts
                 if let Some(title) = &video_meta.title {
-                    p {
-                        class: "text-sm font-medium line-clamp-2 group-hover:text-primary transition",
+                    p { class: "text-sm font-medium line-clamp-2 group-hover:text-primary transition",
                         "{title}"
                     }
                 }
@@ -776,8 +630,6 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
         }
     }
 }
-
-// Video metadata structure
 #[derive(Clone, Debug, PartialEq)]
 struct VideoMeta {
     url: Option<String>,
@@ -786,8 +638,6 @@ struct VideoMeta {
     duration: Option<String>,
     dimensions: Option<String>,
 }
-
-// Parse NIP-71 video metadata from imeta tags
 fn parse_video_meta(event: &Event) -> VideoMeta {
     let mut meta = VideoMeta {
         url: None,
@@ -796,8 +646,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
         duration: None,
         dimensions: None,
     };
-
-    // Parse title tag (use as_slice for zero-copy access)
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("title") && slice.len() > 1 {
@@ -805,8 +653,6 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
             break;
         }
     }
-
-    // Parse imeta tags (use as_slice for zero-copy access)
     for tag in event.tags.iter() {
         let slice = tag.as_slice();
         if slice.first().map(|s| s.as_str()) == Some("imeta") {
@@ -823,16 +669,10 @@ fn parse_video_meta(event: &Event) -> VideoMeta {
             }
         }
     }
-
     meta
 }
-
-
-// Load featured landscape videos (3 landscape videos from Following, fallback to Global)
 async fn load_featured_content() -> Result<Vec<Event>, String> {
     log::info!("Loading featured landscape videos...");
-
-    // Try Following feed first
     if let Some(pubkey_str) = auth_store::get_pubkey() {
         match nostr_client::fetch_contacts(pubkey_str).await {
             Ok(contacts) if !contacts.is_empty() => {
@@ -842,24 +682,25 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         authors.push(pk);
                     }
                 }
-
                 if !authors.is_empty() {
-                    // Fetch only landscape videos (Kind 21)
                     let filter = Filter::new()
                         .kinds([Kind::Custom(21)])
                         .authors(authors)
                         .limit(20);
-
-                    let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
+                    let all_events = nostr_client::fetch_video_events(
+                            filter,
+                            Duration::from_secs(10),
+                        )
                         .await
                         .unwrap_or_default();
-
-                    let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
+                    let mut all_events_vec: Vec<Event> = all_events
+                        .into_iter()
+                        .collect();
                     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-                    // Take first 3 landscape videos
-                    let landscape_vec: Vec<Event> = all_events_vec.into_iter().take(3).collect();
-
+                    let landscape_vec: Vec<Event> = all_events_vec
+                        .into_iter()
+                        .take(3)
+                        .collect();
                     if !landscape_vec.is_empty() {
                         return Ok(landscape_vec);
                     }
@@ -867,37 +708,20 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
             }
             _ => {}
         }
-    };
-
-    // Fallback to Global if Following is empty or not authenticated
+    }
     log::info!("Falling back to global feed for featured landscape videos");
-
-    // Fetch only landscape videos (Kind 21)
-    let filter = Filter::new()
-        .kinds([Kind::Custom(21)])
-        .limit(20);
-
+    let filter = Filter::new().kinds([Kind::Custom(21)]).limit(20);
     let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
         .await
         .unwrap_or_default();
-
     let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    // Take first 3 landscape videos
     let landscape_vec: Vec<Event> = all_events_vec.into_iter().take(3).collect();
-
     Ok(landscape_vec)
 }
-
-// Load recent verts videos (5 verts from Following feed only)
 async fn load_recent_verts() -> Result<Vec<Event>, String> {
     log::info!("Loading recent verts videos from Following feed...");
-
-    // Only fetch from Following feed
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
-
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     match nostr_client::fetch_contacts(pubkey_str).await {
         Ok(contacts) if !contacts.is_empty() => {
             let mut authors = Vec::new();
@@ -906,24 +730,20 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                     authors.push(pk);
                 }
             }
-
             if !authors.is_empty() {
-                // Fetch only verts videos (Kind 22)
                 let filter = Filter::new()
                     .kinds([Kind::Custom(22)])
                     .authors(authors)
                     .limit(20);
-
-                let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
+                let all_events = nostr_client::fetch_video_events(
+                        filter,
+                        Duration::from_secs(10),
+                    )
                     .await
                     .unwrap_or_default();
-
                 let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
                 all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-                // Take first 5 verts videos
                 let verts_vec: Vec<Event> = all_events_vec.into_iter().take(5).collect();
-
                 return Ok(verts_vec);
             }
         }
@@ -936,21 +756,17 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
             return Ok(Vec::new());
         }
     }
-
     Ok(Vec::new())
 }
-
 /// Load following videos (Kind 21 & 22 from followed users)
 /// Returns (events, has_more, did_fallback) where:
 /// - has_more is true if either query hit its limit
 /// - did_fallback is true if we fell back to global feed
-async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, bool), String> {
-    let pubkey_str = auth_store::get_pubkey()
-        .ok_or("Not authenticated")?;
-
+async fn load_following_videos(
+    until: Option<u64>,
+) -> Result<(Vec<Event>, bool, bool), String> {
+    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
     log::info!("Loading following videos feed for {} (until: {:?})", pubkey_str, until);
-
-    // Fetch contacts
     let contacts = match nostr_client::fetch_contacts(pubkey_str.clone()).await {
         Ok(contacts) => contacts,
         Err(e) => {
@@ -959,64 +775,48 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, 
             return Ok((events, has_more, true));
         }
     };
-
     if contacts.is_empty() {
         log::info!("User doesn't follow anyone, showing global videos");
         let (events, has_more) = load_global_videos(until).await?;
         return Ok((events, has_more, true));
     }
-
     log::info!("User follows {} accounts", contacts.len());
-
-    // Parse contact pubkeys
     let mut authors = Vec::new();
     for contact in contacts.iter() {
         if let Ok(pk) = PublicKey::parse(contact) {
             authors.push(pk);
         }
     }
-
     if authors.is_empty() {
         log::warn!("No valid contact pubkeys, falling back to global feed");
         let (events, has_more) = load_global_videos(until).await?;
         return Ok((events, has_more, true));
     }
-
-    // Fetch videos (Kind 21, 22) and livestreams (Kind 30311) separately for better distribution
     let authors_clone = authors.clone();
-
     let mut video_filter = Filter::new()
         .kinds([Kind::Custom(21), Kind::Custom(22)])
         .authors(authors)
         .limit(40);
-
-    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
         video_filter = video_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
-
     let mut stream_filter = Filter::new()
         .kind(Kind::Custom(30311))
         .authors(authors_clone)
         .limit(10);
-
-    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
         stream_filter = stream_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
-
     log::info!("Fetching videos and livestreams separately from followed accounts");
-
-    // Fetch both concurrently using fast fetch (bypasses gossip)
     let (video_result, stream_result) = tokio::join!(
-        nostr_client::fetch_video_events_from_connected_relays(video_filter, Duration::from_secs(10)),
-        nostr_client::fetch_video_events_from_connected_relays(stream_filter, Duration::from_secs(10))
+        nostr_client::fetch_video_events_from_connected_relays(video_filter,
+        Duration::from_secs(10)),
+        nostr_client::fetch_video_events_from_connected_relays(stream_filter,
+        Duration::from_secs(10))
     );
-
     let mut all_events = Vec::new();
     let mut video_hit_limit = false;
     let mut stream_hit_limit = false;
-
     match video_result {
         Ok(videos) => {
             video_hit_limit = videos.len() >= 40;
@@ -1027,7 +827,6 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, 
             log::warn!("Failed to fetch video events from following: {}", e);
         }
     }
-
     match stream_result {
         Ok(streams) => {
             stream_hit_limit = streams.len() >= 10;
@@ -1038,62 +837,35 @@ async fn load_following_videos(until: Option<u64>) -> Result<(Vec<Event>, bool, 
             log::warn!("Failed to fetch livestream events from following: {}", e);
         }
     }
-
-    // If no events found, return empty (valid result - user's contacts just haven't posted videos)
-    // Don't fall back to global here - empty following is different from no contacts
     if all_events.is_empty() {
         log::info!("No videos from followed users");
         return Ok((Vec::new(), false, false));
     }
-
-    // Sort all content chronologically
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
     log::info!("Loaded total of {} events from following", all_events.len());
-
-    // has_more is true if either query hit its limit
     let has_more = video_hit_limit || stream_hit_limit;
-
     Ok((all_events, has_more, false))
 }
-
-// Helper function to load global videos (Kind 21, 22) and livestreams (Kind 30311) from everyone
-// Returns (events, has_more) where has_more is true if either query hit its limit
 async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     log::info!("Loading global videos feed (until: {:?})...", until);
-
-    // Fetch videos (Kind 21, 22) separately to ensure they're included
     let mut video_filter = Filter::new()
         .kinds([Kind::Custom(21), Kind::Custom(22)])
         .limit(40);
-
-    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
     if let Some(until_ts) = until {
         video_filter = video_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
-
-    // Fetch livestreams (Kind 30311) separately
-    let mut stream_filter = Filter::new()
-        .kind(Kind::Custom(30311))
-        .limit(10);
-
-    // Subtract 1 to exclude events at exactly this timestamp (avoid duplicates)
+    let mut stream_filter = Filter::new().kind(Kind::Custom(30311)).limit(10);
     if let Some(until_ts) = until {
         stream_filter = stream_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
     }
-
     log::info!("Fetching global videos and livestreams separately");
-
-    // Fetch both concurrently
     let (video_result, stream_result) = tokio::join!(
         nostr_client::fetch_video_events(video_filter, Duration::from_secs(10)),
         nostr_client::fetch_video_events(stream_filter, Duration::from_secs(10))
     );
-
     let mut all_events = Vec::new();
     let mut video_hit_limit = false;
     let mut stream_hit_limit = false;
-
     match video_result {
         Ok(videos) => {
             video_hit_limit = videos.len() >= 40;
@@ -1104,7 +876,6 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
             log::warn!("Failed to fetch video events: {}", e);
         }
     }
-
     match stream_result {
         Ok(streams) => {
             stream_hit_limit = streams.len() >= 10;
@@ -1115,18 +886,11 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
             log::warn!("Failed to fetch livestream events: {}", e);
         }
     }
-
     if all_events.is_empty() {
         return Err("Failed to load any content".to_string());
     }
-
-    // Sort all content chronologically
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
     log::info!("Loaded total of {} events", all_events.len());
-
-    // has_more is true if either query hit its limit
     let has_more = video_hit_limit || stream_hit_limit;
-
     Ok((all_events, has_more))
 }

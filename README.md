@@ -260,11 +260,10 @@ nostr.blue/
 │   │   ├── btc_price.rs    # Binance BTC price API for P2P sats calculations
 │   │   └── git_hosting/    # NIP-34 Git hosting services
 │   └── main.rs             # Application entry point
-├── assets/                 # Static assets
+├── public/                 # Static assets and build output
 │   ├── favicon.svg         # SVG favicon
 │   ├── favicon.ico         # ICO favicon
-│   └── tailwind.css        # Compiled CSS
-├── public/                 # Public build output
+│   └── ...                 # Other static files (manifest, icons, etc.)
 ├── dist/                   # Production build
 ├── Cargo.toml              # Rust dependencies
 ├── Dioxus.toml             # Dioxus configuration

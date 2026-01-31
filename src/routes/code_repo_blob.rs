@@ -1,14 +1,14 @@
 //! Code Repository Blob Page
 //!
 //! Displays file content at a specific path and ref.
-
-use dioxus::prelude::*;
+use crate::components::{
+    BranchSelector, CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb,
+};
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
-use crate::components::{CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb, BranchSelector};
 use crate::utils::nip34::Repository;
-
+use dioxus::prelude::*;
 #[component]
 pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
     let mut loading = use_signal(|| true);
@@ -17,44 +17,30 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut is_directory = use_signal(|| false);
-
-    // Extract filename from path
     let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
-
-    // Create a load key that changes when route params change - this ensures the effect re-runs
     let load_key = use_memo({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || format!("{}:{}:{}", naddr, git_ref, path)
     });
-
-    // Load file content when key changes
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || {
-            // Read the key to register as dependency
             let _key = load_key.read();
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
             if !client_initialized {
                 return;
             }
-
-            // Reset state for new load
             is_directory.set(false);
-
             let naddr = naddr.clone();
             let git_ref = git_ref.clone();
             let path = path.clone();
-
             spawn(async move {
                 loading.set(true);
                 error.set(None);
-
-                // Fetch repository
                 let repo = match fetch_repository(&naddr).await {
                     Ok(r) => r,
                     Err(e) => {
@@ -64,8 +50,6 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                     }
                 };
                 repo_signal.set(Some(repo.clone()));
-
-                // Initialize git worker if needed
                 if !git_service::GitService::is_initialized() {
                     if let Err(e) = git_service::GitService::init().await {
                         error.set(Some(format!("Failed to initialize git: {}", e)));
@@ -73,62 +57,48 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                         return;
                     }
                 }
-
-                // Decode URL-encoded path (e.g., %20 → space)
                 let decoded_path = urlencoding::decode(&path)
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| path.clone());
-
-                // Validate path to prevent path traversal attacks
                 fn is_safe_path(path: &str) -> bool {
                     use std::path::{Component, Path};
                     let path = Path::new(path);
                     for component in path.components() {
                         match component {
-                            Component::ParentDir => return false, // Reject ".."
-                            Component::RootDir => return false,   // Reject absolute paths
-                            Component::Prefix(_) => return false, // Reject Windows-style paths
+                            Component::ParentDir => return false,
+                            Component::RootDir => return false,
+                            Component::Prefix(_) => return false,
                             _ => {}
                         }
                     }
-                    // Also reject paths that start with /
                     !path.to_string_lossy().starts_with('/')
                 }
-
                 if !is_safe_path(&decoded_path) {
                     log::warn!("Path traversal attempt blocked: {}", decoded_path);
                     error.set(Some("Invalid path".to_string()));
                     loading.set(false);
                     return;
                 }
-
-                // Read file content
-                match git_service().read_file(&repo, &decoded_path, Some(&git_ref)).await {
+                match git_service().read_file(&repo, &decoded_path, Some(&git_ref)).await
+                {
                     Ok(file_content) => {
                         content.set(file_content);
                     }
                     Err(e) => {
-                        // Check if the error indicates this is a directory (tree instead of blob)
                         if e.contains("tree") || e.contains("is a tree") {
-                            // Signal to redirect to tree view
                             is_directory.set(true);
                         } else {
                             error.set(Some(format!("Failed to load file: {}", e)));
                         }
                     }
                 }
-
-                // Get branches
                 if let Ok(branch_list) = git_service().get_branches(&repo).await {
                     branches.set(branch_list);
                 }
-
                 loading.set(false);
             });
         }
     });
-
-    // Redirect to tree view if path is a directory
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
@@ -144,40 +114,25 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
             }
         }
     });
-
     let repo_name = repo_signal()
         .map(|r| r.display_name().to_string())
         .unwrap_or_else(|| "Repository".to_string());
-
-    // Get parent directory for the "back" link
     let parent_path = path
         .rsplit_once('/')
         .map(|(p, _)| p.to_string())
         .unwrap_or_default();
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-
-                // Repository name and navigation
-                div {
-                    class: "px-4 py-3 flex items-center gap-2",
-
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                div { class: "px-4 py-3 flex items-center gap-2",
                     Link {
-                        to: Route::CodeRepo { naddr: naddr.clone() },
+                        to: Route::CodeRepo {
+                            naddr: naddr.clone(),
+                        },
                         class: "text-blue-400 hover:underline font-medium",
                         "{repo_name}"
                     }
-
-                    span {
-                        class: "text-muted-foreground",
-                        "/"
-                    }
-
+                    span { class: "text-muted-foreground", "/" }
                     Link {
                         to: Route::CodeRepoTree {
                             naddr: naddr.clone(),
@@ -188,18 +143,13 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                         "Files"
                     }
                 }
-
-                // Branch selector and breadcrumb
-                div {
-                    class: "px-4 py-2 flex items-center gap-4 border-t border-border/50",
-
+                div { class: "px-4 py-2 flex items-center gap-4 border-t border-border/50",
                     BranchSelector {
                         branches: branches(),
                         current_ref: git_ref.clone(),
                         naddr: naddr.clone(),
                         path: parent_path.clone(),
                     }
-
                     FilePathBreadcrumb {
                         naddr: naddr.clone(),
                         git_ref: git_ref.clone(),
@@ -207,18 +157,12 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                     }
                 }
             }
-
-            // Content
-            div {
-                class: "p-4",
-
+            div { class: "p-4",
                 if loading() {
                     CodeFileViewerSkeleton {}
                 } else if let Some(err) = error() {
-                    div {
-                        class: "text-center py-12",
-                        div {
-                            class: "text-red-400 mb-4",
+                    div { class: "text-center py-12",
+                        div { class: "text-red-400 mb-4",
                             svg {
                                 class: "w-12 h-12 mx-auto",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -231,14 +175,21 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
                                 circle { cx: "12", cy: "12", r: "10" }
-                                line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                                line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                                line {
+                                    x1: "12",
+                                    y1: "8",
+                                    x2: "12",
+                                    y2: "12",
+                                }
+                                line {
+                                    x1: "12",
+                                    y1: "16",
+                                    x2: "12.01",
+                                    y2: "16",
+                                }
                             }
                         }
-                        p {
-                            class: "text-muted-foreground",
-                            "{err}"
-                        }
+                        p { class: "text-muted-foreground", "{err}" }
                         Link {
                             to: Route::CodeRepoTree {
                                 naddr: naddr.clone(),

@@ -1,18 +1,14 @@
 //! Shop Product Edit - Edit an existing product listing (NIP-99 Kind 30402)
-
-use dioxus::prelude::*;
 use crate::routes::Route;
+use crate::stores::shop_store::{fetch_product_by_naddr, update_product, ProductFormData};
 use crate::utils::nip99::Product;
-use crate::stores::shop_store::{ProductFormData, update_product, fetch_product_by_naddr};
-
+use dioxus::prelude::*;
 /// Product edit form
 #[component]
 pub fn ShopProductEdit(naddr: String) -> Element {
     let mut product = use_signal(|| None::<Product>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-
-    // Form fields
     let mut title = use_signal(String::new);
     let mut description = use_signal(String::new);
     let mut price = use_signal(String::new);
@@ -26,8 +22,6 @@ pub fn ShopProductEdit(naddr: String) -> Element {
     let mut updating = use_signal(|| false);
     let mut update_error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
-
-    // Fetch product on mount and populate form
     let naddr_clone = naddr.clone();
     use_effect(move || {
         let naddr = naddr_clone.clone();
@@ -36,7 +30,6 @@ pub fn ShopProductEdit(naddr: String) -> Element {
             error.set(None);
             match fetch_product_by_naddr(&naddr).await {
                 Ok(Some(p)) => {
-                    // Populate form fields
                     title.set(p.title.clone());
                     description.set(p.description.clone().unwrap_or_default());
                     price.set(p.price.amount.to_string());
@@ -61,10 +54,8 @@ pub fn ShopProductEdit(naddr: String) -> Element {
             loading.set(false);
         });
     });
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -78,18 +69,17 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                     h1 { class: "text-xl font-bold", "Edit Product" }
                 }
             }
-
-            // Form content
             div { class: "max-w-2xl mx-auto p-4",
                 if *loading.read() {
-                    // Loading state
                     div { class: "space-y-6",
                         for i in 0..5 {
-                            div { key: "{i}", class: "h-16 bg-muted rounded-lg animate-pulse" }
+                            div {
+                                key: "{i}",
+                                class: "h-16 bg-muted rounded-lg animate-pulse",
+                            }
                         }
                     }
                 } else if let Some(err) = error.read().as_ref() {
-                    // Error state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "😢" }
                         h2 { class: "text-xl font-semibold mb-2", "Failed to load product" }
@@ -104,13 +94,10 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                         }
                     }
                 } else if *success.read() {
-                    // Success message
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "✅" }
                         h2 { class: "text-xl font-semibold mb-2", "Product Updated!" }
-                        p { class: "text-muted-foreground mb-6",
-                            "Your changes have been saved."
-                        }
+                        p { class: "text-muted-foreground mb-6", "Your changes have been saved." }
                         div { class: "space-y-3",
                             Link {
                                 to: Route::ShopMerchant {},
@@ -120,9 +107,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                         }
                     }
                 } else if let Some(prod) = product.read().as_ref() {
-                    // Edit form
                     div { class: "space-y-6",
-                        // Title
                         div {
                             label { class: "block text-sm font-medium mb-2", "Product Title *" }
                             input {
@@ -130,22 +115,18 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "Enter product title",
                                 value: "{title}",
-                                oninput: move |e| title.set(e.value())
+                                oninput: move |e| title.set(e.value()),
                             }
                         }
-
-                        // Description
                         div {
                             label { class: "block text-sm font-medium mb-2", "Description" }
                             textarea {
                                 class: "w-full h-32 px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                                 placeholder: "Describe your product...",
                                 value: "{description}",
-                                oninput: move |e| description.set(e.value())
+                                oninput: move |e| description.set(e.value()),
                             }
                         }
-
-                        // Price
                         div { class: "grid grid-cols-2 gap-4",
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Price *" }
@@ -156,7 +137,7 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                     min: "0",
                                     step: "any",
                                     value: "{price}",
-                                    oninput: move |e| price.set(e.value())
+                                    oninput: move |e| price.set(e.value()),
                                 }
                             }
                             div {
@@ -171,8 +152,6 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 }
                             }
                         }
-
-                        // Image URL
                         div {
                             label { class: "block text-sm font-medium mb-2", "Image URL" }
                             input {
@@ -180,48 +159,34 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "https://example.com/image.jpg",
                                 value: "{image_url}",
-                                oninput: move |e| image_url.set(e.value())
+                                oninput: move |e| image_url.set(e.value()),
                             }
                         }
-
-                        // Image preview
                         if !image_url.read().is_empty() {
                             div { class: "aspect-video bg-muted rounded-lg overflow-hidden",
                                 img {
                                     src: "{image_url}",
-                                    class: "w-full h-full object-contain"
+                                    class: "w-full h-full object-contain",
                                 }
                             }
                         }
-
-                        // Product type
                         div {
                             label { class: "block text-sm font-medium mb-2", "Product Type" }
                             div { class: "flex gap-4",
                                 button {
                                     r#type: "button",
-                                    class: if !*is_digital.read() {
-                                        "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium"
-                                    } else {
-                                        "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition"
-                                    },
+                                    class: if !*is_digital.read() { "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium" } else { "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition" },
                                     onclick: move |_| is_digital.set(false),
                                     "Physical"
                                 }
                                 button {
                                     r#type: "button",
-                                    class: if *is_digital.read() {
-                                        "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium"
-                                    } else {
-                                        "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition"
-                                    },
+                                    class: if *is_digital.read() { "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium" } else { "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition" },
                                     onclick: move |_| is_digital.set(true),
                                     "Digital"
                                 }
                             }
                         }
-
-                        // Condition (for physical products)
                         if !*is_digital.read() {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Condition" }
@@ -237,8 +202,6 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 }
                             }
                         }
-
-                        // Stock (optional)
                         div {
                             label { class: "block text-sm font-medium mb-2", "Stock Quantity (optional)" }
                             input {
@@ -247,44 +210,40 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 placeholder: "Leave empty for unlimited",
                                 min: "0",
                                 value: "{stock}",
-                                oninput: move |e| stock.set(e.value())
+                                oninput: move |e| stock.set(e.value()),
                             }
                         }
-
-                        // Categories
                         div {
-                            label { class: "block text-sm font-medium mb-2", "Categories (comma-separated)" }
+                            label { class: "block text-sm font-medium mb-2",
+                                "Categories (comma-separated)"
+                            }
                             input {
                                 r#type: "text",
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "electronics, gadgets, accessories",
                                 value: "{categories}",
-                                oninput: move |e| categories.set(e.value())
+                                oninput: move |e| categories.set(e.value()),
                             }
                         }
-
-                        // Shipping regions (for physical products)
                         if !*is_digital.read() {
                             div {
-                                label { class: "block text-sm font-medium mb-2", "Ships to (comma-separated)" }
+                                label { class: "block text-sm font-medium mb-2",
+                                    "Ships to (comma-separated)"
+                                }
                                 input {
                                     r#type: "text",
                                     class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     placeholder: "Worldwide, US, EU",
                                     value: "{shipping_regions}",
-                                    oninput: move |e| shipping_regions.set(e.value())
+                                    oninput: move |e| shipping_regions.set(e.value()),
                                 }
                             }
                         }
-
-                        // Error message
                         if let Some(err) = update_error.read().as_ref() {
                             div { class: "bg-destructive/10 border border-destructive/50 text-destructive rounded-lg p-4",
                                 "{err}"
                             }
                         }
-
-                        // Submit button
                         {
                             let d_tag = prod.d_tag.clone();
                             let price_valid = price.read().parse::<f64>().map(|p| p > 0.0).unwrap_or(false);
@@ -295,7 +254,6 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                     onclick: move |_| {
                                         updating.set(true);
                                         update_error.set(None);
-
                                         let d_tag = d_tag.clone();
                                         let is_digital_val = *is_digital.read();
                                         let form_data = ProductFormData {
@@ -308,7 +266,8 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                             } else {
                                                 vec![image_url.read().clone()]
                                             },
-                                            categories: categories.read()
+                                            categories: categories
+                                                .read()
                                                 .split(',')
                                                 .map(|s| s.trim().to_string())
                                                 .filter(|s| !s.is_empty())
@@ -316,14 +275,14 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                             is_digital: is_digital_val,
                                             stock: stock.read().parse().ok(),
                                             specs: vec![],
-                                            shipping_regions: shipping_regions.read()
+                                            shipping_regions: shipping_regions
+                                                .read()
                                                 .split(',')
                                                 .map(|s| s.trim().to_string())
                                                 .filter(|s| !s.is_empty())
                                                 .collect(),
                                             condition: if is_digital_val { None } else { Some(condition.read().clone()) },
                                         };
-
                                         spawn(async move {
                                             match update_product(&d_tag, form_data).await {
                                                 Ok(_) => {
@@ -344,8 +303,6 @@ pub fn ShopProductEdit(naddr: String) -> Element {
                                 }
                             }
                         }
-
-                        // Cancel button
                         Link {
                             to: Route::ShopMerchant {},
                             class: "block w-full py-3 text-center border border-border hover:bg-accent rounded-lg font-medium transition",

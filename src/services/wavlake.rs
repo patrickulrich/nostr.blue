@@ -1,9 +1,7 @@
-use serde::{Deserialize, Serialize};
 use gloo_net::http::Request;
-
+use serde::{Deserialize, Serialize};
 /// Wavlake API base URL
 const WAVLAKE_API_BASE: &str = "https://wavlake.com/api/v1";
-
 /// A track from Wavlake
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WavlakeTrack {
@@ -32,7 +30,6 @@ pub struct WavlakeTrack {
     pub order: Option<u32>,
     pub url: Option<String>,
 }
-
 /// A Wavlake artist with their albums
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WavlakeArtist {
@@ -46,7 +43,6 @@ pub struct WavlakeArtist {
     #[serde(rename = "artistNpub")]
     pub artist_npub: Option<String>,
 }
-
 /// Summary information about an album
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WavlakeAlbumSummary {
@@ -57,7 +53,6 @@ pub struct WavlakeAlbumSummary {
     #[serde(rename = "releaseDate")]
     pub release_date: String,
 }
-
 /// Full album information with tracks
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WavlakeAlbum {
@@ -74,7 +69,6 @@ pub struct WavlakeAlbum {
     pub release_date: String,
     pub tracks: Vec<WavlakeTrack>,
 }
-
 /// Search result from Wavlake
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WavlakeSearchResult {
@@ -82,7 +76,7 @@ pub struct WavlakeSearchResult {
     pub name: String,
     pub title: Option<String>,
     #[serde(rename = "type")]
-    pub result_type: String, // "artist" | "album" | "track"
+    pub result_type: String,
     #[serde(rename = "albumArtUrl")]
     pub album_art_url: Option<String>,
     #[serde(rename = "artistArtUrl")]
@@ -96,7 +90,6 @@ pub struct WavlakeSearchResult {
     pub artist: Option<String>,
     pub duration: Option<u32>,
 }
-
 /// Playlist from Wavlake
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WavlakePlaylist {
@@ -105,13 +98,11 @@ pub struct WavlakePlaylist {
     pub title: String,
     pub tracks: Vec<WavlakeTrack>,
 }
-
 /// LNURL response from Wavlake
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WavlakeLnurlResponse {
     pub lnurl: String,
 }
-
 /// Error response from Wavlake API
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,24 +111,20 @@ pub struct WavlakeErrorResponse {
     pub success: bool,
     pub error: String,
 }
-
 /// Wavlake API client
 pub struct WavlakeAPI {
     base_url: String,
 }
-
 /// Standalone helper function to get artist
 pub async fn get_artist(artist_id: &str) -> Result<WavlakeArtist, String> {
     let api = WavlakeAPI::new();
     api.get_artist(artist_id).await
 }
-
 /// Standalone helper function to get album
 pub async fn get_album(album_id: &str) -> Result<WavlakeAlbum, String> {
     let api = WavlakeAPI::new();
     api.get_album(album_id).await
 }
-
 impl WavlakeAPI {
     /// Create a new Wavlake API client
     pub fn new() -> Self {
@@ -145,30 +132,28 @@ impl WavlakeAPI {
             base_url: WAVLAKE_API_BASE.to_string(),
         }
     }
-
     /// Search for content on Wavlake
-    pub async fn search_content(&self, term: &str) -> Result<Vec<WavlakeSearchResult>, String> {
+    pub async fn search_content(
+        &self,
+        term: &str,
+    ) -> Result<Vec<WavlakeSearchResult>, String> {
         let url = format!(
             "{}/content/search?term={}",
             self.base_url,
-            urlencoding::encode(term)
+            urlencoding::encode(term),
         );
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("Search request failed: {}", e))?;
-
         if !response.ok() {
             return Err(format!("Search failed: {}", response.status_text()));
         }
-
         response
             .json()
             .await
             .map_err(|e| format!("Failed to parse search results: {}", e))
     }
-
     /// Get rankings/trending tracks
     pub async fn get_rankings(
         &self,
@@ -180,7 +165,6 @@ impl WavlakeAPI {
         limit: Option<u32>,
     ) -> Result<Vec<WavlakeTrack>, String> {
         let mut params = vec![("sort", sort.to_string())];
-
         if let Some(d) = days {
             params.push(("days", d.to_string()));
         }
@@ -196,112 +180,76 @@ impl WavlakeAPI {
         if let Some(l) = limit {
             params.push(("limit", l.to_string()));
         }
-
         let query_string = params
             .iter()
             .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
             .collect::<Vec<_>>()
             .join("&");
-
         let url = format!("{}/content/rankings?{}", self.base_url, query_string);
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("Rankings request failed: {}", e))?;
-
         if !response.ok() {
             return Err(format!("Rankings failed: {}", response.status_text()));
         }
-
-        response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse rankings: {}", e))
+        response.json().await.map_err(|e| format!("Failed to parse rankings: {}", e))
     }
-
     /// Get a specific track
     pub async fn get_track(&self, track_id: &str) -> Result<WavlakeTrack, String> {
         let url = format!("{}/content/track/{}", self.base_url, track_id);
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("Track request failed: {}", e))?;
-
         if !response.ok() {
             return Err(format!("Track fetch failed: {}", response.status_text()));
         }
-
-        // The API returns an array, but we want the first track
         let result: Vec<WavlakeTrack> = response
             .json()
             .await
             .map_err(|e| format!("Failed to parse track: {}", e))?;
-
-        result
-            .into_iter()
-            .next()
-            .ok_or_else(|| "No track found".to_string())
+        result.into_iter().next().ok_or_else(|| "No track found".to_string())
     }
-
     /// Get an artist's information
     pub async fn get_artist(&self, artist_id: &str) -> Result<WavlakeArtist, String> {
         let url = format!("{}/content/artist/{}", self.base_url, artist_id);
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("Artist request failed: {}", e))?;
-
         if !response.ok() {
             return Err(format!("Artist fetch failed: {}", response.status_text()));
         }
-
-        response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse artist: {}", e))
+        response.json().await.map_err(|e| format!("Failed to parse artist: {}", e))
     }
-
     /// Get an album's information
     pub async fn get_album(&self, album_id: &str) -> Result<WavlakeAlbum, String> {
         let url = format!("{}/content/album/{}", self.base_url, album_id);
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("Album request failed: {}", e))?;
-
         if !response.ok() {
             return Err(format!("Album fetch failed: {}", response.status_text()));
         }
-
-        response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse album: {}", e))
+        response.json().await.map_err(|e| format!("Failed to parse album: {}", e))
     }
-
     /// Get a playlist
-    pub async fn get_playlist(&self, playlist_id: &str) -> Result<WavlakePlaylist, String> {
+    pub async fn get_playlist(
+        &self,
+        playlist_id: &str,
+    ) -> Result<WavlakePlaylist, String> {
         let url = format!("{}/content/playlist/{}", self.base_url, playlist_id);
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("Playlist request failed: {}", e))?;
-
         if !response.ok() {
             return Err(format!("Playlist fetch failed: {}", response.status_text()));
         }
-
-        response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse playlist: {}", e))
+        response.json().await.map_err(|e| format!("Failed to parse playlist: {}", e))
     }
-
     /// Get LNURL for lightning payments
     pub async fn get_lnurl(
         &self,
@@ -309,37 +257,37 @@ impl WavlakeAPI {
         app_id: Option<&str>,
     ) -> Result<WavlakeLnurlResponse, String> {
         let url = if let Some(app) = app_id {
-            format!(
-                "{}/lnurl?contentId={}&appId={}",
-                self.base_url, content_id, app
-            )
+            format!("{}/lnurl?contentId={}&appId={}", self.base_url, content_id, app)
         } else {
             format!("{}/lnurl?contentId={}", self.base_url, content_id)
         };
-
         log::info!("Requesting LNURL from: {}", url);
-
         let response = Request::get(&url)
             .send()
             .await
             .map_err(|e| format!("LNURL request failed: {}", e))?;
-
         if !response.ok() {
             let status = response.status();
             let status_text = response.status_text();
-            let body = response.text().await.unwrap_or_else(|_| "Unable to read body".to_string());
-            let error_msg = format!("LNURL fetch failed: {} {}. Body: {}", status, status_text, body);
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read body".to_string());
+            let error_msg = format!(
+                "LNURL fetch failed: {} {}. Body: {}",
+                status,
+                status_text,
+                body,
+            );
             log::error!("{}", error_msg);
             return Err(error_msg);
         }
-
         response
             .json()
             .await
             .map_err(|e| format!("Failed to parse LNURL response: {}", e))
     }
 }
-
 impl Default for WavlakeAPI {
     fn default() -> Self {
         Self::new()

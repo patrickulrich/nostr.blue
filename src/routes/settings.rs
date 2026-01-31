@@ -1,33 +1,26 @@
-use dioxus::prelude::*;
-use crate::stores::{auth_store, theme_store, nostr_client, settings_store, blossom_store, relay, nwc_store, reactions_store};
-use crate::stores::blossom_store::BlossomServersStoreStoreExt;
 use crate::components::{NwcSetupModal, ReactionDefaultsModal};
 use crate::routes::Route;
-use nostr_sdk::ToBech32;
+use crate::stores::blossom_store::BlossomServersStoreStoreExt;
+use crate::stores::{
+    auth_store, blossom_store, nostr_client, nwc_store, reactions_store, relay,
+    settings_store, theme_store,
+};
+use dioxus::prelude::*;
 use gloo_storage::Storage;
-
+use nostr_sdk::ToBech32;
 #[component]
 pub fn Settings() -> Element {
     let theme = theme_store::THEME.read();
     let blossom_servers = blossom_store::BLOSSOM_SERVERS.read();
-
     let mut new_server_input = use_signal(String::new);
     let mut server_error = use_signal(|| None::<String>);
-
-    // NWC state
     let mut show_nwc_modal = use_signal(|| false);
     let nwc_status = nwc_store::NWC_STATUS.read().clone();
     let nwc_balance = *nwc_store::NWC_BALANCE.read();
-
-    // Reactions modal state
     let mut show_reactions_modal = use_signal(|| false);
-
-    // Load settings from Nostr on mount
     use_effect(move || {
-        // Use peek() to avoid holding borrows during async operations
         let is_authenticated = auth_store::AUTH_STATE.peek().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.peek();
-
         if is_authenticated && client_initialized {
             spawn(async move {
                 log::info!("Loading settings from Nostr (NIP-78)...");
@@ -37,195 +30,126 @@ pub fn Settings() -> Element {
             });
         }
     });
-
     let auth = auth_store::AUTH_STATE.read();
-
-    // Blossom server handlers
     let mut blossom_save_status = use_signal(|| None::<String>);
-
     let add_blossom_server = move |_| {
         let server_url = new_server_input.read().clone();
         if server_url.is_empty() {
             server_error.set(Some("Please enter a server URL".to_string()));
             return;
         }
-
         if !server_url.starts_with("https://") && !server_url.starts_with("http://") {
-            server_error.set(Some("Server URL must start with http:// or https://".to_string()));
+            server_error
+                .set(Some("Server URL must start with http:// or https://".to_string()));
             return;
         }
-
         blossom_store::add_server(server_url);
         new_server_input.set(String::new());
         server_error.set(None);
     };
-
     let remove_blossom_server = move |url: String| {
         blossom_store::remove_server(&url);
     };
-
-    // Publish Blossom servers to kind 10063 (NIP-B7)
     let publish_blossom_servers = move |_| {
         spawn(async move {
             blossom_save_status.set(Some("Publishing...".to_string()));
-
             match blossom_store::publish_user_servers().await {
                 Ok(_) => {
-                    blossom_save_status.set(Some("✅ Blossom servers published!".to_string()));
-                    // Clear after 3 seconds
+                    blossom_save_status
+                        .set(Some("✅ Blossom servers published!".to_string()));
                     gloo_timers::future::TimeoutFuture::new(3000).await;
                     blossom_save_status.set(None);
                 }
                 Err(e) => {
                     blossom_save_status.set(Some(format!("❌ Failed: {}", e)));
-                    // Auto-clear error after 7 seconds
                     gloo_timers::future::TimeoutFuture::new(7000).await;
                     blossom_save_status.set(None);
                 }
             }
         });
     };
-
     rsx! {
-        div {
-            class: "space-y-6",
-
-            // Page header
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                h2 {
-                    class: "text-2xl font-semibold text-gray-900 dark:text-white flex items-center gap-2",
+        div { class: "space-y-6",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                h2 { class: "text-2xl font-semibold text-gray-900 dark:text-white flex items-center gap-2",
                     crate::components::icons::SettingsIcon { class: "w-7 h-7" }
                     "Settings"
                 }
-                p {
-                    class: "text-gray-600 dark:text-gray-400 mt-2",
+                p { class: "text-gray-600 dark:text-gray-400 mt-2",
                     "Manage your account, relays, and preferences"
                 }
             }
-
-            // Account section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                h3 {
-                    class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white flex items-center gap-2",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                h3 { class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white flex items-center gap-2",
                     crate::components::icons::UserIcon { class: "w-6 h-6" }
                     "Account"
                 }
-
                 if auth.is_authenticated {
                     render_account_info {}
                 } else {
-                    div {
-                        class: "text-center p-6 text-gray-500 dark:text-gray-400",
+                    div { class: "text-center p-6 text-gray-500 dark:text-gray-400",
                         p { "Not logged in" }
-                        p {
-                            class: "mt-2 text-sm",
-                            "Go to the home page to log in"
-                        }
+                        p { class: "mt-2 text-sm", "Go to the home page to log in" }
                     }
                 }
             }
-
-            // Theme section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h3 {
-                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "🎨 Theme"
                     }
-                    // Settings sync status
                     if auth.is_authenticated {
-                        div {
-                            class: "flex items-center gap-2 text-sm",
+                        div { class: "flex items-center gap-2 text-sm",
                             if *settings_store::SETTINGS_LOADING.read() {
-                                span {
-                                    class: "text-gray-500 dark:text-gray-400",
-                                    "⏳ Syncing..."
-                                }
+                                span { class: "text-gray-500 dark:text-gray-400", "⏳ Syncing..." }
                             } else if let Some(err) = settings_store::SETTINGS_ERROR.read().as_ref() {
-                                span {
-                                    class: "text-red-500",
-                                    title: "{err}",
-                                    "⚠️ Sync failed"
-                                }
+                                span { class: "text-red-500", title: "{err}", "⚠️ Sync failed" }
                             } else {
-                                span {
-                                    class: "text-green-500",
-                                    "✓ Synced via NIP-78"
-                                }
+                                span { class: "text-green-500", "✓ Synced via NIP-78" }
                             }
                         }
                     }
                 }
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                     if auth.is_authenticated {
                         "Your theme preference is synced across devices using NIP-78"
                     } else {
                         "Login to sync your theme preference across devices"
                     }
                 }
-                div {
-                    class: "flex gap-3",
+                div { class: "flex gap-3",
                     button {
-                        class: if matches!(*theme, theme_store::Theme::Light) {
-                            "flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium"
-                        } else {
-                            "flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                        },
+                        class: if matches!(*theme, theme_store::Theme::Light) { "flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium" } else { "flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition" },
                         onclick: move |_| theme_store::set_theme(theme_store::Theme::Light),
                         "☀️ Light"
                     }
                     button {
-                        class: if matches!(*theme, theme_store::Theme::Dark) {
-                            "flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium"
-                        } else {
-                            "flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                        },
+                        class: if matches!(*theme, theme_store::Theme::Dark) { "flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium" } else { "flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition" },
                         onclick: move |_| theme_store::set_theme(theme_store::Theme::Dark),
                         "🌙 Dark"
                     }
                     button {
-                        class: if matches!(*theme, theme_store::Theme::System) {
-                            "flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium"
-                        } else {
-                            "flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                        },
+                        class: if matches!(*theme, theme_store::Theme::System) { "flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium" } else { "flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition" },
                         onclick: move |_| theme_store::set_theme(theme_store::Theme::System),
                         "💻 System"
                     }
                 }
             }
-
-            // Default Reactions section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h3 {
-                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "😊 Default Reactions"
                     }
-                    span {
-                        class: "text-xs text-gray-500 dark:text-gray-400",
-                        "NIP-78"
-                    }
+                    span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-78" }
                 }
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                     if auth.is_authenticated {
                         "Customize your preferred reaction emojis. The first emoji is used when you click the heart button."
                     } else {
                         "Login to customize and sync your reaction preferences across devices."
                     }
                 }
-
-                // Show current reactions preview
-                div {
-                    class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg mb-4",
+                div { class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg mb-4",
                     for reaction in reactions_store::PREFERRED_REACTIONS.read().iter().take(10) {
                         match reaction {
                             reactions_store::PreferredReaction::Standard { emoji } => rsx! {
@@ -239,25 +163,21 @@ pub fn Settings() -> Element {
                                         class: "w-7 h-7 object-contain",
                                         src: "{url}",
                                         alt: ":{shortcode}:",
-                                        loading: "lazy"
+                                        loading: "lazy",
                                     }
                                 }
-                            }
+                            },
                         }
                     }
                 }
-
                 button {
                     class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
                     disabled: !auth.is_authenticated,
                     onclick: move |_| show_reactions_modal.set(true),
                     "✏️ Edit Defaults"
                 }
-
-                // Sync status
                 if auth.is_authenticated {
-                    div {
-                        class: "mt-3 text-xs text-gray-500 dark:text-gray-400",
+                    div { class: "mt-3 text-xs text-gray-500 dark:text-gray-400",
                         if reactions_store::REACTIONS_STATE.read().is_loading() {
                             "⏳ Loading..."
                         } else if reactions_store::REACTIONS_STATE.read().is_ready() {
@@ -268,35 +188,25 @@ pub fn Settings() -> Element {
                     }
                 }
             }
-
-            // Notification Sync section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h3 {
-                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "🔔 Notification Sync"
                     }
                 }
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                     if auth.is_authenticated {
                         "Sync notification read status across devices using NIP-78. "
-                        span {
-                            class: "text-gray-500 dark:text-gray-500 italic",
+                        span { class: "text-gray-500 dark:text-gray-500 italic",
                             "Note: Sync data is public on Nostr relays."
                         }
                     } else {
                         "Login to sync notification read status across devices"
                     }
                 }
-                div {
-                    class: "flex items-center justify-between",
-                    div {
-                        class: "flex items-center gap-3",
-                        label {
-                            class: "relative inline-flex items-center cursor-pointer",
+                div { class: "flex items-center justify-between",
+                    div { class: "flex items-center gap-3",
+                        label { class: "relative inline-flex items-center cursor-pointer",
                             input {
                                 r#type: "checkbox",
                                 class: "sr-only peer",
@@ -307,14 +217,11 @@ pub fn Settings() -> Element {
                                     spawn(async move {
                                         settings_store::update_notification_sync(enabled).await;
                                     });
-                                }
+                                },
                             }
-                            div {
-                                class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"
-                            }
+                            div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
                         }
-                        span {
-                            class: "text-sm font-medium text-gray-900 dark:text-white",
+                        span { class: "text-sm font-medium text-gray-900 dark:text-white",
                             {
                                 let is_enabled = settings_store::SETTINGS.read().sync_notifications;
                                 if is_enabled { "Enabled" } else { "Disabled" }
@@ -325,10 +232,7 @@ pub fn Settings() -> Element {
                         let sync_enabled = settings_store::SETTINGS.read().sync_notifications;
                         if auth.is_authenticated && sync_enabled {
                             rsx! {
-                                span {
-                                    class: "text-xs text-green-500",
-                                    "✓ Syncing"
-                                }
+                                span { class: "text-xs text-green-500", "✓ Syncing" }
                             }
                         } else {
                             rsx! {}
@@ -336,69 +240,41 @@ pub fn Settings() -> Element {
                     }
                 }
             }
-
-            // NWC Section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h3 {
-                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "⚡ Nostr Wallet Connect"
                     }
-                    span {
-                        class: "text-xs text-gray-500 dark:text-gray-400",
-                        "NIP-47"
-                    }
+                    span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-47" }
                 }
-
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                     "Connect your lightning wallet to enable instant zaps and payments."
                 }
-
-                // Connection status
                 match &nwc_status {
                     nwc_store::ConnectionStatus::Connected => {
                         rsx! {
-                            div {
-                                class: "space-y-4",
-
-                                // Wallet info
-                                div {
-                                    class: "p-4 bg-green-50 dark:bg-green-900/20 border border-green-200
-                                            dark:border-green-800 rounded-lg",
-                                    div {
-                                        class: "flex items-center gap-2 mb-2",
-                                        span {
-                                            class: "text-sm font-medium text-green-800 dark:text-green-200",
+                            div { class: "space-y-4",
+                                div { class: "p-4 bg-green-50 dark:bg-green-900/20 border border-green-200
+                                                                                                                                                                                                                                                                                                                                                                                                                                                    dark:border-green-800 rounded-lg",
+                                    div { class: "flex items-center gap-2 mb-2",
+                                        span { class: "text-sm font-medium text-green-800 dark:text-green-200",
                                             "✓ Wallet Connected"
                                         }
                                     }
-
-                                    // Balance display
                                     if let Some(balance_msats) = nwc_balance {
-                                        div {
-                                            class: "flex items-center justify-between",
-                                            span {
-                                                class: "text-xs text-gray-600 dark:text-gray-400",
-                                                "Balance:"
-                                            }
-                                            span {
-                                                class: "text-sm font-mono text-gray-900 dark:text-white",
+                                        div { class: "flex items-center justify-between",
+                                            span { class: "text-xs text-gray-600 dark:text-gray-400", "Balance:" }
+                                            span { class: "text-sm font-mono text-gray-900 dark:text-white",
                                                 {format!("{} sats", balance_msats / 1000)}
                                             }
                                         }
                                     }
                                 }
-
-                                // Action buttons
-                                div {
-                                    class: "flex gap-3",
+                                div { class: "flex gap-3",
                                     button {
                                         class: "px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700
-                                                text-gray-700 dark:text-gray-300 rounded-lg
-                                                hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        text-gray-700 dark:text-gray-300 rounded-lg
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors",
                                         onclick: move |_| {
                                             spawn(async move {
                                                 let _ = nwc_store::refresh_balance().await;
@@ -408,8 +284,8 @@ pub fn Settings() -> Element {
                                     }
                                     button {
                                         class: "px-4 py-2 text-sm bg-red-100 dark:bg-red-900/30
-                                                text-red-700 dark:text-red-300 rounded-lg
-                                                hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        text-red-700 dark:text-red-300 rounded-lg
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors",
                                         onclick: move |_| {
                                             nwc_store::disconnect_nwc();
                                         },
@@ -418,69 +294,53 @@ pub fn Settings() -> Element {
                                 }
                             }
                         }
-                    },
+                    }
                     nwc_store::ConnectionStatus::Connecting => {
                         rsx! {
-                            div {
-                                class: "p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200
-                                        dark:border-blue-800 rounded-lg",
-                                p {
-                                    class: "text-sm text-blue-800 dark:text-blue-200",
-                                    "Connecting to wallet..."
-                                }
+                            div { class: "p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200
+                                                                                                                                                                                                                                                                                                                                                                                                                                                dark:border-blue-800 rounded-lg",
+                                p { class: "text-sm text-blue-800 dark:text-blue-200", "Connecting to wallet..." }
                             }
                         }
-                    },
+                    }
                     nwc_store::ConnectionStatus::Error(error) => {
                         rsx! {
-                            div {
-                                class: "space-y-4",
-                                div {
-                                    class: "p-4 bg-red-50 dark:bg-red-900/20 border border-red-200
-                                            dark:border-red-800 rounded-lg",
-                                    p {
-                                        class: "text-sm text-red-800 dark:text-red-200",
-                                        "Connection error: {error}"
-                                    }
+                            div { class: "space-y-4",
+                                div { class: "p-4 bg-red-50 dark:bg-red-900/20 border border-red-200
+                                                                                                                                                                                                                                                                                                                                                                                                                                                    dark:border-red-800 rounded-lg",
+                                    p { class: "text-sm text-red-800 dark:text-red-200", "Connection error: {error}" }
                                 }
                                 button {
                                     class: "px-4 py-2 text-sm bg-purple-600 text-white rounded-lg
-                                            hover:bg-purple-700 transition-colors",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                    hover:bg-purple-700 transition-colors",
                                     onclick: move |_| show_nwc_modal.set(true),
                                     "Connect Wallet"
                                 }
                             }
                         }
-                    },
+                    }
                     nwc_store::ConnectionStatus::Disconnected => {
                         rsx! {
                             button {
                                 class: "px-4 py-2 text-sm bg-purple-600 text-white rounded-lg
-                                        hover:bg-purple-700 transition-colors",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                hover:bg-purple-700 transition-colors",
                                 onclick: move |_| show_nwc_modal.set(true),
                                 "Connect Wallet"
                             }
                         }
                     }
                 }
-
-                // Cashu Wallet Auto-Load toggle (always visible)
-                div {
-                    class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
-                    div {
-                        class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg",
+                div { class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
+                    div { class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg",
                         div {
-                            div {
-                                class: "text-sm font-medium text-gray-900 dark:text-white",
+                            div { class: "text-sm font-medium text-gray-900 dark:text-white",
                                 "Auto-load Cashu Wallet"
                             }
-                            p {
-                                class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                            p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
                                 "Initialize Cashu wallet automatically on app startup for ecash payments"
                             }
                         }
-                        label {
-                            class: "relative inline-flex items-center cursor-pointer",
+                        label { class: "relative inline-flex items-center cursor-pointer",
                             input {
                                 r#type: "checkbox",
                                 class: "sr-only peer",
@@ -489,52 +349,46 @@ pub fn Settings() -> Element {
                                     let enabled = evt.checked();
                                     spawn(async move {
                                         settings_store::update_cashu_wallet_auto_load(enabled).await;
-                                        // When disabling Cashu, reset payment preference if it was "cashu_first"
-                                        // to prevent invalid preference state
                                         if !enabled {
-                                            let current_pref = settings_store::SETTINGS.read().payment_method_preference.clone();
+                                            let current_pref = settings_store::SETTINGS
+                                                .read()
+                                                .payment_method_preference
+                                                .clone();
                                             if current_pref == "cashu_first" {
-                                                // Reset to safe default - check if NWC is connected
                                                 let new_pref = if nwc_store::is_connected() {
                                                     "nwc_first"
                                                 } else {
                                                     "always_ask"
                                                 };
-                                                settings_store::update_payment_method_preference(new_pref.to_string()).await;
-                                                log::info!("Reset payment preference from cashu_first to {}", new_pref);
+                                                settings_store::update_payment_method_preference(
+                                                        new_pref.to_string(),
+                                                    )
+                                                    .await;
+                                                log::info!(
+                                                    "Reset payment preference from cashu_first to {}", new_pref
+                                                );
                                             }
                                         }
                                     });
-                                }
+                                },
                             }
-                            div {
-                                class: "w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"
-                            }
+                            div { class: "w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-hidden peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600" }
                         }
                     }
                 }
-
-                // Payment Method Preference (shown when NWC is connected OR Cashu auto-load is enabled)
                 if matches!(nwc_status, nwc_store::ConnectionStatus::Connected)
-                    || settings_store::SETTINGS.read().cashu_wallet_auto_load {
-                    div {
-                        class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
-                        h4 {
-                            class: "text-sm font-medium text-gray-900 dark:text-white mb-3",
+                    || settings_store::SETTINGS.read().cashu_wallet_auto_load
+                {
+                    div { class: "mt-6 pt-6 border-t border-gray-200 dark:border-gray-700",
+                        h4 { class: "text-sm font-medium text-gray-900 dark:text-white mb-3",
                             "Payment Method Preference"
                         }
-                        p {
-                            class: "text-xs text-gray-600 dark:text-gray-400 mb-3",
+                        p { class: "text-xs text-gray-600 dark:text-gray-400 mb-3",
                             "Choose how you want to pay when zapping content"
                         }
-
-                        div {
-                            class: "space-y-2",
-
-                            // Cashu First (only shown when auto-load is enabled)
+                        div { class: "space-y-2",
                             if settings_store::SETTINGS.read().cashu_wallet_auto_load {
-                                label {
-                                    class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
                                             hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
                                     input {
                                         r#type: "radio",
@@ -543,27 +397,23 @@ pub fn Settings() -> Element {
                                         checked: settings_store::SETTINGS.read().payment_method_preference == "cashu_first",
                                         onchange: move |_| {
                                             spawn(async move {
-                                                settings_store::update_payment_method_preference("cashu_first".to_string()).await;
+                                                settings_store::update_payment_method_preference("cashu_first".to_string())
+                                                    .await;
                                             });
-                                        }
+                                        },
                                     }
                                     div {
-                                        div {
-                                            class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        div { class: "text-sm font-medium text-gray-900 dark:text-white",
                                             "Cashu First (Nutzaps)"
                                         }
-                                        p {
-                                            class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                        p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
                                             "Send ecash via Nostr if recipient supports, fallback to Lightning"
                                         }
                                     }
                                 }
                             }
-
-                            // NWC First (only shown when NWC is connected)
                             if matches!(nwc_status, nwc_store::ConnectionStatus::Connected) {
-                                label {
-                                    class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                                label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
                                             hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
                                     input {
                                         r#type: "radio",
@@ -572,26 +422,22 @@ pub fn Settings() -> Element {
                                         checked: settings_store::SETTINGS.read().payment_method_preference == "nwc_first",
                                         onchange: move |_| {
                                             spawn(async move {
-                                                settings_store::update_payment_method_preference("nwc_first".to_string()).await;
+                                                settings_store::update_payment_method_preference("nwc_first".to_string())
+                                                    .await;
                                             });
-                                        }
+                                        },
                                     }
                                     div {
-                                        div {
-                                            class: "text-sm font-medium text-gray-900 dark:text-white",
+                                        div { class: "text-sm font-medium text-gray-900 dark:text-white",
                                             "NWC First (Recommended)"
                                         }
-                                        p {
-                                            class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                        p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
                                             "Try NWC, fallback to WebLN, then show invoice"
                                         }
                                     }
                                 }
                             }
-
-                            // WebLN First
-                            label {
-                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                            label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
                                         hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
                                 input {
                                     r#type: "radio",
@@ -600,25 +446,21 @@ pub fn Settings() -> Element {
                                     checked: settings_store::SETTINGS.read().payment_method_preference == "webln_first",
                                     onchange: move |_| {
                                         spawn(async move {
-                                            settings_store::update_payment_method_preference("webln_first".to_string()).await;
+                                            settings_store::update_payment_method_preference("webln_first".to_string())
+                                                .await;
                                         });
-                                    }
+                                    },
                                 }
                                 div {
-                                    div {
-                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                    div { class: "text-sm font-medium text-gray-900 dark:text-white",
                                         "WebLN First"
                                     }
-                                    p {
-                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                    p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
                                         "Try WebLN extension, fallback to NWC, then show invoice"
                                     }
                                 }
                             }
-
-                            // Always Ask
-                            label {
-                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                            label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
                                         hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
                                 input {
                                     r#type: "radio",
@@ -627,25 +469,21 @@ pub fn Settings() -> Element {
                                     checked: settings_store::SETTINGS.read().payment_method_preference == "always_ask",
                                     onchange: move |_| {
                                         spawn(async move {
-                                            settings_store::update_payment_method_preference("always_ask".to_string()).await;
+                                            settings_store::update_payment_method_preference("always_ask".to_string())
+                                                .await;
                                         });
-                                    }
+                                    },
                                 }
                                 div {
-                                    div {
-                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                    div { class: "text-sm font-medium text-gray-900 dark:text-white",
                                         "Always Ask"
                                     }
-                                    p {
-                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                    p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
                                         "Show payment method selector each time"
                                     }
                                 }
                             }
-
-                            // Manual Only
-                            label {
-                                class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
+                            label { class: "flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg cursor-pointer
                                         hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors",
                                 input {
                                     r#type: "radio",
@@ -654,17 +492,16 @@ pub fn Settings() -> Element {
                                     checked: settings_store::SETTINGS.read().payment_method_preference == "manual_only",
                                     onchange: move |_| {
                                         spawn(async move {
-                                            settings_store::update_payment_method_preference("manual_only".to_string()).await;
+                                            settings_store::update_payment_method_preference("manual_only".to_string())
+                                                .await;
                                         });
-                                    }
+                                    },
                                 }
                                 div {
-                                    div {
-                                        class: "text-sm font-medium text-gray-900 dark:text-white",
+                                    div { class: "text-sm font-medium text-gray-900 dark:text-white",
                                         "Manual Only"
                                     }
-                                    p {
-                                        class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
+                                    p { class: "text-xs text-gray-600 dark:text-gray-400 mt-1",
                                         "Always show QR code and invoice (no auto-payment)"
                                     }
                                 }
@@ -673,125 +510,82 @@ pub fn Settings() -> Element {
                     }
                 }
             }
-
-            // Content Moderation section
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
-                        h3 {
-                            class: "text-xl font-semibold text-gray-900 dark:text-white",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                             "🛡️ Content Moderation"
                         }
-                        span {
-                            class: "text-xs text-gray-500 dark:text-gray-400",
-                            "NIP-51 & NIP-56"
-                        }
+                        span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-51 & NIP-56" }
                     }
-                    p {
-                        class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                         "Manage blocked users and muted posts"
                     }
-
-                    // Links to sub-pages
-                    div {
-                        class: "space-y-2",
-
+                    div { class: "space-y-2",
                         Link {
                             to: Route::SettingsBlocklist {},
                             class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
-                            div {
-                                class: "flex items-center gap-3",
-                                span {
-                                    class: "text-lg",
-                                    "🚫"
-                                }
+                            div { class: "flex items-center gap-3",
+                                span { class: "text-lg", "🚫" }
                                 div {
-                                    span {
-                                        class: "block font-medium text-gray-900 dark:text-white",
+                                    span { class: "block font-medium text-gray-900 dark:text-white",
                                         "Blocked Users"
                                     }
-                                    span {
-                                        class: "block text-xs text-gray-500 dark:text-gray-400",
+                                    span { class: "block text-xs text-gray-500 dark:text-gray-400",
                                         "Manage users you've blocked"
                                     }
                                 }
                             }
-                            span {
-                                class: "text-gray-400",
-                                "→"
-                            }
+                            span { class: "text-gray-400", "→" }
                         }
-
                         Link {
                             to: Route::SettingsMuted {},
                             class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
-                            div {
-                                class: "flex items-center gap-3",
-                                span {
-                                    class: "text-lg",
-                                    "🔇"
-                                }
+                            div { class: "flex items-center gap-3",
+                                span { class: "text-lg", "🔇" }
                                 div {
-                                    span {
-                                        class: "block font-medium text-gray-900 dark:text-white",
+                                    span { class: "block font-medium text-gray-900 dark:text-white",
                                         "Muted Posts"
                                     }
-                                    span {
-                                        class: "block text-xs text-gray-500 dark:text-gray-400",
+                                    span { class: "block text-xs text-gray-500 dark:text-gray-400",
                                         "Manage posts you've muted or reported"
                                     }
                                 }
                             }
-                            span {
-                                class: "text-gray-400",
-                                "→"
-                            }
+                            span { class: "text-gray-400", "→" }
                         }
                     }
                 }
             }
-
-            // Relay Management Card (links to dedicated page)
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
-                        h3 {
-                            class: "text-xl font-semibold text-gray-900 dark:text-white",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
+                        h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                             "Relay Management"
                         }
-                        span {
-                            class: "text-xs text-gray-500 dark:text-gray-400",
-                            "NIP-65 & NIP-17"
-                        }
+                        span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-65 & NIP-17" }
                     }
-                    p {
-                        class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                    p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                         "Nostr relays are servers that store and distribute your posts. Configure which relays to use for reading content and publishing your notes."
                     }
-
                     Link {
                         to: Route::SettingsRelays {},
                         class: "flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition",
-                        div {
-                            class: "flex items-center gap-3",
+                        div { class: "flex items-center gap-3",
                             span { class: "text-2xl", "📡" }
                             div {
-                                span {
-                                    class: "block font-medium text-gray-900 dark:text-white",
+                                span { class: "block font-medium text-gray-900 dark:text-white",
                                     "Manage Relays"
                                 }
-                                span {
-                                    class: "block text-xs text-gray-500 dark:text-gray-400",
+                                span { class: "block text-xs text-gray-500 dark:text-gray-400",
                                     {
-                                        let general_count = relay::USER_RELAY_METADATA.read()
+                                        let general_count = relay::USER_RELAY_METADATA
+                                            .read()
                                             .as_ref()
                                             .map(|m| m.relays.len())
                                             .unwrap_or(0);
-                                        let dm_count = relay::USER_RELAY_METADATA.read()
+                                        let dm_count = relay::USER_RELAY_METADATA
+                                            .read()
                                             .as_ref()
                                             .map(|m| m.dm_relays.len())
                                             .unwrap_or(0);
@@ -804,24 +598,14 @@ pub fn Settings() -> Element {
                     }
                 }
             }
-
-            // Blossom Servers section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h3 {
-                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "🌸 Blossom Servers"
                     }
-                    span {
-                        class: "text-xs text-gray-500 dark:text-gray-400",
-                        "NIP-B7 (kind 10063)"
-                    }
+                    span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-B7 (kind 10063)" }
                 }
-
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                     "Configure servers for image and media uploads. The first server in the list is used for uploads. "
                     if auth.is_authenticated {
                         "Your server list is synced across devices via Nostr."
@@ -829,36 +613,27 @@ pub fn Settings() -> Element {
                         "Login to sync your server list across devices."
                     }
                 }
-
-                // Server list
-                div {
-                    class: "space-y-2 mb-4",
-                    for (index, server) in blossom_servers.data().read().iter().enumerate() {
+                div { class: "space-y-2 mb-4",
+                    for (index , server) in blossom_servers.data().read().iter().enumerate() {
                         div {
                             key: "{server}",
                             class: "flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                            div {
-                                class: "flex items-center gap-2 flex-wrap",
+                            div { class: "flex items-center gap-2 flex-wrap",
                                 if server == blossom_store::DEFAULT_SERVER {
-                                    span {
-                                        class: "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded",
+                                    span { class: "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded",
                                         "Default"
                                     }
                                 }
                                 if index == 0 {
-                                    span {
-                                        class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded",
+                                    span { class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded",
                                         "⭐ Preferred"
                                     }
                                 }
-                                span {
-                                    class: "text-gray-900 dark:text-white font-mono text-sm",
+                                span { class: "text-gray-900 dark:text-white font-mono text-sm",
                                     "{server}"
                                 }
                             }
-                            div {
-                                class: "flex items-center gap-2",
-                                // Set as Preferred button for non-first servers
+                            div { class: "flex items-center gap-2",
                                 if index != 0 {
                                     button {
                                         class: "px-3 py-1 bg-gray-100 hover:bg-purple-100 dark:bg-gray-600 dark:hover:bg-purple-800 text-gray-700 dark:text-gray-200 rounded-lg text-sm transition",
@@ -869,7 +644,6 @@ pub fn Settings() -> Element {
                                         "Set as Preferred"
                                     }
                                 }
-                                // Remove button (only if more than one server)
                                 if blossom_servers.data().read().len() > 1 {
                                     button {
                                         class: "px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded-lg text-sm transition",
@@ -884,18 +658,14 @@ pub fn Settings() -> Element {
                         }
                     }
                 }
-
-                // Add new server
-                div {
-                    class: "space-y-2",
-                    div {
-                        class: "flex gap-2",
+                div { class: "space-y-2",
+                    div { class: "flex gap-2",
                         input {
                             class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                             r#type: "url",
                             placeholder: "https://your-blossom-server.com",
                             value: "{new_server_input}",
-                            oninput: move |evt| new_server_input.set(evt.value())
+                            oninput: move |evt| new_server_input.set(evt.value()),
                         }
                         button {
                             class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
@@ -904,74 +674,47 @@ pub fn Settings() -> Element {
                         }
                     }
                     if let Some(err) = server_error.read().as_ref() {
-                        div {
-                            class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                        div { class: "p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "❌ {err}"
                         }
                     }
                 }
-
-                // Publish button (only when authenticated)
                 if auth.is_authenticated {
-                    div {
-                        class: "pt-4 border-t border-gray-200 dark:border-gray-700 mt-4",
+                    div { class: "pt-4 border-t border-gray-200 dark:border-gray-700 mt-4",
                         button {
                             class: "w-full px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition",
                             onclick: publish_blossom_servers,
                             "📤 Publish Server List to Nostr"
                         }
                         if let Some(status) = blossom_save_status.read().as_ref() {
-                            div {
-                                class: "mt-3 p-3 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm text-center",
+                            div { class: "mt-3 p-3 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm text-center",
                                 "{status}"
                             }
                         }
                     }
                 }
             }
-
-            // Bitcoin Settings section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h3 {
-                        class: "text-xl font-semibold text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
+                    h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
                         "₿ Bitcoin Settings"
                     }
-                    span {
-                        class: "text-xs text-gray-500 dark:text-gray-400",
-                        "NIP-73 Content"
-                    }
+                    span { class: "text-xs text-gray-500 dark:text-gray-400", "NIP-73 Content" }
                 }
-
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-4",
                     "Configure how Bitcoin transactions and addresses are displayed. "
                     "Uses mempool.space API for transaction data. You can use your own self-hosted instance for privacy."
                 }
-
-                // Mempool endpoint setting
                 BitcoinSettingsSection {}
             }
-
-            // About section
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                h3 {
-                    class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                h3 { class: "text-xl font-semibold mb-4 text-gray-900 dark:text-white",
                     "ℹ️ About"
                 }
-                div {
-                    class: "space-y-2 text-sm text-gray-600 dark:text-gray-400",
-                    p {
-                        "nostr.blue (Rust Edition) with NIP-65 Outbox Model"
-                    }
-                    p {
-                        "Built with ❤️ using Rust, Dioxus, and rust-nostr"
-                    }
-                    p {
-                        class: "pt-2",
+                div { class: "space-y-2 text-sm text-gray-600 dark:text-gray-400",
+                    p { "nostr.blue (Rust Edition) with NIP-65 Outbox Model" }
+                    p { "Built with ❤️ using Rust, Dioxus, and rust-nostr" }
+                    p { class: "pt-2",
                         a {
                             href: "https://github.com/rust-nostr/nostr",
                             target: "_blank",
@@ -982,23 +725,14 @@ pub fn Settings() -> Element {
                 }
             }
         }
-
-        // NWC Setup Modal
         if *show_nwc_modal.read() {
-            NwcSetupModal {
-                on_close: move |_| show_nwc_modal.set(false)
-            }
+            NwcSetupModal { on_close: move |_| show_nwc_modal.set(false) }
         }
-
-        // Reactions Defaults Modal
         if *show_reactions_modal.read() {
-            ReactionDefaultsModal {
-                on_close: move |_| show_reactions_modal.set(false)
-            }
+            ReactionDefaultsModal { on_close: move |_| show_reactions_modal.set(false) }
         }
     }
 }
-
 #[component]
 fn render_account_info() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -1006,22 +740,18 @@ fn render_account_info() -> Element {
     let _show_npub_export = use_signal(|| false);
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
     let mut copy_status = use_signal(|| None::<String>);
-
     let copy_to_clipboard = move |_text: String, _label: &str| {
         #[cfg(target_arch = "wasm32")]
         {
             use web_sys::window;
-
             if let Some(window) = window() {
                 let clipboard = window.navigator().clipboard();
                 let promise = clipboard.write_text(&_text);
                 let label_str = _label.to_string();
-
                 wasm_bindgen_futures::spawn_local(async move {
                     match wasm_bindgen_futures::JsFuture::from(promise).await {
                         Ok(_) => {
                             copy_status.set(Some(format!("{} copied!", label_str)));
-                            // Clear after 2 seconds
                             gloo_timers::future::TimeoutFuture::new(2000).await;
                             copy_status.set(None);
                         }
@@ -1033,18 +763,11 @@ fn render_account_info() -> Element {
             }
         }
     };
-
     rsx! {
-        div {
-            class: "space-y-4",
-
-            // Public Key
-            div {
-                class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                div {
-                    class: "flex items-center justify-between mb-2",
-                    p {
-                        class: "text-sm font-medium text-gray-600 dark:text-gray-400",
+        div { class: "space-y-4",
+            div { class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                div { class: "flex items-center justify-between mb-2",
+                    p { class: "text-sm font-medium text-gray-600 dark:text-gray-400",
                         "Public Key (npub)"
                     }
                     button {
@@ -1058,32 +781,29 @@ fn render_account_info() -> Element {
                     }
                 }
                 if let Some(pubkey) = &auth.pubkey {
-                    p {
-                        class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                    p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                         "{pubkey}"
                     }
                 }
             }
-
-            // Private Key (only shown for PrivateKey login method)
             if matches!(auth.login_method, Some(auth_store::LoginMethod::PrivateKey)) {
-                div {
-                    class: "p-4 bg-yellow-50 dark:bg-yellow-900/20 border-2 border-yellow-300 dark:border-yellow-700 rounded-lg",
-                    div {
-                        class: "flex items-center justify-between mb-2",
-                        p {
-                            class: "text-sm font-medium text-yellow-800 dark:text-yellow-300",
+                div { class: "p-4 bg-yellow-50 dark:bg-yellow-900/20 border-2 border-yellow-300 dark:border-yellow-700 rounded-lg",
+                    div { class: "flex items-center justify-between mb-2",
+                        p { class: "text-sm font-medium text-yellow-800 dark:text-yellow-300",
                             "⚠️ Private Key (nsec)"
                         }
-                        div {
-                            class: "flex gap-2",
+                        div { class: "flex gap-2",
                             button {
                                 class: "px-3 py-1 text-xs bg-yellow-600 hover:bg-yellow-700 text-white rounded transition",
                                 onclick: move |_| {
                                     let current = *show_nsec.read();
                                     show_nsec.set(!current);
                                 },
-                                if *show_nsec.read() { "👁️ Hide" } else { "👁️ Show" }
+                                if *show_nsec.read() {
+                                    "👁️ Hide"
+                                } else {
+                                    "👁️ Show"
+                                }
                             }
                             if *show_nsec.read() {
                                 button {
@@ -1100,35 +820,25 @@ fn render_account_info() -> Element {
                     }
                     if *show_nsec.read() {
                         if let Ok(nsec) = auth_store::export_nsec() {
-                            p {
-                                class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                            p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                                 "{nsec}"
                             }
                         }
                     } else {
-                        p {
-                            class: "text-xs text-yellow-700 dark:text-yellow-400",
+                        p { class: "text-xs text-yellow-700 dark:text-yellow-400",
                             "Click 'Show' to reveal your private key. Keep it safe!"
                         }
                     }
-                    p {
-                        class: "text-xs text-yellow-700 dark:text-yellow-400 mt-2",
+                    p { class: "text-xs text-yellow-700 dark:text-yellow-400 mt-2",
                         "⚠️ Never share your private key with anyone!"
                     }
                 }
             }
-
-            // Remote Signer Info (only shown for RemoteSigner login method)
             if matches!(auth.login_method, Some(auth_store::LoginMethod::RemoteSigner)) {
-                div {
-                    class: "p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg space-y-3",
-
-                    // Bunker URI
+                div { class: "p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg space-y-3",
                     div {
-                        div {
-                            class: "flex items-center justify-between mb-2",
-                            p {
-                                class: "text-sm font-medium text-blue-800 dark:text-blue-300",
+                        div { class: "flex items-center justify-between mb-2",
+                            p { class: "text-sm font-medium text-blue-800 dark:text-blue-300",
                                 "🔐 Bunker URI"
                             }
                             button {
@@ -1142,11 +852,10 @@ fn render_account_info() -> Element {
                             }
                         }
                         if let Ok(uri) = gloo_storage::LocalStorage::get::<String>("nostr_bunker_uri") {
-                            p {
-                                class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                            p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                                 {
                                     if uri.len() > 60 {
-                                        format!("{}...{}", &uri[..30], &uri[uri.len()-25..])
+                                        format!("{}...{}", &uri[..30], &uri[uri.len() - 25..])
                                     } else {
                                         uri
                                     }
@@ -1154,19 +863,17 @@ fn render_account_info() -> Element {
                             }
                         }
                     }
-
-                    // App Public Key
                     div {
-                        div {
-                            class: "flex items-center justify-between mb-2",
-                            p {
-                                class: "text-sm font-medium text-blue-800 dark:text-blue-300",
+                        div { class: "flex items-center justify-between mb-2",
+                            p { class: "text-sm font-medium text-blue-800 dark:text-blue-300",
                                 "🔑 App Public Key"
                             }
                             button {
                                 class: "px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition",
                                 onclick: move |_| {
-                                    if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<String>("nostr_app_keys") {
+                                    if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<
+                                        String,
+                                    >("nostr_app_keys") {
                                         if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
                                             let npub = keys.public_key().to_bech32().unwrap();
                                             copy_to_clipboard(npub, "App public key");
@@ -1178,49 +885,38 @@ fn render_account_info() -> Element {
                         }
                         if let Ok(app_keys_str) = gloo_storage::LocalStorage::get::<String>("nostr_app_keys") {
                             if let Ok(keys) = nostr::Keys::parse(&app_keys_str) {
-                                p {
-                                    class: "font-mono text-xs text-gray-900 dark:text-white break-all",
+                                p { class: "font-mono text-xs text-gray-900 dark:text-white break-all",
                                     "{keys.public_key().to_bech32().unwrap()}"
                                 }
                             }
                         }
                     }
-
-                    p {
-                        class: "text-xs text-blue-700 dark:text-blue-400 mt-2",
+                    p { class: "text-xs text-blue-700 dark:text-blue-400 mt-2",
                         "ℹ️ Your keys are stored on your remote signing device. The app public key is used to authenticate this app to your signer."
                     }
                 }
             }
-
-            // Login Method
-            div {
-                class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                p {
-                    class: "text-sm font-medium text-gray-600 dark:text-gray-400 mb-2",
+            div { class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                p { class: "text-sm font-medium text-gray-600 dark:text-gray-400 mb-2",
                     "Login Method"
                 }
-                p {
-                    class: "text-gray-900 dark:text-white flex items-center gap-2",
+                p { class: "text-gray-900 dark:text-white flex items-center gap-2",
                     match auth_store::get_login_method() {
                         Some(auth_store::LoginMethod::PrivateKey) => "🔑 Private Key (nsec)",
                         Some(auth_store::LoginMethod::ReadOnly) => "👁️ Read-Only (npub)",
-                        Some(auth_store::LoginMethod::BrowserExtension) => "🔌 Browser Extension (NIP-07)",
+                        Some(auth_store::LoginMethod::BrowserExtension) => {
+                            "🔌 Browser Extension (NIP-07)"
+                        }
                         Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer (NIP-46)",
                         None => "Unknown",
                     }
                 }
             }
-
-            // Copy status
             if let Some(status) = copy_status.read().as_ref() {
-                div {
-                    class: "p-3 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-lg text-sm text-center",
+                div { class: "p-3 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-lg text-sm text-center",
                     "✅ {status}"
                 }
             }
-
-            // Logout button
             button {
                 class: "w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition",
                 onclick: move |_| {
@@ -1235,7 +931,6 @@ fn render_account_info() -> Element {
         }
     }
 }
-
 /// Bitcoin settings component for configuring mempool.space endpoint
 #[component]
 fn BitcoinSettingsSection() -> Element {
@@ -1244,99 +939,75 @@ fn BitcoinSettingsSection() -> Element {
     let mut endpoint_input = use_signal(|| current_endpoint.clone());
     let mut save_status = use_signal(|| None::<String>);
     let mut is_saving = use_signal(|| false);
-
-    // Check if endpoint has been modified
     let is_modified = endpoint_input.read().as_str() != current_endpoint.as_str();
     let is_default = current_endpoint == crate::services::mempool::DEFAULT_ENDPOINT;
-
     let save_endpoint = move |_| {
         let endpoint = endpoint_input.read().clone();
         is_saving.set(true);
         save_status.set(None);
-
         spawn(async move {
             settings_store::update_mempool_endpoint(endpoint).await;
             is_saving.set(false);
             save_status.set(Some("Mempool endpoint saved".to_string()));
-
-            // Clear status after 3 seconds
             gloo_timers::future::TimeoutFuture::new(3000).await;
             save_status.set(None);
         });
     };
-
     let reset_to_default = move |_| {
         endpoint_input.set(crate::services::mempool::DEFAULT_ENDPOINT.to_string());
         is_saving.set(true);
         save_status.set(None);
-
         spawn(async move {
             settings_store::reset_mempool_endpoint().await;
             is_saving.set(false);
             save_status.set(Some("Reset to default".to_string()));
-
-            // Clear status after 3 seconds
             gloo_timers::future::TimeoutFuture::new(3000).await;
             save_status.set(None);
         });
     };
-
     rsx! {
-        div {
-            class: "space-y-4",
-
-            // Current endpoint display
-            div {
-                class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                div {
-                    class: "flex items-center justify-between mb-2",
-                    p {
-                        class: "text-sm font-medium text-gray-600 dark:text-gray-400",
+        div { class: "space-y-4",
+            div { class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                div { class: "flex items-center justify-between mb-2",
+                    p { class: "text-sm font-medium text-gray-600 dark:text-gray-400",
                         "Mempool API Endpoint"
                     }
                     if is_default {
-                        span {
-                            class: "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded",
+                        span { class: "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded",
                             "Default"
                         }
                     } else {
-                        span {
-                            class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded",
+                        span { class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded",
                             "Custom"
                         }
                     }
                 }
-
-                // Endpoint input
-                div {
-                    class: "flex gap-2",
+                div { class: "flex gap-2",
                     input {
                         class: "flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                         r#type: "url",
                         placeholder: "https://mempool.space/api",
                         value: "{endpoint_input}",
-                        oninput: move |evt| endpoint_input.set(evt.value())
+                        oninput: move |evt| endpoint_input.set(evt.value()),
                     }
                 }
-
-                p {
-                    class: "mt-2 text-xs text-gray-500 dark:text-gray-400",
+                p { class: "mt-2 text-xs text-gray-500 dark:text-gray-400",
                     "Enter the base URL for your mempool.space instance (e.g., https://mempool.space/api or https://your-server.com/api)"
                 }
             }
-
-            // Action buttons
-            div {
-                class: "flex gap-2",
+            div { class: "flex gap-2",
                 if is_modified {
                     button {
                         class: "flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition disabled:opacity-50",
                         disabled: *is_saving.read(),
                         onclick: save_endpoint,
-                        if *is_saving.read() { "Saving..." } else { "Save Endpoint" }
+                        if *is_saving.read() {
+                            "Saving..."
+                        } else {
+                            "Save Endpoint"
+                        }
                     }
                 }
-
                 if !is_default {
                     button {
                         class: "px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-800 dark:text-white rounded-lg font-medium transition disabled:opacity-50",
@@ -1346,19 +1017,13 @@ fn BitcoinSettingsSection() -> Element {
                     }
                 }
             }
-
-            // Save status
             if let Some(status) = save_status.read().as_ref() {
-                div {
-                    class: "p-3 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-lg text-sm text-center",
+                div { class: "p-3 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-lg text-sm text-center",
                     "✅ {status}"
                 }
             }
-
-            // Note about privacy
             if auth.is_authenticated {
-                p {
-                    class: "text-xs text-gray-500 dark:text-gray-400",
+                p { class: "text-xs text-gray-500 dark:text-gray-400",
                     "Your mempool endpoint setting is synced across devices via Nostr (NIP-78)."
                 }
             }

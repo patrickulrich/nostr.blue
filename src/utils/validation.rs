@@ -1,16 +1,10 @@
 //! Validation utilities for common validation patterns across the codebase.
-
+use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::PublicKey;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use url::Url;
-use crate::stores::signer::SIGNER_INFO;
-
-// ============================================================================
-// URL Validation Utilities
-// ============================================================================
-
 /// Check if a string is a valid HTTP or HTTPS URL.
 ///
 /// Uses the `url` crate for proper URL parsing and validates that the scheme
@@ -34,7 +28,6 @@ use crate::stores::signer::SIGNER_INFO;
 pub fn is_valid_http_url(url_str: &str) -> bool {
     parse_http_url(url_str).is_some()
 }
-
 /// Parse a string as an HTTP/HTTPS URL.
 ///
 /// Returns `Some(Url)` if the string is a valid URL with http/https scheme,
@@ -47,11 +40,8 @@ pub fn is_valid_http_url(url_str: &str) -> bool {
 /// * `Some(Url)` - Valid parsed URL with http/https scheme
 /// * `None` - Invalid URL or non-http/https scheme
 pub fn parse_http_url(url_str: &str) -> Option<Url> {
-    Url::parse(url_str).ok().filter(|u| {
-        matches!(u.scheme(), "http" | "https")
-    })
+    Url::parse(url_str).ok().filter(|u| matches!(u.scheme(), "http" | "https"))
 }
-
 /// Result type for signer validation operations
 pub enum SignerValidationResult {
     /// Successfully retrieved user's public key
@@ -61,7 +51,6 @@ pub enum SignerValidationResult {
     /// Signer info present but public key is invalid
     InvalidPubkey,
 }
-
 /// Get the current user's public key from signer info if available.
 ///
 /// This is a common pattern used in composers and other components that need
@@ -73,27 +62,23 @@ pub enum SignerValidationResult {
 /// - `SignerValidationResult::InvalidPubkey` - Signer info present but malformed
 pub fn get_current_user_pubkey() -> SignerValidationResult {
     match SIGNER_INFO.read().as_ref() {
-        Some(info) => match PublicKey::from_hex(&info.public_key) {
-            Ok(pk) => SignerValidationResult::Ok(pk),
-            Err(_) => SignerValidationResult::InvalidPubkey,
-        },
+        Some(info) => {
+            match PublicKey::from_hex(&info.public_key) {
+                Ok(pk) => SignerValidationResult::Ok(pk),
+                Err(_) => SignerValidationResult::InvalidPubkey,
+            }
+        }
         None => SignerValidationResult::NotSignedIn,
     }
 }
-
 /// Get user's pubkey as Option for simpler cases where error details aren't needed.
-#[allow(dead_code)] // Available for future use
+#[allow(dead_code)]
 pub fn try_get_current_user_pubkey() -> Option<PublicKey> {
     match get_current_user_pubkey() {
         SignerValidationResult::Ok(pk) => Some(pk),
         _ => None,
     }
 }
-
-// ============================================================================
-// Lightning Invoice Validation
-// ============================================================================
-
 /// Sanitize and validate a Lightning invoice for safe embedding in HTML/JS.
 ///
 /// Lightning invoices (BOLT11) should only contain bech32 characters:
@@ -117,41 +102,25 @@ pub fn try_get_current_user_pubkey() -> Option<PublicKey> {
 /// assert!(sanitize_lightning_invoice("lnbc'; alert('xss')").is_none());
 /// ```
 pub fn sanitize_lightning_invoice(invoice: &str) -> Option<String> {
-    // Lightning invoices must start with ln prefix
     let lower = invoice.to_lowercase();
-    if !lower.starts_with("lnbc")  // Mainnet
-        && !lower.starts_with("lntb")  // Testnet
-        && !lower.starts_with("lnbcrt") // Regtest
-        && !lower.starts_with("lnsb")  // Signet
+    if !lower.starts_with("lnbc") && !lower.starts_with("lntb")
+        && !lower.starts_with("lnbcrt") && !lower.starts_with("lnsb")
     {
         return None;
     }
-
-    // Only allow alphanumeric characters (bech32 charset)
-    // This prevents injection of quotes, brackets, or script tags
     let valid = invoice.chars().all(|c| c.is_ascii_alphanumeric());
     if !valid {
         return None;
     }
-
-    // Minimum reasonable length for a Lightning invoice
     if invoice.len() < 50 {
         return None;
     }
-
     Some(invoice.to_uppercase())
 }
-
-// ============================================================================
-// CSS URL Validation
-// ============================================================================
-
-// Static regex for CSS dimension validation - compiled once at startup
 static CSS_DIMENSION_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^-?[0-9]*\.?[0-9]+(px|%|vh|vw|em|rem|pt|vmin|vmax)?$")
         .expect("Failed to compile CSS dimension regex")
 });
-
 /// Validate a URL for safe embedding in CSS `url()` context.
 ///
 /// This function checks that:
@@ -173,18 +142,14 @@ static CSS_DIMENSION_PATTERN: Lazy<Regex> = Lazy::new(|| {
 /// assert!(css_safe_url("'); background: url(javascript:").is_none());
 /// ```
 pub fn css_safe_url(url: &str) -> Option<&str> {
-    // Must be valid HTTP/HTTPS URL
     if !is_valid_http_url(url) {
         return None;
     }
-    // Reject characters that could break out of CSS url() context
-    // Single/double quotes, parentheses, and backslash are dangerous
     if url.contains(['\'', '"', ')', '(', '\\']) {
         return None;
     }
     Some(url)
 }
-
 /// Validates a CSS dimension value to prevent CSS injection attacks.
 ///
 /// Accepts numeric values with allowed units: px, %, vh, vw, em, rem, pt.
@@ -207,29 +172,17 @@ pub fn css_safe_url(url: &str) -> Option<&str> {
 /// ```
 pub fn validate_css_dimension(dimension: &str) -> Option<&str> {
     let trimmed = dimension.trim();
-
-    // Reject empty strings
     if trimmed.is_empty() {
         return None;
     }
-
-    // Reject dangerous CSS content
-    // Semicolons, braces, parentheses, quotes, backslashes are dangerous
     if trimmed.contains([';', '{', '}', '(', ')', '\'', '"', '\\', '<', '>']) {
         return None;
     }
-
-    // Reject common CSS injection patterns (case-insensitive check)
     let lower = trimmed.to_lowercase();
-    if lower.contains("expression") || lower.contains("javascript") || lower.contains("url") {
+    if lower.contains("expression") || lower.contains("javascript")
+        || lower.contains("url")
+    {
         return None;
     }
-
-    // Must match pattern: number + optional unit
-    // Allowed units: px, %, vh, vw, em, rem, pt, vmin, vmax
-    if CSS_DIMENSION_PATTERN.is_match(trimmed) {
-        Some(trimmed)  // Return validated trimmed slice
-    } else {
-        None
-    }
+    if CSS_DIMENSION_PATTERN.is_match(trimmed) { Some(trimmed) } else { None }
 }

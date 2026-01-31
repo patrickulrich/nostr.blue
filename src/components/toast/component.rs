@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{self, ToastProviderProps};
-
 #[component]
 pub fn ToastProvider(props: ToastProviderProps) -> Element {
     rsx! {

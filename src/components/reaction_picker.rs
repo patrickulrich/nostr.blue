@@ -1,12 +1,10 @@
 //! Inline reaction picker for notes and posts
 //! Shows user's preferred reaction emojis
-
+use crate::components::icons::SettingsIcon;
+use crate::hooks::ReactionEmoji;
+use crate::stores::reactions_store::{PreferredReaction, PREFERRED_REACTIONS};
 use dioxus::prelude::*;
 use std::collections::HashSet;
-use crate::hooks::ReactionEmoji;
-use crate::stores::reactions_store::{PREFERRED_REACTIONS, PreferredReaction};
-use crate::components::icons::SettingsIcon;
-
 /// Inline reaction picker that appears on hover/click
 /// Shows user's preferred reactions with optional settings button
 #[derive(Props, Clone, PartialEq)]
@@ -17,20 +15,15 @@ pub struct InlineReactionPickerProps {
     #[props(default)]
     pub on_settings: Option<EventHandler<()>>,
 }
-
 #[component]
 pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
     let preferred_reactions = PREFERRED_REACTIONS.read();
-    // Track failed image URLs for fallback display
     let mut failed_images: Signal<HashSet<String>> = use_signal(HashSet::new);
-
     rsx! {
         div {
             class: "flex items-center gap-0.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full shadow-lg px-2 py-1",
             onclick: move |e| e.stop_propagation(),
-
-            // Render preferred reactions
-            for (idx, reaction) in preferred_reactions.iter().enumerate() {
+            for (idx , reaction) in preferred_reactions.iter().enumerate() {
                 {
                     let reaction_clone = reaction.clone();
                     let reaction_for_click = reaction.clone();
@@ -72,7 +65,7 @@ pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
                                             loading: "lazy",
                                             onerror: move |_| {
                                                 failed_images.write().insert(url_for_error.clone());
-                                            }
+                                            },
                                         }
                                     }
                                 }
@@ -81,11 +74,8 @@ pub fn InlineReactionPicker(props: InlineReactionPickerProps) -> Element {
                     }
                 }
             }
-
-            // Settings button (if callback provided)
             if let Some(on_settings) = props.on_settings {
-                div {
-                    class: "ml-1 pl-1 border-l border-gray-200 dark:border-gray-600",
+                div { class: "ml-1 pl-1 border-l border-gray-200 dark:border-gray-600",
                     button {
                         class: "p-0.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition text-gray-400 hover:text-gray-600 dark:hover:text-gray-300",
                         title: "Customize reactions",

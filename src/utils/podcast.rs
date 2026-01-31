@@ -6,24 +6,12 @@
 //! - Kind 30078: Application-specific metadata (d="podcast-metadata")
 //!
 //! Also includes Podcasting 2.0 data structures for V4V payments, chapters, etc.
-
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-
-// ============================================================================
-// Event Kind Constants
-// ============================================================================
-
 /// Podcast episode event kind (addressable)
 pub const KIND_PODCAST_EPISODE: u16 = 30054;
-
 /// Application-specific data kind (for podcast metadata)
 pub const KIND_APP_DATA: u16 = 30078;
-
-// ============================================================================
-// Podcast Metadata (from Kind 30078 with d="podcast-metadata")
-// ============================================================================
-
 /// Podcast-level metadata parsed from Kind 30078 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PodcastMetadata {
@@ -54,11 +42,6 @@ pub struct PodcastMetadata {
     /// Created timestamp
     pub created_at: u64,
 }
-
-// ============================================================================
-// Podcast Episode (Kind 30054)
-// ============================================================================
-
 /// Parsed podcast episode from Kind 30054 event
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PodcastEpisode {
@@ -101,11 +84,6 @@ pub struct PodcastEpisode {
     /// Created timestamp
     pub created_at: u64,
 }
-
-// ============================================================================
-// Podcasting 2.0 Data Structures
-// ============================================================================
-
 /// Value for Value (V4V) Lightning payment configuration
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ValueBlock {
@@ -118,7 +96,6 @@ pub struct ValueBlock {
     /// Payment recipients with splits
     pub recipients: Vec<ValueRecipient>,
 }
-
 impl Default for ValueBlock {
     fn default() -> Self {
         Self {
@@ -129,7 +106,6 @@ impl Default for ValueBlock {
         }
     }
 }
-
 /// V4V payment recipient
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ValueRecipient {
@@ -148,7 +124,6 @@ pub struct ValueRecipient {
     /// True if this is a processing fee
     pub fee: Option<bool>,
 }
-
 /// JSON Chapters format (Podcasting 2.0)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChaptersFile {
@@ -164,7 +139,6 @@ pub struct ChaptersFile {
     #[serde(rename = "podcastName")]
     pub podcast_name: Option<String>,
 }
-
 /// Single chapter entry
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chapter {
@@ -185,7 +159,6 @@ pub struct Chapter {
     /// OpenStreetMap query string
     pub location: Option<String>,
 }
-
 /// Transcript reference
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptRef {
@@ -199,7 +172,6 @@ pub struct TranscriptRef {
     /// Relation: "captions" for closed captions
     pub rel: Option<String>,
 }
-
 /// Soundbite for episode previews
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Soundbite {
@@ -211,7 +183,6 @@ pub struct Soundbite {
     /// Optional title (max 128 chars)
     pub title: Option<String>,
 }
-
 /// Person/contributor credit
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Person {
@@ -226,7 +197,6 @@ pub struct Person {
     /// Bio/social link URL
     pub href: Option<String>,
 }
-
 /// Funding link
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FundingLink {
@@ -235,20 +205,11 @@ pub struct FundingLink {
     /// Display name
     pub name: Option<String>,
 }
-
-// ============================================================================
-// Unified Podcast Source Enum
-// ============================================================================
-
 /// Source of podcast content for routing and display
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PodcastSource {
     /// Native Nostr podcast (kind 30054/30055/30078)
-    Nostr {
-        pubkey: String,
-        d_tag: String,
-        coordinate: String,
-    },
+    Nostr { pubkey: String, d_tag: String, coordinate: String },
     /// Traditional RSS feed
     Rss {
         feed_url: String,
@@ -257,32 +218,24 @@ pub enum PodcastSource {
         podcast_id: Option<u64>,
     },
 }
-
-// ============================================================================
-// Parsing Functions
-// ============================================================================
-
 /// Parse a Kind 30054 event into a PodcastEpisode
 pub fn parse_podcast_episode(event: &Event) -> Result<PodcastEpisode, String> {
     if event.kind.as_u16() != KIND_PODCAST_EPISODE {
-        return Err(format!("Expected kind {}, got {}", KIND_PODCAST_EPISODE, event.kind.as_u16()));
+        return Err(
+            format!(
+                "Expected kind {}, got {}",
+                KIND_PODCAST_EPISODE,
+                event.kind.as_u16(),
+            ),
+        );
     }
-
     let pubkey = event.pubkey.to_hex();
-
-    // Extract required tags
-    let d_tag = get_tag_value(event, "d")
-        .ok_or("Missing required 'd' tag")?;
-    let title = get_tag_value(event, "title")
-        .ok_or("Missing required 'title' tag")?;
-
-    // Audio URL - per NIP spec, should be in 'audio' tag
-    // Also check 'url' and 'enclosure' for backwards compatibility
+    let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
+    let title = get_tag_value(event, "title").ok_or("Missing required 'title' tag")?;
     let audio_url = get_tag_value(event, "audio")
         .or_else(|| get_tag_value(event, "url"))
         .or_else(|| get_tag_value(event, "enclosure"))
         .or_else(|| {
-            // Check content for URL if tags don't have it
             if event.content.starts_with("http") {
                 Some(event.content.split_whitespace().next()?.to_string())
             } else {
@@ -290,49 +243,35 @@ pub fn parse_podcast_episode(event: &Event) -> Result<PodcastEpisode, String> {
             }
         })
         .ok_or("Missing audio URL (audio, url, or enclosure tag)")?;
-
-    // Get audio type from the second parameter of the audio tag if present
     let audio_type = get_tag_second_value(event, "audio")
         .or_else(|| get_tag_value(event, "type"));
-
-    // Build coordinate
     let coordinate = format!("{}:{}:{}", KIND_PODCAST_EPISODE, pubkey, d_tag);
-
-    // Extract optional tags
     let pubdate = get_tag_value(event, "pubdate")
         .or_else(|| get_tag_value(event, "published_at"));
     let description = get_tag_value(event, "description")
         .or_else(|| get_tag_value(event, "summary"))
-        .or_else(|| if !event.content.is_empty() && !event.content.starts_with("http") {
-            Some(event.content.clone())
-        } else {
-            None
+        .or_else(|| {
+            if !event.content.is_empty() && !event.content.starts_with("http") {
+                Some(event.content.clone())
+            } else {
+                None
+            }
         });
-    let image = get_tag_value(event, "image")
-        .or_else(|| get_tag_value(event, "thumb"));
-    let duration = get_tag_value(event, "duration")
-        .and_then(|d| d.parse::<u64>().ok());
-    let season = get_tag_value(event, "season")
-        .and_then(|s| s.parse::<u32>().ok());
+    let image = get_tag_value(event, "image").or_else(|| get_tag_value(event, "thumb"));
+    let duration = get_tag_value(event, "duration").and_then(|d| d.parse::<u64>().ok());
+    let season = get_tag_value(event, "season").and_then(|s| s.parse::<u32>().ok());
     let episode_number = get_tag_value(event, "episode")
         .and_then(|e| e.parse::<u32>().ok());
     let chapters_url = get_tag_value(event, "chapters");
-
-    // Collect topic tags
-    let topics: Vec<String> = event.tags.iter()
+    let topics: Vec<String> = event
+        .tags
+        .iter()
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t"))
         .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
         .collect();
-
-    // Parse transcripts from tags
     let transcripts = parse_transcripts(event);
-
-    // Parse soundbites from tags
     let soundbites = parse_soundbites(event);
-
-    // Parse value block if present
     let value = parse_value_block(event);
-
     Ok(PodcastEpisode {
         event_id: event.id.to_hex(),
         pubkey,
@@ -355,86 +294,91 @@ pub fn parse_podcast_episode(event: &Event) -> Result<PodcastEpisode, String> {
         created_at: event.created_at.as_secs(),
     })
 }
-
 /// Parse podcast metadata from Kind 30078 event (d="podcast-metadata" or similar)
 /// Per NIP spec, metadata is stored as JSON in the content field
 pub fn parse_podcast_metadata(event: &Event) -> Result<PodcastMetadata, String> {
     if event.kind.as_u16() != KIND_APP_DATA {
-        return Err(format!("Expected kind {}, got {}", KIND_APP_DATA, event.kind.as_u16()));
+        return Err(
+            format!("Expected kind {}, got {}", KIND_APP_DATA, event.kind.as_u16()),
+        );
     }
-
     let pubkey = event.pubkey.to_hex();
-    let d_tag = get_tag_value(event, "d")
-        .ok_or("Missing required 'd' tag")?;
-
-    // Try to parse JSON from content field (per NIP spec)
+    let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let content_json: Option<serde_json::Value> = if !event.content.is_empty() {
         serde_json::from_str(&event.content).ok()
     } else {
         None
     };
-
-    // Title - try JSON content first, then tags
-    let title = content_json.as_ref()
-        .and_then(|j| j.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let title = content_json
+        .as_ref()
+        .and_then(|j| { j.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()) })
         .or_else(|| get_tag_value(event, "title"))
         .ok_or("Missing required 'title' in content or tags")?;
-
-    // Extract fields from JSON content or fall back to tags
-    let description = content_json.as_ref()
-        .and_then(|j| j.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let description = content_json
+        .as_ref()
+        .and_then(|j| {
+            j.get("description").and_then(|v| v.as_str()).map(|s| s.to_string())
+        })
         .or_else(|| get_tag_value(event, "description"));
-
-    let author = content_json.as_ref()
-        .and_then(|j| j.get("author").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let author = content_json
+        .as_ref()
+        .and_then(|j| {
+            j.get("author").and_then(|v| v.as_str()).map(|s| s.to_string())
+        })
         .or_else(|| get_tag_value(event, "author"));
-
-    let image = content_json.as_ref()
-        .and_then(|j| j.get("image").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let image = content_json
+        .as_ref()
+        .and_then(|j| { j.get("image").and_then(|v| v.as_str()).map(|s| s.to_string()) })
         .or_else(|| get_tag_value(event, "image"));
-
-    let language = content_json.as_ref()
-        .and_then(|j| j.get("language").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let language = content_json
+        .as_ref()
+        .and_then(|j| {
+            j.get("language").and_then(|v| v.as_str()).map(|s| s.to_string())
+        })
         .or_else(|| get_tag_value(event, "language"));
-
-    let website = content_json.as_ref()
-        .and_then(|j| j.get("website").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let website = content_json
+        .as_ref()
+        .and_then(|j| {
+            j.get("website").and_then(|v| v.as_str()).map(|s| s.to_string())
+        })
         .or_else(|| get_tag_value(event, "website"))
         .or_else(|| get_tag_value(event, "link"));
-
-    let explicit = content_json.as_ref()
+    let explicit = content_json
+        .as_ref()
         .and_then(|j| j.get("explicit").and_then(|v| v.as_bool()))
         .or_else(|| get_tag_value(event, "explicit").map(|v| v == "true" || v == "yes"))
         .unwrap_or(false);
-
-    // Categories from JSON or tags
-    let categories: Vec<String> = content_json.as_ref()
+    let categories: Vec<String> = content_json
+        .as_ref()
         .and_then(|j| j.get("categories").and_then(|v| v.as_array()))
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+        })
         .unwrap_or_else(|| {
-            event.tags.iter()
+            event
+                .tags
+                .iter()
                 .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("t"))
                 .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
                 .collect()
         });
-
-    // Parse funding links from JSON or tags
-    let funding = content_json.as_ref()
+    let funding = content_json
+        .as_ref()
         .and_then(|j| j.get("funding").and_then(|v| v.as_array()))
         .map(|arr| {
-            arr.iter().filter_map(|v| {
-                let url = v.as_str().map(|s| s.to_string())?;
-                Some(FundingLink { url, name: None })
-            }).collect()
+            arr.iter()
+                .filter_map(|v| {
+                    let url = v.as_str().map(|s| s.to_string())?;
+                    Some(FundingLink { url, name: None })
+                })
+                .collect()
         })
         .unwrap_or_else(|| parse_funding_links(event));
-
-    // Parse value block from JSON or tags
-    let value = content_json.as_ref()
+    let value = content_json
+        .as_ref()
         .and_then(|j| j.get("value"))
         .and_then(parse_value_block_from_json)
         .or_else(|| parse_value_block(event));
-
     Ok(PodcastMetadata {
         title,
         description,
@@ -451,38 +395,37 @@ pub fn parse_podcast_metadata(event: &Event) -> Result<PodcastMetadata, String> 
         created_at: event.created_at.as_secs(),
     })
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
 /// Get a tag value by name (first parameter after tag name)
 fn get_tag_value(event: &Event, tag_name: &str) -> Option<String> {
-    event.tags.iter()
+    event
+        .tags
+        .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
         .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
 }
-
 /// Get the second value of a tag (e.g., media type from ["audio", "url", "audio/mpeg"])
 fn get_tag_second_value(event: &Event, tag_name: &str) -> Option<String> {
-    event.tags.iter()
+    event
+        .tags
+        .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(tag_name))
         .and_then(|t| t.as_slice().get(2).map(|s| s.to_string()))
 }
-
 /// Parse transcript references from event tags
 fn parse_transcripts(event: &Event) -> Vec<TranscriptRef> {
-    event.tags.iter()
+    event
+        .tags
+        .iter()
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("transcript"))
         .filter_map(|t| {
             let slice = t.as_slice();
             let url = slice.get(1)?.to_string();
-            let transcript_type = slice.get(2)
+            let transcript_type = slice
+                .get(2)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "text/plain".to_string());
             let language = slice.get(3).map(|s| s.to_string());
             let rel = slice.get(4).map(|s| s.to_string());
-
             Some(TranscriptRef {
                 url,
                 transcript_type,
@@ -492,17 +435,17 @@ fn parse_transcripts(event: &Event) -> Vec<TranscriptRef> {
         })
         .collect()
 }
-
 /// Parse soundbites from event tags
 fn parse_soundbites(event: &Event) -> Vec<Soundbite> {
-    event.tags.iter()
+    event
+        .tags
+        .iter()
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("soundbite"))
         .filter_map(|t| {
             let slice = t.as_slice();
             let start_time: f64 = slice.get(1)?.parse().ok()?;
             let duration: f64 = slice.get(2)?.parse().ok()?;
             let title = slice.get(3).map(|s| s.to_string());
-
             Some(Soundbite {
                 start_time,
                 duration,
@@ -511,85 +454,80 @@ fn parse_soundbites(event: &Event) -> Vec<Soundbite> {
         })
         .collect()
 }
-
 /// Parse funding links from event tags
 fn parse_funding_links(event: &Event) -> Vec<FundingLink> {
-    event.tags.iter()
+    event
+        .tags
+        .iter()
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("funding"))
         .filter_map(|t| {
             let slice = t.as_slice();
             let url = slice.get(1)?.to_string();
             let name = slice.get(2).map(|s| s.to_string());
-
             Some(FundingLink { url, name })
         })
         .collect()
 }
-
 /// Parse V4V value block from JSON content
 fn parse_value_block_from_json(json: &serde_json::Value) -> Option<ValueBlock> {
     let obj = json.as_object()?;
-
-    let value_type = obj.get("type")
+    let value_type = obj
+        .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("lightning")
         .to_string();
-
-    let method = obj.get("method")
+    let method = obj
+        .get("method")
         .and_then(|v| v.as_str())
         .unwrap_or("keysend")
         .to_string();
-
-    let suggested = obj.get("suggested")
-        .and_then(|v| v.as_f64());
-
-    let recipients: Vec<ValueRecipient> = obj.get("recipients")
+    let suggested = obj.get("suggested").and_then(|v| v.as_f64());
+    let recipients: Vec<ValueRecipient> = obj
+        .get("recipients")
         .and_then(|v| v.as_array())
         .map(|arr| {
-            arr.iter().filter_map(|r| {
-                let r_obj = r.as_object()?;
-
-                let name = r_obj.get("name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let recipient_type = r_obj.get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("node")
-                    .to_string();
-
-                let address = r_obj.get("address")
-                    .and_then(|v| v.as_str())?
-                    .to_string();
-
-                let split = r_obj.get("split")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(100) as u32;
-
-                let custom_key = r_obj.get("customKey")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let custom_value = r_obj.get("customValue")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                let fee = r_obj.get("fee")
-                    .and_then(|v| v.as_bool());
-
-                Some(ValueRecipient {
-                    name,
-                    recipient_type,
-                    address,
-                    split,
-                    custom_key,
-                    custom_value,
-                    fee,
+            arr.iter()
+                .filter_map(|r| {
+                    let r_obj = r.as_object()?;
+                    let name = r_obj
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let recipient_type = r_obj
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("node")
+                        .to_string();
+                    let address = r_obj
+                        .get("address")
+                        .and_then(|v| v.as_str())?
+                        .to_string();
+                    let split = r_obj
+                        .get("split")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(100) as u32;
+                    let custom_key = r_obj
+                        .get("customKey")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let custom_value = r_obj
+                        .get("customValue")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let fee = r_obj.get("fee").and_then(|v| v.as_bool());
+                    Some(ValueRecipient {
+                        name,
+                        recipient_type,
+                        address,
+                        split,
+                        custom_key,
+                        custom_value,
+                        fee,
+                    })
                 })
-            }).collect()
+                .collect()
         })
         .unwrap_or_default();
-
     Some(ValueBlock {
         value_type,
         method,
@@ -597,32 +535,34 @@ fn parse_value_block_from_json(json: &serde_json::Value) -> Option<ValueBlock> {
         recipients,
     })
 }
-
 /// Parse V4V value block from event tags
 fn parse_value_block(event: &Event) -> Option<ValueBlock> {
-    // Look for value tag: ["value", "lightning", "keysend", suggested_sats]
-    let value_tag = event.tags.iter()
+    let value_tag = event
+        .tags
+        .iter()
         .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("value"))?;
-
     let slice = value_tag.as_slice();
     let value_type = slice.get(1)?.to_string();
-    let method = slice.get(2).map(|s| s.to_string()).unwrap_or_else(|| "keysend".to_string());
+    let method = slice
+        .get(2)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "keysend".to_string());
     let suggested: Option<f64> = slice.get(3).and_then(|s| s.parse().ok());
-
-    // Parse recipients from valueRecipient tags
-    let recipients: Vec<ValueRecipient> = event.tags.iter()
+    let recipients: Vec<ValueRecipient> = event
+        .tags
+        .iter()
         .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("valueRecipient"))
         .filter_map(|t| {
             let slice = t.as_slice();
-            // Format: ["valueRecipient", name, type, address, split, custom_key?, custom_value?, fee?]
-            let name = slice.get(1).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) });
+            let name = slice
+                .get(1)
+                .and_then(|s| { if s.is_empty() { None } else { Some(s.to_string()) } });
             let recipient_type = slice.get(2)?.to_string();
             let address = slice.get(3)?.to_string();
             let split: u32 = slice.get(4)?.parse().ok()?;
             let custom_key = slice.get(5).map(|s| s.to_string());
             let custom_value = slice.get(6).map(|s| s.to_string());
             let fee = slice.get(7).map(|s| s == "true");
-
             Some(ValueRecipient {
                 name,
                 recipient_type,
@@ -634,7 +574,6 @@ fn parse_value_block(event: &Event) -> Option<ValueBlock> {
             })
         })
         .collect();
-
     Some(ValueBlock {
         value_type,
         method,
@@ -642,7 +581,6 @@ fn parse_value_block(event: &Event) -> Option<ValueBlock> {
         recipients,
     })
 }
-
 /// Check if an event is podcast metadata (Kind 30078)
 /// Per NIP spec, the d-tag should be the podcast's GUID (not necessarily containing "podcast")
 /// We detect podcast metadata by:
@@ -652,19 +590,13 @@ pub fn is_podcast_metadata(event: &Event) -> bool {
     if event.kind.as_u16() != KIND_APP_DATA {
         return false;
     }
-
-    // Must have a d-tag
     let d_tag = match get_tag_value(event, "d") {
         Some(d) => d,
         None => return false,
     };
-
-    // Check if d-tag contains "podcast" (explicit indicator per NIP spec)
     if d_tag.to_lowercase().contains("podcast") {
         return true;
     }
-
-    // Check if content is JSON with a title (podcast metadata must have title)
     if !event.content.is_empty() {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&event.content) {
             if json.get("title").is_some() {
@@ -672,15 +604,11 @@ pub fn is_podcast_metadata(event: &Event) -> bool {
             }
         }
     }
-
-    // Check for title tag (required for podcasts)
     get_tag_value(event, "title").is_some()
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_value_block_default() {
         let block = ValueBlock::default();
@@ -688,7 +616,6 @@ mod tests {
         assert_eq!(block.method, "keysend");
         assert!(block.recipients.is_empty());
     }
-
     #[test]
     fn test_chapter_serialization() {
         let chapter = Chapter {
@@ -700,7 +627,6 @@ mod tests {
             end_time: Some(120.0),
             location: None,
         };
-
         let json = serde_json::to_string(&chapter).unwrap();
         assert!(json.contains("startTime"));
         assert!(json.contains("Intro"));

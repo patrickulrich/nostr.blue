@@ -2,51 +2,40 @@
 //!
 //! Displays a feed of notes recommended by a Data Vending Machine (DVM).
 //! Users can select which DVM provider to use via a gear icon.
-
 use std::collections::HashMap;
 use std::time::Duration;
-
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
-
-use crate::stores::{nostr_client, dvm_store};
-use crate::stores::dvm_store::{DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_FEED_ERROR, DVM_PROVIDERS, SELECTED_DVM_PROVIDER};
-use crate::components::{NoteCard, ClientInitializing, DvmSelectorModal};
-use crate::services::aggregation::{InteractionCounts, InteractionStreamHandle, fetch_interaction_counts_batch, stream_interaction_counts};
+use crate::components::{ClientInitializing, DvmSelectorModal, NoteCard};
 use crate::hooks::use_mute_block_cache;
-
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
+    InteractionStreamHandle,
+};
+use crate::stores::dvm_store::{
+    DVM_FEED_ERROR, DVM_FEED_EVENTS, DVM_FEED_LOADING, DVM_PROVIDERS,
+    SELECTED_DVM_PROVIDER,
+};
+use crate::stores::{dvm_store, nostr_client};
 /// Main Explore page component - DVM-powered content discovery
 #[component]
 pub fn Explore() -> Element {
     let mut show_selector = use_signal(|| false);
     let mut refresh_trigger = use_signal(|| 0);
-
-    // Interaction counts cache (event_id -> counts) for batch optimization
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interactions_loaded = use_signal(|| false);
-
-    // Track interaction stream subscription for cleanup (store full handle for graceful cleanup)
     let mut interaction_stream_handle = use_signal(|| None::<InteractionStreamHandle>);
-
-    // Cached mute/block lists for N+1 optimization (uses centralized hook)
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-
     let feed_loading = *DVM_FEED_LOADING.read();
     let feed_error = DVM_FEED_ERROR.read().clone();
     let feed_events = DVM_FEED_EVENTS.read().clone();
     let selected_provider = *SELECTED_DVM_PROVIDER.read();
-
-    // Load DVMs and feed on mount and when client initializes
     use_effect(move || {
-        // Subscribe to both refresh_trigger AND client_initialized
         let _ = refresh_trigger.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             return;
         }
-
-        // Cleanup interaction stream subscription on refresh (use full handle for graceful cleanup)
         if let Some(handle) = interaction_stream_handle.peek().clone() {
             spawn(async move {
                 log::info!("Cleaning up interaction stream subscription due to refresh");
@@ -54,18 +43,12 @@ pub fn Explore() -> Element {
             });
         }
         interaction_stream_handle.set(None);
-
-        // Reset interaction counts on refresh
         interactions_loaded.set(false);
-
-        // Discover DVMs in background
         spawn(async move {
             if let Err(e) = dvm_store::discover_content_dvms().await {
                 log::error!("Failed to discover DVMs: {}", e);
             }
         });
-
-        // Request content feed
         let provider = *SELECTED_DVM_PROVIDER.peek();
         spawn(async move {
             if let Err(e) = dvm_store::request_content_feed(provider).await {
@@ -73,34 +56,32 @@ pub fn Explore() -> Element {
             }
         });
     });
-
-    // Fetch interaction counts when feed events change
     use_effect(move || {
         let events = DVM_FEED_EVENTS.read().clone();
-
         if events.is_empty() {
             return;
         }
-
-        // Only fetch if not already loaded for this batch
         if *interactions_loaded.peek() {
             return;
         }
-
         spawn(async move {
             let event_ids: Vec<_> = events.iter().map(|e| e.id).collect();
-            match fetch_interaction_counts_batch(event_ids.clone(), Duration::from_secs(5)).await {
+            match fetch_interaction_counts_batch(
+                    event_ids.clone(),
+                    Duration::from_secs(5),
+                )
+                .await
+            {
                 Ok(counts) => {
                     interaction_counts.set(counts);
                     interactions_loaded.set(true);
-
-                    // Start streaming interactions after batch fetch completes
-                    // Store full handle for graceful cleanup (not just subscription_id)
                     if let Ok(handle) = stream_interaction_counts(
-                        event_ids,
-                        interaction_counts,
-                        Some(600), // 10 minute idle timeout
-                    ).await {
+                            event_ids,
+                            interaction_counts,
+                            Some(600),
+                        )
+                        .await
+                    {
                         interaction_stream_handle.set(Some(handle));
                     }
                 }
@@ -110,12 +91,11 @@ pub fn Explore() -> Element {
             }
         });
     });
-
-    // Get current provider name for display
     let current_provider_name = {
         let providers = DVM_PROVIDERS.read();
         if let Some(pubkey) = selected_provider {
-            providers.iter()
+            providers
+                .iter()
                 .find(|p| p.pubkey == pubkey)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "Selected DVM".to_string())
@@ -123,29 +103,17 @@ pub fn Explore() -> Element {
             "Default DVM".to_string()
         }
     };
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-                div {
-                    class: "px-4 py-3 flex items-center justify-between",
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                div { class: "px-4 py-3 flex items-center justify-between",
                     div {
-                        h2 {
-                            class: "text-xl font-bold",
-                            "Explore"
-                        }
-                        p {
-                            class: "text-sm text-muted-foreground",
+                        h2 { class: "text-xl font-bold", "Explore" }
+                        p { class: "text-sm text-muted-foreground",
                             "Powered by {current_provider_name}"
                         }
                     }
-                    div {
-                        class: "flex items-center gap-2",
-                        // Refresh button
+                    div { class: "flex items-center gap-2",
                         button {
                             class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
                             disabled: feed_loading,
@@ -156,14 +124,11 @@ pub fn Explore() -> Element {
                             },
                             title: "Refresh feed",
                             if feed_loading {
-                                span {
-                                    class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"
-                                }
+                                span { class: "inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
                             } else {
                                 "🔄"
                             }
                         }
-                        // Settings/DVM selector button
                         button {
                             class: "p-2 hover:bg-accent rounded-full transition",
                             onclick: move |_| show_selector.set(true),
@@ -173,40 +138,19 @@ pub fn Explore() -> Element {
                     }
                 }
             }
-
-            // Content
             if !*nostr_client::CLIENT_INITIALIZED.read() {
                 ClientInitializing {}
             } else if feed_loading && feed_events.is_empty() {
-                // Loading state
-                div {
-                    class: "flex flex-col items-center justify-center py-20 gap-4",
-                    span {
-                        class: "inline-block w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"
-                    }
-                    p {
-                        class: "text-muted-foreground",
-                        "Requesting content from DVM..."
-                    }
+                div { class: "flex flex-col items-center justify-center py-20 gap-4",
+                    span { class: "inline-block w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" }
+                    p { class: "text-muted-foreground", "Requesting content from DVM..." }
                 }
             } else if let Some(error) = feed_error {
-                // Error state
-                div {
-                    class: "p-6 text-center",
-                    div {
-                        class: "max-w-md mx-auto",
-                        div {
-                            class: "text-4xl mb-4",
-                            "⚠️"
-                        }
-                        h3 {
-                            class: "text-lg font-semibold mb-2",
-                            "Failed to load feed"
-                        }
-                        p {
-                            class: "text-muted-foreground text-sm mb-4",
-                            "{error}"
-                        }
+                div { class: "p-6 text-center",
+                    div { class: "max-w-md mx-auto",
+                        div { class: "text-4xl mb-4", "⚠️" }
+                        h3 { class: "text-lg font-semibold mb-2", "Failed to load feed" }
+                        p { class: "text-muted-foreground text-sm mb-4", "{error}" }
                         button {
                             class: "px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition",
                             onclick: move |_| {
@@ -219,29 +163,17 @@ pub fn Explore() -> Element {
                     }
                 }
             } else if feed_events.is_empty() {
-                // Empty state
-                div {
-                    class: "p-6 text-center",
-                    div {
-                        class: "max-w-md mx-auto",
-                        div {
-                            class: "text-6xl mb-4",
-                            "🔍"
-                        }
-                        h3 {
-                            class: "text-lg font-semibold mb-2",
-                            "No content yet"
-                        }
-                        p {
-                            class: "text-muted-foreground text-sm",
+                div { class: "p-6 text-center",
+                    div { class: "max-w-md mx-auto",
+                        div { class: "text-6xl mb-4", "🔍" }
+                        h3 { class: "text-lg font-semibold mb-2", "No content yet" }
+                        p { class: "text-muted-foreground text-sm",
                             "The DVM hasn't returned any content. Try selecting a different provider or refreshing."
                         }
                     }
                 }
             } else {
-                // Feed content
-                div {
-                    class: "divide-y divide-border",
+                div { class: "divide-y divide-border",
                     for event in feed_events.iter() {
                         NoteCard {
                             key: "{event.id.to_hex()}",
@@ -249,13 +181,11 @@ pub fn Explore() -> Element {
                             precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
                             collapsible: true,
                             cached_muted_posts: cached_muted_posts.read().clone(),
-                            cached_blocked_users: cached_blocked_users.read().clone()
+                            cached_blocked_users: cached_blocked_users.read().clone(),
                         }
                     }
                 }
             }
-
-            // DVM Selector Modal
             if *show_selector.read() {
                 DvmSelectorModal {
                     on_close: move |_| show_selector.set(false),
@@ -265,10 +195,9 @@ pub fn Explore() -> Element {
                         dvm_store::clear_feed();
                         let next = *refresh_trigger.peek() + 1;
                         refresh_trigger.set(next);
-                    }
+                    },
                 }
             }
         }
     }
 }
-
