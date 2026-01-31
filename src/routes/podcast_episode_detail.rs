@@ -546,7 +546,7 @@ async fn fetch_rss_episode(
             decoded_episode_id
         );
         let feed = podcast_index::get_podcast_by_id(feed_id).await?;
-        let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await?;
+        let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100), None).await?;
         let episode = episodes
             .iter()
             .find(|ep| ep.id.to_string() == decoded_episode_id)

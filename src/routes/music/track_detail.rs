@@ -420,7 +420,7 @@ async fn fetch_track(id: &str) -> Result<music_player::MusicTrack, String> {
             .map_err(|_| "Invalid episode ID")?;
 
         let feed = podcast_index::get_podcast_by_id(feed_id).await?;
-        let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await?;
+        let episodes = podcast_index::get_episodes_by_feed_id(feed_id, Some(100), None).await?;
         let episode = episodes
             .iter()
             .find(|e| e.id == episode_id)

@@ -35,7 +35,7 @@ pub fn MusicRssAlbum(feed_id: u64) -> Element {
                     return;
                 }
             }
-            match podcast_index::get_episodes_by_feed_id(feed_id, Some(100)).await {
+            match podcast_index::get_episodes_by_feed_id(feed_id, Some(100), None).await {
                 Ok(episodes) => {
                     episodes_state.set(episodes);
                 }

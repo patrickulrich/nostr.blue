@@ -4071,6 +4071,7 @@ fn NostrBlueRssPodcastEpisodeRenderer(
                 let episodes = podcast_index::get_episodes_by_feed_id(
                         feed_id,
                         Some(fetch_count),
+                        None,
                     )
                     .await
                     .map_err(|e| format!("Failed to fetch episodes: {}", e))?;

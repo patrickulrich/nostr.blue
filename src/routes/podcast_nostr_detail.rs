@@ -2,17 +2,19 @@
 //!
 //! Shows a native Nostr podcast with:
 //! - Podcast metadata (cover, title, description)
-//! - Episode list
+//! - Episode list with infinite scroll
 //! - V4V payment support
 //! - Follow/subscribe functionality
 use crate::components::{
     icons, ContentShareModal, ContentType, DisplayEpisode, PodcastEpisodeList,
 };
+use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::podcast::{self, PodcastMetadata};
 use dioxus::prelude::*;
-use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag};
+use nostr_sdk::prelude::{Filter, Kind, PublicKey, SingleLetterTag, Timestamp};
+use std::collections::HashSet;
 use std::time::Duration;
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastNostrDetailProps {
@@ -22,10 +24,17 @@ pub struct PodcastNostrDetailProps {
 #[component]
 pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
     let naddr = props.naddr.clone();
-    let mut podcast_data = use_signal(|| {
-        None::<Result<(PodcastMetadata, Vec<DisplayEpisode>), String>>
-    });
+
+    // State signals
+    let mut metadata = use_signal(|| None::<(PodcastMetadata, String)>);
+    let mut episodes = use_signal(Vec::<DisplayEpisode>::new);
     let mut loading = use_signal(|| true);
+    let mut loading_more = use_signal(|| false);
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut error = use_signal(|| None::<String>);
+
+    // Initial load - metadata then first batch of episodes
     use_effect(move || {
         let naddr = naddr.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -34,11 +43,83 @@ pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
         }
         loading.set(true);
         spawn(async move {
-            let result = fetch_nostr_podcast(&naddr).await;
-            podcast_data.set(Some(result));
+            // First fetch metadata
+            match fetch_nostr_podcast_metadata(&naddr).await {
+                Ok((meta, pubkey)) => {
+                    metadata.set(Some((meta.clone(), pubkey.clone())));
+
+                    // Then load initial episodes
+                    match fetch_nostr_episodes(&pubkey, &meta, 30, None).await {
+                        Ok(eps) => {
+                            log::info!("Loaded {} initial Nostr episodes", eps.len());
+                            if let Some(last) = eps.last() {
+                                oldest_timestamp.set(Some(last.created_at));
+                            }
+                            has_more.set(eps.len() >= 30);
+                            episodes.set(eps);
+                        }
+                        Err(e) => log::error!("Failed to load episodes: {}", e),
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to load metadata: {}", e);
+                    error.set(Some(e));
+                }
+            }
             loading.set(false);
         });
     });
+
+    // Load more callback - only runs after initial load is complete
+    let load_more = move || {
+        // Don't load more until initial load is complete
+        if *loading.read() || *loading_more.read() || !*has_more.read() {
+            return;
+        }
+        let Some((ref meta, ref pubkey)) = *metadata.peek() else {
+            return;
+        };
+
+        // Subtract 1 from timestamp to avoid duplicates (until filter is inclusive)
+        let until = (*oldest_timestamp.peek()).map(|ts| ts.saturating_sub(1));
+        let meta = meta.clone();
+        let pubkey = pubkey.clone();
+
+        loading_more.set(true);
+        spawn(async move {
+            log::info!("Loading more Nostr episodes, until: {:?}", until);
+            match fetch_nostr_episodes(&pubkey, &meta, 30, until).await {
+                Ok(new_eps) => {
+                    log::info!("Loaded {} more Nostr episodes", new_eps.len());
+                    // Deduplicate by checking existing episode IDs
+                    let existing_ids: HashSet<_> =
+                        episodes.peek().iter().map(|e| e.id.clone()).collect();
+                    let unique: Vec<_> = new_eps
+                        .into_iter()
+                        .filter(|ep| !existing_ids.contains(&ep.id))
+                        .collect();
+
+                    if unique.is_empty() {
+                        has_more.set(false);
+                    } else {
+                        if let Some(last) = unique.last() {
+                            oldest_timestamp.set(Some(last.created_at));
+                        }
+                        has_more.set(unique.len() >= 20);
+                        episodes.write().extend(unique);
+                    }
+                }
+                Err(e) => {
+                    has_more.set(false);
+                    log::error!("Load more failed: {}", e);
+                }
+            }
+            loading_more.set(false);
+        });
+    };
+
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -53,21 +134,21 @@ pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
             }
             if !*nostr_client::CLIENT_INITIALIZED.read() || *loading.read() {
                 PodcastDetailSkeleton {}
-            } else {
-                match podcast_data.read().as_ref() {
-                    Some(Ok((metadata, episodes))) => rsx! {
-                        PodcastDetailContent { metadata: metadata.clone(), episodes: episodes.clone() }
-                    },
-                    Some(Err(e)) => rsx! {
-                        div { class: "p-4 text-center",
-                            div { class: "text-destructive mb-2", "Failed to load podcast" }
-                            div { class: "text-sm text-muted-foreground", "{e}" }
-                        }
-                    },
-                    None => rsx! {
-                        PodcastDetailSkeleton {}
-                    },
+            } else if let Some(ref e) = *error.read() {
+                div { class: "p-4 text-center",
+                    div { class: "text-destructive mb-2", "Failed to load podcast" }
+                    div { class: "text-sm text-muted-foreground", "{e}" }
                 }
+            } else if let Some((ref meta, _)) = *metadata.read() {
+                PodcastDetailContent {
+                    metadata: meta.clone(),
+                    episodes: episodes.read().clone(),
+                    has_more: *has_more.read(),
+                    loading_more: *loading_more.read(),
+                    sentinel_id: sentinel_id.clone(),
+                }
+            } else {
+                PodcastDetailSkeleton {}
             }
         }
     }
@@ -76,6 +157,9 @@ pub fn PodcastNostrDetail(props: PodcastNostrDetailProps) -> Element {
 struct PodcastDetailContentProps {
     metadata: PodcastMetadata,
     episodes: Vec<DisplayEpisode>,
+    has_more: bool,
+    loading_more: bool,
+    sentinel_id: String,
 }
 #[component]
 fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
@@ -95,6 +179,7 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
         &coordinate_for_memo,
     ));
     let mut subscribing = use_signal(|| false);
+    let episode_count = props.episodes.len();
     rsx! {
         div {
             div { class: "relative",
@@ -231,12 +316,28 @@ fn PodcastDetailContent(props: PodcastDetailContentProps) -> Element {
             div { class: "p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h2 { class: "font-semibold text-lg", "Episodes" }
-                    span { class: "text-sm text-muted-foreground", "{props.episodes.len()} episodes" }
+                    span { class: "text-sm text-muted-foreground",
+                        "{episode_count} episodes"
+                        if props.has_more { "+" } else { "" }
+                    }
                 }
                 PodcastEpisodeList {
                     episodes: props.episodes.clone(),
                     show_podcast_title: false,
                     enable_playlist: true,
+                }
+                // Sentinel element for infinite scroll
+                if props.has_more {
+                    div {
+                        id: "{props.sentinel_id}",
+                        class: "h-20 flex items-center justify-center",
+                        if props.loading_more {
+                            div { class: "flex items-center gap-3 text-muted-foreground",
+                                span { class: "w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                                "Loading more episodes..."
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -281,10 +382,10 @@ fn PodcastDetailSkeleton() -> Element {
         }
     }
 }
-/// Fetch Nostr podcast by naddr/coordinate
-async fn fetch_nostr_podcast(
+/// Fetch only Nostr podcast metadata by naddr/coordinate
+async fn fetch_nostr_podcast_metadata(
     naddr: &str,
-) -> std::result::Result<(PodcastMetadata, Vec<DisplayEpisode>), String> {
+) -> std::result::Result<(PodcastMetadata, String), String> {
     let (pubkey, d_tag) = parse_coordinate(naddr)?;
     let metadata_filter = Filter::new()
         .kind(Kind::from(podcast::KIND_APP_DATA))
@@ -300,17 +401,30 @@ async fn fetch_nostr_podcast(
         .first()
         .ok_or_else(|| "Podcast not found".to_string())?;
     let metadata = podcast::parse_podcast_metadata(metadata_event)?;
-    let episode_filter = Filter::new()
+    Ok((metadata, pubkey))
+}
+
+/// Fetch Nostr podcast episodes with pagination
+async fn fetch_nostr_episodes(
+    pubkey_hex: &str,
+    metadata: &PodcastMetadata,
+    limit: usize,
+    until: Option<u64>,
+) -> Result<Vec<DisplayEpisode>, String> {
+    let mut filter = Filter::new()
         .kind(Kind::from(podcast::KIND_PODCAST_EPISODE))
-        .author(PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?)
-        .limit(100);
-    let episode_events = nostr_client::fetch_events_aggregated(
-            episode_filter,
-            Duration::from_secs(10),
-        )
-        .await?;
+        .author(PublicKey::from_hex(pubkey_hex).map_err(|e| e.to_string())?)
+        .limit(limit);
+
+    // Timestamp::from(u64) takes seconds per rust-nostr SDK
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+
+    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await?;
+
     let mut episodes = Vec::new();
-    for event in episode_events.iter() {
+    for event in events.iter() {
         if let Ok(episode) = podcast::parse_podcast_episode(event) {
             let display = DisplayEpisode::from_nostr_episode(
                 &episode,
@@ -321,8 +435,9 @@ async fn fetch_nostr_podcast(
         }
     }
     episodes.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    Ok((metadata, episodes))
+    Ok(episodes)
 }
+
 /// Parse coordinate string into pubkey and d-tag
 fn parse_coordinate(coord: &str) -> Result<(String, String), String> {
     use nostr::prelude::*;

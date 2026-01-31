@@ -108,7 +108,7 @@ pub fn MusicSearch(q: String) -> Element {
             podcast_index::search_music(& query_for_rss, Some(20)). await { Ok(albums) =>
             { log::info!("Found {} RSS music albums", albums.len()); let mut tracks =
             Vec::new(); for album in albums.iter().take(10) { if let Ok(episodes) =
-            podcast_index::get_episodes_by_feed_id(album.id, Some(3)). await { for ep in
+            podcast_index::get_episodes_by_feed_id(album.id, Some(3), None). await { for ep in
             & episodes { tracks.push(MusicTrack::from_rss_music_track(ep, album)); } } }
             rss_music_tracks.set(tracks); rss_loading.set(false); } Err(e) => {
             log::warn!("RSS music search failed: {}", e); rss_loading.set(false); } } });

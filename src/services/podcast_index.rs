@@ -335,14 +335,25 @@ pub async fn get_episodes_by_podcast_guid(
     Ok(data.data.items)
 }
 /// Get episodes by feed ID
+///
+/// # Arguments
+/// * `feed_id` - The Podcast Index feed ID
+/// * `max` - Maximum number of episodes to return (default 20)
+/// * `skip` - Number of episodes to skip from the beginning (for pagination)
 pub async fn get_episodes_by_feed_id(
     feed_id: u64,
     max: Option<u32>,
+    skip: Option<usize>,
 ) -> Result<Vec<Episode>, String> {
-    let max = max.unwrap_or(20);
-    let url = format!("{}/episodes/byfeedid?id={}&max={}", API_BASE, feed_id, max);
+    let skip_count = skip.unwrap_or(0);
+    // Request enough episodes to cover skip + max
+    let fetch_count = max.unwrap_or(20) as usize + skip_count;
+    let url = format!("{}/episodes/byfeedid?id={}&max={}", API_BASE, feed_id, fetch_count);
     let data: ApiResponse<EpisodesData> = authenticated_get(&url).await?;
-    Ok(data.data.items)
+
+    // Skip the first N episodes (already loaded) and take the rest
+    let items: Vec<Episode> = data.data.items.into_iter().skip(skip_count).collect();
+    Ok(items)
 }
 /// Get a single episode by its numeric ID
 pub async fn get_episode_by_id(episode_id: u64) -> Result<Episode, String> {

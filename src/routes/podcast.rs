@@ -805,6 +805,7 @@ fn RecentFromSubscriptions(props: RecentFromSubscriptionsProps) -> Element {
                         let episodes = podcast_index::get_episodes_by_feed_id(
                                 feed.id,
                                 Some(5),
+                                None,
                             )
                             .await
                             .unwrap_or_default();
@@ -1724,6 +1725,7 @@ fn RecentEpisodesMerged(props: RecentEpisodesMergedProps) -> Element {
                             let episodes = podcast_index::get_episodes_by_feed_id(
                                     feed.id,
                                     Some(5),
+                                    None,
                                 )
                                 .await
                                 .unwrap_or_default();

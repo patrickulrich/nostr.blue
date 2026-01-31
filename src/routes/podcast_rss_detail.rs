@@ -8,8 +8,9 @@
 use crate::components::{
     icons, ContentShareModal, ContentType, DisplayEpisode, PodcastEpisodeList,
 };
+use crate::hooks::use_infinite_scroll;
 use crate::routes::Route;
-use crate::services::podcast_index::{self, Episode, PodcastFeed};
+use crate::services::podcast_index::{self, PodcastFeed};
 use crate::stores::{auth_store, nostr_client, podcast_subscription};
 use crate::utils::markdown::sanitize_html;
 use dioxus::prelude::*;
@@ -21,6 +22,7 @@ pub struct PodcastRssFeedDetailProps {
 #[component]
 pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
     let podcast_id = props.podcast_id.clone();
+    // Only fetch feed metadata, episodes are loaded incrementally
     let podcast_data = use_resource(move || {
         let id_str = podcast_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -37,17 +39,8 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
                 .map_err(|_| format!("Invalid podcast ID: {}", id_str))?;
             log::info!("Fetching podcast metadata for ID: {}", id);
             let feed = podcast_index::get_podcast_by_id(id).await?;
-            let episodes = podcast_index::get_episodes_by_feed_id(id, Some(100))
-                .await
-                .unwrap_or_else(|e| {
-                    log::warn!("Failed to fetch episodes: {}", e);
-                    Vec::new()
-                });
-            log::info!(
-                "Successfully loaded podcast: {} with {} episodes", feed.title, episodes
-                .len()
-            );
-            Ok::<_, String>((feed, episodes, id))
+            log::info!("Successfully loaded podcast: {}", feed.title);
+            Ok::<_, String>((feed, id))
         }
     });
     rsx! {
@@ -63,8 +56,8 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
                 }
             }
             match &*podcast_data.read() {
-                Some(Ok((feed, episodes, id))) => rsx! {
-                    RssPodcastDetailContent { feed: feed.clone(), episodes: episodes.clone(), podcast_id: *id }
+                Some(Ok((feed, id))) => rsx! {
+                    RssPodcastDetailContent { feed: feed.clone(), podcast_id: *id }
                 },
                 Some(Err(e)) => rsx! {
                     div { class: "p-4 text-center",
@@ -82,15 +75,89 @@ pub fn PodcastRssFeedDetail(props: PodcastRssFeedDetailProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct RssPodcastDetailContentProps {
     feed: PodcastFeed,
-    episodes: Vec<Episode>,
     podcast_id: u64,
 }
 #[component]
 fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
-    let feed = &props.feed;
+    let feed = props.feed.clone();
     let podcast_id = props.podcast_id;
     let auth = auth_store::AUTH_STATE.read();
     let mut show_share_modal = use_signal(|| false);
+
+    // Infinite scroll state
+    let mut episodes = use_signal(Vec::<DisplayEpisode>::new);
+    let mut loading_more = use_signal(|| false);
+    let mut has_more = use_signal(|| true);
+    let mut initial_load_started = use_signal(|| false);
+    let mut initial_load_complete = use_signal(|| false);
+
+    // Initial episode load
+    {
+        let feed = feed.clone();
+        use_effect(move || {
+            if *initial_load_started.read() {
+                return;
+            }
+            initial_load_started.set(true);
+            let feed = feed.clone();
+            spawn(async move {
+                log::info!("Loading initial episodes for podcast {}", podcast_id);
+                match podcast_index::get_episodes_by_feed_id(podcast_id, Some(30), None).await {
+                    Ok(eps) => {
+                        log::info!("Loaded {} initial episodes", eps.len());
+                        has_more.set(eps.len() >= 30);
+                        let display_eps: Vec<DisplayEpisode> = eps
+                            .iter()
+                            .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed))
+                            .collect();
+                        episodes.set(display_eps);
+                    }
+                    Err(e) => log::error!("Failed to load episodes: {}", e),
+                }
+                initial_load_complete.set(true);
+            });
+        });
+    }
+
+    // Load more callback - only runs after initial load is complete
+    let load_more = {
+        let feed = feed.clone();
+        move || {
+            // Don't load more until initial load is complete
+            if !*initial_load_complete.read() || *loading_more.read() || !*has_more.read() {
+                return;
+            }
+            let current_count = episodes.peek().len();
+            let feed = feed.clone();
+            loading_more.set(true);
+            spawn(async move {
+                log::info!("Loading more episodes, skip: {}", current_count);
+                match podcast_index::get_episodes_by_feed_id(podcast_id, Some(30), Some(current_count)).await {
+                    Ok(new_eps) => {
+                        log::info!("Loaded {} more episodes", new_eps.len());
+                        if new_eps.is_empty() {
+                            has_more.set(false);
+                        } else {
+                            has_more.set(new_eps.len() >= 30);
+                            episodes.write().extend(
+                                new_eps
+                                    .iter()
+                                    .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, &feed)),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        has_more.set(false);
+                        log::error!("Load more failed: {}", e);
+                    }
+                }
+                loading_more.set(false);
+            });
+        }
+    };
+
+    let sentinel_id = use_infinite_scroll(load_more, has_more, loading_more);
+
     let image_url = feed
         .get_image()
         .map(|s| s.to_string())
@@ -109,17 +176,15 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
         }
     });
     let mut subscribing = use_signal(|| false);
-    let episodes: Vec<DisplayEpisode> = props
-        .episodes
-        .iter()
-        .map(|ep| DisplayEpisode::from_podcast_index_episode(ep, feed))
-        .collect();
     let category_names: Vec<String> = feed
         .categories
         .as_ref()
         .map(|cats| cats.values().cloned().collect())
         .unwrap_or_default();
     let safe_description = feed.description.as_ref().map(|d| sanitize_html(d));
+
+    let episode_count = episodes.read().len();
+
     rsx! {
         div {
             div { class: "relative",
@@ -268,12 +333,28 @@ fn RssPodcastDetailContent(props: RssPodcastDetailContentProps) -> Element {
             div { class: "p-6",
                 div { class: "flex items-center justify-between mb-4",
                     h2 { class: "font-semibold text-lg", "Episodes" }
-                    span { class: "text-sm text-muted-foreground", "{episodes.len()} episodes" }
+                    span { class: "text-sm text-muted-foreground",
+                        "{episode_count} episodes"
+                        if *has_more.read() { "+" } else { "" }
+                    }
                 }
                 PodcastEpisodeList {
-                    episodes,
+                    episodes: episodes.read().clone(),
                     show_podcast_title: false,
                     enable_playlist: true,
+                }
+                // Sentinel element for infinite scroll
+                if *has_more.read() {
+                    div {
+                        id: "{sentinel_id}",
+                        class: "h-20 flex items-center justify-center",
+                        if *loading_more.read() {
+                            div { class: "flex items-center gap-3 text-muted-foreground",
+                                span { class: "w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" }
+                                "Loading more episodes..."
+                            }
+                        }
+                    }
                 }
             }
         }
