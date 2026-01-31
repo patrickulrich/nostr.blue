@@ -74,7 +74,21 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
             (&*props.show.read(), &props.citation_to_edit),
             move |(is_shown, citation)| {
                 if is_shown {
+                    // Clear all fields first to prevent stale data when switching tabs
+                    title.set(String::new());
+                    author.set(String::new());
+                    cited_text.set(String::new());
+                    coordinate.set(String::new());
+                    url.set(String::new());
+                    page_range.set(String::new());
+                    publisher.set(String::new());
+                    doi.set(String::new());
+                    llm.set(String::new());
+                    conversation_summary.set(String::new());
+                    prompt_url.set(String::new());
+
                     if let Some(ref cached) = citation {
+                        // Populate fields for the specific citation type being edited
                         match &cached.citation {
                             Citation::Internal(c) => {
                                 active_tab.set(CitationEditorTab::Internal);
@@ -105,7 +119,6 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                                 title.set(c.base.title.clone());
                                 author.set(c.base.author.clone());
                                 cited_text.set(c.base.content.clone());
-                                // Preserve existing summary on edit
                                 conversation_summary
                                     .set(c.base.summary.clone().unwrap_or_default());
                                 prompt_url.set(c.url.clone().unwrap_or_default());
@@ -113,17 +126,6 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                         }
                     } else {
                         active_tab.set(CitationEditorTab::Internal);
-                        title.set(String::new());
-                        author.set(String::new());
-                        cited_text.set(String::new());
-                        coordinate.set(String::new());
-                        url.set(String::new());
-                        page_range.set(String::new());
-                        publisher.set(String::new());
-                        doi.set(String::new());
-                        llm.set(String::new());
-                        conversation_summary.set(String::new());
-                        prompt_url.set(String::new());
                     }
                     error.set(None);
                 }

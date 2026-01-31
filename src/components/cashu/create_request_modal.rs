@@ -1,5 +1,5 @@
 use crate::stores::cashu;
-use crate::stores::cashu::PaymentRequestProgress;
+use crate::stores::cashu::{PaymentRequestProgress, PAYMENT_CANCELLED_MSG};
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use dioxus::prelude::*;
 #[component]
@@ -13,7 +13,6 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut copied = use_signal(|| false);
     let mut copy_error = use_signal(|| Option::<String>::None);
-    let balance = WALLET_BALANCES.read().available;
 
     // Memoize payment_received for reactivity
     let payment_received = use_memo(move || {
@@ -76,7 +75,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                                     log::info!("Received payment of {} sats", amount);
                                 }
                                 Err(e) => {
-                                    if e != "Payment request cancelled" {
+                                    if e != PAYMENT_CANCELLED_MSG {
                                         log::error!("Payment wait error: {}", e);
                                     }
                                 }
@@ -282,7 +281,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                             }
                         }
                         p { class: "text-xs text-muted-foreground mt-3 text-center",
-                            "Current balance: {balance} sats"
+                            "Current balance: {WALLET_BALANCES.read().available} sats"
                         }
                     }
                 }

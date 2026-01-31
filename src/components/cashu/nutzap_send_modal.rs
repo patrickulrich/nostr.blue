@@ -184,7 +184,7 @@ pub fn NutzapSendModal(
                     if let Some(error) = load_error.read().as_ref() {
                         div { class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
                             p { class: "text-sm text-red-800 dark:text-red-200",
-                                "This user has not enabled nutzaps: {error}"
+                                "Could not load nutzap information: {error}"
                             }
                         }
                     }

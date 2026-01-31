@@ -68,7 +68,7 @@ pub use mpp::{
 };
 pub use payment_request::{
     cancel_payment_request, create_payment_request, parse_payment_request,
-    pay_payment_request, wait_for_nostr_payment,
+    pay_payment_request, wait_for_nostr_payment, PAYMENT_CANCELLED_MSG,
 };
 #[allow(unused_imports)]
 pub use receive::{

@@ -5,6 +5,10 @@
 //!
 //! Uses CDK's native PaymentRequest types for NUT-18 compliance.
 #![allow(dead_code)]
+
+/// Error message returned when a payment request is cancelled by the user.
+/// This is NOT an error condition - it indicates a clean shutdown.
+pub const PAYMENT_CANCELLED_MSG: &str = "Payment request cancelled";
 use std::str::FromStr;
 use dioxus::prelude::*;
 use nostr_sdk::{EventId, Kind, PublicKey};
@@ -483,7 +487,7 @@ pub async fn wait_for_nostr_payment(
     let mut notifications = client.notifications();
     loop {
         if !PENDING_PAYMENT_REQUESTS.read().contains_key(&request_id) {
-            return Err("Payment request cancelled".to_string());
+            return Err(PAYMENT_CANCELLED_MSG.to_string());
         }
         let elapsed = chrono::Utc::now().timestamp() as u64 - start;
         if elapsed > timeout_secs {
@@ -569,7 +573,7 @@ pub async fn wait_for_nostr_payment(
         }
     }
     if !PENDING_PAYMENT_REQUESTS.read().contains_key(&request_id) {
-        return Err("Payment request cancelled".to_string());
+        return Err(PAYMENT_CANCELLED_MSG.to_string());
     }
     *PAYMENT_REQUEST_PROGRESS.write() = Some(PaymentRequestProgress::Error {
         message: "Connection closed".to_string(),
