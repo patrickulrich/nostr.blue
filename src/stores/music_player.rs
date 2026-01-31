@@ -209,6 +209,36 @@ impl MusicTrack {
             _ => None,
         }
     }
+    /// Get route to the track detail page (for music tracks)
+    pub fn get_track_route(&self) -> Option<Route> {
+        match &self.source {
+            TrackSource::Wavlake { .. } => {
+                Some(Route::MusicTrackDetail { track_id: self.id.clone() })
+            }
+            TrackSource::Nostr { pubkey, d_tag, .. } => {
+                use nostr::prelude::*;
+                if let Ok(pk) = PublicKey::from_hex(pubkey) {
+                    let coord = nostr::nips::nip01::Coordinate::new(
+                        nostr::Kind::from(KIND_MUSIC_TRACK),
+                        pk,
+                    )
+                    .identifier(d_tag);
+                    let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(coord, vec![]);
+                    if let Ok(naddr) = nip19_coord.to_bech32() {
+                        return Some(Route::MusicTrackDetail { track_id: naddr });
+                    }
+                }
+                None
+            }
+            TrackSource::RssMusic { feed_id, episode_id, .. } => {
+                Some(Route::MusicTrackDetail {
+                    track_id: format!("rss:{}:{}", feed_id, episode_id),
+                })
+            }
+            // Podcasts and radio use their own detail pages
+            _ => None,
+        }
+    }
     /// Create MusicTrack from RSS music album track (Podcast Index medium="music")
     pub fn from_rss_music_track(
         episode: &PodcastIndexEpisode,

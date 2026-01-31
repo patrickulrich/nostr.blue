@@ -133,6 +133,12 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                                 naddr: identifier.to_string(),
                             })
                         }
+                        36787 => {
+                            // Nostr music track (kind 36787)
+                            Ok(Route::MusicTrackDetail {
+                                track_id: identifier.to_string(),
+                            })
+                        }
                         30078 => {
                             Ok(Route::PodcastNostrDetail {
                                 naddr: identifier.to_string(),

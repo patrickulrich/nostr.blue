@@ -218,7 +218,22 @@ pub fn MusicAlbum(album_id: String) -> Element {
                                                         }
                                                     }
                                                     div { class: "flex-1 min-w-0",
-                                                        div { class: "font-medium text-white truncate hover:underline", "{track.title}" }
+                                                        {
+                                                            if let Some(route) = track.get_track_route() {
+                                                                rsx! {
+                                                                    Link {
+                                                                        to: route,
+                                                                        class: "font-medium text-white truncate hover:underline hover:text-primary block",
+                                                                        onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                                                                        "{track.title}"
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                rsx! {
+                                                                    div { class: "font-medium text-white truncate", "{track.title}" }
+                                                                }
+                                                            }
+                                                        }
                                                         p { class: "text-sm text-gray-400 truncate", "{track.artist}" }
                                                     }
                                                     div { class: "text-sm text-gray-400", {track.duration.map(&format_duration).unwrap_or_default()} }

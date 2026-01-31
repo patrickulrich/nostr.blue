@@ -211,10 +211,31 @@ pub fn UnifiedTrackCard(props: UnifiedTrackCardProps) -> Element {
             }
             div { class: "flex-1 min-w-0",
                 div { class: "font-medium text-sm truncate",
-                    if *is_playing.read() {
-                        span { class: "text-primary", "{track.title}" }
-                    } else {
-                        "{track.title}"
+                    {
+                        let title_class = if *is_playing.read() { "text-primary" } else { "" };
+                        if let Some(route) = track.get_track_route() {
+                            rsx! {
+                                Link {
+                                    to: route,
+                                    class: "hover:underline {title_class}",
+                                    onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                                    "{track.title}"
+                                }
+                            }
+                        } else if let Some(episode_route) = track.get_episode_route() {
+                            rsx! {
+                                Link {
+                                    to: episode_route,
+                                    class: "hover:underline {title_class}",
+                                    onclick: move |e: Event<MouseData>| e.stop_propagation(),
+                                    "{track.title}"
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                span { class: "{title_class}", "{track.title}" }
+                            }
+                        }
                     }
                 }
                 div { class: "text-xs text-muted-foreground truncate",

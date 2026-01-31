@@ -359,6 +359,12 @@ pub fn PersistentMusicPlayer() -> Element {
                                     class: "font-semibold text-sm truncate hover:text-primary hover:underline",
                                     "{track.title}"
                                 }
+                            } else if let Some(track_route) = track.get_track_route() {
+                                Link {
+                                    to: track_route,
+                                    class: "font-semibold text-sm truncate hover:text-primary hover:underline",
+                                    "{track.title}"
+                                }
                             } else {
                                 div { class: "font-semibold text-sm truncate", "{track.title}" }
                             }

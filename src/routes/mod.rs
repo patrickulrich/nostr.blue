@@ -195,7 +195,7 @@ use live_stream_detail::LiveStreamDetail;
 use live_stream_new::LiveStreamNew;
 use music::{
     MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail,
-    MusicPlaylistNew, MusicRadio, MusicRssAlbum, MusicSearch, MusicTrackNew,
+    MusicPlaylistNew, MusicRadio, MusicRssAlbum, MusicSearch, MusicTrackDetail, MusicTrackNew,
 };
 use nip19::Nip19Handler;
 use nip_detail::NipDetail;
@@ -318,6 +318,8 @@ pub enum Route {
     MusicPlaylistDetail { naddr: String },
     #[route("/music/rss/album/:feed_id")]
     MusicRssAlbum { feed_id: u64 },
+    #[route("/music/track/:track_id")]
+    MusicTrackDetail { track_id: String },
     #[route("/podcast")]
     PodcastHome {},
     #[route("/podcast/trending")]
@@ -585,6 +587,7 @@ fn Layout() -> Element {
         | Route::MusicAlbum { .. }
         | Route::MusicRssAlbum { .. }
         | Route::MusicTrackNew {}
+        | Route::MusicTrackDetail { .. }
         | Route::MusicPlaylistNew {}
         | Route::MusicPlaylistDetail { .. }
     );
@@ -1181,6 +1184,7 @@ fn NavLink(
         | (Route::MusicHome {}, Route::MusicAlbum { .. })
         | (Route::MusicHome {}, Route::MusicRssAlbum { .. })
         | (Route::MusicHome {}, Route::MusicTrackNew {})
+        | (Route::MusicHome {}, Route::MusicTrackDetail { .. })
         | (Route::MusicHome {}, Route::MusicPlaylistNew {})
         | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
