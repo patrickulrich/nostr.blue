@@ -73,6 +73,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                             {
                                 Ok(amount) => {
                                     log::info!("Received payment of {} sats", amount);
+                                    current_request_id.set(None); // Clear so handle_close won't cancel completed request
                                 }
                                 Err(e) => {
                                     if e != PAYMENT_CANCELLED_MSG {

@@ -3,6 +3,39 @@ use crate::stores::cashu::ws as cashu_ws;
 use crate::utils::shorten_url;
 use dioxus::prelude::*;
 use qrcode::{render::svg, QrCode};
+
+/// Result of attempting to mint tokens after payment detection
+enum MintResult {
+    Success(u64),
+    Cancelled,
+    Error(String),
+}
+
+/// Attempt to mint tokens from a quote with cancellation check
+async fn try_mint_tokens(
+    mint_url: String,
+    quote_id: String,
+    delay_ms: u32,
+    is_cancelled: impl Fn() -> bool,
+) -> MintResult {
+    gloo_timers::future::TimeoutFuture::new(delay_ms).await;
+
+    if is_cancelled() {
+        return MintResult::Cancelled;
+    }
+
+    match cashu::mint_tokens_from_quote(mint_url, quote_id).await {
+        Ok(amount) => {
+            if is_cancelled() {
+                MintResult::Cancelled
+            } else {
+                MintResult::Success(amount)
+            }
+        }
+        Err(e) => MintResult::Error(e),
+    }
+}
+
 #[component]
 pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
     let mut amount = use_signal(String::new);
@@ -68,55 +101,105 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                     break;
                                 }
                                 tokio::select! {
-                                    status = rx.recv() => { match status {
-                                    Some(cashu_ws::QuoteStatus::Paid) |
-                                    Some(cashu_ws::QuoteStatus::Issued) => {
-                                    log::info!("Payment detected via WebSocket, minting tokens...");
-                                    mint_status.set(Some("Payment detected! Minting..."
-                                    .to_string()));
-                                    gloo_timers::future::TimeoutFuture::new(1000).await; if !*
-                                    is_polling_clone.read() || quote_info_clone.read().is_none()
-                                    { break; } match cashu::mint_tokens_from_quote(mint_url
-                                    .clone(), quote_id.clone()).await { Ok(amount) => { if !*
-                                    is_polling_clone.read() || quote_info_clone.read().is_none()
-                                    { break; } success_message
-                                    .set(Some(format!("Successfully received {} sats!",
-                                    amount))); quote_info.set(None); is_polling.set(false);
-                                    mint_status.set(None); spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                                    on_close.call(()); }); } Err(e) => { error_message
-                                    .set(Some(format!("Failed to mint tokens: {}", e)));
-                                    is_polling.set(false); mint_status.set(None); quote_info
-                                    .set(None); } } break; }
-                                    Some(cashu_ws::QuoteStatus::Expired) => { error_message
-                                    .set(Some("Invoice expired".to_string())); is_polling
-                                    .set(false); mint_status.set(None); quote_info.set(None);
-                                    break; } Some(cashu_ws::QuoteStatus::Pending) => {}
-                                    Some(cashu_ws::QuoteStatus::Unknown(_)) => {} None => {
-                                    log::warn!("WebSocket channel closed, falling back to HTTP polling");
-                                    mint_status.set(Some("Checking payment...".to_string()));
-                                    break; } } } _ =
-                                    gloo_timers::future::TimeoutFuture::new(5000) => { match
-                                    cashu::check_mint_quote_status(mint_url.clone(), quote_id
-                                    .clone()).await { Ok(cashu::MintQuoteState::Paid) |
-                                    Ok(cashu::MintQuoteState::Issued) => {
-                                    log::info!("Payment detected via HTTP backup check, minting tokens...");
-                                    mint_status.set(Some("Payment detected! Minting..."
-                                    .to_string()));
-                                    gloo_timers::future::TimeoutFuture::new(1000).await; if !*
-                                    is_polling_clone.read() || quote_info_clone.read().is_none()
-                                    { break; } match cashu::mint_tokens_from_quote(mint_url
-                                    .clone(), quote_id.clone()).await { Ok(amount) => { if !*
-                                    is_polling_clone.read() || quote_info_clone.read().is_none()
-                                    { break; } success_message
-                                    .set(Some(format!("Successfully received {} sats!",
-                                    amount))); quote_info.set(None); is_polling.set(false);
-                                    mint_status.set(None); spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
-                                    on_close.call(()); }); } Err(e) => { error_message
-                                    .set(Some(format!("Failed to mint tokens: {}", e)));
-                                    is_polling.set(false); mint_status.set(None); quote_info
-                                    .set(None); } } break; } _ => {} } }
+                                    status = rx.recv() => {
+                                        match status {
+                                            Some(cashu_ws::QuoteStatus::Paid)
+                                            | Some(cashu_ws::QuoteStatus::Issued) => {
+                                                log::info!("Payment detected via WebSocket, minting tokens...");
+                                                mint_status.set(Some("Payment detected! Minting...".to_string()));
+
+                                                let is_cancelled = || {
+                                                    !*is_polling_clone.read() || quote_info_clone.read().is_none()
+                                                };
+
+                                                match try_mint_tokens(
+                                                    mint_url.clone(),
+                                                    quote_id.clone(),
+                                                    1000,
+                                                    is_cancelled,
+                                                ).await {
+                                                    MintResult::Success(amount) => {
+                                                        success_message.set(Some(format!("Successfully received {} sats!", amount)));
+                                                        quote_info.set(None);
+                                                        is_polling.set(false);
+                                                        mint_status.set(None);
+                                                        spawn(async move {
+                                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                            on_close.call(());
+                                                        });
+                                                    }
+                                                    MintResult::Cancelled => {}
+                                                    MintResult::Error(e) => {
+                                                        error_message.set(Some(format!("Failed to mint tokens: {}", e)));
+                                                        is_polling.set(false);
+                                                        mint_status.set(None);
+                                                        quote_info.set(None);
+                                                    }
+                                                }
+                                                break;
+                                            }
+
+                                            Some(cashu_ws::QuoteStatus::Expired) => {
+                                                error_message.set(Some("Invoice expired".to_string()));
+                                                is_polling.set(false);
+                                                mint_status.set(None);
+                                                quote_info.set(None);
+                                                break;
+                                            }
+
+                                            Some(cashu_ws::QuoteStatus::Pending) => {}
+
+                                            Some(cashu_ws::QuoteStatus::Unknown(_)) => {}
+
+                                            None => {
+                                                log::warn!("WebSocket channel closed, falling back to HTTP polling");
+                                                mint_status.set(Some("Checking payment...".to_string()));
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    _ = gloo_timers::future::TimeoutFuture::new(5000) => {
+                                        match cashu::check_mint_quote_status(mint_url.clone(), quote_id.clone()).await {
+                                            Ok(cashu::MintQuoteState::Paid)
+                                            | Ok(cashu::MintQuoteState::Issued) => {
+                                                log::info!("Payment detected via HTTP backup check, minting tokens...");
+                                                mint_status.set(Some("Payment detected! Minting...".to_string()));
+
+                                                let is_cancelled = || {
+                                                    !*is_polling_clone.read() || quote_info_clone.read().is_none()
+                                                };
+
+                                                match try_mint_tokens(
+                                                    mint_url.clone(),
+                                                    quote_id.clone(),
+                                                    1000,
+                                                    is_cancelled,
+                                                ).await {
+                                                    MintResult::Success(amount) => {
+                                                        success_message.set(Some(format!("Successfully received {} sats!", amount)));
+                                                        quote_info.set(None);
+                                                        is_polling.set(false);
+                                                        mint_status.set(None);
+                                                        spawn(async move {
+                                                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                            on_close.call(());
+                                                        });
+                                                    }
+                                                    MintResult::Cancelled => {}
+                                                    MintResult::Error(e) => {
+                                                        error_message.set(Some(format!("Failed to mint tokens: {}", e)));
+                                                        is_polling.set(false);
+                                                        mint_status.set(None);
+                                                        quote_info.set(None);
+                                                    }
+                                                }
+                                                break;
+                                            }
+
+                                            _ => {}
+                                        }
+                                    }
                                 }
                             }
                         }
