@@ -12,6 +12,9 @@ pub struct EmojiPickerProps {
     /// ARIA label for the emoji picker button (for accessibility)
     #[props(default = "Add emoji".to_string())]
     pub aria_label: String,
+    /// Whether the picker is disabled (e.g., during form submission)
+    #[props(default = false)]
+    pub disabled: bool,
 }
 /// Comprehensive emoji categories with extensive emoji coverage
 const EMOJI_CATEGORIES: &[(&str, &[&str])] = &[
@@ -1615,10 +1618,16 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
         div { class: "relative",
             button {
                 id: "{button_id}",
-                class: if props.icon_only { "p-2 rounded-full hover:bg-accent transition" } else { "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition" },
+                class: if props.disabled {
+                    if props.icon_only { "p-2 rounded-full opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
+                } else {
+                    if props.icon_only { "p-2 rounded-full hover:bg-accent transition" } else { "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition" }
+                },
                 title: if props.icon_only { "Add emoji" } else { "" },
                 aria_label: if props.icon_only { "{props.aria_label}" } else { "" },
+                disabled: props.disabled,
                 onclick: move |_| {
+                    if props.disabled { return; }
                     let current = *show_picker.read();
                     show_picker.set(!current);
                     if !current {

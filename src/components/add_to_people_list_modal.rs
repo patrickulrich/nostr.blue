@@ -168,13 +168,9 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                             ),
                                         ),
                                     );
-                                #[cfg(target_arch = "wasm32")]
-                                {
-                                    use gloo_timers::future::TimeoutFuture;
-                                    TimeoutFuture::new(1000).await;
-                                }
                                 loading.set(false);
-                                on_added.call(());
+                                // Note: on_added is NOT called here because adding the person failed
+                                // The list was created but the modal should stay open to show the error
                             }
                         }
                     }

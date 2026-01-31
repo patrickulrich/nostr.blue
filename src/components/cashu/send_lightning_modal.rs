@@ -5,6 +5,7 @@ use crate::stores::cashu::{
 };
 use crate::stores::cashu_cdk_bridge::WALLET_BALANCES;
 use crate::utils::shorten_url;
+use crate::utils::validation::sanitize_lightning_invoice;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use futures::future::join_all;
@@ -97,9 +98,8 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
             error_message.set(Some("Please enter a lightning invoice".to_string()));
             return;
         }
-        if !invoice_str.to_lowercase().starts_with("lnbc")
-            && !invoice_str.to_lowercase().starts_with("lntb")
-        {
+        // Use sanitize_lightning_invoice which handles all Lightning prefixes (lnbc, lntb, lnbcrt, lnsb)
+        if sanitize_lightning_invoice(&invoice_str).is_none() {
             error_message.set(Some("Invalid lightning invoice format".to_string()));
             return;
         }

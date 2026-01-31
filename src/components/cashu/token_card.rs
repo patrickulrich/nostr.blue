@@ -29,6 +29,19 @@ fn format_amount(amount: u64) -> String {
     }
     result
 }
+
+/// Returns pluralized display string for currency unit.
+/// CDK's CurrencyUnit::Display returns lowercase singular (sat, msat, usd, eur)
+/// but nostr.blue uses plural forms for sats/msats.
+fn unit_display(unit: &CurrencyUnit) -> &'static str {
+    match unit {
+        CurrencyUnit::Sat => "sats",
+        CurrencyUnit::Msat => "msats",
+        CurrencyUnit::Usd => "USD",
+        CurrencyUnit::Eur => "EUR",
+        _ => "units",
+    }
+}
 /// Extract hostname from mint URL for display
 fn extract_mint_hostname(url: &str) -> String {
     url.trim_start_matches("https://")
@@ -76,16 +89,7 @@ pub fn CashuTokenCard(token: String) -> Element {
         let token = token.clone();
         let unit_for_claim = parsed
             .as_ref()
-            .map(|info| {
-                match info.unit {
-                    CurrencyUnit::Sat => "sats",
-                    CurrencyUnit::Msat => "msats",
-                    CurrencyUnit::Usd => "USD",
-                    CurrencyUnit::Eur => "EUR",
-                    _ => "units",
-                }
-                    .to_string()
-            })
+            .map(|info| unit_display(&info.unit).to_string())
             .unwrap_or_else(|| "sats".to_string());
         move |e: MouseEvent| {
             e.stop_propagation();
@@ -147,13 +151,7 @@ pub fn CashuTokenCard(token: String) -> Element {
     if let Some(info) = parsed {
         let mint_display = extract_mint_hostname(&info.mint_url);
         let amount_display = format_amount(info.amount);
-        let unit_display = match info.unit {
-            CurrencyUnit::Sat => "sats",
-            CurrencyUnit::Msat => "msats",
-            CurrencyUnit::Usd => "USD",
-            CurrencyUnit::Eur => "EUR",
-            _ => "units",
-        };
+        let unit_str = unit_display(&info.unit);
         rsx! {
             div {
                 class: "my-2 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl",
@@ -166,7 +164,7 @@ pub fn CashuTokenCard(token: String) -> Element {
                 }
                 div { class: "text-center mb-3",
                     span { class: "text-2xl font-bold text-amber-900 dark:text-amber-100",
-                        "{amount_display} {unit_display}"
+                        "{amount_display} {unit_str}"
                     }
                 }
                 div { class: "text-center mb-4",

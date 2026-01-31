@@ -89,7 +89,9 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                         if !displayed_tags.is_empty() {
                             div { class: "flex flex-wrap gap-2",
                                 for tag in displayed_tags {
-                                    span { class: "px-2 py-1 text-xs rounded-full bg-primary/10 text-primary font-medium",
+                                    span {
+                                        key: "{tag}",
+                                        class: "px-2 py-1 text-xs rounded-full bg-primary/10 text-primary font-medium",
                                         "#{tag}"
                                     }
                                 }

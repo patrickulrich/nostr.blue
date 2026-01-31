@@ -76,10 +76,10 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         if !rejected.is_empty() {
             log::warn!("Rejected relay URLs (invalid scheme): {:?}", rejected);
         }
+        let mut seen_relays = std::collections::HashSet::new();
         let relays: Vec<String> = relays
             .into_iter()
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
+            .filter(|r| seen_relays.insert(r.clone()))
             .collect();
         if relays.is_empty() {
             error_message

@@ -320,8 +320,14 @@ pub fn CommentComposer(
                                 disabled: *is_publishing.read(),
                                 "Media"
                             }
-                            EmojiPicker { on_emoji_selected: handle_emoji_selected }
-                            GifPicker { on_gif_selected: handle_gif_selected }
+                            EmojiPicker {
+                                on_emoji_selected: handle_emoji_selected,
+                                disabled: *is_publishing.read(),
+                            }
+                            GifPicker {
+                                on_gif_selected: handle_gif_selected,
+                                disabled: *is_publishing.read(),
+                            }
                         }
                     }
                     div { class: "flex items-center gap-3",

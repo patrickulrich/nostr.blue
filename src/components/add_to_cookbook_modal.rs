@@ -38,6 +38,7 @@ pub fn AddToCookbookModal(
     });
     let mut pending_pin_cookbook: Signal<Option<(String, String)>> = use_signal(|| None);
     let mut has_loaded = use_signal(|| false);
+    let mut fetch_generation = use_signal(|| 0u64);
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
     let has_signer = *HAS_SIGNER.read();
     let loaded = *has_loaded.read();
@@ -61,11 +62,22 @@ pub fn AddToCookbookModal(
                 return;
             }
 
+            // Increment generation token to invalidate any in-flight requests
+            let current_generation = *fetch_generation.peek() + 1;
+            fetch_generation.set(current_generation);
+
             needs_signin.set(false);
             has_loaded.set(true);
             cookbooks_loading.set(true);
             spawn(async move {
-                match pin_boards_store::fetch_user_cookbooks().await {
+                let result = pin_boards_store::fetch_user_cookbooks().await;
+
+                // Check staleness before state updates
+                if *fetch_generation.peek() != current_generation {
+                    return;
+                }
+
+                match result {
                     Ok(books) => {
                         cookbooks.set(books);
                     }

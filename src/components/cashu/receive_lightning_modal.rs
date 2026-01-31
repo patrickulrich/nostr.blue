@@ -74,16 +74,16 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                     log::info!("Payment detected via WebSocket, minting tokens...");
                                     mint_status.set(Some("Payment detected! Minting..."
                                     .to_string()));
-                                    gloo_timers::future::TimeoutFuture::new(1000). await; if !*
+                                    gloo_timers::future::TimeoutFuture::new(1000).await; if !*
                                     is_polling_clone.read() || quote_info_clone.read().is_none()
                                     { break; } match cashu::mint_tokens_from_quote(mint_url
-                                    .clone(), quote_id.clone()). await { Ok(amount) => { if !*
+                                    .clone(), quote_id.clone()).await { Ok(amount) => { if !*
                                     is_polling_clone.read() || quote_info_clone.read().is_none()
                                     { break; } success_message
                                     .set(Some(format!("Successfully received {} sats!",
                                     amount))); quote_info.set(None); is_polling.set(false);
                                     mint_status.set(None); spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(2000). await;
+                                    gloo_timers::future::TimeoutFuture::new(2000).await;
                                     on_close.call(()); }); } Err(e) => { error_message
                                     .set(Some(format!("Failed to mint tokens: {}", e)));
                                     is_polling.set(false); mint_status.set(None); quote_info
@@ -98,21 +98,21 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                     break; } } } _ =
                                     gloo_timers::future::TimeoutFuture::new(5000) => { match
                                     cashu::check_mint_quote_status(mint_url.clone(), quote_id
-                                    .clone()). await { Ok(cashu::MintQuoteState::Paid) |
+                                    .clone()).await { Ok(cashu::MintQuoteState::Paid) |
                                     Ok(cashu::MintQuoteState::Issued) => {
                                     log::info!("Payment detected via HTTP backup check, minting tokens...");
                                     mint_status.set(Some("Payment detected! Minting..."
                                     .to_string()));
-                                    gloo_timers::future::TimeoutFuture::new(1000). await; if !*
+                                    gloo_timers::future::TimeoutFuture::new(1000).await; if !*
                                     is_polling_clone.read() || quote_info_clone.read().is_none()
                                     { break; } match cashu::mint_tokens_from_quote(mint_url
-                                    .clone(), quote_id.clone()). await { Ok(amount) => { if !*
+                                    .clone(), quote_id.clone()).await { Ok(amount) => { if !*
                                     is_polling_clone.read() || quote_info_clone.read().is_none()
                                     { break; } success_message
                                     .set(Some(format!("Successfully received {} sats!",
                                     amount))); quote_info.set(None); is_polling.set(false);
                                     mint_status.set(None); spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(2000). await;
+                                    gloo_timers::future::TimeoutFuture::new(2000).await;
                                     on_close.call(()); }); } Err(e) => { error_message
                                     .set(Some(format!("Failed to mint tokens: {}", e)));
                                     is_polling.set(false); mint_status.set(None); quote_info

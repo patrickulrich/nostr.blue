@@ -120,15 +120,27 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     let mut loading = use_signal(|| false);
     let mut fetch_error = use_signal(|| None::<String>);
     let mut publications_version = use_signal(|| 0usize);
+    let mut fetch_generation = use_signal(|| 0u64);
     use_effect(
         use_reactive(
             &*props.show.read(),
             move |is_shown| {
                 if is_shown {
+                    // Increment generation token to invalidate any in-flight requests
+                    let current_generation = *fetch_generation.peek() + 1;
+                    fetch_generation.set(current_generation);
+
                     loading.set(true);
                     fetch_error.set(None);
                     spawn(async move {
-                        match fetch_publications(100, None).await {
+                        let result = fetch_publications(100, None).await;
+
+                        // Check staleness before state updates
+                        if *fetch_generation.peek() != current_generation {
+                            return;
+                        }
+
+                        match result {
                             Ok(_) => {
                                 fetch_error.set(None);
                                 publications_version.set(publications_version() + 1);

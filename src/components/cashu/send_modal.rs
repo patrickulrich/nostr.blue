@@ -1,4 +1,5 @@
 use crate::stores::cashu;
+use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::{format::truncate_pubkey, shorten_url};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
@@ -305,15 +306,12 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                         button {
                                             class: "px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition",
                                             onclick: move |_| {
-                                                #[cfg(target_arch = "wasm32")]
-                                                {
-                                                    if let Some(token_to_copy) = token_result.read().as_ref() {
-                                                        if let Some(window) = web_sys::window() {
-                                                            let navigator = window.navigator();
-                                                            let clipboard = navigator.clipboard();
-                                                            let _ = clipboard.write_text(token_to_copy);
+                                                if let Some(token_to_copy) = token_result.read().clone() {
+                                                    spawn(async move {
+                                                        if let Err(e) = copy_to_clipboard(&token_to_copy).await {
+                                                            log::warn!("Failed to copy to clipboard: {:?}", e);
                                                         }
-                                                    }
+                                                    });
                                                 }
                                             },
                                             "Copy"
