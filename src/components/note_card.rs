@@ -38,6 +38,8 @@ pub fn NoteCard(
     cached_muted_posts: Option<Rc<HashSet<String>>>,
     #[props(default = None)]
     cached_blocked_users: Option<Rc<HashSet<String>>>,
+    #[props(default = None)]
+    on_reply: Option<EventHandler<NostrEvent>>,
 ) -> Element {
     let author_pubkey = event.pubkey.to_string();
     let author_pubkey_like = author_pubkey.clone();
@@ -815,7 +817,15 @@ pub fn NoteCard(
                 on_close: move |_| {
                     show_reply_modal.set(false);
                 },
-                on_success: move |_| {
+                on_success: move |reply_event: NostrEvent| {
+                    // Increment reply count for immediate visual feedback
+                    let current = *reply_count.read();
+                    reply_count.set(current + 1);
+                    // Bubble up the reply event for optimistic update
+                    if let Some(handler) = on_reply.as_ref() {
+                        handler.call(reply_event);
+                    }
+                    // Close modal LAST to ensure state updates happen first
                     show_reply_modal.set(false);
                 },
             }

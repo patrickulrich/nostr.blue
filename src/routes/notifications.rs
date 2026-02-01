@@ -57,42 +57,45 @@ pub fn Notifications() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-    use_effect(move || {
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !is_authenticated || !client_initialized {
-            return;
-        }
-        let now = Timestamp::now().as_secs() as i64;
-        notif_store::set_checked_at(now);
-        loading.set(true);
-        error.set(None);
-        spawn(async move {
-            match load_notifications(None).await {
-                Ok(notifs) => {
-                    if !notifs.is_empty() {
-                        let oldest = notifs.iter().map(get_timestamp).min();
-                        oldest_timestamp.set(oldest);
-                        let len = notifs.len();
-                        notifications.set(notifs.clone());
-                        has_more.set(len >= 100);
-                        spawn(async move {
-                            prefetch_notification_authors(&notifs).await;
-                        });
-                    } else {
-                        has_more.set(false);
+    use_effect(
+        use_reactive(
+            (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
+            move |(client_initialized, is_authenticated)| {
+                if !client_initialized || !is_authenticated {
+                    return;
+                }
+                let now = Timestamp::now().as_secs() as i64;
+                notif_store::set_checked_at(now);
+                loading.set(true);
+                error.set(None);
+                spawn(async move {
+                    match load_notifications(None).await {
+                        Ok(notifs) => {
+                            if !notifs.is_empty() {
+                                let oldest = notifs.iter().map(get_timestamp).min();
+                                oldest_timestamp.set(oldest);
+                                let len = notifs.len();
+                                notifications.set(notifs.clone());
+                                has_more.set(len >= 100);
+                                spawn(async move {
+                                    prefetch_notification_authors(&notifs).await;
+                                });
+                            } else {
+                                has_more.set(false);
+                            }
+                        }
+                        Err(e) => {
+                            error.set(Some(e));
+                            has_more.set(false);
+                        }
                     }
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    has_more.set(false);
-                }
-            }
-            loading.set(false);
-        });
-    });
+                    loading.set(false);
+                });
+            },
+        ),
+    );
     let handle_refresh = move |_| {
-        let is_authenticated = auth_store::is_authenticated();
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         if !is_authenticated || *refreshing.read() {
             return;
         }
