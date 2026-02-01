@@ -139,22 +139,28 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                 match result {
                     Ok(token_string) => {
                         token_result.set(Some(token_string.clone()));
-                        token_claimed.set(Some(false));
                         is_sending.set(false);
                         amount.set(String::new());
                         recipient_pubkey.set(String::new());
-                        if let Ok(y_values) = cashu::extract_y_values_from_token(
-                            &token_string,
-                        ) {
-                            cashu::watch_sent_token_claims(
-                                mint_for_watch,
-                                y_values,
-                                move || {
-                                    if is_mounted_for_watch.get() {
-                                        token_claimed.set(Some(true));
-                                    }
-                                },
-                            );
+
+                        // Only show "Pending" when claim tracking is active
+                        match cashu::extract_y_values_from_token(&token_string) {
+                            Ok(y_values) if !y_values.is_empty() => {
+                                token_claimed.set(Some(false));
+                                cashu::watch_sent_token_claims(
+                                    mint_for_watch,
+                                    y_values,
+                                    move || {
+                                        if is_mounted_for_watch.get() {
+                                            token_claimed.set(Some(true));
+                                        }
+                                    },
+                                );
+                            }
+                            _ => {
+                                // No tracking available - don't show status badge
+                                token_claimed.set(None);
+                            }
                         }
                     }
                     Err(e) => {

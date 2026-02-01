@@ -30,13 +30,7 @@ async fn try_mint_tokens(
     }
 
     match cashu::mint_tokens_from_quote(mint_url, quote_id).await {
-        Ok(amount) => {
-            if is_cancelled() {
-                MintResult::Cancelled
-            } else {
-                MintResult::Success(amount)
-            }
-        }
+        Ok(amount) => MintResult::Success(amount),
         Err(e) => MintResult::Error(e),
     }
 }
@@ -71,7 +65,7 @@ async fn poll_mint_quote_http(
         }
 
         match cashu::check_mint_quote_status(mint_url.clone(), quote_id.clone()).await {
-            Ok(cashu::MintQuoteState::Paid) | Ok(cashu::MintQuoteState::Issued) => {
+            Ok(cashu::MintQuoteState::Paid) => {
                 mint_status.set(Some("Payment detected! Minting...".to_string()));
                 gloo_timers::future::TimeoutFuture::new(2000).await;
 
@@ -100,6 +94,19 @@ async fn poll_mint_quote_http(
                         quote_info.set(None);
                     }
                 }
+                break;
+            }
+            Ok(cashu::MintQuoteState::Issued) => {
+                // Tokens already minted - show success without minting again
+                let amount = quote_info.read().as_ref().map(|q| q.amount).unwrap_or(0);
+                success_message.set(Some(format!("Received {} sats (already issued)", amount)));
+                quote_info.set(None);
+                is_polling.set(false);
+                mint_status.set(None);
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                    on_close.call(());
+                });
                 break;
             }
             Ok(cashu::MintQuoteState::Unpaid) => {}
@@ -190,8 +197,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                 tokio::select! {
                                     status = rx.recv() => {
                                         match status {
-                                            Some(cashu_ws::QuoteStatus::Paid)
-                                            | Some(cashu_ws::QuoteStatus::Issued) => {
+                                            Some(cashu_ws::QuoteStatus::Paid) => {
                                                 log::info!("Payment detected via WebSocket, minting tokens...");
                                                 mint_status.set(Some("Payment detected! Minting...".to_string()));
 
@@ -223,6 +229,21 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                         quote_info.set(None);
                                                     }
                                                 }
+                                                break;
+                                            }
+
+                                            Some(cashu_ws::QuoteStatus::Issued) => {
+                                                // Tokens already minted - show success without minting again
+                                                log::info!("Quote already issued, tokens previously minted");
+                                                let amount = quote_info_clone.read().as_ref().map(|q| q.amount).unwrap_or(0);
+                                                success_message.set(Some(format!("Received {} sats (already issued)", amount)));
+                                                quote_info.set(None);
+                                                is_polling.set(false);
+                                                mint_status.set(None);
+                                                spawn(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    on_close.call(());
+                                                });
                                                 break;
                                             }
 
@@ -258,8 +279,7 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
 
                                     _ = gloo_timers::future::TimeoutFuture::new(5000) => {
                                         match cashu::check_mint_quote_status(mint_url.clone(), quote_id.clone()).await {
-                                            Ok(cashu::MintQuoteState::Paid)
-                                            | Ok(cashu::MintQuoteState::Issued) => {
+                                            Ok(cashu::MintQuoteState::Paid) => {
                                                 log::info!("Payment detected via HTTP backup check, minting tokens...");
                                                 mint_status.set(Some("Payment detected! Minting...".to_string()));
 
@@ -291,6 +311,21 @@ pub fn CashuReceiveLightningModal(on_close: EventHandler<()>) -> Element {
                                                         quote_info.set(None);
                                                     }
                                                 }
+                                                break;
+                                            }
+
+                                            Ok(cashu::MintQuoteState::Issued) => {
+                                                // Tokens already minted - show success without minting again
+                                                log::info!("Quote already issued via HTTP backup check");
+                                                let amount = quote_info_clone.read().as_ref().map(|q| q.amount).unwrap_or(0);
+                                                success_message.set(Some(format!("Received {} sats (already issued)", amount)));
+                                                quote_info.set(None);
+                                                is_polling.set(false);
+                                                mint_status.set(None);
+                                                spawn(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    on_close.call(());
+                                                });
                                                 break;
                                             }
 
