@@ -278,7 +278,7 @@ pub fn NutzapSendModal(
                     {
                         let is_disabled = *is_sending.read() || *is_loading_info.read()
                             || load_error.read().is_some() || compatible_mint.read().is_none()
-                            || amount.read().is_empty();
+                            || amount.read().parse::<u64>().map_or(true, |a| a == 0);
                         rsx! {
                             button {
                                 class: if is_disabled { "flex-1 px-4 py-3 bg-orange-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed" } else { "flex-1 px-4 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition" },

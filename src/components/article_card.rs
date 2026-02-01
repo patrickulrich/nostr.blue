@@ -47,6 +47,7 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
         .and_then(|m| m.picture.clone())
         .filter(|url| !url.trim().is_empty() && is_valid_http_url(url));
     let avatar_letter = display_name
+        .trim_start()
         .chars()
         .next()
         .unwrap_or('?')
