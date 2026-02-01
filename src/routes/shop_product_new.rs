@@ -1,9 +1,7 @@
 //! Shop Product New - Create a new product listing (NIP-99 Kind 30402)
-
-use dioxus::prelude::*;
 use crate::routes::Route;
-use crate::stores::shop_store::{ProductFormData, publish_product};
-
+use crate::stores::shop_store::{publish_product, ProductFormData};
+use dioxus::prelude::*;
 /// Product creation form
 #[component]
 pub fn ShopProductNew() -> Element {
@@ -20,10 +18,8 @@ pub fn ShopProductNew() -> Element {
     let mut publishing = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -37,11 +33,8 @@ pub fn ShopProductNew() -> Element {
                     h1 { class: "text-xl font-bold", "New Product" }
                 }
             }
-
-            // Form content
             div { class: "max-w-2xl mx-auto p-4",
                 if *success.read() {
-                    // Success message
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "✅" }
                         h2 { class: "text-xl font-semibold mb-2", "Product Listed!" }
@@ -57,7 +50,6 @@ pub fn ShopProductNew() -> Element {
                             button {
                                 class: "block w-full py-3 border border-border hover:bg-accent rounded-lg font-medium transition",
                                 onclick: move |_| {
-                                    // Reset form
                                     title.set(String::new());
                                     description.set(String::new());
                                     price.set(String::new());
@@ -75,9 +67,7 @@ pub fn ShopProductNew() -> Element {
                         }
                     }
                 } else {
-                    // Form
                     div { class: "space-y-6",
-                        // Title
                         div {
                             label { class: "block text-sm font-medium mb-2", "Product Title *" }
                             input {
@@ -85,22 +75,18 @@ pub fn ShopProductNew() -> Element {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "Enter product title",
                                 value: "{title}",
-                                oninput: move |e| title.set(e.value())
+                                oninput: move |e| title.set(e.value()),
                             }
                         }
-
-                        // Description
                         div {
                             label { class: "block text-sm font-medium mb-2", "Description" }
                             textarea {
                                 class: "w-full h-32 px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
                                 placeholder: "Describe your product...",
                                 value: "{description}",
-                                oninput: move |e| description.set(e.value())
+                                oninput: move |e| description.set(e.value()),
                             }
                         }
-
-                        // Price
                         div { class: "grid grid-cols-2 gap-4",
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Price *" }
@@ -111,7 +97,7 @@ pub fn ShopProductNew() -> Element {
                                     min: "0",
                                     step: "any",
                                     value: "{price}",
-                                    oninput: move |e| price.set(e.value())
+                                    oninput: move |e| price.set(e.value()),
                                 }
                             }
                             div {
@@ -126,8 +112,6 @@ pub fn ShopProductNew() -> Element {
                                 }
                             }
                         }
-
-                        // Image URL
                         div {
                             label { class: "block text-sm font-medium mb-2", "Image URL" }
                             input {
@@ -135,51 +119,37 @@ pub fn ShopProductNew() -> Element {
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "https://example.com/image.jpg",
                                 value: "{image_url}",
-                                oninput: move |e| image_url.set(e.value())
+                                oninput: move |e| image_url.set(e.value()),
                             }
                             p { class: "text-xs text-muted-foreground mt-1",
                                 "Enter a direct URL to your product image"
                             }
                         }
-
-                        // Image preview
                         if !image_url.read().is_empty() {
                             div { class: "aspect-video bg-muted rounded-lg overflow-hidden",
                                 img {
                                     src: "{image_url}",
-                                    class: "w-full h-full object-contain"
+                                    class: "w-full h-full object-contain",
                                 }
                             }
                         }
-
-                        // Product type
                         div {
                             label { class: "block text-sm font-medium mb-2", "Product Type" }
                             div { class: "flex gap-4",
                                 button {
                                     r#type: "button",
-                                    class: if !*is_digital.read() {
-                                        "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium"
-                                    } else {
-                                        "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition"
-                                    },
+                                    class: if !*is_digital.read() { "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium" } else { "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition" },
                                     onclick: move |_| is_digital.set(false),
                                     "📦 Physical"
                                 }
                                 button {
                                     r#type: "button",
-                                    class: if *is_digital.read() {
-                                        "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium"
-                                    } else {
-                                        "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition"
-                                    },
+                                    class: if *is_digital.read() { "flex-1 py-3 px-4 bg-blue-500 text-white rounded-lg font-medium" } else { "flex-1 py-3 px-4 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-accent transition" },
                                     onclick: move |_| is_digital.set(true),
                                     "📥 Digital"
                                 }
                             }
                         }
-
-                        // Condition (for physical products)
                         if !*is_digital.read() {
                             div {
                                 label { class: "block text-sm font-medium mb-2", "Condition" }
@@ -195,8 +165,6 @@ pub fn ShopProductNew() -> Element {
                                 }
                             }
                         }
-
-                        // Stock (optional)
                         div {
                             label { class: "block text-sm font-medium mb-2", "Stock Quantity (optional)" }
                             input {
@@ -205,53 +173,48 @@ pub fn ShopProductNew() -> Element {
                                 placeholder: "Leave empty for unlimited",
                                 min: "0",
                                 value: "{stock}",
-                                oninput: move |e| stock.set(e.value())
+                                oninput: move |e| stock.set(e.value()),
                             }
                         }
-
-                        // Categories
                         div {
-                            label { class: "block text-sm font-medium mb-2", "Categories (comma-separated)" }
+                            label { class: "block text-sm font-medium mb-2",
+                                "Categories (comma-separated)"
+                            }
                             input {
                                 r#type: "text",
                                 class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                 placeholder: "electronics, gadgets, accessories",
                                 value: "{categories}",
-                                oninput: move |e| categories.set(e.value())
+                                oninput: move |e| categories.set(e.value()),
                             }
                         }
-
-                        // Shipping regions (for physical products)
                         if !*is_digital.read() {
                             div {
-                                label { class: "block text-sm font-medium mb-2", "Ships to (comma-separated)" }
+                                label { class: "block text-sm font-medium mb-2",
+                                    "Ships to (comma-separated)"
+                                }
                                 input {
                                     r#type: "text",
                                     class: "w-full px-4 py-3 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
                                     placeholder: "Worldwide, US, EU",
                                     value: "{shipping_regions}",
-                                    oninput: move |e| shipping_regions.set(e.value())
+                                    oninput: move |e| shipping_regions.set(e.value()),
                                 }
                             }
                         }
-
-                        // Error message
                         if let Some(err) = error.read().as_ref() {
                             div { class: "bg-destructive/10 border border-destructive/50 text-destructive rounded-lg p-4",
                                 "{err}"
                             }
                         }
-
-                        // Action buttons
                         div { class: "flex gap-3",
-                            // Publish button
                             button {
                                 class: "flex-1 py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition disabled:opacity-50",
-                                disabled: *publishing.read() || title.read().trim().is_empty() || price.read().trim().is_empty(),
+                                disabled: *publishing.read() || title.read().trim().is_empty()
+                                    || price.read().trim().is_empty(),
                                 onclick: move |_| {
                                     publishing.set(true);
                                     error.set(None);
-
                                     let is_digital_val = *is_digital.read();
                                     let form_data = ProductFormData {
                                         title: title.read().clone(),
@@ -263,7 +226,8 @@ pub fn ShopProductNew() -> Element {
                                         } else {
                                             vec![image_url.read().clone()]
                                         },
-                                        categories: categories.read()
+                                        categories: categories
+                                            .read()
                                             .split(',')
                                             .map(|s| s.trim().to_string())
                                             .filter(|s| !s.is_empty())
@@ -271,14 +235,14 @@ pub fn ShopProductNew() -> Element {
                                         is_digital: is_digital_val,
                                         stock: stock.read().parse().ok(),
                                         specs: vec![],
-                                        shipping_regions: shipping_regions.read()
+                                        shipping_regions: shipping_regions
+                                            .read()
                                             .split(',')
                                             .map(|s| s.trim().to_string())
                                             .filter(|s| !s.is_empty())
                                             .collect(),
                                         condition: if is_digital_val { None } else { Some(condition.read().clone()) },
                                     };
-
                                     spawn(async move {
                                         match publish_product(form_data).await {
                                             Ok(d_tag) => {
@@ -299,7 +263,6 @@ pub fn ShopProductNew() -> Element {
                                 }
                             }
                         }
-
                     }
                 }
             }

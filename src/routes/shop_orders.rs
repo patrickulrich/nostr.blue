@@ -1,11 +1,13 @@
 //! Shop Orders - Buyer's order history
-
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::utils::nip99::{ShopOrder, OrderStatus, ShippingStatus, extract_product_name_from_coordinate};
-use crate::stores::shop_store::{fetch_my_orders, listen_for_order_updates, ensure_orders_loaded};
 use crate::components::shop::{OrderStatusBadge, ReviewForm};
-
+use crate::routes::Route;
+use crate::stores::shop_store::{
+    ensure_orders_loaded, fetch_my_orders, listen_for_order_updates,
+};
+use crate::utils::nip99::{
+    extract_product_name_from_coordinate, OrderStatus, ShippingStatus, ShopOrder,
+};
+use dioxus::prelude::*;
 /// Buyer orders page
 #[component]
 pub fn ShopOrders() -> Element {
@@ -13,15 +15,8 @@ pub fn ShopOrders() -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut selected_order = use_signal(|| None::<ShopOrder>);
-
-    // Fetch orders and listen for updates on mount
-    // Dioxus pattern: reading is_authenticated() auto-subscribes to auth changes
-    // Effect will rerun when user logs in
     use_effect(move || {
         let is_authenticated = crate::stores::auth_store::is_authenticated();
-
-        // Skip if not authenticated - orders page requires login
-        // Clear ALL state on logout to prevent stale data
         if !is_authenticated {
             orders.set(Vec::new());
             selected_order.set(None);
@@ -29,35 +24,23 @@ pub fn ShopOrders() -> Element {
             loading.set(false);
             return;
         }
-
-        // Capture auth state before async operations
         let auth_snapshot = crate::stores::auth_store::get_pubkey();
-
         spawn(async move {
             loading.set(true);
             error.set(None);
-
-            // Shop pattern: retry auth-dependent operations when auth becomes available
             if let Err(e) = ensure_orders_loaded().await {
                 log::warn!("Failed to ensure orders loaded: {}", e);
             }
-
-            // First, listen for any new order updates via NIP-17
             if let Err(e) = listen_for_order_updates().await {
                 log::warn!("Failed to fetch order updates: {}", e);
             }
-
-            // Guard: re-check auth before writing state (prevent stale writes after logout)
             if crate::stores::auth_store::get_pubkey() != auth_snapshot {
                 log::debug!("Auth changed during order fetch, discarding results");
                 loading.set(false);
                 return;
             }
-
-            // Then fetch all orders
             match fetch_my_orders().await {
                 Ok(o) => {
-                    // Final auth guard before state mutation
                     if crate::stores::auth_store::get_pubkey() == auth_snapshot {
                         orders.set(o);
                     }
@@ -72,17 +55,13 @@ pub fn ShopOrders() -> Element {
             loading.set(false);
         });
     });
-
-    // Sort orders by date (newest first)
     let sorted_orders = {
         let mut o = orders.read().clone();
         o.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         o
     };
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -94,17 +73,13 @@ pub fn ShopOrders() -> Element {
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
                     h1 { class: "text-xl font-bold flex-1", "My Orders" }
-
-                    // Refresh button
                     button {
                         class: "p-2 hover:bg-accent rounded-full transition",
                         disabled: *loading.read(),
                         onclick: move |_| {
                             spawn(async move {
                                 loading.set(true);
-                                // Listen for updates first
                                 let _ = listen_for_order_updates().await;
-                                // Then refresh orders
                                 if let Ok(o) = fetch_my_orders().await {
                                     orders.set(o);
                                 }
@@ -117,8 +92,6 @@ pub fn ShopOrders() -> Element {
                             crate::components::icons::RefreshIcon { class: "w-5 h-5" }
                         }
                     }
-
-                    // Cart link
                     Link {
                         to: Route::ShopCart {},
                         class: "p-2 hover:bg-accent rounded-full transition",
@@ -126,18 +99,17 @@ pub fn ShopOrders() -> Element {
                     }
                 }
             }
-
-            // Orders list
             div { class: "p-4",
                 if *loading.read() {
-                    // Loading skeleton
                     div { class: "space-y-4",
                         for i in 0..4 {
-                            div { key: "{i}", class: "h-32 bg-muted rounded-lg animate-pulse" }
+                            div {
+                                key: "{i}",
+                                class: "h-32 bg-muted rounded-lg animate-pulse",
+                            }
                         }
                     }
                 } else if let Some(err) = error.read().as_ref() {
-                    // Error state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "😢" }
                         h2 { class: "text-xl font-semibold mb-2", "Failed to load orders" }
@@ -159,7 +131,6 @@ pub fn ShopOrders() -> Element {
                         }
                     }
                 } else if sorted_orders.is_empty() {
-                    // Empty state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "📋" }
                         h2 { class: "text-xl font-semibold mb-2", "No Orders Yet" }
@@ -173,7 +144,6 @@ pub fn ShopOrders() -> Element {
                         }
                     }
                 } else {
-                    // Orders list
                     div { class: "space-y-4",
                         for order in sorted_orders.iter() {
                             div {
@@ -183,8 +153,6 @@ pub fn ShopOrders() -> Element {
                                     let order = order.clone();
                                     move |_| selected_order.set(Some(order.clone()))
                                 },
-
-                                // Order header
                                 div { class: "flex items-start justify-between mb-3",
                                     {
                                         let order_id_short = if order.order_id.len() > 8 {
@@ -197,29 +165,21 @@ pub fn ShopOrders() -> Element {
                                             .unwrap_or_else(|| "Unknown".to_string());
                                         rsx! {
                                             div {
-                                                p { class: "font-medium text-sm font-mono",
-                                                    "Order #{order_id_short}"
-                                                }
-                                                p { class: "text-xs text-muted-foreground",
-                                                    "{created_date}"
-                                                }
+                                                p { class: "font-medium text-sm font-mono", "Order #{order_id_short}" }
+                                                p { class: "text-xs text-muted-foreground", "{created_date}" }
                                             }
                                         }
                                     }
                                     OrderStatusBadge { status: order.status }
                                 }
-
-                                // Items preview
                                 div { class: "space-y-1 mb-3",
-                                    for (i, item) in order.items.iter().take(2).enumerate() {
+                                    for (i , item) in order.items.iter().take(2).enumerate() {
                                         {
-                                            let product_name = extract_product_name_from_coordinate(&item.product_coordinate);
+                                            let product_name = extract_product_name_from_coordinate(
+                                                &item.product_coordinate,
+                                            );
                                             rsx! {
-                                                p {
-                                                    key: "{i}",
-                                                    class: "text-sm text-muted-foreground truncate",
-                                                    "{product_name} x{item.quantity}"
-                                                }
+                                                p { key: "{i}", class: "text-sm text-muted-foreground truncate", "{product_name} x{item.quantity}" }
                                             }
                                         }
                                     }
@@ -227,17 +187,13 @@ pub fn ShopOrders() -> Element {
                                         let remaining = order.items.len().saturating_sub(2);
                                         if remaining > 0 {
                                             rsx! {
-                                                p { class: "text-sm text-muted-foreground",
-                                                    "...and {remaining} more item(s)"
-                                                }
+                                                p { class: "text-sm text-muted-foreground", "...and {remaining} more item(s)" }
                                             }
                                         } else {
                                             rsx! {}
                                         }
                                     }
                                 }
-
-                                // Total and shipping status
                                 div { class: "flex items-center justify-between",
                                     span { class: "text-amber-500 font-medium",
                                         "⚡{order.amount_sats} sats"
@@ -258,17 +214,13 @@ pub fn ShopOrders() -> Element {
                     }
                 }
             }
-
-            // Order detail modal
             if let Some(order) = selected_order.read().as_ref() {
-                div { class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
+                div {
+                    class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
                     onclick: move |_| selected_order.set(None),
-
                     div {
                         class: "bg-background rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto",
                         onclick: move |e| e.stop_propagation(),
-
-                        // Modal header
                         div { class: "sticky top-0 bg-background border-b border-border p-4 flex items-center justify-between",
                             h2 { class: "text-lg font-semibold", "Order Details" }
                             button {
@@ -277,10 +229,7 @@ pub fn ShopOrders() -> Element {
                                 crate::components::icons::XIcon { class: "w-5 h-5" }
                             }
                         }
-
-                        // Modal content
                         div { class: "p-4 space-y-4",
-                            // Order info
                             div { class: "space-y-2",
                                 div { class: "flex items-center justify-between",
                                     span { class: "text-sm text-muted-foreground", "Order ID" }
@@ -303,28 +252,27 @@ pub fn ShopOrders() -> Element {
                                 }
                                 div { class: "flex items-center justify-between",
                                     span { class: "text-sm text-muted-foreground", "Total" }
-                                    span { class: "text-amber-500 font-medium", "⚡{order.amount_sats} sats" }
+                                    span { class: "text-amber-500 font-medium",
+                                        "⚡{order.amount_sats} sats"
+                                    }
                                 }
                             }
-
-                            // Items
                             div { class: "border-t border-border pt-4",
                                 h3 { class: "font-medium mb-3", "Items" }
                                 div { class: "space-y-3",
                                     for item in order.items.iter() {
                                         {
-                                            let product_name = extract_product_name_from_coordinate(&item.product_coordinate);
+                                            let product_name = extract_product_name_from_coordinate(
+                                                &item.product_coordinate,
+                                            );
                                             rsx! {
                                                 div { class: "flex items-center gap-3",
-                                                    // Product image placeholder
                                                     div { class: "w-12 h-12 bg-muted rounded-lg flex items-center justify-center text-lg",
                                                         "📦"
                                                     }
                                                     div { class: "flex-1",
                                                         p { class: "font-medium text-sm", "{product_name}" }
-                                                        p { class: "text-xs text-muted-foreground",
-                                                            "Qty: {item.quantity}"
-                                                        }
+                                                        p { class: "text-xs text-muted-foreground", "Qty: {item.quantity}" }
                                                     }
                                                 }
                                             }
@@ -332,15 +280,15 @@ pub fn ShopOrders() -> Element {
                                     }
                                 }
                             }
-
-                            // Shipping info
                             if order.shipping_status.is_some() || order.tracking_number.is_some() {
                                 div { class: "border-t border-border pt-4",
                                     h3 { class: "font-medium mb-3", "Shipping" }
                                     div { class: "space-y-2",
                                         if let Some(ref status) = order.shipping_status {
                                             div { class: "flex items-center justify-between",
-                                                span { class: "text-sm text-muted-foreground", "Status" }
+                                                span { class: "text-sm text-muted-foreground",
+                                                    "Status"
+                                                }
                                                 span { class: "text-sm",
                                                     match status {
                                                         ShippingStatus::Processing => "Processing",
@@ -353,21 +301,23 @@ pub fn ShopOrders() -> Element {
                                         }
                                         if let Some(ref tracking) = order.tracking_number {
                                             div { class: "flex items-center justify-between",
-                                                span { class: "text-sm text-muted-foreground", "Tracking" }
+                                                span { class: "text-sm text-muted-foreground",
+                                                    "Tracking"
+                                                }
                                                 span { class: "text-sm font-mono", "{tracking}" }
                                             }
                                         }
                                         if let Some(ref carrier) = order.carrier {
                                             div { class: "flex items-center justify-between",
-                                                span { class: "text-sm text-muted-foreground", "Carrier" }
+                                                span { class: "text-sm text-muted-foreground",
+                                                    "Carrier"
+                                                }
                                                 span { class: "text-sm", "{carrier}" }
                                             }
                                         }
                                     }
                                 }
                             }
-
-                            // Digital delivery info
                             if order.download_url.is_some() || order.license_key.is_some() {
                                 div { class: "border-t border-border pt-4",
                                     h3 { class: "font-medium mb-3 flex items-center gap-2",
@@ -375,10 +325,11 @@ pub fn ShopOrders() -> Element {
                                         "Digital Delivery"
                                     }
                                     div { class: "space-y-3",
-                                        // Download URL
                                         if let Some(ref url) = order.download_url {
                                             div { class: "bg-muted/50 rounded-lg p-3",
-                                                p { class: "text-xs text-muted-foreground mb-1", "Download Link" }
+                                                p { class: "text-xs text-muted-foreground mb-1",
+                                                    "Download Link"
+                                                }
                                                 a {
                                                     href: "{url}",
                                                     target: "_blank",
@@ -388,11 +339,11 @@ pub fn ShopOrders() -> Element {
                                                 }
                                             }
                                         }
-
-                                        // License key
                                         if let Some(ref key) = order.license_key {
                                             div { class: "bg-muted/50 rounded-lg p-3",
-                                                p { class: "text-xs text-muted-foreground mb-1", "License Key" }
+                                                p { class: "text-xs text-muted-foreground mb-1",
+                                                    "License Key"
+                                                }
                                                 div { class: "flex items-center gap-2",
                                                     code { class: "text-sm font-mono bg-background px-2 py-1 rounded border border-border flex-1 break-all",
                                                         "{key}"
@@ -417,16 +368,12 @@ pub fn ShopOrders() -> Element {
                                     }
                                 }
                             }
-
-                            // Merchant info
                             div { class: "border-t border-border pt-4",
                                 h3 { class: "font-medium mb-2", "Seller" }
                                 p { class: "text-sm font-mono text-muted-foreground",
                                     "{order.merchant_pubkey}"
                                 }
                             }
-
-                            // Payment info
                             if let Some(paid_at) = order.paid_at {
                                 div { class: "border-t border-border pt-4",
                                     h3 { class: "font-medium mb-2", "Payment" }
@@ -443,10 +390,7 @@ pub fn ShopOrders() -> Element {
                                     }
                                 }
                             }
-
-                            // Actions and Reviews for completed orders
                             if order.status == OrderStatus::Completed {
-                                // Review section - show form for each item
                                 div { class: "border-t border-border pt-4",
                                     h3 { class: "font-medium mb-3 flex items-center gap-2",
                                         span { class: "text-lg", "⭐" }
@@ -459,7 +403,6 @@ pub fn ShopOrders() -> Element {
                                         for item in order.items.iter() {
                                             {
                                                 let coord = item.product_coordinate.clone();
-                                                // Use splitn(3, ':') to handle identifiers containing colons
                                                 let parts: Vec<&str> = coord.splitn(3, ':').collect();
                                                 let product_name = if parts.len() >= 3 {
                                                     parts[2].to_string()
@@ -469,17 +412,13 @@ pub fn ShopOrders() -> Element {
                                                 rsx! {
                                                     div { class: "border border-border rounded-lg p-4",
                                                         p { class: "font-medium text-sm mb-3", "{product_name}" }
-                                                        ReviewForm {
-                                                            product_coordinate: coord.clone()
-                                                        }
+                                                        ReviewForm { product_coordinate: coord.clone() }
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
-
-                                // Order again button
                                 div { class: "border-t border-border pt-4 mt-4",
                                     Link {
                                         to: Route::ShopHome {},

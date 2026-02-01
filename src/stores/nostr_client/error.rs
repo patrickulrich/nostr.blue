@@ -1,9 +1,7 @@
 //! Nostr client error types
 //!
 //! Error enum following nostr-sdk patterns with proper From implementations.
-
 use std::fmt;
-
 /// Errors that can occur during client operations
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -24,9 +22,7 @@ pub enum Error {
     /// Not authenticated
     NotAuthenticated,
 }
-
 impl std::error::Error for Error {}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -41,7 +37,6 @@ impl fmt::Display for Error {
         }
     }
 }
-
 impl From<Error> for String {
     fn from(e: Error) -> String {
         e.to_string()

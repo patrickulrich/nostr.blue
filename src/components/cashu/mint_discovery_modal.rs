@@ -1,8 +1,7 @@
-use dioxus::prelude::*;
 use crate::stores::cashu;
 use crate::stores::cashu::DiscoveredMint;
 use crate::utils::format::truncate_pubkey;
-
+use dioxus::prelude::*;
 #[component]
 pub fn CashuMintDiscoveryModal(
     on_close: EventHandler<()>,
@@ -13,8 +12,6 @@ pub fn CashuMintDiscoveryModal(
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut selected_mint = use_signal(|| Option::<String>::None);
     let mut is_adding = use_signal(|| false);
-
-    // Fetch mints on mount
     use_effect(move || {
         spawn(async move {
             match cashu::discover_mints().await {
@@ -29,11 +26,9 @@ pub fn CashuMintDiscoveryModal(
             }
         });
     });
-
     let mut on_add_mint = move |url: String| {
         is_adding.set(true);
         error_message.set(None);
-
         spawn(async move {
             match cashu::add_mint(&url).await {
                 Ok(_) => {
@@ -48,25 +43,26 @@ pub fn CashuMintDiscoveryModal(
             }
         });
     };
-
-    // Get existing mints to filter out already added ones (memoized to avoid cloning on every render)
     let existing_mints = use_memo(cashu::get_mints);
-
-    // Precompute display names for discovered mints to avoid URL parsing on every render
     let mints_with_display = use_memo(move || {
-        discovered_mints.read().iter().map(|mint| {
-            let display_name = mint.name.clone().unwrap_or_else(|| {
-                url::Url::parse(&mint.url)
-                    .ok()
-                    .and_then(|u| u.host_str().map(|h| h.to_string()))
-                    .unwrap_or_else(|| mint.url.clone())
-            });
-            (mint.clone(), display_name)
-        }).collect::<Vec<_>>()
+        discovered_mints
+            .read()
+            .iter()
+            .map(|mint| {
+                let display_name = mint
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| {
+                        url::Url::parse(&mint.url)
+                            .ok()
+                            .and_then(|u| u.host_str().map(|h| h.to_string()))
+                            .unwrap_or_else(|| mint.url.clone())
+                    });
+                (mint.clone(), display_name)
+            })
+            .collect::<Vec<_>>()
     });
-
     rsx! {
-        // Modal overlay
         div {
             class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
             onclick: move |_| {
@@ -74,17 +70,11 @@ pub fn CashuMintDiscoveryModal(
                     on_close.call(());
                 }
             },
-
-            // Modal content
             div {
                 class: "bg-card border border-border rounded-lg max-w-lg w-full shadow-xl max-h-[80vh] flex flex-col",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header
-                div {
-                    class: "px-6 py-4 border-b border-border flex items-center justify-between shrink-0",
-                    h3 {
-                        class: "text-xl font-bold flex items-center gap-2",
+                div { class: "px-6 py-4 border-b border-border flex items-center justify-between shrink-0",
+                    h3 { class: "text-xl font-bold flex items-center gap-2",
                         span { class: "text-2xl", "!" }
                         "Discover Mints"
                     }
@@ -96,69 +86,43 @@ pub fn CashuMintDiscoveryModal(
                         }
                     }
                 }
-
-                // Body
-                div {
-                    class: "p-6 overflow-y-auto flex-1",
-
-                    // Error message
+                div { class: "p-6 overflow-y-auto flex-1",
                     if let Some(msg) = error_message.read().as_ref() {
-                        div {
-                            class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4",
-                            p {
-                                class: "text-sm text-red-800 dark:text-red-200",
-                                "{msg}"
-                            }
+                        div { class: "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4",
+                            p { class: "text-sm text-red-800 dark:text-red-200", "{msg}" }
                         }
                     }
-
-                    // Loading state
                     if *is_loading.read() {
-                        div {
-                            class: "flex flex-col items-center justify-center py-12",
+                        div { class: "flex flex-col items-center justify-center py-12",
                             p { class: "text-muted-foreground", "Discovering mints via NIP-87..." }
                         }
                     } else if discovered_mints.read().is_empty() {
-                        // No mints found
-                        div {
-                            class: "text-center py-12",
+                        div { class: "text-center py-12",
                             div { class: "text-4xl mb-4", "!" }
                             h4 { class: "text-lg font-semibold mb-2", "No mints discovered" }
-                            p {
-                                class: "text-muted-foreground text-sm",
+                            p { class: "text-muted-foreground text-sm",
                                 "No Cashu mint announcements found on the network. Try adding a mint manually."
                             }
                         }
                     } else {
-                        // Mint list
-                        div {
-                            class: "space-y-3",
-
-                            p {
-                                class: "text-sm text-muted-foreground mb-4",
+                        div { class: "space-y-3",
+                            p { class: "text-sm text-muted-foreground mb-4",
                                 "Mints discovered via NIP-87. Sorted by recommendation count."
                             }
-
-                            for (mint, display_name) in mints_with_display.read().iter() {
+                            for (mint , display_name) in mints_with_display.read().iter() {
                                 {
                                     let url = mint.url.clone();
                                     let normalized_url = cashu::normalize_mint_url(&url);
-                                    let is_already_added = existing_mints.read()
+                                    let is_already_added = existing_mints
+                                        .read()
                                         .iter()
                                         .any(|m| cashu::mint_matches(m, &normalized_url));
                                     let is_selected = selected_mint.read().as_ref() == Some(&url);
                                     let is_mainnet = mint.network.as_ref().map(|n| n == "mainnet").unwrap_or(true);
-
                                     rsx! {
                                         div {
                                             key: "{url}",
-                                            class: if is_selected {
-                                                "bg-accent border-2 border-blue-500 rounded-lg p-4 cursor-pointer transition"
-                                            } else if is_already_added {
-                                                "bg-accent/30 border border-border rounded-lg p-4 opacity-60"
-                                            } else {
-                                                "bg-accent/50 border border-border rounded-lg p-4 cursor-pointer hover:border-blue-400 transition"
-                                            },
+                                            class: if is_selected { "bg-accent border-2 border-blue-500 rounded-lg p-4 cursor-pointer transition" } else if is_already_added { "bg-accent/30 border border-border rounded-lg p-4 opacity-60" } else { "bg-accent/50 border border-border rounded-lg p-4 cursor-pointer hover:border-blue-400 transition" },
                                             onclick: {
                                                 let url = url.clone();
                                                 move |_| {
@@ -167,124 +131,67 @@ pub fn CashuMintDiscoveryModal(
                                                     }
                                                 }
                                             },
-
-                                            // Header row
-                                            div {
-                                                class: "flex items-start justify-between gap-2",
-                                                div {
-                                                    class: "flex-1 min-w-0",
-                                                    // Name (precomputed display_name avoids URL parsing on each render)
-                                                    h4 {
-                                                        class: "font-semibold truncate",
-                                                        "{display_name}"
-                                                    }
-                                                    // URL
-                                                    p {
-                                                        class: "text-xs text-muted-foreground truncate",
-                                                        "{mint.url}"
-                                                    }
+                                            div { class: "flex items-start justify-between gap-2",
+                                                div { class: "flex-1 min-w-0",
+                                                    h4 { class: "font-semibold truncate", "{display_name}" }
+                                                    p { class: "text-xs text-muted-foreground truncate", "{mint.url}" }
                                                 }
-
-                                                // Badges
-                                                div {
-                                                    class: "flex items-center gap-2 shrink-0",
-                                                    // Network badge
+                                                div { class: "flex items-center gap-2 shrink-0",
                                                     if !is_mainnet {
-                                                        span {
-                                                            class: "px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 rounded",
+                                                        span { class: "px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 rounded",
                                                             {mint.network.clone().unwrap_or_default()}
                                                         }
                                                     }
-                                                    // Already added badge
                                                     if is_already_added {
-                                                        span {
-                                                            class: "px-2 py-0.5 text-xs bg-green-500/20 text-green-600 dark:text-green-400 rounded",
+                                                        span { class: "px-2 py-0.5 text-xs bg-green-500/20 text-green-600 dark:text-green-400 rounded",
                                                             "Added"
                                                         }
                                                     }
                                                 }
                                             }
-
-                                            // Description
                                             if let Some(desc) = &mint.description {
-                                                p {
-                                                    class: "text-sm text-muted-foreground mt-2 line-clamp-2",
-                                                    "{desc}"
-                                                }
+                                                p { class: "text-sm text-muted-foreground mt-2 line-clamp-2", "{desc}" }
                                             }
-
-                                            // Footer row
-                                            div {
-                                                class: "flex items-center justify-between mt-3 pt-2 border-t border-border/50",
-                                                // Recommendations
-                                                div {
-                                                    class: "flex items-center gap-1 text-sm",
+                                            div { class: "flex items-center justify-between mt-3 pt-2 border-t border-border/50",
+                                                div { class: "flex items-center gap-1 text-sm",
                                                     if mint.recommendation_count > 0 {
                                                         {
                                                             let count = mint.recommendation_count;
                                                             let suffix = if count == 1 { "" } else { "s" };
                                                             rsx! {
                                                                 span { class: "text-green-500", "!" }
-                                                                span { class: "text-muted-foreground",
-                                                                    "{count} recommendation{suffix}"
-                                                                }
+                                                                span { class: "text-muted-foreground", "{count} recommendation{suffix}" }
                                                             }
                                                         }
                                                     } else {
                                                         span { class: "text-muted-foreground text-xs", "No recommendations yet" }
                                                     }
                                                 }
-                                                // NUTs
                                                 if let Some(nuts) = &mint.nuts {
-                                                    span {
-                                                        class: "text-xs text-muted-foreground",
-                                                        "NUTs: {nuts}"
-                                                    }
+                                                    span { class: "text-xs text-muted-foreground", "NUTs: {nuts}" }
                                                 }
                                             }
-
-                                            // Announcement metadata (author and mint pubkey)
-                                            div {
-                                                class: "flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground",
-                                                // Author who published the announcement
-                                                span {
-                                                    title: "{mint.author_pubkey}",
-                                                    "Announced by: {truncate_pubkey(&mint.author_pubkey)}"
-                                                }
-                                                // Mint's own pubkey if available
+                                            div { class: "flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground",
+                                                span { title: "{mint.author_pubkey}", "Announced by: {truncate_pubkey(&mint.author_pubkey)}" }
                                                 if let Some(mint_pk) = &mint.mint_pubkey {
-                                                    span {
-                                                        title: "{mint_pk}",
-                                                        "Mint key: {truncate_pubkey(mint_pk)}"
-                                                    }
+                                                    span { title: "{mint_pk}", "Mint key: {truncate_pubkey(mint_pk)}" }
                                                 }
                                             }
-
-                                            // Show individual recommendations with comments
                                             if !mint.recommendations.is_empty() {
                                                 {
-                                                    // Filter to only show recommendations with content
-                                                    let recs_with_content: Vec<_> = mint.recommendations.iter()
+                                                    let recs_with_content: Vec<_> = mint
+                                                        .recommendations
+                                                        .iter()
                                                         .filter(|r| !r.content.trim().is_empty())
                                                         .collect();
-
                                                     if !recs_with_content.is_empty() {
                                                         rsx! {
-                                                            div {
-                                                                class: "mt-3 pt-2 border-t border-border/30",
-                                                                p {
-                                                                    class: "text-xs font-semibold text-muted-foreground mb-2",
-                                                                    "Reviews:"
-                                                                }
-                                                                div {
-                                                                    class: "space-y-2",
+                                                            div { class: "mt-3 pt-2 border-t border-border/30",
+                                                                p { class: "text-xs font-semibold text-muted-foreground mb-2", "Reviews:" }
+                                                                div { class: "space-y-2",
                                                                     for rec in recs_with_content.iter().take(3) {
-                                                                        div {
-                                                                            class: "bg-background/50 rounded p-2",
-                                                                            p {
-                                                                                class: "text-xs text-foreground line-clamp-2",
-                                                                                "\"{rec.content}\""
-                                                                            }
+                                                                        div { class: "bg-background/50 rounded p-2",
+                                                                            p { class: "text-xs text-foreground line-clamp-2", "\"{rec.content}\"" }
                                                                             p {
                                                                                 class: "text-xs text-muted-foreground mt-1",
                                                                                 title: "{rec.recommender}",
@@ -293,10 +200,7 @@ pub fn CashuMintDiscoveryModal(
                                                                         }
                                                                     }
                                                                     if recs_with_content.len() > 3 {
-                                                                        p {
-                                                                            class: "text-xs text-muted-foreground",
-                                                                            "+{recs_with_content.len() - 3} more reviews"
-                                                                        }
+                                                                        p { class: "text-xs text-muted-foreground", "+{recs_with_content.len() - 3} more reviews" }
                                                                     }
                                                                 }
                                                             }
@@ -313,29 +217,23 @@ pub fn CashuMintDiscoveryModal(
                         }
                     }
                 }
-
-                // Footer
-                div {
-                    class: "px-6 py-4 border-t border-border flex gap-3 shrink-0",
-                    // Cancel button
+                div { class: "px-6 py-4 border-t border-border flex gap-3 shrink-0",
                     button {
                         class: "flex-1 px-4 py-3 bg-accent hover:bg-accent/80 rounded-lg transition",
                         disabled: *is_adding.read(),
                         onclick: move |_| on_close.call(()),
                         "Cancel"
                     }
-
-                    // Add selected mint button
                     if let Some(url) = selected_mint.read().clone() {
                         button {
-                            class: if *is_adding.read() {
-                                "flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed"
-                            } else {
-                                "flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition"
-                            },
+                            class: if *is_adding.read() { "flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg transition opacity-50 cursor-not-allowed" } else { "flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition" },
                             disabled: *is_adding.read(),
                             onclick: move |_| on_add_mint(url.clone()),
-                            if *is_adding.read() { "Adding..." } else { "Add Mint" }
+                            if *is_adding.read() {
+                                "Adding..."
+                            } else {
+                                "Add Mint"
+                            }
                         }
                     }
                 }
@@ -343,4 +241,3 @@ pub fn CashuMintDiscoveryModal(
         }
     }
 }
-

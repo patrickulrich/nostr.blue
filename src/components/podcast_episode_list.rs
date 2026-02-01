@@ -2,12 +2,12 @@
 //!
 //! Displays a list of podcast episodes with optional filtering
 //! and continuous playback support.
-
+use crate::components::podcast_episode_card::{
+    DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
+};
+use crate::stores::music_player::MusicTrack;
 use dioxus::prelude::*;
 use std::rc::Rc;
-use crate::stores::music_player::MusicTrack;
-use crate::components::podcast_episode_card::{PodcastEpisodeCard, PodcastEpisodeCardSkeleton, DisplayEpisode};
-
 #[derive(Props, Clone, PartialEq)]
 pub struct PodcastEpisodeListProps {
     /// Episodes to display
@@ -28,54 +28,39 @@ pub struct PodcastEpisodeListProps {
     #[props(default = false)]
     pub loading: bool,
 }
-
 /// Podcast episode list component
 #[component]
 pub fn PodcastEpisodeList(props: PodcastEpisodeListProps) -> Element {
-    // Limit episodes if specified
     let episodes: Vec<_> = if let Some(limit) = props.limit {
         props.episodes.iter().take(limit).cloned().collect()
     } else {
         props.episodes.clone()
     };
-
-    // Create playlist from all episodes if enabled
-    // Use Rc to avoid O(n²) cloning when passing to each episode card
-    let playlist: Option<Rc<Vec<MusicTrack>>> = if props.enable_playlist && !episodes.is_empty() {
+    let playlist: Option<Rc<Vec<MusicTrack>>> = if props.enable_playlist
+        && !episodes.is_empty()
+    {
         Some(Rc::new(episodes.iter().map(|ep| ep.to_music_track()).collect()))
     } else {
         None
     };
-
     rsx! {
-        div {
-            class: "space-y-1",
-
-            // Loading state
+        div { class: "space-y-1",
             if props.loading {
                 for i in 0..5 {
-                    PodcastEpisodeCardSkeleton {
-                        key: "{i}"
-                    }
+                    PodcastEpisodeCardSkeleton { key: "{i}" }
                 }
             } else if episodes.is_empty() {
-                // Empty state
-                div {
-                    class: "flex flex-col items-center justify-center py-8 text-center",
-                    div {
-                        class: "text-muted-foreground text-sm",
-                        "No episodes found"
-                    }
+                div { class: "flex flex-col items-center justify-center py-8 text-center",
+                    div { class: "text-muted-foreground text-sm", "No episodes found" }
                 }
             } else {
-                // Episode list
                 for episode in episodes {
                     PodcastEpisodeCard {
                         key: "{episode.id}",
                         episode: episode.clone(),
                         show_podcast_title: props.show_podcast_title,
                         show_description: props.show_descriptions,
-                        playlist: playlist.clone()
+                        playlist: playlist.clone(),
                     }
                 }
             }

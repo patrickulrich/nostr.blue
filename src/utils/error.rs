@@ -1,5 +1,4 @@
 //! Error handling utilities for consistent error logging across the codebase.
-
 /// Log a fetch/async operation error with context.
 ///
 /// Provides consistent error logging format for fetch operations, making it
@@ -19,7 +18,6 @@
 pub fn log_fetch_error(context: &str, error: impl std::fmt::Display) {
     log::warn!("[fetch] Failed to fetch {}: {}", context, error);
 }
-
 /// Log a parse/decode error with context.
 ///
 /// Use this for parsing failures (JSON, timestamps, etc.) rather than fetch errors.
@@ -31,7 +29,6 @@ pub fn log_fetch_error(context: &str, error: impl std::fmt::Display) {
 pub fn log_parse_error(context: &str, error: impl std::fmt::Display) {
     log::warn!("[parse] Failed to parse {}: {}", context, error);
 }
-
 /// Log an error and return a user-friendly error message.
 ///
 /// Useful when you need to both log the error and display something to the user.

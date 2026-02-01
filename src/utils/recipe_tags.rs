@@ -1,6 +1,3 @@
-// Recipe tags for the /recipes feature
-// Uses "nostrcooking" tag prefix for Kind 30023 recipes
-
 /// A recipe category tag with optional emoji
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecipeTag {
@@ -11,14 +8,16 @@ pub struct RecipeTag {
     /// Optional emoji for display
     pub emoji: Option<&'static str>,
 }
-
 impl RecipeTag {
-    pub const fn new(name: &'static str, slug: &'static str, emoji: Option<&'static str>) -> Self {
+    pub const fn new(
+        name: &'static str,
+        slug: &'static str,
+        emoji: Option<&'static str>,
+    ) -> Self {
         Self { name, slug, emoji }
     }
 }
-
-/// All 163 curated recipe tags
+/// All 171 curated recipe tags
 /// These are used for filtering and categorizing recipes
 pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Alcohol", "alcohol", Some("🍸")),
@@ -46,6 +45,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Cabbage", "cabbage", None),
     RecipeTag::new("Cajun", "cajun", None),
     RecipeTag::new("Cake", "cake", Some("🍰")),
+    RecipeTag::new("Caribbean", "caribbean", Some("🏝️")),
     RecipeTag::new("Cheese", "cheese", Some("🧀")),
     RecipeTag::new("Cheesefare", "cheesefare", None),
     RecipeTag::new("Chicken", "chicken", Some("🍗")),
@@ -73,6 +73,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Easy", "easy", Some("😌")),
     RecipeTag::new("Eggs", "eggs", Some("🥚")),
     RecipeTag::new("English", "english", Some("🏴󠁧󠁢󠁥󠁮󠁧󠁿")),
+    RecipeTag::new("Ethiopian", "ethiopian", Some("🇪🇹")),
     RecipeTag::new("Fasting", "fasting", None),
     RecipeTag::new("Feta", "feta", Some("🧀")),
     RecipeTag::new("Filipino", "filipino", Some("🇵🇭")),
@@ -91,9 +92,11 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Irish", "irish", Some("☘️")),
     RecipeTag::new("Israeli", "israeli", Some("🇮🇱")),
     RecipeTag::new("Italian", "italian", Some("🇮🇹")),
+    RecipeTag::new("Jamaican", "jamaican", Some("🇯🇲")),
     RecipeTag::new("Jam", "jam", None),
     RecipeTag::new("Japanese", "japanese", Some("🇯🇵")),
     RecipeTag::new("Keto", "keto", None),
+    RecipeTag::new("Korean", "korean", Some("🇰🇷")),
     RecipeTag::new("Lamb", "lamb", Some("🐑")),
     RecipeTag::new("Layered", "layered", None),
     RecipeTag::new("Lebanese", "lebanese", Some("🇱🇧")),
@@ -107,9 +110,12 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Mexican", "mexican", Some("🇲🇽")),
     RecipeTag::new("Middle-Eastern", "middle-eastern", None),
     RecipeTag::new("Milk", "milk", Some("🥛")),
+    RecipeTag::new("Moroccan", "moroccan", Some("🇲🇦")),
     RecipeTag::new("Mushrooms", "mushrooms", Some("🍄")),
     RecipeTag::new("Mutton", "mutton", Some("🐑")),
+    RecipeTag::new("Nigerian", "nigerian", Some("🇳🇬")),
     RecipeTag::new("Noodles", "noodles", Some("🍜")),
+    RecipeTag::new("Nuts", "nuts", Some("🥜")),
     RecipeTag::new("Oven", "oven", Some("🔥")),
     RecipeTag::new("Palestinian", "palestinian", None),
     RecipeTag::new("Pancake", "pancake", Some("🥞")),
@@ -117,6 +123,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Pastry", "pastry", Some("🥐")),
     RecipeTag::new("Pate", "pate", None),
     RecipeTag::new("Peppers", "peppers", Some("🌶️")),
+    RecipeTag::new("Persian", "persian", Some("🇮🇷")),
     RecipeTag::new("Peruvian", "peruvian", Some("🇵🇪")),
     RecipeTag::new("Pie", "pie", Some("🥧")),
     RecipeTag::new("Pizza", "pizza", Some("🍕")),
@@ -142,6 +149,7 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Side", "side", None),
     RecipeTag::new("Slowcooked", "slowcooked", Some("⏲️")),
     RecipeTag::new("Snack", "snack", Some("🍿")),
+    RecipeTag::new("Somali", "somali", Some("🇸🇴")),
     RecipeTag::new("Soup", "soup", Some("🍲")),
     RecipeTag::new("Sourdough", "sourdough", Some("🍞")),
     RecipeTag::new("Southern", "southern", None),
@@ -184,7 +192,6 @@ pub static RECIPE_TAGS: &[RecipeTag] = &[
     RecipeTag::new("Healthy", "healthy", Some("🍏")),
     RecipeTag::new("Gluten Free", "gluten-free", Some("🥗")),
 ];
-
 /// A curated section of tags for the explore page
 #[derive(Clone, Debug)]
 pub struct TagSection {
@@ -192,41 +199,102 @@ pub struct TagSection {
     pub title: &'static str,
     pub tags: &'static [&'static str],
 }
-
 /// Curated tag sections for the /recipes explore page
 pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
     TagSection {
         emoji: "🍽️",
         title: "Why are you cooking?",
-        tags: &["Easy", "Quick", "Breakfast", "Lunch", "Supper", "Dessert", "Snack", "Drinks"],
+        tags: &[
+            "Easy",
+            "Quick",
+            "Breakfast",
+            "Lunch",
+            "Supper",
+            "Dessert",
+            "Snack",
+            "Drinks",
+        ],
     },
     TagSection {
         emoji: "🌍",
         title: "Explore by culture",
         tags: &[
-            "American", "Asian", "Chinese", "French", "German", "Greek", "Indian", "Italian",
-            "Japanese", "Mexican", "Spanish", "Thai", "Turkish", "Vietnamese", "Mediterranean",
-            "Middle-Eastern", "Brazilian", "Filipino", "Lebanese",
+            "American",
+            "Asian",
+            "Chinese",
+            "French",
+            "German",
+            "Greek",
+            "Indian",
+            "Italian",
+            "Japanese",
+            "Mexican",
+            "Spanish",
+            "Thai",
+            "Turkish",
+            "Vietnamese",
+            "Mediterranean",
+            "Middle-Eastern",
+            "Brazilian",
+            "Filipino",
+            "Lebanese",
         ],
     },
     TagSection {
         emoji: "🥩",
         title: "Proteins",
-        tags: &["Beef", "Chicken", "Fish", "Lamb", "Pork", "Seafood", "Steak", "Turkey", "Duck", "Eggs", "Tofu"],
+        tags: &[
+            "Beef",
+            "Chicken",
+            "Fish",
+            "Lamb",
+            "Pork",
+            "Seafood",
+            "Steak",
+            "Turkey",
+            "Duck",
+            "Eggs",
+            "Tofu",
+        ],
     },
     TagSection {
         emoji: "🥕",
         title: "Ingredients",
         tags: &[
-            "Apple", "Beans", "Bread", "Cheese", "Chocolate", "Coconut", "Corn", "Cream",
-            "Fruit", "Garlic", "Mushrooms", "Noodles", "Pasta", "Peppers", "Potato", "Rice",
-            "Spinach", "Tomato", "Vegetables",
+            "Apple",
+            "Beans",
+            "Bread",
+            "Cheese",
+            "Chocolate",
+            "Coconut",
+            "Corn",
+            "Cream",
+            "Fruit",
+            "Garlic",
+            "Mushrooms",
+            "Noodles",
+            "Pasta",
+            "Peppers",
+            "Potato",
+            "Rice",
+            "Spinach",
+            "Tomato",
+            "Vegetables",
         ],
     },
     TagSection {
         emoji: "🍳",
         title: "Meals",
-        tags: &["Pizza", "Pasta", "Soup", "Salad", "Sandwich", "Breakfast", "Lunch", "Supper"],
+        tags: &[
+            "Pizza",
+            "Pasta",
+            "Soup",
+            "Salad",
+            "Sandwich",
+            "Breakfast",
+            "Lunch",
+            "Supper",
+        ],
     },
     TagSection {
         emoji: "🔥",
@@ -244,7 +312,6 @@ pub static CURATED_TAG_SECTIONS: &[TagSection] = &[
         tags: &["Spicy", "Sweet", "Curry"],
     },
 ];
-
 /// Tag aliases for normalization (maps variations to canonical tag names)
 pub static TAG_ALIASES: &[(&str, &str)] = &[
     ("Spice", "Spicy"),
@@ -256,18 +323,15 @@ pub static TAG_ALIASES: &[(&str, &str)] = &[
     ("Middle Eastern", "Middle-Eastern"),
     ("MiddleEastern", "Middle-Eastern"),
 ];
-
 /// Find a tag by name (case-insensitive)
 pub fn find_tag(name: &str) -> Option<&'static RecipeTag> {
     let name_lower = name.to_lowercase();
     RECIPE_TAGS.iter().find(|t| t.name.to_lowercase() == name_lower)
 }
-
 /// Find a tag by slug
 pub fn find_tag_by_slug(slug: &str) -> Option<&'static RecipeTag> {
     RECIPE_TAGS.iter().find(|t| t.slug == slug)
 }
-
 /// Normalize a tag name using aliases
 pub fn normalize_tag(name: &str) -> &str {
     TAG_ALIASES
@@ -276,7 +340,6 @@ pub fn normalize_tag(name: &str) -> &str {
         .map(|(_, canonical)| *canonical)
         .unwrap_or(name)
 }
-
 /// Get tags matching a search query (case-insensitive prefix match)
 pub fn search_tags(query: &str) -> Vec<&'static RecipeTag> {
     if query.is_empty() {
@@ -288,49 +351,34 @@ pub fn search_tags(query: &str) -> Vec<&'static RecipeTag> {
         .filter(|t| t.name.to_lowercase().starts_with(&query_lower))
         .collect()
 }
-
 /// Get the curated tags for a specific section by title
 pub fn get_section_tags(section_title: &str) -> Option<Vec<&'static RecipeTag>> {
     CURATED_TAG_SECTIONS
         .iter()
         .find(|s| s.title == section_title)
         .map(|section| {
-            section.tags
-                .iter()
-                .filter_map(|name| find_tag(name))
-                .collect()
+            section.tags.iter().filter_map(|name| find_tag(name)).collect()
         })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_tag_count() {
-        assert_eq!(RECIPE_TAGS.len(), 163);
+        assert_eq!(RECIPE_TAGS.len(), 171);
     }
-
     #[test]
     fn test_find_tag() {
         let italian = find_tag("Italian");
         assert!(italian.is_some());
         assert_eq!(italian.unwrap().emoji, Some("🇮🇹"));
     }
-
-    #[test]
-    fn test_nostr_tag() {
-        let italian = find_tag("Italian").unwrap();
-        assert_eq!(italian.nostr_tag(), "nostrcooking-italian");
-    }
-
     #[test]
     fn test_normalize_tag() {
         assert_eq!(normalize_tag("Spice"), "Spicy");
         assert_eq!(normalize_tag("Gluten-Free"), "Gluten Free");
-        assert_eq!(normalize_tag("Italian"), "Italian"); // No alias
+        assert_eq!(normalize_tag("Italian"), "Italian");
     }
-
     #[test]
     fn test_search_tags() {
         let results = search_tags("It");

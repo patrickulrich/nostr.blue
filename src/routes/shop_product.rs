@@ -1,11 +1,14 @@
 //! Shop Product Detail - View a single product (NIP-99 Kind 30402)
-
-use dioxus::prelude::*;
-use crate::utils::nip99::{Product, ProductReview, ShippingOption};
-use crate::stores::shop_store::{fetch_product_by_naddr, add_to_cart, fetch_product_reviews, fetch_shipping_options, CART_ITEMS};
-use crate::components::shop::{QuantitySelector, ImageCarousel, ReviewCard, MerchantCard, ConditionBadge};
+use crate::components::shop::{
+    ConditionBadge, ImageCarousel, MerchantCard, QuantitySelector, ReviewCard,
+};
 use crate::routes::Route;
-
+use crate::stores::shop_store::{
+    add_to_cart, fetch_product_by_naddr, fetch_product_reviews, fetch_shipping_options,
+    CART_ITEMS,
+};
+use crate::utils::nip99::{Product, ProductReview, ShippingOption};
+use dioxus::prelude::*;
 /// Product detail page
 #[component]
 pub fn ShopProductDetail(naddr: String) -> Element {
@@ -18,8 +21,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
     let mut reviews_loading = use_signal(|| false);
     let mut shipping_opts = use_signal(Vec::<ShippingOption>::new);
     let mut shipping_loading = use_signal(|| false);
-
-    // Fetch product on mount
     let naddr_clone = naddr.clone();
     use_effect(move || {
         let naddr = naddr_clone.clone();
@@ -29,18 +30,16 @@ pub fn ShopProductDetail(naddr: String) -> Element {
             match fetch_product_by_naddr(&naddr).await {
                 Ok(Some(p)) => {
                     product.set(Some(p.clone()));
-
-                    // Fetch reviews using product coordinate
                     reviews_loading.set(true);
                     if let Ok(r) = fetch_product_reviews(&p.coordinate).await {
                         reviews.set(r);
                     }
                     reviews_loading.set(false);
-
-                    // Fetch shipping options if physical product
                     if !p.format.is_digital() && !p.shipping_options.is_empty() {
                         shipping_loading.set(true);
-                        if let Ok(opts) = fetch_shipping_options(&p.shipping_options).await {
+                        if let Ok(opts) = fetch_shipping_options(&p.shipping_options)
+                            .await
+                        {
                             shipping_opts.set(opts);
                         }
                         shipping_loading.set(false);
@@ -52,10 +51,8 @@ pub fn ShopProductDetail(naddr: String) -> Element {
             loading.set(false);
         });
     });
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -67,8 +64,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
                     h1 { class: "text-xl font-bold flex-1", "Product" }
-
-                    // Cart link with count
                     {
                         let cart_items = CART_ITEMS.read();
                         let cart_count = cart_items.len();
@@ -87,11 +82,8 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                     }
                 }
             }
-
-            // Content
             div { class: "max-w-4xl mx-auto p-4",
                 if *loading.read() {
-                    // Loading skeleton
                     div { class: "grid md:grid-cols-2 gap-8",
                         div { class: "aspect-square bg-muted rounded-lg animate-pulse" }
                         div { class: "space-y-4",
@@ -102,7 +94,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                         }
                     }
                 } else if let Some(err) = error.read().as_ref().cloned() {
-                    // Error state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "😢" }
                         h2 { class: "text-xl font-semibold mb-2", "Failed to load product" }
@@ -117,47 +108,30 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                         }
                     }
                 } else if let Some(prod) = product.read().clone() {
-                    // Product details
                     div { class: "grid md:grid-cols-2 gap-8",
-                        // Left column - Images
                         div {
                             ImageCarousel {
                                 images: prod.images.iter().map(|i| i.url.clone()).collect(),
-                                alt: Some(prod.title.clone())
+                                alt: Some(prod.title.clone()),
                             }
                         }
-
-                        // Right column - Info
                         div { class: "space-y-6",
-                            // Title
                             h1 { class: "text-2xl md:text-3xl font-bold", "{prod.title}" }
-
-                            // Price
                             div { class: "flex items-baseline gap-3",
                                 {
-                                    let price_sats = if prod.price.is_sats() {
-                                        prod.price.amount as u64
-                                    } else {
-                                        0
-                                    };
+                                    let price_sats = if prod.price.is_sats() { prod.price.amount as u64 } else { 0 };
                                     if price_sats > 0 {
                                         rsx! {
-                                            span { class: "text-3xl font-bold text-amber-500",
-                                                "⚡{price_sats}"
-                                            }
+                                            span { class: "text-3xl font-bold text-amber-500", "⚡{price_sats}" }
                                             span { class: "text-muted-foreground", "sats" }
                                         }
                                     } else {
                                         rsx! {
-                                            span { class: "text-3xl font-bold",
-                                                "{prod.price.display()}"
-                                            }
+                                            span { class: "text-3xl font-bold", "{prod.price.display()}" }
                                         }
                                     }
                                 }
                             }
-
-                            // Stock status
                             if let Some(stock) = prod.stock {
                                 if stock == 0 {
                                     span { class: "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
@@ -173,42 +147,38 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                     }
                                 }
                             }
-
-                            // Format and condition badges
                             div { class: "flex gap-2 flex-wrap",
                                 span { class: "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-muted",
-                                    if prod.format.is_digital() { "📥 Digital Product" } else { "📦 Physical Product" }
+                                    if prod.format.is_digital() {
+                                        "📥 Digital Product"
+                                    } else {
+                                        "📦 Physical Product"
+                                    }
                                 }
                                 if let Some(ref cond) = prod.condition {
                                     ConditionBadge { condition: cond.clone() }
                                 }
                             }
-
-                            // Quantity selector and Add to Cart
                             if prod.stock != Some(0) {
                                 div { class: "space-y-4 pt-4 border-t border-border",
-                                    // Quantity
                                     div { class: "flex items-center gap-4",
                                         span { class: "text-sm font-medium", "Quantity:" }
                                         QuantitySelector {
                                             quantity: *quantity.read(),
                                             max: prod.stock.unwrap_or(99),
-                                            on_change: move |q: u32| quantity.set(q)
+                                            on_change: move |q: u32| quantity.set(q),
                                         }
                                     }
-
-                                    // Add to cart button (read cart inside render for reactivity)
                                     {
                                         let prod_clone = prod.clone();
                                         let qty = *quantity.read();
-                                        // Read cart state inside render to stay fresh
                                         let cart_items = CART_ITEMS.read();
                                         let in_cart = cart_items.iter().any(|item| item.product.naddr == prod.naddr);
-                                        let in_cart_qty = cart_items.iter()
+                                        let in_cart_qty = cart_items
+                                            .iter()
                                             .find(|item| item.product.naddr == prod.naddr)
                                             .map(|item| item.quantity)
                                             .unwrap_or(0);
-
                                         rsx! {
                                             button {
                                                 class: "w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition flex items-center justify-center gap-2",
@@ -223,19 +193,13 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                                     "Add to Cart"
                                                 }
                                             }
-
-                                            // In cart indicator
                                             if in_cart {
-                                                p { class: "text-sm text-center text-muted-foreground",
-                                                    "You have {in_cart_qty} in your cart"
-                                                }
+                                                p { class: "text-sm text-center text-muted-foreground", "You have {in_cart_qty} in your cart" }
                                             }
                                         }
                                     }
                                 }
                             }
-
-                            // Description
                             if let Some(desc) = &prod.description {
                                 div { class: "pt-4 border-t border-border",
                                     h2 { class: "text-lg font-semibold mb-3", "Description" }
@@ -244,8 +208,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                     }
                                 }
                             }
-
-                            // Specifications (if any)
                             if !prod.specs.is_empty() {
                                 div { class: "pt-4 border-t border-border",
                                     h2 { class: "text-lg font-semibold mb-3", "Specifications" }
@@ -257,22 +219,22 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                     }
                                 }
                             }
-
-                            // Shipping options (for physical products)
                             if !prod.format.is_digital() && !prod.shipping_options.is_empty() {
                                 div { class: "pt-4 border-t border-border",
                                     h2 { class: "text-lg font-semibold mb-3", "Shipping Options" }
-
                                     if *shipping_loading.read() {
-                                        div { class: "text-muted-foreground text-sm", "Loading shipping options..." }
+                                        div { class: "text-muted-foreground text-sm",
+                                            "Loading shipping options..."
+                                        }
                                     } else if !shipping_opts.read().is_empty() {
-                                        // Display fetched shipping options with prices and durations
                                         div { class: "space-y-3",
                                             for opt in shipping_opts.read().iter() {
                                                 div { class: "bg-muted rounded-lg p-3",
                                                     div { class: "flex items-center justify-between",
                                                         div {
-                                                            span { class: "font-medium", "{opt.title}" }
+                                                            span { class: "font-medium",
+                                                                "{opt.title}"
+                                                            }
                                                             for country in opt.countries.iter() {
                                                                 span { class: "ml-2 text-xs text-muted-foreground bg-background px-2 py-0.5 rounded",
                                                                     "{country}"
@@ -292,7 +254,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                             }
                                         }
                                     } else {
-                                        // Fallback: just show region coordinates
                                         div { class: "flex flex-wrap gap-2",
                                             for region in prod.shipping_options.iter() {
                                                 span { class: "px-3 py-1 bg-muted rounded-full text-sm",
@@ -303,8 +264,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                     }
                                 }
                             }
-
-                            // Digital delivery info (for digital products)
                             if prod.has_digital_delivery() {
                                 div { class: "pt-4 border-t border-border",
                                     div { class: "bg-blue-500/10 border border-blue-500/30 rounded-lg p-4",
@@ -313,7 +272,9 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                             h3 { class: "font-medium", "Digital Download" }
                                         }
                                         if let Some(info) = prod.get_download_info() {
-                                            p { class: "text-sm text-muted-foreground", "{info}" }
+                                            p { class: "text-sm text-muted-foreground",
+                                                "{info}"
+                                            }
                                         }
                                         p { class: "text-xs text-muted-foreground mt-2",
                                             "You'll receive download access after purchase"
@@ -321,8 +282,6 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                     }
                                 }
                             }
-
-                            // Categories/Tags
                             if !prod.categories.is_empty() {
                                 div { class: "pt-4 border-t border-border",
                                     h2 { class: "text-lg font-semibold mb-3", "Categories" }
@@ -335,12 +294,9 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                     }
                                 }
                             }
-
-                            // Merchant info
                             div { class: "pt-4 border-t border-border",
                                 h2 { class: "text-lg font-semibold mb-3", "Seller" }
                                 {
-                                    // Calculate average rating and review count from loaded reviews
                                     let reviews_list = reviews.read();
                                     let review_count = reviews_list.len();
                                     let avg_rating = if review_count > 0 {
@@ -353,23 +309,18 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                         MerchantCard {
                                             pubkey: prod.pubkey.clone(),
                                             review_count: Some(review_count),
-                                            avg_rating: avg_rating
+                                            avg_rating,
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    // Reviews section
                     div { class: "mt-12 pt-8 border-t border-border col-span-full",
                         div { class: "flex items-center justify-between mb-6",
                             h2 { class: "text-xl font-bold", "Customer Reviews" }
-                            span { class: "text-muted-foreground",
-                                "{reviews.read().len()} reviews"
-                            }
+                            span { class: "text-muted-foreground", "{reviews.read().len()} reviews" }
                         }
-
-                        // Reviews list
                         div { class: "space-y-4",
                             if *reviews_loading.read() {
                                 div { class: "text-center py-8",
@@ -381,16 +332,12 @@ pub fn ShopProductDetail(naddr: String) -> Element {
                                 }
                             } else {
                                 for review in reviews.read().iter().cloned() {
-                                    ReviewCard {
-                                        key: "{review.event_id}",
-                                        review: review
-                                    }
+                                    ReviewCard { key: "{review.event_id}", review }
                                 }
                             }
                         }
                     }
                 } else {
-                    // No product
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "📦" }
                         h2 { class: "text-xl font-semibold mb-2", "Product not found" }

@@ -2,11 +2,8 @@ use dioxus::prelude::*;
 use dioxus_primitives::dialog::{
     self, DialogContentProps, DialogDescriptionProps, DialogRootProps, DialogTitleProps,
 };
-
 #[component]
 pub fn DialogRoot(props: DialogRootProps) -> Element {
-    // Use the caller's is_modal value; defaults to true via DialogRootProps
-    // Modal dialogs get proper centering and backdrop styling via CSS
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("./style.css") }
         dialog::DialogRoot {
@@ -21,14 +18,12 @@ pub fn DialogRoot(props: DialogRootProps) -> Element {
         }
     }
 }
-
 #[component]
 pub fn DialogContent(props: DialogContentProps) -> Element {
     rsx! {
         dialog::DialogContent { class: "dialog", id: props.id, attributes: props.attributes, {props.children} }
     }
 }
-
 #[component]
 pub fn DialogTitle(props: DialogTitleProps) -> Element {
     rsx! {
@@ -40,7 +35,6 @@ pub fn DialogTitle(props: DialogTitleProps) -> Element {
         }
     }
 }
-
 #[component]
 pub fn DialogDescription(props: DialogDescriptionProps) -> Element {
     rsx! {
