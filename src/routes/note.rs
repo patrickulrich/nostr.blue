@@ -306,12 +306,26 @@ pub fn Note(note_id: String, from_voice: Option<String>) -> Element {
                         event: event.clone(),
                     }
                 } else {
-                    NoteCard {
-                        key: "{event.id}",
-                        event: event.clone(),
-                        collapsible: false,
-                        cached_muted_posts: cached_muted_posts.read().clone(),
-                        cached_blocked_users: cached_blocked_users.read().clone(),
+                    {
+                        let root_event_id = event.id;
+                        rsx! {
+                            NoteCard {
+                                key: "{event.id}",
+                                event: event.clone(),
+                                collapsible: false,
+                                cached_muted_posts: cached_muted_posts.read().clone(),
+                                cached_blocked_users: cached_blocked_users.read().clone(),
+                                on_reply: move |reply_event: NostrEvent| {
+                                    // Add the reply optimistically
+                                    let already_exists = replies.read().iter().any(|e| e.id == reply_event.id);
+                                    if !already_exists {
+                                        log::info!("Adding reply optimistically from main note: {}", reply_event.id.to_hex());
+                                        replies.write().push(reply_event);
+                                        crate::utils::thread_tree::invalidate_thread_tree_cache(&root_event_id);
+                                    }
+                                },
+                            }
+                        }
                     }
                 }
                 div { class: "border-b border-border" }
