@@ -20,6 +20,7 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
     let mut is_estimating_fee = use_signal(|| false);
     let mut fee_request_id = use_signal(|| 0u32);
     let mut token_claimed = use_signal(|| Option::<bool>::None);
+    let mut watcher_request_id = use_signal(|| 0u32);
     let is_mounted = use_hook(|| Rc::new(Cell::new(true)));
     let is_mounted_cleanup = is_mounted.clone();
     use_drop(move || {
@@ -146,12 +147,18 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                         // Only show "Pending" when claim tracking is active
                         match cashu::extract_y_values_from_token(&token_string) {
                             Ok(y_values) if !y_values.is_empty() => {
+                                // Invalidate any previous watcher and start new one
+                                let current_watcher_id = watcher_request_id.peek().wrapping_add(1);
+                                watcher_request_id.set(current_watcher_id);
                                 token_claimed.set(Some(false));
                                 cashu::watch_sent_token_claims(
                                     mint_for_watch,
                                     y_values,
                                     move || {
-                                        if is_mounted_for_watch.get() {
+                                        // Only update if this watcher is still the active one
+                                        if is_mounted_for_watch.get()
+                                            && *watcher_request_id.read() == current_watcher_id
+                                        {
                                             token_claimed.set(Some(true));
                                         }
                                     },
@@ -159,6 +166,9 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                             }
                             _ => {
                                 // No tracking available - don't show status badge
+                                // Also invalidate any pending watchers
+                                let next_id = watcher_request_id.peek().wrapping_add(1);
+                                watcher_request_id.set(next_id);
                                 token_claimed.set(None);
                             }
                         }
