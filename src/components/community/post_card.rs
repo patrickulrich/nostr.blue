@@ -1,37 +1,40 @@
 //! Community Post Card Component
 //! Displays a community post with approval status badges, moderation actions,
 //! reactions, zaps, and threading support
-
-use dioxus::prelude::*;
-use crate::stores::community_store::{
-    Community, CommunityPost, ApprovalStatus, AutoApprovalReason, UserRole,
-    approve_post, remove_post, can_moderate,
-};
+use crate::components::{CommunityPostComposer, RichContent, ZapModal};
+use crate::hooks::{use_reaction, ReactionState};
+use crate::routes::Route;
+use crate::services::aggregation::InteractionCounts;
 use crate::stores::auth_store;
+use crate::stores::community_store::{
+    approve_post, can_moderate, remove_post, ApprovalStatus, AutoApprovalReason,
+    Community, CommunityPost, UserRole,
+};
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::get_cached_profile;
-use crate::services::aggregation::InteractionCounts;
-use crate::utils::format::{format_sats_human, format_relative_time_or};
+use crate::utils::format::{format_relative_time_or, format_sats_human};
 use crate::utils::validation::is_valid_http_url;
-use crate::hooks::{use_reaction, ReactionState};
-use crate::components::{RichContent, ZapModal, CommunityPostComposer};
-use crate::routes::Route;
-
+use dioxus::prelude::*;
 /// Maximum depth for visual indentation
 const MAX_VISUAL_DEPTH: usize = 4;
-
 /// Post card for community feeds with approval status, moderation, reactions, and zaps
 #[component]
 pub fn CommunityPostCard(
     post: CommunityPost,
     community: Community,
-    #[props(default = 0)] depth: usize,
-    #[props(default)] interaction_counts: Option<InteractionCounts>,
-    #[props(default = true)] show_actions: bool,
-    #[props(default = false)] show_moderation: bool,
-    #[props(default)] on_reply_success: Option<EventHandler<String>>,
+    #[props(default = 0)]
+    depth: usize,
+    #[props(default)]
+    interaction_counts: Option<InteractionCounts>,
+    #[props(default = true)]
+    show_actions: bool,
+    #[props(default = false)]
+    show_moderation: bool,
+    #[props(default)]
+    on_reply_success: Option<EventHandler<String>>,
     /// Called when a moderation action (approve/remove) completes successfully
-    #[props(default)] on_moderation_complete: Option<EventHandler<()>>,
+    #[props(default)]
+    on_moderation_complete: Option<EventHandler<()>>,
 ) -> Element {
     let mut approving = use_signal(|| false);
     let mut removing = use_signal(|| false);
@@ -40,17 +43,12 @@ pub fn CommunityPostCard(
     let mut remove_reason = use_signal(String::new);
     let mut error = use_signal(|| None::<String>);
     let mut show_zap_modal = use_signal(|| false);
-
     let has_signer = *HAS_SIGNER.read();
-
-    // Get current user for moderation check
     let current_pubkey = auth_store::get_pubkey();
     let is_moderator = current_pubkey
         .as_ref()
         .map(|pk| can_moderate(pk, &community))
         .unwrap_or(false);
-
-    // Get author profile
     let profile = get_cached_profile(&post.pubkey);
     let author_name = profile
         .as_ref()
@@ -61,11 +59,7 @@ pub fn CommunityPostCard(
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
     let author_pubkey = post.pubkey.clone();
-
-    // Format timestamp
     let time_ago = format_relative_time_or(post.created_at, "just now");
-
-    // Calculate indentation class (capped at MAX_VISUAL_DEPTH)
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {
         0 => "",
         1 => "ml-4 border-l-2 border-blue-200 dark:border-blue-800 pl-3",
@@ -73,31 +67,22 @@ pub fn CommunityPostCard(
         3 => "ml-12 border-l-2 border-green-200 dark:border-green-800 pl-3",
         _ => "ml-16 border-l-2 border-orange-200 dark:border-orange-800 pl-3",
     };
-
-    // Set up reaction hook
     let reaction = use_reaction(
         post.id.clone(),
         post.pubkey.clone(),
         interaction_counts.as_ref(),
     );
-
-    // Get counts from precomputed or default
     let reply_count = interaction_counts.as_ref().map(|c| c.replies).unwrap_or(0);
     let zap_amount = interaction_counts.as_ref().map(|c| c.zap_amount_sats).unwrap_or(0);
-
-    // Clone values for closures
     let post_for_approve = post.clone();
     let community_for_approve = community.clone();
     let post_for_remove = post.clone();
     let community_for_remove = community.clone();
-
-    // Handle approve
     let handle_approve = move |_| {
         let post = post_for_approve.clone();
         let community = community_for_approve.clone();
         approving.set(true);
         error.set(None);
-
         spawn(async move {
             match approve_post(&community, &post).await {
                 Ok(_) => {
@@ -114,17 +99,18 @@ pub fn CommunityPostCard(
             approving.set(false);
         });
     };
-
-    // Handle remove
     let handle_remove = move |_| {
         let post = post_for_remove.clone();
         let community = community_for_remove.clone();
         let reason = remove_reason.read().clone();
         removing.set(true);
         error.set(None);
-
         spawn(async move {
-            let reason_opt = if reason.is_empty() { None } else { Some(reason.as_str()) };
+            let reason_opt = if reason.is_empty() {
+                None
+            } else {
+                Some(reason.as_str())
+            };
             match remove_post(&community, &post, reason_opt).await {
                 Ok(_) => {
                     log::info!("Post removed: {}", post.id);
@@ -141,87 +127,55 @@ pub fn CommunityPostCard(
             removing.set(false);
         });
     };
-
     rsx! {
-        div {
-            class: "p-4 hover:bg-accent/50 transition {indent_class}",
-
-            // Error message
+        div { class: "p-4 hover:bg-accent/50 transition {indent_class}",
             if let Some(err) = error.read().as_ref() {
-                div {
-                    class: "mb-3 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                div { class: "mb-3 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                     "{err}"
                 }
             }
-
-            // Thread depth indicator (for deeply nested)
             if depth > MAX_VISUAL_DEPTH {
-                div {
-                    class: "text-xs text-muted-foreground mb-2",
-                    "Nested {depth} levels deep"
-                }
+                div { class: "text-xs text-muted-foreground mb-2", "Nested {depth} levels deep" }
             }
-
-            // Author header with approval badge
-            div {
-                class: "flex items-center justify-between mb-2",
-
-                // Author info
-                div {
-                    class: "flex items-center gap-2",
-
-                    // Avatar with link (Security Fix #5 - URL validation)
+            div { class: "flex items-center justify-between mb-2",
+                div { class: "flex items-center gap-2",
                     Link {
-                        to: Route::Profile { pubkey: author_pubkey.clone() },
+                        to: Route::Profile {
+                            pubkey: author_pubkey.clone(),
+                        },
                         if let Some(ref pic) = author_picture.as_ref().filter(|u| is_valid_http_url(u)) {
                             img {
                                 class: "w-10 h-10 rounded-full object-cover",
                                 src: "{pic}",
-                                alt: "Profile"
+                                alt: "Profile",
                             }
                         } else {
-                            div {
-                                class: "w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold",
+                            div { class: "w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold",
                                 "{author_name.chars().next().unwrap_or('?').to_uppercase()}"
                             }
                         }
                     }
-
-                    // Name and time
                     div {
                         Link {
-                            to: Route::Profile { pubkey: author_pubkey.clone() },
+                            to: Route::Profile {
+                                pubkey: author_pubkey.clone(),
+                            },
                             class: "font-medium hover:underline",
                             "{author_name}"
                         }
-                        p {
-                            class: "text-xs text-muted-foreground",
-                            "{time_ago}"
-                        }
+                        p { class: "text-xs text-muted-foreground", "{time_ago}" }
                     }
                 }
-
-                // Approval status badge
-                ApprovalBadge {
-                    status: post.approval_status.clone()
-                }
+                ApprovalBadge { status: post.approval_status.clone() }
             }
-
-            // Post content
-            div {
-                class: "mb-3",
+            div { class: "mb-3",
                 RichContent {
                     content: post.content.clone(),
-                    tags: post.event.tags.iter().cloned().collect()
+                    tags: post.event.tags.iter().cloned().collect(),
                 }
             }
-
-            // Interaction bar (reply count, reactions, zaps)
             if show_actions {
-                div {
-                    class: "flex items-center gap-4 text-sm text-muted-foreground mb-2",
-
-                    // Reply button
+                div { class: "flex items-center gap-4 text-sm text-muted-foreground mb-2",
                     if has_signer {
                         button {
                             class: "flex items-center gap-1 hover:text-blue-500 transition",
@@ -246,9 +200,7 @@ pub fn CommunityPostCard(
                             }
                         }
                     } else if reply_count > 0 {
-                        // Read-only reply count when not signed in
-                        span {
-                            class: "flex items-center gap-1",
+                        span { class: "flex items-center gap-1",
                             svg {
                                 class: "w-4 h-4",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -265,15 +217,9 @@ pub fn CommunityPostCard(
                             "{reply_count}"
                         }
                     }
-
-                    // Reaction button (Accessibility Fix #9 - consolidated class attributes)
                     if has_signer {
                         button {
-                            class: if *reaction.is_liked.read() {
-                                "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50 text-red-500"
-                            } else {
-                                "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50"
-                            },
+                            class: if *reaction.is_liked.read() { "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50 text-red-500" } else { "flex items-center gap-1 hover:text-red-500 transition disabled:opacity-50" },
                             disabled: matches!(*reaction.state.read(), ReactionState::Pending),
                             onclick: move |_| reaction.toggle_like.call(()),
                             svg {
@@ -294,9 +240,7 @@ pub fn CommunityPostCard(
                             }
                         }
                     } else {
-                        // Read-only reaction count
-                        span {
-                            class: "flex items-center gap-1",
+                        span { class: "flex items-center gap-1",
                             svg {
                                 class: "w-4 h-4",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -315,15 +259,9 @@ pub fn CommunityPostCard(
                             }
                         }
                     }
-
-                    // Zap button
                     if has_signer {
                         button {
-                            class: if zap_amount > 0 {
-                                "flex items-center gap-1 hover:text-yellow-500 transition text-yellow-500"
-                            } else {
-                                "flex items-center gap-1 hover:text-yellow-500 transition"
-                            },
+                            class: if zap_amount > 0 { "flex items-center gap-1 hover:text-yellow-500 transition text-yellow-500" } else { "flex items-center gap-1 hover:text-yellow-500 transition" },
                             onclick: move |_| show_zap_modal.set(true),
                             svg {
                                 class: "w-4 h-4",
@@ -343,9 +281,7 @@ pub fn CommunityPostCard(
                             }
                         }
                     } else if zap_amount > 0 {
-                        // Read-only zap amount
-                        span {
-                            class: "flex items-center gap-1 text-yellow-500",
+                        span { class: "flex items-center gap-1 text-yellow-500",
                             svg {
                                 class: "w-4 h-4",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -363,29 +299,20 @@ pub fn CommunityPostCard(
                         }
                     }
                 }
-
-                // Moderation actions (only for moderators viewing pending posts)
                 if show_moderation && is_moderator {
-                    div {
-                        class: "flex items-center gap-2 pt-2 border-t border-border",
-
-                        // Approve button (only for pending posts)
+                    div { class: "flex items-center gap-2 pt-2 border-t border-border",
                         if matches!(post.approval_status, ApprovalStatus::Pending) {
                             button {
                                 class: "px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-sm font-medium transition disabled:opacity-50",
                                 disabled: *approving.read(),
                                 onclick: handle_approve,
                                 if *approving.read() {
-                                    span {
-                                        class: "flex items-center gap-1",
-                                        span {
-                                            class: "inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"
-                                        }
+                                    span { class: "flex items-center gap-1",
+                                        span { class: "inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" }
                                         "Approving..."
                                     }
                                 } else {
-                                    span {
-                                        class: "flex items-center gap-1",
+                                    span { class: "flex items-center gap-1",
                                         svg {
                                             class: "w-4 h-4",
                                             xmlns: "http://www.w3.org/2000/svg",
@@ -404,14 +331,11 @@ pub fn CommunityPostCard(
                                 }
                             }
                         }
-
-                        // Remove button
                         if !matches!(post.approval_status, ApprovalStatus::Removed(_)) {
                             button {
                                 class: "px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-medium transition",
                                 onclick: move |_| show_remove_dialog.set(true),
-                                span {
-                                    class: "flex items-center gap-1",
+                                span { class: "flex items-center gap-1",
                                     svg {
                                         class: "w-4 h-4",
                                         xmlns: "http://www.w3.org/2000/svg",
@@ -434,13 +358,10 @@ pub fn CommunityPostCard(
                     }
                 }
             }
-
-            // Remove dialog
             if *show_remove_dialog.read() {
                 div {
                     class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
                     onclick: move |_| show_remove_dialog.set(false),
-
                     div {
                         class: "bg-background rounded-lg p-6 max-w-md w-full shadow-xl",
                         role: "dialog",
@@ -460,27 +381,18 @@ pub fn CommunityPostCard(
                                 show_remove_dialog.set(false);
                             }
                         },
-
-                        h3 {
-                            class: "text-lg font-bold mb-4",
-                            "Remove Post"
-                        }
-
-                        p {
-                            class: "text-sm text-muted-foreground mb-4",
+                        h3 { class: "text-lg font-bold mb-4", "Remove Post" }
+                        p { class: "text-sm text-muted-foreground mb-4",
                             "Are you sure you want to remove this post? Optionally provide a reason."
                         }
-
                         textarea {
                             class: "w-full p-3 border border-border rounded-lg mb-4 bg-background",
                             placeholder: "Reason (optional)...",
                             rows: 3,
                             value: "{remove_reason}",
-                            oninput: move |evt| remove_reason.set(evt.value())
+                            oninput: move |evt| remove_reason.set(evt.value()),
                         }
-
-                        div {
-                            class: "flex gap-2 justify-end",
+                        div { class: "flex gap-2 justify-end",
                             button {
                                 class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition",
                                 onclick: move |_| show_remove_dialog.set(false),
@@ -491,11 +403,8 @@ pub fn CommunityPostCard(
                                 disabled: *removing.read(),
                                 onclick: handle_remove,
                                 if *removing.read() {
-                                    span {
-                                        class: "flex items-center gap-2",
-                                        span {
-                                            class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"
-                                        }
+                                    span { class: "flex items-center gap-2",
+                                        span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
                                         "Removing..."
                                     }
                                 } else {
@@ -506,29 +415,23 @@ pub fn CommunityPostCard(
                     }
                 }
             }
-
-            // Zap modal
             if *show_zap_modal.read() {
                 {
-                    // Reuse author_name and profile already computed at top of component
                     let recipient_name = author_name.clone();
                     let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
-                    let lud06: Option<String> = None; // lud06 not commonly used
-
+                    let lud06: Option<String> = None;
                     rsx! {
                         ZapModal {
                             recipient_pubkey: post.pubkey.clone(),
-                            recipient_name: recipient_name,
-                            lud16: lud16,
-                            lud06: lud06,
+                            recipient_name,
+                            lud16,
+                            lud06,
                             event_id: Some(post.id.clone()),
-                            on_close: move |_| show_zap_modal.set(false)
+                            on_close: move |_| show_zap_modal.set(false),
                         }
                     }
                 }
             }
-
-            // Reply composer modal
             if *show_reply_composer.read() {
                 {
                     let on_reply_success_clone = on_reply_success;
@@ -542,7 +445,7 @@ pub fn CommunityPostCard(
                                 if let Some(handler) = on_reply_success_clone.as_ref() {
                                     handler.call(event_id);
                                 }
-                            }
+                            },
                         }
                     }
                 }
@@ -550,7 +453,6 @@ pub fn CommunityPostCard(
         }
     }
 }
-
 /// Approval status badge component
 #[component]
 pub fn ApprovalBadge(status: ApprovalStatus) -> Element {
@@ -562,8 +464,7 @@ pub fn ApprovalBadge(status: ApprovalStatus) -> Element {
                 AutoApprovalReason::ApprovedMember => ("Member", "star"),
             };
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded text-xs font-medium flex items-center gap-1",
                     if icon == "crown" {
                         svg {
                             class: "w-3 h-3",
@@ -614,8 +515,7 @@ pub fn ApprovalBadge(status: ApprovalStatus) -> Element {
         }
         ApprovalStatus::Approved(_) => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -635,8 +535,7 @@ pub fn ApprovalBadge(status: ApprovalStatus) -> Element {
         }
         ApprovalStatus::Pending => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -681,15 +580,13 @@ pub fn ApprovalBadge(status: ApprovalStatus) -> Element {
         }
     }
 }
-
 /// User role badge component
 #[component]
 pub fn UserRoleBadge(role: UserRole) -> Element {
     match role {
         UserRole::Owner => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -710,8 +607,7 @@ pub fn UserRoleBadge(role: UserRole) -> Element {
         }
         UserRole::Moderator => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -731,8 +627,7 @@ pub fn UserRoleBadge(role: UserRole) -> Element {
         }
         UserRole::ApprovedMember => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -752,8 +647,7 @@ pub fn UserRoleBadge(role: UserRole) -> Element {
         }
         UserRole::Pending => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -774,8 +668,7 @@ pub fn UserRoleBadge(role: UserRole) -> Element {
         }
         UserRole::Declined => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-xs font-medium flex items-center gap-1",
+                span { class: "px-2 py-0.5 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-xs font-medium flex items-center gap-1",
                     svg {
                         class: "w-3 h-3",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -788,8 +681,18 @@ pub fn UserRoleBadge(role: UserRole) -> Element {
                         stroke_linecap: "round",
                         stroke_linejoin: "round",
                         circle { cx: "12", cy: "12", r: "10" }
-                        line { x1: "15", y1: "9", x2: "9", y2: "15" }
-                        line { x1: "9", y1: "9", x2: "15", y2: "15" }
+                        line {
+                            x1: "15",
+                            y1: "9",
+                            x2: "9",
+                            y2: "15",
+                        }
+                        line {
+                            x1: "9",
+                            y1: "9",
+                            x2: "15",
+                            y2: "15",
+                        }
                     }
                     "Declined"
                 }
@@ -797,43 +700,31 @@ pub fn UserRoleBadge(role: UserRole) -> Element {
         }
         UserRole::Visitor => {
             rsx! {
-                span {
-                    class: "px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded text-xs font-medium",
+                span { class: "px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded text-xs font-medium",
                     "Visitor"
                 }
             }
         }
     }
 }
-
 /// Loading skeleton for CommunityPostCard
 #[component]
 pub fn CommunityPostCardSkeleton() -> Element {
     rsx! {
-        div {
-            class: "p-4 border-b border-border animate-pulse",
-
-            // Header skeleton
-            div {
-                class: "flex items-center gap-2 mb-3",
+        div { class: "p-4 border-b border-border animate-pulse",
+            div { class: "flex items-center gap-2 mb-3",
                 div { class: "w-10 h-10 rounded-full bg-muted" }
                 div {
                     div { class: "h-4 w-24 bg-muted rounded mb-1" }
                     div { class: "h-3 w-16 bg-muted rounded" }
                 }
             }
-
-            // Content skeleton
-            div {
-                class: "space-y-2 mb-3",
+            div { class: "space-y-2 mb-3",
                 div { class: "h-4 bg-muted rounded w-full" }
                 div { class: "h-4 bg-muted rounded w-5/6" }
                 div { class: "h-4 bg-muted rounded w-4/6" }
             }
-
-            // Actions skeleton
-            div {
-                class: "flex gap-4",
+            div { class: "flex gap-4",
                 div { class: "h-4 w-12 bg-muted rounded" }
                 div { class: "h-4 w-12 bg-muted rounded" }
                 div { class: "h-4 w-12 bg-muted rounded" }
@@ -841,4 +732,3 @@ pub fn CommunityPostCardSkeleton() -> Element {
         }
     }
 }
-

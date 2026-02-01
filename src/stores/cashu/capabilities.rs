@@ -2,16 +2,8 @@
 //!
 //! Comprehensive NUT support detection and feature gating.
 //! Checks mint capabilities before attempting operations.
-
-// Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
-
 use super::internal::get_or_create_wallet;
-
-// =============================================================================
-// NUT Capabilities
-// =============================================================================
-
 /// All known NUT numbers for capability checking
 ///
 /// Note: NUT-06 (Optional amounts) and NUT-13 (Deterministic secrets) are not included
@@ -49,7 +41,6 @@ pub enum Nut {
     /// NUT-22: Blind auth
     BlindAuth = 22,
 }
-
 /// Mint capabilities derived from mint info
 #[derive(Debug, Clone, Default)]
 pub struct MintCapabilities {
@@ -82,58 +73,45 @@ pub struct MintCapabilities {
     /// Auth type if required
     pub auth_type: Option<String>,
 }
-
 impl MintCapabilities {
     /// Check if a specific NUT is supported
     pub fn supports_nut(&self, nut: Nut) -> bool {
         self.supported_nuts.contains(&(nut as u8))
     }
-
     /// Check if P2PK is supported
     pub fn supports_p2pk(&self) -> bool {
         self.supports_nut(Nut::P2pk) && self.supports_nut(Nut::SpendingConditions)
     }
-
     /// Check if HTLC is supported
     pub fn supports_htlc(&self) -> bool {
         self.supports_nut(Nut::Htlc) && self.supports_nut(Nut::SpendingConditions)
     }
-
     /// Check if MPP is supported
     pub fn supports_mpp(&self) -> bool {
         self.supports_nut(Nut::Mpp)
     }
-
     /// Check if WebSocket is supported
     pub fn supports_websocket(&self) -> bool {
         self.supports_nut(Nut::WebSocket)
     }
-
     /// Check if DLEQ verification is available
     pub fn supports_dleq(&self) -> bool {
         self.supports_nut(Nut::Dleq)
     }
-
     /// Check if restore is available
     pub fn supports_restore(&self) -> bool {
         self.supports_nut(Nut::Restore)
     }
-
     /// Check if mint can perform basic operations
     pub fn is_operational(&self) -> bool {
         self.minting_enabled || self.melting_enabled
     }
-
     /// Get list of missing required NUTs for an operation
     pub fn missing_nuts_for(&self, operation: OperationKind) -> Vec<Nut> {
         let required = operation.required_nuts();
-        required
-            .into_iter()
-            .filter(|nut| !self.supports_nut(*nut))
-            .collect()
+        required.into_iter().filter(|nut| !self.supports_nut(*nut)).collect()
     }
 }
-
 /// Operation kinds for capability checking
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
@@ -154,7 +132,6 @@ pub enum OperationKind {
     /// Wallet restore
     Restore,
 }
-
 impl OperationKind {
     /// Get required NUTs for this operation
     pub fn required_nuts(&self) -> Vec<Nut> {
@@ -170,27 +147,16 @@ impl OperationKind {
         }
     }
 }
-
-// =============================================================================
-// Capability Fetching
-// =============================================================================
-
 /// Fetch and parse mint capabilities
 pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, String> {
     log::info!("Fetching capabilities for mint: {}", mint_url);
-
     let wallet = get_or_create_wallet(mint_url).await?;
-
     let mint_info = wallet
         .fetch_mint_info()
         .await
         .map_err(|e| format!("Failed to fetch mint info: {}", e))?
         .ok_or("Mint info not available")?;
-
     let mut caps = MintCapabilities::default();
-
-    // Parse NUT support
-    // NUT-4: Minting
     if !mint_info.nuts.nut04.methods.is_empty() {
         caps.supported_nuts.push(4);
         caps.minting_enabled = !mint_info.nuts.nut04.disabled;
@@ -201,29 +167,27 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
             .iter()
             .map(|m| m.method.to_string())
             .collect();
-
-        // Extract limits if available - aggregate across methods
-        // Use min of max_amounts (most restrictive upper bound)
-        // Use max of min_amounts (most restrictive lower bound)
         for method in &mint_info.nuts.nut04.methods {
             if let Some(max) = method.max_amount {
                 let amt = u64::from(max);
-                caps.max_mint_amount = Some(match caps.max_mint_amount {
-                    None => amt,
-                    Some(prev) => prev.min(amt),
-                });
+                caps.max_mint_amount = Some(
+                    match caps.max_mint_amount {
+                        None => amt,
+                        Some(prev) => prev.min(amt),
+                    },
+                );
             }
             if let Some(min) = method.min_amount {
                 let amt = u64::from(min);
-                caps.min_mint_amount = Some(match caps.min_mint_amount {
-                    None => amt,
-                    Some(prev) => prev.max(amt),
-                });
+                caps.min_mint_amount = Some(
+                    match caps.min_mint_amount {
+                        None => amt,
+                        Some(prev) => prev.max(amt),
+                    },
+                );
             }
         }
     }
-
-    // NUT-5: Melting
     if !mint_info.nuts.nut05.methods.is_empty() {
         caps.supported_nuts.push(5);
         caps.melting_enabled = !mint_info.nuts.nut05.disabled;
@@ -234,92 +198,67 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
             .iter()
             .map(|m| m.method.to_string())
             .collect();
-
-        // Aggregate melt limits across methods (same pattern as mint)
         for method in &mint_info.nuts.nut05.methods {
             if let Some(max) = method.max_amount {
                 let amt = u64::from(max);
-                caps.max_melt_amount = Some(match caps.max_melt_amount {
-                    None => amt,
-                    Some(prev) => prev.min(amt),
-                });
+                caps.max_melt_amount = Some(
+                    match caps.max_melt_amount {
+                        None => amt,
+                        Some(prev) => prev.min(amt),
+                    },
+                );
             }
             if let Some(min) = method.min_amount {
                 let amt = u64::from(min);
-                caps.min_melt_amount = Some(match caps.min_melt_amount {
-                    None => amt,
-                    Some(prev) => prev.max(amt),
-                });
+                caps.min_melt_amount = Some(
+                    match caps.min_melt_amount {
+                        None => amt,
+                        Some(prev) => prev.max(amt),
+                    },
+                );
             }
         }
     }
-
-    // NUT-7: Proof state
     if mint_info.nuts.nut07.supported {
         caps.supported_nuts.push(7);
     }
-
-    // NUT-8: Swap
     if mint_info.nuts.nut08.supported {
         caps.supported_nuts.push(8);
     }
-
-    // NUT-9: Restore
     if mint_info.nuts.nut09.supported {
         caps.supported_nuts.push(9);
     }
-
-    // NUT-10: Spending conditions
     if mint_info.nuts.nut10.supported {
         caps.supported_nuts.push(10);
     }
-
-    // NUT-11: P2PK
     if mint_info.nuts.nut11.supported {
         caps.supported_nuts.push(11);
     }
-
-    // NUT-12: DLEQ
     if mint_info.nuts.nut12.supported {
         caps.supported_nuts.push(12);
     }
-
-    // NUT-14: HTLC
     if mint_info.nuts.nut14.supported {
         caps.supported_nuts.push(14);
     }
-
-    // NUT-15: Multi-path payments (MPP)
-    // CDK pattern: check if methods list is non-empty
     if !mint_info.nuts.nut15.methods.is_empty() {
         caps.supported_nuts.push(15);
     }
-
-    // NUT-17: WebSocket subscriptions
-    // CDK pattern: check if supported methods list is non-empty
     if !mint_info.nuts.nut17.supported.is_empty() {
         caps.supported_nuts.push(17);
     }
-
-    // NUT-19: Cached responses
-    // Check if cached_endpoints is non-empty or ttl is set
-    if !mint_info.nuts.nut19.cached_endpoints.is_empty() || mint_info.nuts.nut19.ttl.is_some() {
+    if !mint_info.nuts.nut19.cached_endpoints.is_empty()
+        || mint_info.nuts.nut19.ttl.is_some()
+    {
         caps.supported_nuts.push(19);
     }
-
-    // NUT-20: Quote signatures
     if mint_info.nuts.nut20.supported {
         caps.supported_nuts.push(20);
     }
-
-    // NUT-21: Clear auth
     if mint_info.nuts.nut21.is_some() {
         caps.supported_nuts.push(21);
         caps.auth_required = true;
         caps.auth_type = Some("clear".to_string());
     }
-
-    // NUT-22: Blind auth
     if mint_info.nuts.nut22.is_some() {
         caps.supported_nuts.push(22);
         caps.auth_required = true;
@@ -327,19 +266,10 @@ pub async fn get_mint_capabilities(mint_url: &str) -> Result<MintCapabilities, S
             caps.auth_type = Some("blind".to_string());
         }
     }
-
-    // Sort for consistent display
     caps.supported_nuts.sort();
-
-    log::info!(
-        "Mint {} capabilities: {:?}",
-        mint_url,
-        caps.supported_nuts
-    );
-
+    log::info!("Mint {} capabilities: {:?}", mint_url, caps.supported_nuts);
     Ok(caps)
 }
-
 /// Check if an operation is supported by a mint
 pub async fn check_operation_supported(
     mint_url: &str,
@@ -347,18 +277,21 @@ pub async fn check_operation_supported(
 ) -> Result<(), String> {
     let caps = get_mint_capabilities(mint_url).await?;
     let missing = caps.missing_nuts_for(operation);
-
     if missing.is_empty() {
         Ok(())
     } else {
-        let missing_str: Vec<String> = missing.iter().map(|n| format!("NUT-{}", *n as u8)).collect();
-        Err(format!(
-            "Mint does not support required features: {}",
-            missing_str.join(", ")
-        ))
+        let missing_str: Vec<String> = missing
+            .iter()
+            .map(|n| format!("NUT-{}", *n as u8))
+            .collect();
+        Err(
+            format!(
+                "Mint does not support required features: {}",
+                missing_str.join(", "),
+            ),
+        )
     }
 }
-
 /// Quick check if P2PK is supported (cached)
 pub async fn supports_p2pk(mint_url: &str) -> bool {
     match get_mint_capabilities(mint_url).await {
@@ -366,7 +299,6 @@ pub async fn supports_p2pk(mint_url: &str) -> bool {
         Err(_) => false,
     }
 }
-
 /// Quick check if MPP is supported
 pub async fn supports_mpp(mint_url: &str) -> bool {
     match get_mint_capabilities(mint_url).await {
@@ -374,7 +306,6 @@ pub async fn supports_mpp(mint_url: &str) -> bool {
         Err(_) => false,
     }
 }
-
 /// Quick check if restore is supported
 pub async fn supports_restore(mint_url: &str) -> bool {
     match get_mint_capabilities(mint_url).await {
@@ -382,81 +313,57 @@ pub async fn supports_restore(mint_url: &str) -> bool {
         Err(_) => false,
     }
 }
-
-// =============================================================================
-// Limit Checking
-// =============================================================================
-
 /// Check if an amount is within mint limits for minting
 pub async fn check_mint_limits(mint_url: &str, amount: u64) -> Result<(), String> {
     let caps = get_mint_capabilities(mint_url).await?;
-
     if let Some(max) = caps.max_mint_amount {
         if amount > max {
-            return Err(format!(
-                "Amount {} exceeds mint maximum of {} sats",
-                amount, max
-            ));
+            return Err(
+                format!("Amount {} exceeds mint maximum of {} sats", amount, max),
+            );
         }
     }
-
     if let Some(min) = caps.min_mint_amount {
         if amount < min {
-            return Err(format!(
-                "Amount {} is below mint minimum of {} sats",
-                amount, min
-            ));
+            return Err(
+                format!("Amount {} is below mint minimum of {} sats", amount, min),
+            );
         }
     }
-
     Ok(())
 }
-
 /// Check if an amount is within mint limits for melting
 pub async fn check_melt_limits(mint_url: &str, amount: u64) -> Result<(), String> {
     let caps = get_mint_capabilities(mint_url).await?;
-
     if let Some(max) = caps.max_melt_amount {
         if amount > max {
-            return Err(format!(
-                "Amount {} exceeds melt maximum of {} sats",
-                amount, max
-            ));
+            return Err(
+                format!("Amount {} exceeds melt maximum of {} sats", amount, max),
+            );
         }
     }
-
     if let Some(min) = caps.min_melt_amount {
         if amount < min {
-            return Err(format!(
-                "Amount {} is below melt minimum of {} sats",
-                amount, min
-            ));
+            return Err(
+                format!("Amount {} is below melt minimum of {} sats", amount, min),
+            );
         }
     }
-
     Ok(())
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_operation_required_nuts() {
         let p2pk_nuts = OperationKind::P2pkSend.required_nuts();
         assert!(p2pk_nuts.contains(&Nut::SpendingConditions));
         assert!(p2pk_nuts.contains(&Nut::P2pk));
     }
-
     #[test]
     fn test_capabilities_supports() {
         let mut caps = MintCapabilities::default();
         caps.supported_nuts = vec![4, 5, 7, 8, 10, 11];
-
         assert!(caps.supports_nut(Nut::Minting));
         assert!(caps.supports_p2pk());
         assert!(!caps.supports_mpp());

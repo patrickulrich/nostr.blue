@@ -5,19 +5,10 @@
 //! - Swap details (source/destination keysets)
 //! - Error details for failed transactions
 //! - Transaction descriptions from quotes
-
-// Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
-
 use nostr_sdk::nips::nip60::TransactionDirection;
 use serde::{Deserialize, Serialize};
-
 use super::types::HistoryItem;
-
-// =============================================================================
-// Direction Wrapper (for serialization)
-// =============================================================================
-
 /// Direction enum that can be serialized (wraps TransactionDirection)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
@@ -26,7 +17,6 @@ pub enum Direction {
     /// Outgoing transaction
     Out,
 }
-
 impl From<TransactionDirection> for Direction {
     fn from(dir: TransactionDirection) -> Self {
         match dir {
@@ -35,7 +25,6 @@ impl From<TransactionDirection> for Direction {
         }
     }
 }
-
 impl From<Direction> for TransactionDirection {
     fn from(dir: Direction) -> Self {
         match dir {
@@ -44,67 +33,49 @@ impl From<Direction> for TransactionDirection {
         }
     }
 }
-
-// =============================================================================
-// Enriched History Types
-// =============================================================================
-
 /// Enriched transaction history item
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedHistoryItem {
     /// Base history item
     #[serde(flatten)]
     pub base: HistoryItemData,
-
     /// Transaction fee paid (in sats)
     #[serde(default)]
     pub fee_paid: Option<u64>,
-
     /// Fee percentage (for melt operations)
     #[serde(default)]
     pub fee_percent: Option<f64>,
-
     /// Transaction description/memo
     #[serde(default)]
     pub description: Option<String>,
-
     /// Mint URL
     #[serde(default)]
     pub mint_url: Option<String>,
-
     /// Transaction type (more specific than direction)
     #[serde(default)]
     pub tx_type: Option<TransactionType>,
-
     /// Error message if transaction failed
     #[serde(default)]
     pub error: Option<String>,
-
     /// Related quote ID
     #[serde(default)]
     pub quote_id: Option<String>,
-
     /// Lightning invoice (for mint/melt)
     #[serde(default)]
     pub invoice: Option<String>,
-
     /// Lightning preimage (for successful melts)
     #[serde(default)]
     pub preimage: Option<String>,
-
     /// Keyset information
     #[serde(default)]
     pub keyset_info: Option<KeysetInfo>,
-
     /// P2PK recipient (if P2PK send)
     #[serde(default)]
     pub p2pk_recipient: Option<String>,
-
     /// Swap details (if swap operation)
     #[serde(default)]
     pub swap_details: Option<SwapDetails>,
 }
-
 /// Base history item data (matches HistoryItem)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HistoryItemData {
@@ -117,7 +88,6 @@ pub struct HistoryItemData {
     pub destroyed_tokens: Vec<String>,
     pub redeemed_events: Vec<String>,
 }
-
 impl From<HistoryItem> for HistoryItemData {
     fn from(item: HistoryItem) -> Self {
         Self {
@@ -132,7 +102,6 @@ impl From<HistoryItem> for HistoryItemData {
         }
     }
 }
-
 /// Specific transaction types
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransactionType {
@@ -161,7 +130,6 @@ pub enum TransactionType {
     /// Restore recovery
     Restore,
 }
-
 impl TransactionType {
     /// Get human-readable name
     pub fn display_name(&self) -> &'static str {
@@ -180,7 +148,6 @@ impl TransactionType {
             Self::Restore => "Restore",
         }
     }
-
     /// Get icon name for display
     pub fn icon(&self) -> &'static str {
         match self {
@@ -194,7 +161,6 @@ impl TransactionType {
         }
     }
 }
-
 /// Keyset information for a transaction
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KeysetInfo {
@@ -205,7 +171,6 @@ pub struct KeysetInfo {
     /// Whether this was a keyset migration
     pub is_migration: bool,
 }
-
 /// Swap operation details
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SwapDetails {
@@ -220,7 +185,6 @@ pub struct SwapDetails {
     /// Reason for swap
     pub reason: SwapReason,
 }
-
 /// Reason for swap operation
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SwapReason {
@@ -237,11 +201,6 @@ pub enum SwapReason {
     /// Unknown/other
     Other,
 }
-
-// =============================================================================
-// Enrichment Functions
-// =============================================================================
-
 /// Enrich a history item with additional data
 pub fn enrich_history_item(
     item: HistoryItem,
@@ -265,7 +224,6 @@ pub fn enrich_history_item(
         swap_details: None,
     }
 }
-
 /// Create enriched history for lightning receive
 pub fn create_lightning_receive_history(
     event_id: String,
@@ -286,7 +244,7 @@ pub fn create_lightning_receive_history(
             destroyed_tokens: Vec::new(),
             redeemed_events: Vec::new(),
         },
-        fee_paid: None, // Mints typically don't charge for receiving
+        fee_paid: None,
         fee_percent: None,
         description: Some("Lightning deposit".to_string()),
         mint_url: Some(mint_url),
@@ -300,7 +258,6 @@ pub fn create_lightning_receive_history(
         swap_details: None,
     }
 }
-
 /// Create enriched history for lightning send
 #[allow(clippy::too_many_arguments)]
 pub fn create_lightning_send_history(
@@ -318,7 +275,6 @@ pub fn create_lightning_send_history(
     } else {
         None
     };
-
     EnrichedHistoryItem {
         base: HistoryItemData {
             event_id,
@@ -344,7 +300,6 @@ pub fn create_lightning_send_history(
         swap_details: None,
     }
 }
-
 /// Create enriched history for P2PK send
 pub fn create_p2pk_send_history(
     event_id: String,
@@ -354,7 +309,6 @@ pub fn create_p2pk_send_history(
     recipient: String,
     created_at: u64,
 ) -> EnrichedHistoryItem {
-    // Use UTF-8 safe character slicing to avoid panic on multi-byte chars
     let recipient_short: String = recipient.chars().take(8).collect();
     EnrichedHistoryItem {
         base: HistoryItemData {
@@ -381,7 +335,6 @@ pub fn create_p2pk_send_history(
         swap_details: None,
     }
 }
-
 /// Create enriched history for swap
 #[allow(clippy::too_many_arguments)]
 pub fn create_swap_history(
@@ -395,11 +348,10 @@ pub fn create_swap_history(
     created_at: u64,
 ) -> EnrichedHistoryItem {
     let fee_paid = input_value.saturating_sub(output_value);
-
     EnrichedHistoryItem {
         base: HistoryItemData {
             event_id,
-            direction: Direction::In, // Net effect is neutral
+            direction: Direction::In,
             amount: output_value,
             unit: "sat".to_string(),
             created_at,
@@ -409,14 +361,16 @@ pub fn create_swap_history(
         },
         fee_paid: Some(fee_paid),
         fee_percent: None,
-        description: Some(match reason {
-            SwapReason::Consolidation => "Proof consolidation".to_string(),
-            SwapReason::Optimization => "Denomination optimization".to_string(),
-            SwapReason::Migration => "Keyset migration".to_string(),
-            SwapReason::Privacy => "Privacy refresh".to_string(),
-            SwapReason::Split => "Amount split".to_string(),
-            SwapReason::Other => "Swap".to_string(),
-        }),
+        description: Some(
+            match reason {
+                SwapReason::Consolidation => "Proof consolidation".to_string(),
+                SwapReason::Optimization => "Denomination optimization".to_string(),
+                SwapReason::Migration => "Keyset migration".to_string(),
+                SwapReason::Privacy => "Privacy refresh".to_string(),
+                SwapReason::Split => "Amount split".to_string(),
+                SwapReason::Other => "Swap".to_string(),
+            },
+        ),
         mint_url: Some(mint_url),
         tx_type: Some(TransactionType::Swap),
         error: None,
@@ -434,21 +388,14 @@ pub fn create_swap_history(
         }),
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_transaction_type_display() {
         assert_eq!(TransactionType::LightningSend.display_name(), "Lightning Send");
         assert_eq!(TransactionType::P2pkReceive.display_name(), "P2PK Receive");
     }
-
     #[test]
     fn test_swap_reason() {
         let reason = SwapReason::Consolidation;

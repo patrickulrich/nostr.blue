@@ -1,11 +1,8 @@
-use dioxus::prelude::*;
 use crate::utils::markdown::render_markdown;
-
+use dioxus::prelude::*;
 #[component]
 pub fn ArticleContent(content: String) -> Element {
-    // Compute markdown directly - props are not reactive so use_memo wouldn't recompute on changes
     let html_content = render_markdown(&content);
-
     rsx! {
         div {
             dangerous_inner_html: "{html_content}",

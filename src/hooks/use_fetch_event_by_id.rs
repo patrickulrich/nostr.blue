@@ -2,14 +2,11 @@
 //!
 //! Reusable hook for fetching Nostr events by ID (nevent, note, hex) with proper state management.
 //! Uses `use_resource` for automatic cancellation when the id changes.
-
 use dioxus::prelude::*;
-use nostr_sdk::{Event as NostrEvent, EventId, Filter, FromBech32};
 use nostr_sdk::nips::nip19::Nip19;
+use nostr_sdk::{Event as NostrEvent, EventId, Filter, FromBech32};
 use std::time::Duration;
-
 use crate::stores::nostr_client;
-
 /// Wrapper struct for ID-based event fetching with custom not-found message.
 ///
 /// Uses `Resource` internally for automatic cancellation of inflight fetches.
@@ -18,13 +15,11 @@ pub struct UseFetchEventById {
     resource: Resource<Result<Option<NostrEvent>, String>>,
     not_found_message: &'static str,
 }
-
 impl UseFetchEventById {
     /// Returns true if the fetch is still pending
     pub fn is_loading(&self) -> bool {
         matches!(self.resource.state().cloned(), UseResourceState::Pending)
     }
-
     /// Returns the error message if there was an error, or the not-found message if event is None
     pub fn error(&self) -> Option<String> {
         match &*self.resource.read() {
@@ -33,7 +28,6 @@ impl UseFetchEventById {
             _ => None,
         }
     }
-
     /// Returns the fetched event if available
     pub fn event(&self) -> Option<NostrEvent> {
         match &*self.resource.read() {
@@ -42,29 +36,24 @@ impl UseFetchEventById {
         }
     }
 }
-
 /// Parse an event ID from various formats (nevent, note, hex)
 fn parse_event_id(id: &str) -> Option<EventId> {
-    // Normalize: trim whitespace, strip nostr: prefix (NIP-21)
     let trimmed = id.trim();
     let normalized = trimmed
         .strip_prefix("nostr:")
         .or_else(|| trimmed.strip_prefix("NOSTR:"))
         .unwrap_or(trimmed);
-
-    // Try hex first (nostr-sdk pattern), then bech32
     if let Ok(event_id) = EventId::from_hex(normalized) {
         return Some(event_id);
     }
-
-    // Try bech32 (nevent1, note1) - bech32 handles case internally
-    Nip19::from_bech32(normalized).ok().and_then(|n| match n {
-        Nip19::Event(e) => Some(e.event_id),
-        Nip19::EventId(id) => Some(id),
-        _ => None,
-    })
+    Nip19::from_bech32(normalized)
+        .ok()
+        .and_then(|n| match n {
+            Nip19::Event(e) => Some(e.event_id),
+            Nip19::EventId(id) => Some(id),
+            _ => None,
+        })
 }
-
 /// Async helper to fetch event by ID with optional kind validation
 async fn fetch_event_by_id_inner(
     id: &str,
@@ -74,16 +63,14 @@ async fn fetch_event_by_id_inner(
         Some(eid) => eid,
         None => return Err("Invalid event ID".to_string()),
     };
-
     let filter = Filter::new().id(event_id).limit(1);
     match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(e) = events.into_iter().next() {
-                // Validate kind if valid_kinds is not empty
                 if valid_kinds.is_empty() || valid_kinds.contains(&e.kind.as_u16()) {
                     Ok(Some(e))
                 } else {
-                    Ok(None) // Wrong kind = not found
+                    Ok(None)
                 }
             } else {
                 Ok(None)
@@ -92,7 +79,6 @@ async fn fetch_event_by_id_inner(
         Err(e) => Err(e),
     }
 }
-
 /// Fetch a Nostr event by ID with kind validation and a custom not-found message.
 ///
 /// Returns a wrapper struct with helper methods for accessing state.
@@ -121,22 +107,16 @@ pub fn use_fetch_event_by_id(
     valid_kinds: &'static [u16],
     not_found_message: &'static str,
 ) -> UseFetchEventById {
-    // Create signal to track the prop
     let mut id_signal = use_signal(|| id.clone());
-
-    // Sync prop changes to the signal using use_reactive! (Dioxus best practice)
-    use_effect(use_reactive!(|id| {
-        id_signal.set(id);
-    }));
-
-    // use_resource auto-tracks id_signal reads and re-runs when it changes
-    let resource = use_resource(move || async move { fetch_event_by_id_inner(&id_signal(), valid_kinds).await });
+    use_effect(use_reactive!(| id | { id_signal.set(id); }));
+    let resource = use_resource(move || async move {
+        fetch_event_by_id_inner(&id_signal(), valid_kinds).await
+    });
     UseFetchEventById {
         resource,
         not_found_message,
     }
 }
-
 /// Fetch a Nostr event by its ID reactively with kind validation (Resource API).
 ///
 /// Parses nevent/note/hex IDs and fetches via `fetch_events_aggregated`.
@@ -172,9 +152,10 @@ pub fn use_fetch_event_by_id_resource(
     id: ReadSignal<String>,
     valid_kinds: &'static [u16],
 ) -> Resource<Result<Option<NostrEvent>, String>> {
-    use_resource(move || async move { fetch_event_by_id_inner(&id(), valid_kinds).await })
+    use_resource(move || async move {
+        fetch_event_by_id_inner(&id(), valid_kinds).await
+    })
 }
-
 /// Fetch a Nostr event by its ID reactively without kind validation.
 ///
 /// Simplified version that accepts any event kind.

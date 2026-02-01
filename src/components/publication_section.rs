@@ -1,13 +1,15 @@
 //! Publication Section Component
 //! Renders individual publication sections (NKBIP-01 Kind 30041 or nested Kind 30040)
-
+use crate::components::icons::{
+    ArrowLeftIcon, BookOpenIcon, ChevronDownIcon, ClockIcon, FileVideoIcon,
+};
+use crate::components::{AsciiDocContent, CitationMetadata};
+use crate::stores::nostr_client;
+use crate::stores::publication_store::{
+    parse_publication_section, sections_by_addresses_filter, PublicationSection,
+};
 use dioxus::prelude::*;
 use std::time::Duration;
-use crate::stores::publication_store::{PublicationSection, sections_by_addresses_filter, parse_publication_section};
-use crate::stores::nostr_client;
-use crate::components::{AsciiDocContent, CitationMetadata};
-use crate::components::icons::{ArrowLeftIcon, FileVideoIcon, ClockIcon, ChevronDownIcon, BookOpenIcon};
-
 /// Publication section content renderer
 #[component]
 pub fn PublicationSectionContent(
@@ -26,43 +28,28 @@ pub fn PublicationSectionContent(
     #[props(default = None)]
     on_child_select: Option<EventHandler<String>>,
 ) -> Element {
-    // If this is a nested index, show child sections instead of content
     if section.is_index && !section.child_addresses.is_empty() {
         rsx! {
-            NestedIndexContent {
-                section: section,
-                show_header: show_header,
-                on_child_select: on_child_select,
-            }
+            NestedIndexContent { section, show_header, on_child_select }
         }
     } else {
         rsx! {
-            article {
-                class: "publication-section",
-
-                // Section header
+            article { class: "publication-section",
                 if show_header {
-                    header {
-                        class: "mb-6 pb-4 border-b border-border",
-                        h1 {
-                            class: "text-2xl font-bold text-foreground",
-                            "{section.title}"
-                        }
+                    header { class: "mb-6 pb-4 border-b border-border",
+                        h1 { class: "text-2xl font-bold text-foreground", "{section.title}" }
                     }
                 }
-
-                // Section content
                 AsciiDocContent {
                     content: section.content.clone(),
                     enable_wikilinks: true,
-                    enable_book_links: enable_book_links,
-                    on_citations_loaded: on_citations_loaded,
+                    enable_book_links,
+                    on_citations_loaded,
                 }
             }
         }
     }
 }
-
 /// Component for displaying nested index content (kind 30040 with children)
 #[component]
 fn NestedIndexContent(
@@ -73,120 +60,60 @@ fn NestedIndexContent(
     let mut child_sections = use_signal(Vec::<PublicationSection>::new);
     let mut loading = use_signal(|| true);
     let mut fetch_error = use_signal(|| None::<String>);
-    // Store fetch task handle for cancellation to prevent stale responses
     let mut fetch_task: Signal<Option<dioxus::dioxus_core::Task>> = use_signal(|| None);
-    // Track current addresses to detect stale responses
     let mut current_addresses: Signal<Vec<String>> = use_signal(Vec::new);
-
-    // Clone addresses once for dependency tracking
     let child_addresses = section.child_addresses.clone();
-    let addresses_key: Vec<String> = child_addresses.iter().map(|a| a.address.clone()).collect();
-
-    // Fetch child sections - only re-run when addresses actually change
-    use_effect(use_reactive!(|addresses_key| {
-        // Cancel any existing fetch task before starting new one
-        if let Some(existing_task) = fetch_task.write().take() {
-            existing_task.cancel();
-        }
-
-        // Update tracked addresses for stale detection
-        current_addresses.set(addresses_key.clone());
-        let expected_addresses = addresses_key.clone();
-
-        let addresses = child_addresses.clone();
-        let task = spawn(async move {
-            loading.set(true);
-            fetch_error.set(None);
-            let filters = sections_by_addresses_filter(&addresses);
-            let mut loaded_sections = Vec::new();
-            let mut errors = Vec::new();
-
-            for filter in filters {
-                match nostr_client::fetch_events_aggregated(
-                    filter,
-                    Duration::from_secs(10),
-                ).await {
-                    Ok(events) => {
-                        for event in events {
-                            if let Some(section) = parse_publication_section(&event) {
-                                loaded_sections.push(section);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        errors.push(e);
-                    }
-                }
-            }
-
-            // Check if addresses changed during fetch (stale response)
-            if *current_addresses.read() != expected_addresses {
-                log::debug!("Discarding stale publication section fetch");
-                return;
-            }
-
-            // Deduplicate by a_tag (keep first occurrence)
-            let mut seen = std::collections::HashSet::new();
-            loaded_sections.retain(|s| seen.insert(s.a_tag.clone()));
-
-            // Sort by the order in child_addresses
-            let address_order: std::collections::HashMap<_, _> = addresses.iter()
-                .enumerate()
-                .map(|(i, a)| (a.address.clone(), i))
-                .collect();
-            loaded_sections.sort_by_key(|s| address_order.get(&s.a_tag).copied().unwrap_or(usize::MAX));
-
-            child_sections.set(loaded_sections);
-
-            // Report errors if any occurred but we got some results
-            if !errors.is_empty() {
-                log::warn!("Some section fetches failed: {:?}", errors);
-            }
-
-            loading.set(false);
-        });
-        fetch_task.set(Some(task));
-    }));
-
+    let addresses_key: Vec<String> = child_addresses
+        .iter()
+        .map(|a| a.address.clone())
+        .collect();
+    use_effect(
+        use_reactive!(
+            | addresses_key | { if let Some(existing_task) = fetch_task.write().take() {
+            existing_task.cancel(); } current_addresses.set(addresses_key.clone()); let
+            expected_addresses = addresses_key.clone(); let addresses = child_addresses
+            .clone(); let task = spawn(async move { loading.set(true); fetch_error
+            .set(None); let filters = sections_by_addresses_filter(& addresses); let mut
+            loaded_sections = Vec::new(); let mut errors = Vec::new(); for filter in
+            filters { match nostr_client::fetch_events_aggregated(filter,
+            Duration::from_secs(10)). await { Ok(events) => { for event in events { if
+            let Some(section) = parse_publication_section(& event) { loaded_sections
+            .push(section); } } } Err(e) => { errors.push(e); } } } if *
+            current_addresses.read() != expected_addresses {
+            log::debug!("Discarding stale publication section fetch"); return; } let mut
+            seen = std::collections::HashSet::new(); loaded_sections.retain(| s | seen
+            .insert(s.a_tag.clone())); let address_order : std::collections::HashMap < _,
+            _ > = addresses.iter().enumerate().map(| (i, a) | (a.address.clone(), i))
+            .collect(); loaded_sections.sort_by_key(| s | address_order.get(& s.a_tag)
+            .copied().unwrap_or(usize::MAX)); child_sections.set(loaded_sections); if !
+            errors.is_empty() { log::warn!("Some section fetches failed: {:?}", errors);
+            } loading.set(false); }); fetch_task.set(Some(task)); }
+        ),
+    );
     rsx! {
-        article {
-            class: "publication-section",
-
-            // Section header
+        article { class: "publication-section",
             if show_header {
-                header {
-                    class: "mb-6 pb-4 border-b border-border",
-                    h1 {
-                        class: "text-2xl font-bold text-foreground",
-                        "{section.title}"
-                    }
-                    p {
-                        class: "text-muted-foreground mt-2",
+                header { class: "mb-6 pb-4 border-b border-border",
+                    h1 { class: "text-2xl font-bold text-foreground", "{section.title}" }
+                    p { class: "text-muted-foreground mt-2",
                         "{section.child_addresses.len()} chapters"
                     }
                 }
             }
-
-            // Child sections list
             if *loading.read() {
-                div {
-                    class: "space-y-3",
+                div { class: "space-y-3",
                     for _ in 0..5 {
-                        div {
-                            class: "h-14 bg-muted/50 rounded-lg animate-pulse"
-                        }
+                        div { class: "h-14 bg-muted/50 rounded-lg animate-pulse" }
                     }
                 }
             } else if child_sections.read().is_empty() {
-                div {
-                    class: "text-center py-8 text-muted-foreground",
+                div { class: "text-center py-8 text-muted-foreground",
                     BookOpenIcon { class: "w-12 h-12 mx-auto mb-3 opacity-50" }
                     p { "No chapters found" }
                 }
             } else {
-                div {
-                    class: "space-y-2",
-                    for (idx, child) in child_sections.read().iter().enumerate() {
+                div { class: "space-y-2",
+                    for (idx , child) in child_sections.read().iter().enumerate() {
                         ChildSectionCard {
                             key: "{child.a_tag}",
                             section: child.clone(),
@@ -199,7 +126,6 @@ fn NestedIndexContent(
         }
     }
 }
-
 /// Card component for a child section
 #[component]
 fn ChildSectionCard(
@@ -211,7 +137,6 @@ fn ChildSectionCard(
     let has_content = !section.content.is_empty();
     let is_nested = section.is_index;
     let child_count = section.child_addresses.len();
-
     rsx! {
         button {
             class: "w-full flex items-center gap-4 p-4 rounded-lg border border-border hover:bg-accent/50 transition-colors text-left group",
@@ -220,63 +145,41 @@ fn ChildSectionCard(
                     handler.call(a_tag.clone());
                 }
             },
-
-            // Chapter number
-            div {
-                class: "w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium shrink-0",
+            div { class: "w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium shrink-0",
                 "{index + 1}"
             }
-
-            // Title and metadata
-            div {
-                class: "flex-1 min-w-0",
-                h3 {
-                    class: "font-medium text-foreground truncate",
-                    "{section.title}"
-                }
+            div { class: "flex-1 min-w-0",
+                h3 { class: "font-medium text-foreground truncate", "{section.title}" }
                 if is_nested && child_count > 0 {
-                    p {
-                        class: "text-sm text-muted-foreground",
-                        "{child_count} sections"
-                    }
+                    p { class: "text-sm text-muted-foreground", "{child_count} sections" }
                 } else if has_content {
-                    p {
-                        class: "text-sm text-muted-foreground",
+                    p { class: "text-sm text-muted-foreground",
                         "{estimate_word_count(&section.content)} words"
                     }
                 }
             }
-
-            // Arrow indicator (rotated chevron for "right" direction)
-            ChevronDownIcon {
-                class: "w-5 h-5 -rotate-90 text-muted-foreground group-hover:text-foreground transition-colors shrink-0"
-            }
+            ChevronDownIcon { class: "w-5 h-5 -rotate-90 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" }
         }
     }
 }
-
 /// Section navigation component
 #[component]
 pub fn SectionNavigation(
     /// Previous section (if any)
-    prev_section: Option<(String, String)>, // (address, title)
+    prev_section: Option<(String, String)>,
     /// Next section (if any)
-    next_section: Option<(String, String)>, // (address, title)
+    next_section: Option<(String, String)>,
     /// Callback when navigation is triggered
     on_navigate: EventHandler<String>,
 ) -> Element {
     rsx! {
-        nav {
-            class: "flex items-center justify-between py-6 border-t border-border",
-
-            // Previous
+        nav { class: "flex items-center justify-between py-6 border-t border-border",
             if let Some((addr, title)) = prev_section {
                 button {
                     class: "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors",
                     onclick: move |_| on_navigate.call(addr.clone()),
                     ArrowLeftIcon { class: "w-4 h-4" }
-                    div {
-                        class: "text-left",
+                    div { class: "text-left",
                         span { class: "text-xs block", "Previous" }
                         span { class: "font-medium line-clamp-1", "{title}" }
                     }
@@ -284,14 +187,11 @@ pub fn SectionNavigation(
             } else {
                 div {}
             }
-
-            // Next
             if let Some((addr, title)) = next_section {
                 button {
                     class: "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors",
                     onclick: move |_| on_navigate.call(addr.clone()),
-                    div {
-                        class: "text-right",
+                    div { class: "text-right",
                         span { class: "text-xs block", "Next" }
                         span { class: "font-medium line-clamp-1", "{title}" }
                     }
@@ -303,19 +203,15 @@ pub fn SectionNavigation(
         }
     }
 }
-
 /// Section loading skeleton
 #[component]
 pub fn PublicationSectionSkeleton() -> Element {
     rsx! {
-        article {
-            class: "publication-section animate-pulse",
-            header {
-                class: "mb-6 pb-4 border-b border-border",
+        article { class: "publication-section animate-pulse",
+            header { class: "mb-6 pb-4 border-b border-border",
                 div { class: "h-8 bg-muted rounded w-2/3" }
             }
-            div {
-                class: "space-y-4",
+            div { class: "space-y-4",
                 for _ in 0..5 {
                     div { class: "h-4 bg-muted rounded w-full" }
                 }
@@ -325,73 +221,49 @@ pub fn PublicationSectionSkeleton() -> Element {
         }
     }
 }
-
 /// Section metadata display
 #[component]
-pub fn SectionMetadata(
-    section: PublicationSection,
-) -> Element {
+pub fn SectionMetadata(section: PublicationSection) -> Element {
     rsx! {
-        div {
-            class: "flex flex-wrap gap-4 text-sm text-muted-foreground",
-
-            // Word count estimate
-            div {
-                class: "flex items-center gap-1",
+        div { class: "flex flex-wrap gap-4 text-sm text-muted-foreground",
+            div { class: "flex items-center gap-1",
                 FileVideoIcon { class: "w-4 h-4" }
-                span {
-                    {format!("{} words", estimate_word_count(&section.content))}
-                }
+                span { {format!("{} words", estimate_word_count(&section.content))} }
             }
-
-            // Reading time estimate
-            div {
-                class: "flex items-center gap-1",
+            div { class: "flex items-center gap-1",
                 ClockIcon { class: "w-4 h-4" }
-                span {
-                    {format!("{} min read", estimate_reading_time(&section.content))}
-                }
+                span { {format!("{} min read", estimate_reading_time(&section.content))} }
             }
         }
     }
 }
-
 /// Estimate word count from content
 fn estimate_word_count(content: &str) -> usize {
     content.split_whitespace().count()
 }
-
 /// Estimate reading time in minutes (assuming 200 words per minute)
 fn estimate_reading_time(content: &str) -> usize {
     let words = estimate_word_count(content);
     std::cmp::max(1, words / 200)
 }
-
 /// Section outline (headings extracted from content)
 #[component]
 pub fn SectionOutline(
     content: String,
     on_heading_click: EventHandler<String>,
 ) -> Element {
-    // Extract headings from AsciiDoc content
     let headings = use_memo(move || extract_headings(&content));
-
     if headings.read().is_empty() {
         return rsx! {};
     }
-
     rsx! {
-        nav {
-            class: "section-outline",
-            h4 {
-                class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2",
+        nav { class: "section-outline",
+            h4 { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2",
                 "On this page"
             }
-            ul {
-                class: "space-y-1",
-                for (level, text, id) in headings.read().iter() {
-                    li {
-                        style: "padding-left: {(*level - 1) * 8}px",
+            ul { class: "space-y-1",
+                for (level , text , id) in headings.read().iter() {
+                    li { style: "padding-left: {(*level - 1) * 8}px",
                         button {
                             class: "text-sm text-muted-foreground hover:text-foreground transition-colors text-left w-full truncate",
                             onclick: {
@@ -406,12 +278,11 @@ pub fn SectionOutline(
         }
     }
 }
-
 /// Extract headings from AsciiDoc content
 fn extract_headings(content: &str) -> Vec<(usize, String, String)> {
     let heading_pattern = regex::Regex::new(r"(?m)^(=+)\s+(.+)$").unwrap();
-
-    heading_pattern.captures_iter(content)
+    heading_pattern
+        .captures_iter(content)
         .map(|cap| {
             let level = cap.get(1).map(|m| m.as_str().len()).unwrap_or(1);
             let text = cap.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
@@ -420,7 +291,6 @@ fn extract_headings(content: &str) -> Vec<(usize, String, String)> {
         })
         .collect()
 }
-
 /// Generate a URL-safe slug from heading text
 fn slug_from_text(text: &str) -> String {
     text.chars()

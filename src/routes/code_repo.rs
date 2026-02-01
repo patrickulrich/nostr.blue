@@ -2,39 +2,30 @@
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
-
-use dioxus::prelude::*;
+use crate::components::code::{ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
 use crate::components::icons;
-use crate::components::code::{RepoHeader, RepoActionBar, RepoTabNav, ReadmeViewer};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, fetch_readme};
-use crate::utils::nip34::Repository;
-use crate::utils::format_relative_time_or;
-use crate::utils::truncate_pubkey;
-use crate::stores::profiles::PROFILE_CACHE;
+use crate::services::git_hosting::{fetch_readme, fetch_repository};
 use crate::stores::nostr_client;
-
+use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::format_relative_time_or;
+use crate::utils::nip34::Repository;
+use crate::utils::truncate_pubkey;
+use dioxus::prelude::*;
 /// Repository detail page component
 #[component]
 pub fn CodeRepo(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
-
-    // Clone naddr for use in the effect and for passing to child components
     let naddr_for_effect = naddr.clone();
     let naddr_for_render = naddr.clone();
-
-    // Wait for client initialization before fetching
-    // This prevents the "Client not initialized" error when navigating directly to this page
     use_effect(move || {
         let naddr = naddr_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
         if !client_initialized {
             log::info!("CodeRepo: Waiting for client initialization...");
             return;
         }
-
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&naddr).await;
@@ -42,23 +33,16 @@ pub fn CodeRepo(naddr: String) -> Element {
             loading.set(false);
         });
     });
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-                div {
-                    class: "p-4 flex items-center gap-3",
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                div { class: "p-4 flex items-center gap-3",
                     Link {
                         to: Route::CodeHome {},
                         class: "text-muted-foreground hover:text-foreground",
-                        dangerous_inner_html: icons::ARROW_LEFT
+                        dangerous_inner_html: icons::ARROW_LEFT,
                     }
-                    h1 {
-                        class: "text-xl font-bold flex items-center gap-2",
+                    h1 { class: "text-xl font-bold flex items-center gap-2",
                         svg {
                             class: "w-5 h-5",
                             xmlns: "http://www.w3.org/2000/svg",
@@ -77,20 +61,15 @@ pub fn CodeRepo(naddr: String) -> Element {
                     }
                 }
             }
-
-            // Content
-            div {
-                class: "p-4",
-                // Show loading while client is initializing or data is being fetched
-                if !*nostr_client::CLIENT_INITIALIZED.read() || (*loading.read() && repo_result.read().is_none()) {
+            div { class: "p-4",
+                if !*nostr_client::CLIENT_INITIALIZED.read()
+                    || (*loading.read() && repo_result.read().is_none())
+                {
                     LoadingSkeleton {}
                 } else {
                     match repo_result.read().as_ref() {
                         Some(Ok(r)) => rsx! {
-                            RepoContent {
-                                repo: r.clone(),
-                                naddr: naddr_for_render.clone(),
-                            }
+                            RepoContent { repo: r.clone(), naddr: naddr_for_render.clone() }
                         },
                         Some(Err(e)) => rsx! {
                             ErrorState { message: e.clone() }
@@ -104,72 +83,41 @@ pub fn CodeRepo(naddr: String) -> Element {
         }
     }
 }
-
 #[component]
 fn RepoContent(repo: Repository, naddr: String) -> Element {
     rsx! {
-        div {
-            class: "space-y-4",
-
-            // Row 1: Header + Action Bar
-            div {
-                class: "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
-
-                // Repository header (owner/repo breadcrumb + Public badge)
+        div { class: "space-y-4",
+            div { class: "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
                 RepoHeader { repo: repo.clone() }
-
-                // Action bar (Watch/Star/Fork/Zap/Share)
                 RepoActionBar { repo: repo.clone(), naddr: naddr.clone() }
             }
-
-            // Description
             if let Some(desc) = &repo.description {
-                p {
-                    class: "text-muted-foreground",
-                    "{desc}"
-                }
+                p { class: "text-muted-foreground", "{desc}" }
             }
-
-            // Tab navigation (routes handle Issues/PRs, this is always Overview)
             RepoTabNav {
                 naddr: naddr.clone(),
                 active_tab: "overview".to_string(),
                 issue_count: Some(repo.issue_count),
                 pr_count: Some(repo.pr_count),
             }
-
-            // Overview content
-            div {
-                class: "pt-4",
+            div { class: "pt-4",
                 OverviewTab { repo: repo.clone(), naddr: naddr.clone() }
             }
         }
     }
 }
-
 #[component]
 fn OverviewTab(repo: Repository, naddr: String) -> Element {
-    // Fetch README content
     let repo_for_fetch = repo.clone();
     let readme_resource: Resource<Result<String, String>> = use_resource(move || {
         let r = repo_for_fetch.clone();
-        async move {
-            fetch_readme(&r, None).await
-        }
+        async move { fetch_readme(&r, None).await }
     });
-
     rsx! {
-        div {
-            class: "space-y-6",
-
-            // Browse Files and Clone URL section
-            div {
-                class: "flex flex-col lg:flex-row gap-4",
-
-                // Left side: Browse Files button
+        div { class: "space-y-6",
+            div { class: "flex flex-col lg:flex-row gap-4",
                 if !repo.clone.is_empty() {
-                    div {
-                        class: "flex gap-3",
+                    div { class: "flex gap-3",
                         Link {
                             to: Route::CodeRepoTree {
                                 naddr: naddr.clone(),
@@ -194,64 +142,38 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                         }
                     }
                 }
-
-                // Right side: Clone URL
                 if !repo.clone.is_empty() {
-                    div {
-                        class: "flex-1 p-3 bg-muted rounded-lg",
+                    div { class: "flex-1 p-3 bg-muted rounded-lg",
                         p { class: "text-xs text-muted-foreground mb-2", "Clone" }
-                        code {
-                            class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
+                        code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
                             "{repo.clone.first().unwrap_or(&String::new())}"
                         }
                     }
                 }
             }
-
-            // README section
             match &*readme_resource.read() {
                 Some(Ok(content)) => rsx! {
-                    ReadmeViewer {
-                        content: Some(content.clone()),
-                        loading: false,
-                    }
+                    ReadmeViewer { content: Some(content.clone()), loading: false }
                 },
                 Some(Err(_)) => rsx! {
-                    ReadmeViewer {
-                        content: None,
-                        loading: false,
-                    }
+                    ReadmeViewer { content: None, loading: false }
                 },
                 None => rsx! {
-                    ReadmeViewer {
-                        loading: true,
-                    }
+                    ReadmeViewer { loading: true }
                 },
             }
-
-            // Maintainers
             if !repo.maintainers.is_empty() {
                 div {
-                    h3 {
-                        class: "font-semibold mb-3",
-                        "Maintainers"
-                    }
-                    div {
-                        class: "flex flex-wrap gap-2",
+                    h3 { class: "font-semibold mb-3", "Maintainers" }
+                    div { class: "flex flex-wrap gap-2",
                         for pubkey in repo.maintainers.iter() {
-                            MaintainerBadge {
-                                key: "{pubkey}",
-                                pubkey: pubkey.clone()
-                            }
+                            MaintainerBadge { key: "{pubkey}", pubkey: pubkey.clone() }
                         }
                     }
                 }
             }
-
-            // Web URLs
             if !repo.web.is_empty() {
-                div {
-                    class: "flex flex-wrap gap-2",
+                div { class: "flex flex-wrap gap-2",
                     for url in repo.web.iter() {
                         a {
                             key: "{url}",
@@ -272,24 +194,28 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                                 stroke_linejoin: "round",
                                 path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
                                 polyline { points: "15 3 21 3 21 9" }
-                                line { x1: "10", y1: "14", x2: "21", y2: "3" }
+                                line {
+                                    x1: "10",
+                                    y1: "14",
+                                    x2: "21",
+                                    y2: "3",
+                                }
                             }
                             "{url}"
                         }
                     }
                 }
             }
-
-            // Metadata
-            div {
-                class: "text-sm text-muted-foreground space-y-1",
+            div { class: "text-sm text-muted-foreground space-y-1",
                 p { "Event ID: {repo.event_id}" }
-                p { "Created: " {format_relative_time_or(repo.created_at, "Unknown")} }
+                p {
+                    "Created: "
+                    {format_relative_time_or(repo.created_at, "Unknown")}
+                }
             }
         }
     }
 }
-
 #[component]
 fn MaintainerBadge(pubkey: String) -> Element {
     let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
@@ -297,23 +223,21 @@ fn MaintainerBadge(pubkey: String) -> Element {
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
-
     rsx! {
         Link {
-            to: Route::Profile { pubkey: pubkey.clone() },
+            to: Route::Profile {
+                pubkey: pubkey.clone(),
+            },
             class: "px-3 py-1 bg-muted rounded-full text-sm hover:bg-accent transition",
             "{name}"
         }
     }
 }
-
 #[component]
 fn ErrorState(message: String) -> Element {
     rsx! {
-        div {
-            class: "text-center py-12",
-            div {
-                class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
+        div { class: "text-center py-12",
+            div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
                 svg {
                     class: "w-8 h-8 text-destructive",
                     xmlns: "http://www.w3.org/2000/svg",
@@ -326,54 +250,46 @@ fn ErrorState(message: String) -> Element {
                     stroke_linecap: "round",
                     stroke_linejoin: "round",
                     circle { cx: "12", cy: "12", r: "10" }
-                    line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                    line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                    line {
+                        x1: "12",
+                        y1: "8",
+                        x2: "12",
+                        y2: "12",
+                    }
+                    line {
+                        x1: "12",
+                        y1: "16",
+                        x2: "12.01",
+                        y2: "16",
+                    }
                 }
             }
             h3 { class: "font-semibold text-lg mb-2", "Repository Not Found" }
             p { class: "text-muted-foreground text-sm mb-4", "{message}" }
-            Link {
-                to: Route::CodeHome {},
-                class: "text-primary hover:underline",
-                "← Back to Code"
-            }
+            Link { to: Route::CodeHome {}, class: "text-primary hover:underline", "← Back to Code" }
         }
     }
 }
-
 #[component]
 fn LoadingSkeleton() -> Element {
     rsx! {
-        div {
-            class: "space-y-6 animate-pulse",
-
-            // Header skeleton
-            div {
-                class: "space-y-3",
+        div { class: "space-y-6 animate-pulse",
+            div { class: "space-y-3",
                 div { class: "h-6 bg-muted rounded w-1/3" }
                 div { class: "h-4 bg-muted rounded w-2/3" }
-                div {
-                    class: "flex gap-4",
+                div { class: "flex gap-4",
                     div { class: "h-4 bg-muted rounded w-16" }
                     div { class: "h-4 bg-muted rounded w-20" }
                     div { class: "h-4 bg-muted rounded w-16" }
                 }
             }
-
-            // Clone box skeleton
             div { class: "h-20 bg-muted rounded-lg" }
-
-            // Tabs skeleton
-            div {
-                class: "flex gap-4 border-b border-border pb-2",
+            div { class: "flex gap-4 border-b border-border pb-2",
                 div { class: "h-6 bg-muted rounded w-20" }
                 div { class: "h-6 bg-muted rounded w-16" }
                 div { class: "h-6 bg-muted rounded w-24" }
             }
-
-            // Content skeleton
             div { class: "h-32 bg-muted rounded-lg" }
         }
     }
 }
-

@@ -1,13 +1,11 @@
 use nostr_sdk::nips::nip53::LiveEventStatus;
 use nostr_sdk::Timestamp;
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum StreamStatus {
     Planned,
     Live,
     Ended,
 }
-
 impl StreamStatus {
     /// Get effective status accounting for stale "live" streams.
     ///
@@ -20,8 +18,6 @@ impl StreamStatus {
         if status == StreamStatus::Live {
             let now = Timestamp::now();
             let age_secs = now.as_secs().saturating_sub(last_updated.as_secs());
-
-            // NIP-53: consider live events stale after 1 hour without update
             if age_secs > 3600 {
                 return StreamStatus::Ended;
             }
@@ -29,7 +25,6 @@ impl StreamStatus {
         status
     }
 }
-
 impl From<&LiveEventStatus> for StreamStatus {
     fn from(status: &LiveEventStatus) -> Self {
         match status {
