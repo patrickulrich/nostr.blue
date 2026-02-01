@@ -863,17 +863,20 @@ async fn load_notifications(
         }
         match event.kind {
             Kind::TextNote => {
-                let is_reply = event
-                    .tags
-                    .iter()
-                    .any(|tag| {
-                        tag.kind()
-                            == nostr_sdk::TagKind::SingleLetter(
-                                nostr_sdk::SingleLetterTag::lowercase(
-                                    nostr_sdk::Alphabet::E,
-                                ),
-                            )
-                    });
+                // NIP-10: Only e tags with root/reply markers indicate thread replies
+                // Unmarked e tags are mentions in the preferred scheme
+                let is_reply = event.tags.iter().any(|tag| {
+                    matches!(
+                        tag.as_standardized(),
+                        Some(nostr_sdk::TagStandard::Event {
+                            marker: Some(nostr_sdk::nips::nip10::Marker::Root),
+                            ..
+                        }) | Some(nostr_sdk::TagStandard::Event {
+                            marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
+                            ..
+                        })
+                    )
+                });
                 if is_reply {
                     all_notifications.push(NotificationType::Reply(event));
                 } else {
