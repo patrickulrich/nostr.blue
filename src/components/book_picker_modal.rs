@@ -514,15 +514,14 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                                                 },
                                                 option { value: "", "Entire book" }
                                                 for (idx , section_ref) in pub_.section_addresses.iter().enumerate() {
-                                                    {
-                                                        let d_tag = section_ref
-                                                            .address
-                                                            .splitn(3, ':')
-                                                            .nth(2)
-                                                            .unwrap_or(&section_ref.address);
-                                                        let display_label = format!("{}. {}", idx + 1, d_tag);
-                                                        rsx! {
-                                                            option { key: "{section_ref.address}", value: "{d_tag}", "{display_label}" }
+                                                    if let Some(d_tag) = section_ref.address.splitn(3, ':').nth(2) {
+                                                        if !d_tag.is_empty() && is_valid_book_id(d_tag) {
+                                                            {
+                                                                let display_label = format!("{}. {}", idx + 1, d_tag);
+                                                                rsx! {
+                                                                    option { key: "{section_ref.address}", value: "{d_tag}", "{display_label}" }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }

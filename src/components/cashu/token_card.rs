@@ -39,7 +39,22 @@ fn unit_display(unit: &CurrencyUnit) -> &'static str {
         CurrencyUnit::Msat => "msats",
         CurrencyUnit::Usd => "USD",
         CurrencyUnit::Eur => "EUR",
+        CurrencyUnit::Auth => "auth",
+        CurrencyUnit::Custom(_) => "tokens",
         _ => "units",
+    }
+}
+
+/// Safely truncate error message respecting UTF-8 char boundaries.
+fn truncate_error(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        let mut end = max_len.saturating_sub(3);
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }
 /// Extract hostname from mint URL for display
@@ -180,10 +195,16 @@ pub fn CashuTokenCard(token: String) -> Element {
                     }
                 }
                 if let ClaimState::Failed(error_msg) = &*claim_state.read() {
-                    div {
-                        class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm cursor-help",
-                        title: "{error_msg}",
-                        "Failed to claim token. Please try again."
+                    {
+                        let truncated = truncate_error(error_msg, 50);
+                        rsx! {
+                            div {
+                                class: "mb-3 p-2 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-center text-sm cursor-help",
+                                title: "{error_msg}",
+                                p { class: "font-medium", "Failed to claim token" }
+                                p { class: "text-xs opacity-75 mt-1", "{truncated}" }
+                            }
+                        }
                     }
                 }
                 div { class: "flex items-center justify-center gap-2",

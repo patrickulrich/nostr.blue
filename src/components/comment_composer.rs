@@ -188,14 +188,27 @@ pub fn CommentComposer(
                         // Send the signed event
                         match client.send_event(&signed_event).await {
                             Ok(send_output) => {
-                                log::info!("NIP-22 comment published: {}", send_output.id().to_hex());
-                                // Invalidate cache so new comments appear on refresh
-                                invalidate_thread_tree_cache(&target_event.id);
-                                // Clear UI and call on_success with signed event for optimistic update
-                                // nostr-sdk excludes self-published events from RelayPoolNotification::Event
-                                content.set(String::new());
-                                uploaded_media.set(Vec::new());
-                                on_success.call(signed_event);
+                                if send_output.success.is_empty() {
+                                    log::warn!("Comment signed but no relay accepted it");
+                                    toast_for_async.error(
+                                        "Failed to publish".to_string(),
+                                        ToastOptions::new()
+                                            .description("No relay accepted the event".to_string())
+                                            .duration(Duration::from_secs(3)),
+                                    );
+                                } else {
+                                    log::info!(
+                                        "NIP-22 comment published: {}",
+                                        send_output.id().to_hex()
+                                    );
+                                    // Invalidate cache so new comments appear on refresh
+                                    invalidate_thread_tree_cache(&target_event.id);
+                                    // Clear UI and call on_success with signed event for optimistic update
+                                    // nostr-sdk excludes self-published events from RelayPoolNotification::Event
+                                    content.set(String::new());
+                                    uploaded_media.set(Vec::new());
+                                    on_success.call(signed_event);
+                                }
                             }
                             Err(e) => {
                                 log::error!("Failed to send comment: {}", e);
