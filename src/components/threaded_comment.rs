@@ -584,13 +584,15 @@ pub fn ThreadedComment(
                     show_reply_modal.set(false);
                 },
                 on_success: move |reply_event: NostrEvent| {
-                    show_reply_modal.set(false);
+                    // Update reply count for immediate visual feedback
                     let current = *reply_count.read();
                     reply_count.set(current + 1);
-                    // Bubble up the reply event for optimistic update
+                    // Bubble up the reply event for optimistic update BEFORE closing modal
                     if let Some(handler) = on_reply.as_ref() {
                         handler.call(reply_event);
                     }
+                    // Close modal LAST to ensure state updates happen first
+                    show_reply_modal.set(false);
                 },
             }
         }
