@@ -8,12 +8,16 @@ pub fn CashuOptimizeModal(on_close: EventHandler<()>) -> Element {
     let mut results = use_signal(Vec::<(String, ConsolidationResult)>::new);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut is_complete = use_signal(|| false);
-    let mints = cashu::get_mints();
-    let mint_proof_counts: Vec<(String, usize)> = mints
-        .iter()
-        .map(|m| (m.clone(), cashu::get_mint_proof_count(m)))
-        .collect();
-    let total_proofs: usize = mint_proof_counts.iter().map(|(_, c)| *c).sum();
+    // Memo recomputes only when get_mints() signal changes
+    let mint_proof_counts = use_memo(move || {
+        let mints = cashu::get_mints();
+        mints
+            .iter()
+            .map(|m| (m.clone(), cashu::get_mint_proof_count(m)))
+            .collect::<Vec<(String, usize)>>()
+    });
+    // Access memoized value
+    let total_proofs: usize = mint_proof_counts().iter().map(|(_, c)| *c).sum();
     let on_optimize = move |_| {
         if *is_optimizing.read() {
             return;
@@ -118,7 +122,7 @@ pub fn CashuOptimizeModal(on_close: EventHandler<()>) -> Element {
                         div { class: "bg-accent/50 rounded-lg p-4 space-y-2",
                             h4 { class: "text-sm font-semibold mb-3", "Current Proof Distribution" }
                             div { class: "space-y-2 text-sm",
-                                for (mint , count) in mint_proof_counts.iter() {
+                                for (mint , count) in mint_proof_counts().iter() {
                                     div {
                                         key: "{mint}",
                                         class: "flex justify-between",

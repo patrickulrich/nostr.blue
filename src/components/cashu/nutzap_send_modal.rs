@@ -42,12 +42,13 @@ pub fn NutzapSendModal(
             let version = *request_version.peek() + 1;
             request_version.set(version);
 
-            spawn(async move {
-                is_loading_info.set(true);
-                load_error.set(None);
-                recipient_info.set(None);
-                compatible_mint.set(None);
+            // Reset synchronously - UI updates immediately
+            is_loading_info.set(true);
+            load_error.set(None);
+            recipient_info.set(None);
+            compatible_mint.set(None);
 
+            spawn(async move {
                 match cashu::fetch_nutzap_info(&recipient).await {
                     Ok(info) => {
                         // Stale check: use peek() to avoid subscription in async

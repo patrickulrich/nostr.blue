@@ -59,6 +59,11 @@ pub fn AddToCookbookModal(
                 new_description.set(String::new());
                 new_image_url.set(None);
                 error.set(None);
+                // Reset submit-related state
+                success.set(false);
+                pending_pin_cookbook.set(None);
+                is_submitting.set(false);
+                fetch_error.set(None);
                 return;
             }
 

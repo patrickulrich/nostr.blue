@@ -65,10 +65,6 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut session_token = use_signal(|| 0u64);
     let is_editing = props.citation_to_edit.is_some();
-    let existing_d_tag = props
-        .citation_to_edit
-        .as_ref()
-        .and_then(|c| c.event.tags.identifier().map(|s| s.to_string()));
     use_effect(
         use_reactive(
             (&*props.show.read(), &props.citation_to_edit),
@@ -188,7 +184,11 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let prompt_url_val = prompt_url.read().clone();
         let on_save = props.on_save;
         let mut show = props.show;
-        let existing_d_tag = existing_d_tag.clone();
+        // Compute fresh from current props
+        let existing_d_tag = props
+            .citation_to_edit
+            .as_ref()
+            .and_then(|c| c.event.tags.identifier().map(|s| s.to_string()));
         let my_token = *session_token.read();
         spawn(async move {
             let result = match current_tab {

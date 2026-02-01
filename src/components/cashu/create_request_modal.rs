@@ -76,6 +76,7 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                                     current_request_id.set(None); // Clear so handle_close won't cancel completed request
                                 }
                                 Err(e) => {
+                                    current_request_id.set(None); // Clear on error too
                                     if e != PAYMENT_CANCELLED_MSG {
                                         log::error!("Payment wait error: {}", e);
                                     }

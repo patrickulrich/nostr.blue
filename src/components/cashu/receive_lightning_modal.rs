@@ -109,7 +109,9 @@ async fn poll_mint_quote_http(
                 });
                 break;
             }
-            Ok(cashu::MintQuoteState::Unpaid) => {}
+            Ok(cashu::MintQuoteState::Unpaid) => {
+                mint_status.set(Some("Waiting for payment...".to_string()));
+            }
             Err(e) => {
                 let e_lower = e.to_lowercase();
                 if e_lower.contains("expired") || e_lower.contains("not found") {

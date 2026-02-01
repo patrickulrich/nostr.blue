@@ -67,9 +67,9 @@ pub fn BoardSlideover(
             request_id.set(if next == 0 { 1 } else { next });
         }
     });
-    let is_owner = auth_store::AUTH_STATE
-        .read()
-        .pubkey
+    // Hoist AUTH_STATE read to component top - computed once per render
+    let current_user_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
+    let is_owner = current_user_pubkey
         .as_ref()
         .map(|pk| pk == &board.pubkey)
         .unwrap_or(false);
@@ -93,21 +93,45 @@ pub fn BoardSlideover(
     let mut retry_trigger_mut = retry_trigger;
     use_effect(
         use_reactive!(
-            | (show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative,
-            retry_trigger,) | { let _ = * retry_trigger.read(); let shown = * show_signal
-            .read(); if ! shown { return; } let a_tag = board_a_tag.clone(); let owner_pk
-            = owner_pubkey_for_pins.clone(); let current_request = { let next =
-            request_id_mut.read().wrapping_add(1); if next == 0 { 1 } else { next } };
-            request_id_mut.set(current_request); pins_loading.set(true); pins_error
-            .set(None); spawn(async move { let result = if is_collaborative {
-            fetch_pins_for_board_filtered(& a_tag, None, None). await } else {
-            fetch_pins_for_board_filtered(& a_tag, Some(& owner_pk), None). await }; let
-            current = * request_id_mut.read(); if current == 0 || current !=
-            current_request { return; } match result { Ok(fetched_pins) => { pins
-            .set(fetched_pins); pins_error.set(None); } Err(e) => {
-            log::error!("Failed to fetch pins: {}", e); pins_error
-            .set(Some(format!("Failed to load pins: {}", e))); } } pins_loading
-            .set(false); }); }
+            |(show_signal, board_a_tag, owner_pubkey_for_pins, is_collaborative, retry_trigger,)| {
+                let _ = *retry_trigger.read();
+                let shown = *show_signal.read();
+                if !shown {
+                    return;
+                }
+                let a_tag = board_a_tag.clone();
+                let owner_pk = owner_pubkey_for_pins.clone();
+                let current_request = {
+                    let next = request_id_mut.read().wrapping_add(1);
+                    if next == 0 { 1 } else { next }
+                };
+                request_id_mut.set(current_request);
+                pins_loading.set(true);
+                pins_error.set(None);
+                spawn(async move {
+                    let result = if is_collaborative {
+                        fetch_pins_for_board_filtered(&a_tag, None, None).await
+                    } else {
+                        fetch_pins_for_board_filtered(&a_tag, Some(&owner_pk), None).await
+                    };
+                    // Use .peek() in async callback - doesn't subscribe (Dioxus pattern)
+                    let current = *request_id_mut.peek();
+                    if current != current_request {
+                        return;
+                    }
+                    match result {
+                        Ok(fetched_pins) => {
+                            pins.set(fetched_pins);
+                            pins_error.set(None);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch pins: {}", e);
+                            pins_error.set(Some(format!("Failed to load pins: {}", e)));
+                        }
+                    }
+                    pins_loading.set(false);
+                });
+            }
         ),
     );
     let nav = navigator();
@@ -393,27 +417,22 @@ pub fn BoardSlideover(
                             }
                         }
                     } else {
-                        {
-                            let current_user_pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
-                            rsx! {
-                                div { class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-auto",
-                                    for pin in pins.read().iter() {
-                                        {
-                                            let pin_is_owner = current_user_pubkey
-                                                .as_ref()
-                                                .map(|pk| pk == &pin.pubkey)
-                                                .unwrap_or(false);
-                                            rsx! {
-                                                PinCard {
-                                                    key: "{pin.event_id}",
-                                                    pin: pin.clone(),
-                                                    is_owner: pin_is_owner,
-                                                    on_delete: handle_pin_deleted,
-                                                    on_pin_to_board: move |req: PinToBoardRequest| {
-                                                        pin_to_board_request.set(Some(req));
-                                                    },
-                                                }
-                                            }
+                        div { class: "grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-auto",
+                            for pin in pins.read().iter() {
+                                {
+                                    let pin_is_owner = current_user_pubkey
+                                        .as_ref()
+                                        .map(|pk| pk == &pin.pubkey)
+                                        .unwrap_or(false);
+                                    rsx! {
+                                        PinCard {
+                                            key: "{pin.event_id}",
+                                            pin: pin.clone(),
+                                            is_owner: pin_is_owner,
+                                            on_delete: handle_pin_deleted,
+                                            on_pin_to_board: move |req: PinToBoardRequest| {
+                                                pin_to_board_request.set(Some(req));
+                                            },
                                         }
                                     }
                                 }

@@ -110,7 +110,8 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                         ),
                     );
             } else {
-                success_message
+                // Use error_message for partial failures
+                error_message
                     .set(
                         Some(
                             format!(

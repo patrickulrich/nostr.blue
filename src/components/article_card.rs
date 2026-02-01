@@ -11,8 +11,18 @@ use nostr_sdk::Event as NostrEvent;
 #[component]
 pub fn ArticleCard(event: NostrEvent) -> Element {
     let title = get_title(&event);
-    let summary = get_summary(&event);
-    let image_url = get_image(&event);
+    // Chain: get Option → borrow → trim → filter empty → clone to owned
+    let summary = get_summary(&event)
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|t| !t.is_empty())
+        .map(|s| s.to_string());
+    // Chain: get Option → trim → filter invalid URLs
+    let image_url = get_image(&event)
+        .as_ref()
+        .map(|url| url.trim())
+        .filter(|url| !url.is_empty() && is_valid_http_url(url))
+        .map(|url| url.to_string());
     let published_at = get_published_at(&event);
     let hashtags = get_hashtags(&event);
     let identifier = get_identifier(&event);
@@ -89,9 +99,9 @@ pub fn ArticleCard(event: NostrEvent) -> Element {
                     div { class: "p-4 space-y-3",
                         if !displayed_tags.is_empty() {
                             div { class: "flex flex-wrap gap-2",
-                                for tag in displayed_tags {
+                                for (idx, tag) in displayed_tags.iter().enumerate() {
                                     span {
-                                        key: "{tag}",
+                                        key: "{idx}-{tag}",
                                         class: "px-2 py-1 text-xs rounded-full bg-primary/10 text-primary font-medium",
                                         "#{tag}"
                                     }

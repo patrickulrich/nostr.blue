@@ -420,6 +420,7 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                     {
                         let is_disabled = *is_sending.read()
                             || amount.read().parse::<u64>().map_or(true, |a| a == 0)
+                            || selected_mint.read().is_empty()  // Mirrors on_send validation
                             || (*p2pk_enabled.read() && recipient_pubkey.read().is_empty());
                         rsx! {
                             button {

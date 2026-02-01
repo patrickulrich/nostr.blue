@@ -151,14 +151,14 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
                         let request_amount = request.amount.map(u64::from).unwrap_or(0);
                         let has_description = request.description.is_some();
                         let description = request.description.clone().unwrap_or_default();
-                        let mint_count = request.mints.as_ref().map(|m| m.len()).unwrap_or(0);
+                        // Use map_or for count (nostr pattern)
+                        let mint_count = request.mints.as_ref().map_or(0, |v| v.len());
+                        // Use as_ref() to borrow, then iterate and collect strings
                         let request_mints: Vec<String> = request
                             .mints
-                            .clone()
-                            .unwrap_or_default()
-                            .iter()
-                            .map(|m| m.to_string())
-                            .collect();
+                            .as_ref()
+                            .map(|v| v.iter().map(|m| m.to_string()).collect())
+                            .unwrap_or_default();
                         let has_nostr = request
                             .transports
                             .iter()
