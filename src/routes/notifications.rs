@@ -4,6 +4,7 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind, Timestamp};
 use crate::components::{ClientInitializing, NoteCard};
+use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
@@ -52,48 +53,45 @@ pub fn Notifications() -> Element {
     let mut notifications = use_signal(Vec::<NotificationType>::new);
     let mut loading = use_signal(|| false);
     let mut refreshing = use_signal(|| false);
-    let mut error = use_signal(|| None::<String>);
+    let mut error = use_signal(|| None::<NostrBlueError>);
     let mut active_filter = use_signal(|| NotificationFilter::All);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
-    use_effect(
-        use_reactive(
-            (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
-            move |(client_initialized, is_authenticated)| {
-                if !client_initialized || !is_authenticated {
-                    return;
-                }
-                let now = Timestamp::now().as_secs() as i64;
-                notif_store::set_checked_at(now);
-                loading.set(true);
-                error.set(None);
-                spawn(async move {
-                    match load_notifications(None).await {
-                        Ok(notifs) => {
-                            if !notifs.is_empty() {
-                                let oldest = notifs.iter().map(get_timestamp).min();
-                                oldest_timestamp.set(oldest);
-                                let len = notifs.len();
-                                notifications.set(notifs.clone());
-                                has_more.set(len >= 100);
-                                spawn(async move {
-                                    prefetch_notification_authors(&notifs).await;
-                                });
-                            } else {
-                                has_more.set(false);
-                            }
-                        }
-                        Err(e) => {
-                            error.set(Some(e));
-                            has_more.set(false);
-                        }
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        if !client_initialized || !is_authenticated {
+            return;
+        }
+        let now = Timestamp::now().as_secs() as i64;
+        notif_store::set_checked_at(now);
+        loading.set(true);
+        error.set(None);
+        spawn(async move {
+            match load_notifications(None).await {
+                Ok(notifs) => {
+                    if !notifs.is_empty() {
+                        let oldest = notifs.iter().map(get_timestamp).min();
+                        oldest_timestamp.set(oldest);
+                        let len = notifs.len();
+                        notifications.set(notifs.clone());
+                        has_more.set(len >= 100);
+                        spawn(async move {
+                            prefetch_notification_authors(&notifs).await;
+                        });
+                    } else {
+                        has_more.set(false);
                     }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
+                }
+                Err(e) => {
+                    error.set(Some(e));
+                    has_more.set(false);
+                }
+            }
+            loading.set(false);
+        });
+    });
     let handle_refresh = move |_| {
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         if !is_authenticated || *refreshing.read() {
@@ -829,14 +827,14 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
 }
 async fn load_notifications(
     until: Option<u64>,
-) -> Result<Vec<NotificationType>, String> {
+) -> Result<Vec<NotificationType>, NostrBlueError> {
     let client = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
-        .ok_or("Client not initialized")?
+        .ok_or(NostrBlueError::Other("Client not initialized".into()))?
         .clone();
     nostr_client::ensure_relays_ready(&client).await;
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!("Loading notifications for {} (until: {:?})", pubkey_str, until);
     let mut all_notifications = Vec::new();
     let mut filter = Filter::new()
@@ -849,51 +847,49 @@ async fn load_notifications(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    match client
+    let events: Vec<_> = client
         .fetch_events(filter, Duration::from_secs(10))
         .await
-        .map(|e| e.into_iter().collect::<Vec<_>>())
-    {
-        Ok(events) => {
-            for event in events {
-                if event.pubkey.to_hex() == pubkey_str {
-                    continue;
-                }
-                match event.kind {
-                    Kind::TextNote => {
-                        let is_reply = event
-                            .tags
-                            .iter()
-                            .any(|tag| {
-                                tag.kind()
-                                    == nostr_sdk::TagKind::SingleLetter(
-                                        nostr_sdk::SingleLetterTag::lowercase(
-                                            nostr_sdk::Alphabet::E,
-                                        ),
-                                    )
-                            });
-                        if is_reply {
-                            all_notifications.push(NotificationType::Reply(event));
-                        } else {
-                            all_notifications.push(NotificationType::Mention(event));
-                        }
-                    }
-                    Kind::Reaction => {
-                        all_notifications.push(NotificationType::Reaction(event));
-                    }
-                    Kind::Repost => {
-                        all_notifications.push(NotificationType::Repost(event));
-                    }
-                    Kind::ZapReceipt => {
-                        all_notifications.push(NotificationType::Zap(event));
-                    }
-                    _ => {}
+        .map_err(|e| {
+            log::error!("Failed to fetch notifications: {}", e);
+            e
+        })?
+        .into_iter()
+        .collect();
+
+    for event in events {
+        if event.pubkey.to_hex() == pubkey_str {
+            continue;
+        }
+        match event.kind {
+            Kind::TextNote => {
+                let is_reply = event
+                    .tags
+                    .iter()
+                    .any(|tag| {
+                        tag.kind()
+                            == nostr_sdk::TagKind::SingleLetter(
+                                nostr_sdk::SingleLetterTag::lowercase(
+                                    nostr_sdk::Alphabet::E,
+                                ),
+                            )
+                    });
+                if is_reply {
+                    all_notifications.push(NotificationType::Reply(event));
+                } else {
+                    all_notifications.push(NotificationType::Mention(event));
                 }
             }
-        }
-        Err(e) => {
-            log::error!("Failed to fetch notifications: {}", e);
-            return Err(format!("Failed to fetch notifications: {}", e));
+            Kind::Reaction => {
+                all_notifications.push(NotificationType::Reaction(event));
+            }
+            Kind::Repost => {
+                all_notifications.push(NotificationType::Repost(event));
+            }
+            Kind::ZapReceipt => {
+                all_notifications.push(NotificationType::Zap(event));
+            }
+            _ => {}
         }
     }
     all_notifications.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
