@@ -2,7 +2,7 @@
 
 A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.7.7-blue)
+![Version](https://img.shields.io/badge/version-0.7.8-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
@@ -260,11 +260,10 @@ nostr.blue/
 │   │   ├── btc_price.rs    # Binance BTC price API for P2P sats calculations
 │   │   └── git_hosting/    # NIP-34 Git hosting services
 │   └── main.rs             # Application entry point
-├── assets/                 # Static assets
+├── public/                 # Static assets and build output
 │   ├── favicon.svg         # SVG favicon
 │   ├── favicon.ico         # ICO favicon
-│   └── tailwind.css        # Compiled CSS
-├── public/                 # Public build output
+│   └── ...                 # Other static files (manifest, icons, etc.)
 ├── dist/                   # Production build
 ├── Cargo.toml              # Rust dependencies
 ├── Dioxus.toml             # Dioxus configuration
@@ -300,9 +299,14 @@ cargo install dioxus-cli@0.7
 # Install Node dependencies
 npm install
 
+# Initialize protocol documentation submodules
+git submodule update --init --recursive
+
 # Build TailwindCSS
 npm run tailwind:build
 ```
+
+Run `git submodule update --init --recursive` again when new submodules are added. See `.gitmodules` for the list of submodules.
 
 ### Development
 

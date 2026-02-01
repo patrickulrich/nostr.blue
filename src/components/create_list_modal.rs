@@ -7,13 +7,12 @@
 //! - Curation lists (kind 30004)
 //!
 //! People lists support NIP-44 encrypted private members.
-
 use dioxus::prelude::*;
-
 use crate::stores::nostr_client;
-use crate::utils::list_kinds::{NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS};
+use crate::utils::list_kinds::{
+    NAMED_BOOKMARKS, NAMED_CURATIONS, NAMED_PEOPLE, NAMED_RELAYS,
+};
 use nostr_sdk::{EventBuilder, Kind, Tag};
-
 /// List type for creation
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum ListType {
@@ -22,7 +21,6 @@ enum ListType {
     Bookmarks,
     Curations,
 }
-
 impl ListType {
     fn kind(&self) -> u16 {
         match self {
@@ -32,7 +30,6 @@ impl ListType {
             ListType::Curations => NAMED_CURATIONS,
         }
     }
-
     fn label(&self) -> &'static str {
         match self {
             ListType::People => "People List",
@@ -41,7 +38,6 @@ impl ListType {
             ListType::Curations => "Curation List",
         }
     }
-
     fn icon(&self) -> &'static str {
         match self {
             ListType::People => "👥",
@@ -50,7 +46,6 @@ impl ListType {
             ListType::Curations => "📚",
         }
     }
-
     fn description(&self) -> &'static str {
         match self {
             ListType::People => "Organize contacts into groups",
@@ -59,7 +54,6 @@ impl ListType {
             ListType::Curations => "Curate collections of content",
         }
     }
-
     fn alt_text(&self) -> &'static str {
         match self {
             ListType::People => "List of people",
@@ -68,19 +62,16 @@ impl ListType {
             ListType::Curations => "List of curated content",
         }
     }
-
     /// Only people lists support private members per NIP-51
     fn supports_privacy(&self) -> bool {
         matches!(self, ListType::People)
     }
 }
-
 #[derive(Props, Clone, PartialEq)]
 pub struct CreateListModalProps {
     pub on_close: EventHandler<()>,
     pub on_created: EventHandler<()>,
 }
-
 #[component]
 pub fn CreateListModal(props: CreateListModalProps) -> Element {
     let mut list_type = use_signal(|| ListType::People);
@@ -89,29 +80,22 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
     let mut is_private_list = use_signal(|| false);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
-
     let on_close = props.on_close;
     let on_created = props.on_created;
-
     let handle_create = move |_| {
-        // Guard against re-entry while already creating
         if *loading.peek() {
             return;
         }
-
         let list_type_val = *list_type.read();
         let name_val = name.read().clone();
         let desc_val = description.read().clone();
         let is_private = *is_private_list.read();
-
         if name_val.trim().is_empty() {
             error_msg.set(Some("Please enter a list name".to_string()));
             return;
         }
-
         loading.set(true);
         error_msg.set(None);
-
         spawn(async move {
             match create_list(list_type_val, name_val, desc_val, is_private).await {
                 Ok(_) => {
@@ -125,28 +109,19 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
             }
         });
     };
-
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
             onclick: move |_| {
-                // Use peek() to check loading without subscribing
                 if !*loading.peek() {
                     props.on_close.call(())
                 }
             },
-
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-lg mx-4 w-full max-h-[90vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
-
-                // Header
-                div {
-                    class: "flex justify-between items-center mb-6",
-                    h2 {
-                        class: "text-xl font-bold",
-                        "Create New List"
-                    }
+                div { class: "flex justify-between items-center mb-6",
+                    h2 { class: "text-xl font-bold", "Create New List" }
                     button {
                         class: "text-muted-foreground hover:text-foreground disabled:opacity-50",
                         disabled: *loading.read(),
@@ -159,19 +134,10 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                         "✕"
                     }
                 }
-
-                div {
-                    class: "space-y-6",
-
-                    // List Type Selection
+                div { class: "space-y-6",
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-3",
-                            "List Type"
-                        }
-                        div {
-                            class: "grid grid-cols-2 gap-3",
-
+                        label { class: "block text-sm font-medium mb-3", "List Type" }
+                        div { class: "grid grid-cols-2 gap-3",
                             for lt in [ListType::People, ListType::Relays, ListType::Bookmarks, ListType::Curations] {
                                 {
                                     let lt_for_check = lt;
@@ -179,40 +145,26 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                                     rsx! {
                                         button {
                                             key: "{lt.label()}",
-                                            class: if *list_type.read() == lt_for_check {
-                                                "p-3 border-2 border-primary rounded-lg text-left bg-primary/5"
-                                            } else {
-                                                "p-3 border border-border rounded-lg text-left hover:bg-accent"
-                                            },
+                                            class: if *list_type.read() == lt_for_check { "p-3 border-2 border-primary rounded-lg text-left bg-primary/5" } else { "p-3 border border-border rounded-lg text-left hover:bg-accent" },
                                             onclick: move |_| {
                                                 list_type.set(lt_for_set);
-                                                // Reset privacy toggle when switching away from people lists
                                                 if !lt_for_set.supports_privacy() {
                                                     is_private_list.set(false);
                                                 }
                                             },
-                                            div {
-                                                class: "flex items-center gap-2 mb-1",
+                                            div { class: "flex items-center gap-2 mb-1",
                                                 span { class: "text-xl", "{lt.icon()}" }
                                                 span { class: "font-medium", "{lt.label()}" }
                                             }
-                                            div {
-                                                class: "text-xs text-muted-foreground",
-                                                "{lt.description()}"
-                                            }
+                                            div { class: "text-xs text-muted-foreground", "{lt.description()}" }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Name Input
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Name"
-                        }
+                        label { class: "block text-sm font-medium mb-2", "Name" }
                         input {
                             class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
@@ -222,13 +174,8 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                             oninput: move |e| name.set(e.value().clone()),
                         }
                     }
-
-                    // Description Input
                     div {
-                        label {
-                            class: "block text-sm font-medium mb-2",
-                            "Description (optional)"
-                        }
+                        label { class: "block text-sm font-medium mb-2", "Description (optional)" }
                         textarea {
                             class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                             rows: "2",
@@ -238,14 +185,9 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                             oninput: move |e| description.set(e.value().clone()),
                         }
                     }
-
-                    // Privacy Toggle (only for people lists)
                     if list_type.read().supports_privacy() {
-                        div {
-                            class: "p-4 bg-muted/50 rounded-lg",
-
-                            div {
-                                class: "flex items-start gap-3",
+                        div { class: "p-4 bg-muted/50 rounded-lg",
+                            div { class: "flex items-start gap-3",
                                 input {
                                     r#type: "checkbox",
                                     id: "private-list",
@@ -259,46 +201,44 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
                                         class: "font-medium cursor-pointer",
                                         "🔒 Private List"
                                     }
-                                    p {
-                                        class: "text-sm text-muted-foreground mt-1",
+                                    p { class: "text-sm text-muted-foreground mt-1",
                                         "Members will be encrypted with NIP-44. Only you can see who is in this list. "
                                         "You can still add individual members as public or private later."
                                     }
                                 }
                             }
-
-                            // Info box about privacy
-                            div {
-                                class: "mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded text-sm",
-                                div {
-                                    class: "flex items-start gap-2",
+                            div { class: "mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded text-sm",
+                                div { class: "flex items-start gap-2",
                                     span { "ℹ️" }
                                     div {
-                                        p { class: "font-medium text-blue-600 dark:text-blue-400", "How private lists work:" }
-                                        ul {
-                                            class: "mt-1 text-muted-foreground space-y-1",
-                                            li { "• Private members are encrypted in the event content" }
-                                            li { "• Public members appear in tags (visible to everyone)" }
-                                            li { "• You can mix public and private members in one list" }
-                                            li { "• Other apps that support NIP-51 will decrypt your private members" }
+                                        p { class: "font-medium text-blue-600 dark:text-blue-400",
+                                            "How private lists work:"
+                                        }
+                                        ul { class: "mt-1 text-muted-foreground space-y-1",
+                                            li {
+                                                "• Private members are encrypted in the event content"
+                                            }
+                                            li {
+                                                "• Public members appear in tags (visible to everyone)"
+                                            }
+                                            li {
+                                                "• You can mix public and private members in one list"
+                                            }
+                                            li {
+                                                "• Other apps that support NIP-51 will decrypt your private members"
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-
-                    // Error message
                     if let Some(err) = error_msg.read().as_ref() {
-                        div {
-                            class: "p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600",
+                        div { class: "p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600",
                             "{err}"
                         }
                     }
-
-                    // Action buttons
-                    div {
-                        class: "flex gap-3 justify-end pt-2",
+                    div { class: "flex gap-3 justify-end pt-2",
                         button {
                             class: "px-4 py-2 text-muted-foreground hover:text-foreground",
                             disabled: *loading.read(),
@@ -323,7 +263,6 @@ pub fn CreateListModal(props: CreateListModalProps) -> Element {
         }
     }
 }
-
 /// Create a new list
 async fn create_list(
     list_type: ListType,
@@ -332,23 +271,15 @@ async fn create_list(
     is_private_default: bool,
 ) -> Result<(), String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
-    let signer = client
-        .signer()
-        .await
-        .map_err(|e| format!("No signer: {}", e))?;
-
+    let signer = client.signer().await.map_err(|e| format!("No signer: {}", e))?;
     let name = name.trim();
     if name.is_empty() {
         return Err("List name cannot be empty".to_string());
     }
-    // Use chars().count() for proper UTF-8 character counting
     if name.chars().count() > 100 {
         return Err("List name too long (max 100 characters)".to_string());
     }
-
     let unique_id = uuid::Uuid::new_v4().to_string();
-
-    // Build NIP-51 compliant tags
     let mut tags = vec![
         Tag::identifier(&unique_id),
         Tag::custom(
@@ -360,24 +291,21 @@ async fn create_list(
             vec![list_type.alt_text().to_string()],
         ),
     ];
-
-    // Add description if provided (enforce 500-char limit matching UI)
     let desc = description.trim();
     if !desc.is_empty() {
         let bounded_desc: String = desc.chars().take(500).collect();
-        tags.push(Tag::custom(
-            nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
-            vec![bounded_desc],
-        ));
+        tags.push(
+            Tag::custom(
+                nostr_sdk::TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+                vec![bounded_desc],
+            ),
+        );
     }
-
-    // For private people lists, encrypt empty array to establish the pattern
     let content = if list_type.supports_privacy() && is_private_default {
         let pubkey = signer
             .get_public_key()
             .await
             .map_err(|e| format!("Failed to get pubkey: {}", e))?;
-
         signer
             .nip44_encrypt(&pubkey, "[]")
             .await
@@ -385,14 +313,12 @@ async fn create_list(
     } else {
         String::new()
     };
-
-    let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content).tags(tags);
-
+    let builder = EventBuilder::new(Kind::from_u16(list_type.kind()), content)
+        .tags(tags);
     client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to create list: {}", e))?;
-
     log::info!("Created new {} list: {}", list_type.label(), name);
     Ok(())
 }

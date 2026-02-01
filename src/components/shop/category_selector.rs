@@ -1,7 +1,5 @@
 //! CategorySelector component - category chips for filtering
-
 use dioxus::prelude::*;
-
 /// Common marketplace categories
 /// Used by CategorySelector component for filtering products
 pub const CATEGORIES: &[(&str, &str)] = &[
@@ -20,7 +18,6 @@ pub const CATEGORIES: &[(&str, &str)] = &[
     ("services", "Services"),
     ("other", "Other"),
 ];
-
 #[derive(Props, Clone, PartialEq)]
 pub struct CategorySelectorProps {
     pub selected: Vec<String>,
@@ -28,13 +25,12 @@ pub struct CategorySelectorProps {
     #[props(default = false)]
     pub multi_select: bool,
 }
-
 /// Category chip selector
 #[component]
 pub fn CategorySelector(props: CategorySelectorProps) -> Element {
     rsx! {
         div { class: "flex flex-wrap gap-2",
-            for (id, label) in CATEGORIES.iter() {
+            for (id , label) in CATEGORIES.iter() {
                 {
                     let id_str = id.to_string();
                     let is_selected = props.selected.contains(&id_str);
@@ -43,7 +39,6 @@ pub fn CategorySelector(props: CategorySelectorProps) -> Element {
                     } else {
                         "bg-card hover:bg-accent border-border"
                     };
-
                     rsx! {
                         button {
                             key: "{id}",
@@ -55,18 +50,12 @@ pub fn CategorySelector(props: CategorySelectorProps) -> Element {
                                 let on_change = props.on_change;
                                 let multi = props.multi_select;
                                 move |_| {
-                                    let mut new_selected = if multi {
-                                        current.clone()
-                                    } else {
-                                        vec![]
-                                    };
-
+                                    let mut new_selected = if multi { current.clone() } else { vec![] };
                                     if new_selected.contains(&id_owned) {
                                         new_selected.retain(|x| x != &id_owned);
                                     } else {
                                         new_selected.push(id_owned.clone());
                                     }
-
                                     on_change.call(new_selected);
                                 }
                             },

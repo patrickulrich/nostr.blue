@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.7.7"
+version = "0.7.8"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -9,8 +9,8 @@ license = "MIT"
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.7.2", default-features = false, features = ["web", "router", "launch", "logger", "lib"] }
-dioxus-stores = "0.7.2"
+dioxus = { version = "0.7.3", default-features = false, features = ["web", "router", "launch", "logger", "lib"] }
+dioxus-stores = "0.7.3"
 
 # Nostr protocol
 nostr = { version = "0.44.1", default-features = false, features = ["std", "nip47", "nip49", "nip57", "nip60", "nip98"] }
@@ -124,7 +124,7 @@ urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4", "js"] }
 url = "2.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-gloo-net = "0.5"
+gloo-net = "0.6"
 bech32 = "0.11"
 qrcode = "0.14"
 base64 = "0.22"
@@ -144,7 +144,7 @@ maplit = "1.0"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false }
 
 # RSS feed parsing and podcast support
-quick-xml = "0.37"
+quick-xml = "0.39"
 strum = { version = "0.27.2", features = ["derive"] }
 gloo-events = "0.2.0"
 

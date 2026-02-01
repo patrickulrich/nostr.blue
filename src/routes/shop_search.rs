@@ -1,14 +1,12 @@
 //! Shop Search - Search marketplace products
-
-use dioxus::prelude::*;
-use crate::routes::Route;
-use crate::utils::nip99::{Product, ProductFormat};
-use crate::stores::shop_store::{
-    search_products, CART_ITEMS,
-    ShopFilterState, filter_products, sort_products, ProductSortBy,
-};
 use crate::components::shop::{ProductCard, ProductCardSkeleton};
-
+use crate::routes::Route;
+use crate::stores::shop_store::{
+    filter_products, search_products, sort_products, ProductSortBy, ShopFilterState,
+    CART_ITEMS,
+};
+use crate::utils::nip99::{Product, ProductFormat};
+use dioxus::prelude::*;
 /// Product search page
 #[component]
 pub fn ShopSearch(q: String) -> Element {
@@ -17,8 +15,6 @@ pub fn ShopSearch(q: String) -> Element {
     let mut loading = use_signal(|| false);
     let mut has_searched = use_signal(|| !q.is_empty());
     let mut search_error = use_signal(|| None::<String>);
-
-    // Filter states
     let mut min_price = use_signal(|| None::<u64>);
     let mut max_price = use_signal(|| None::<u64>);
     let mut category_filter = use_signal(String::new);
@@ -26,8 +22,6 @@ pub fn ShopSearch(q: String) -> Element {
     let mut physical_only = use_signal(|| false);
     let mut show_filters = use_signal(|| false);
     let mut sort_by = use_signal(|| ProductSortBy::Newest);
-
-    // Search on initial load if query provided
     let initial_query = q.clone();
     use_effect(move || {
         if !initial_query.is_empty() {
@@ -46,13 +40,10 @@ pub fn ShopSearch(q: String) -> Element {
             });
         }
     });
-
-    // Build filter state from UI inputs
     let filter_state = {
         let cat = category_filter.read();
         let digital = *digital_only.read();
         let physical = *physical_only.read();
-
         ShopFilterState {
             min_price_sats: *min_price.read(),
             max_price_sats: *max_price.read(),
@@ -67,8 +58,6 @@ pub fn ShopSearch(q: String) -> Element {
             ..Default::default()
         }
     };
-
-    // Apply filters and sort using infrastructure
     let filtered_products = {
         let prods = products.read();
         let sort = *sort_by.read();
@@ -76,12 +65,9 @@ pub fn ShopSearch(q: String) -> Element {
         sort_products(&mut filtered, sort);
         filtered
     };
-
     let cart_count = CART_ITEMS.read().len();
-
     rsx! {
         div { class: "min-h-screen",
-            // Header
             div { class: "sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "flex items-center gap-4 p-4",
                     button {
@@ -93,22 +79,14 @@ pub fn ShopSearch(q: String) -> Element {
                         crate::components::icons::ArrowLeftIcon { class: "w-5 h-5" }
                     }
                     h1 { class: "text-xl font-bold flex-1", "Search" }
-
-                    // Filter toggle
                     button {
-                        class: if *show_filters.read() {
-                            "p-2 bg-blue-500 text-white rounded-full transition"
-                        } else {
-                            "p-2 hover:bg-accent rounded-full transition"
-                        },
+                        class: if *show_filters.read() { "p-2 bg-blue-500 text-white rounded-full transition" } else { "p-2 hover:bg-accent rounded-full transition" },
                         onclick: move |_| {
                             let current = *show_filters.read();
                             show_filters.set(!current);
                         },
                         crate::components::icons::FilterIcon { class: "w-5 h-5" }
                     }
-
-                    // Cart button
                     Link {
                         to: Route::ShopCart {},
                         class: "relative p-2 hover:bg-accent rounded-full transition",
@@ -120,8 +98,6 @@ pub fn ShopSearch(q: String) -> Element {
                         }
                     }
                 }
-
-                // Search input
                 div { class: "px-4 pb-4",
                     form {
                         class: "relative",
@@ -150,7 +126,7 @@ pub fn ShopSearch(q: String) -> Element {
                             placeholder: "Search products...",
                             r#type: "text",
                             value: "{query}",
-                            oninput: move |e| query.set(e.value())
+                            oninput: move |e| query.set(e.value()),
                         }
                         div { class: "absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground",
                             crate::components::icons::SearchIcon { class: "w-5 h-5" }
@@ -162,11 +138,8 @@ pub fn ShopSearch(q: String) -> Element {
                         }
                     }
                 }
-
-                // Filters panel
                 if *show_filters.read() {
                     div { class: "px-4 pb-4 border-t border-border pt-4 space-y-4",
-                        // Sort
                         div {
                             label { class: "block text-sm font-medium mb-2", "Sort By" }
                             div { class: "flex gap-2 flex-wrap",
@@ -177,22 +150,17 @@ pub fn ShopSearch(q: String) -> Element {
                                     ProductSortBy::PriceHigh,
                                     ProductSortBy::Rating,
                                     ProductSortBy::Title,
-                                ] {
+                                ]
+                                {
                                     button {
                                         key: "{option.label()}",
-                                        class: if *sort_by.read() == option {
-                                            "px-3 py-1 text-sm bg-blue-500 text-white rounded-full"
-                                        } else {
-                                            "px-3 py-1 text-sm bg-muted hover:bg-accent rounded-full transition"
-                                        },
+                                        class: if *sort_by.read() == option { "px-3 py-1 text-sm bg-blue-500 text-white rounded-full" } else { "px-3 py-1 text-sm bg-muted hover:bg-accent rounded-full transition" },
                                         onclick: move |_| sort_by.set(option),
                                         "{option.label()}"
                                     }
                                 }
                             }
                         }
-
-                        // Price range
                         div {
                             label { class: "block text-sm font-medium mb-2", "Price Range (sats)" }
                             div { class: "flex items-center gap-2",
@@ -203,7 +171,7 @@ pub fn ShopSearch(q: String) -> Element {
                                     value: if let Some(v) = *min_price.read() { v.to_string() } else { String::new() },
                                     oninput: move |e| {
                                         min_price.set(e.value().parse().ok());
-                                    }
+                                    },
                                 }
                                 span { class: "text-muted-foreground", "-" }
                                 input {
@@ -213,12 +181,10 @@ pub fn ShopSearch(q: String) -> Element {
                                     value: if let Some(v) = *max_price.read() { v.to_string() } else { String::new() },
                                     oninput: move |e| {
                                         max_price.set(e.value().parse().ok());
-                                    }
+                                    },
                                 }
                             }
                         }
-
-                        // Category filter
                         div {
                             label { class: "block text-sm font-medium mb-2", "Category" }
                             input {
@@ -226,11 +192,9 @@ pub fn ShopSearch(q: String) -> Element {
                                 class: "w-full px-3 py-2 bg-muted rounded-lg text-sm",
                                 placeholder: "e.g., electronics, art",
                                 value: "{category_filter}",
-                                oninput: move |e| category_filter.set(e.value())
+                                oninput: move |e| category_filter.set(e.value()),
                             }
                         }
-
-                        // Product type
                         div {
                             label { class: "block text-sm font-medium mb-2", "Product Type" }
                             div { class: "flex gap-4",
@@ -241,8 +205,10 @@ pub fn ShopSearch(q: String) -> Element {
                                         checked: *digital_only.read(),
                                         onchange: move |e| {
                                             digital_only.set(e.checked());
-                                            if e.checked() { physical_only.set(false); }
-                                        }
+                                            if e.checked() {
+                                                physical_only.set(false);
+                                            }
+                                        },
                                     }
                                     span { class: "text-sm", "Digital only" }
                                 }
@@ -253,16 +219,19 @@ pub fn ShopSearch(q: String) -> Element {
                                         checked: *physical_only.read(),
                                         onchange: move |e| {
                                             physical_only.set(e.checked());
-                                            if e.checked() { digital_only.set(false); }
-                                        }
+                                            if e.checked() {
+                                                digital_only.set(false);
+                                            }
+                                        },
                                     }
                                     span { class: "text-sm", "Physical only" }
                                 }
                             }
                         }
-
-                        // Clear filters button
-                        if min_price.read().is_some() || max_price.read().is_some() || !category_filter.read().is_empty() || *digital_only.read() || *physical_only.read() {
+                        if min_price.read().is_some() || max_price.read().is_some()
+                            || !category_filter.read().is_empty() || *digital_only.read()
+                            || *physical_only.read()
+                        {
                             button {
                                 class: "w-full py-2 text-sm text-blue-500 hover:underline",
                                 onclick: move |_| {
@@ -278,21 +247,19 @@ pub fn ShopSearch(q: String) -> Element {
                     }
                 }
             }
-
-            // Results
             div { class: "p-4",
                 if *loading.read() {
-                    // Loading skeleton
                     div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
                         for i in 0..8 {
                             ProductCardSkeleton { key: "{i}" }
                         }
                     }
                 } else if let Some(ref err) = *search_error.read() {
-                    // Error state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "⚠️" }
-                        h2 { class: "text-xl font-semibold mb-2 text-destructive", "Search Failed" }
+                        h2 { class: "text-xl font-semibold mb-2 text-destructive",
+                            "Search Failed"
+                        }
                         p { class: "text-muted-foreground mb-4", "{err}" }
                         button {
                             class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition",
@@ -318,43 +285,35 @@ pub fn ShopSearch(q: String) -> Element {
                         }
                     }
                 } else if !*has_searched.read() {
-                    // Initial state
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "🔍" }
                         h2 { class: "text-xl font-semibold mb-2", "Search Products" }
-                        p { class: "text-muted-foreground",
-                            "Enter a search term to find products"
-                        }
+                        p { class: "text-muted-foreground", "Enter a search term to find products" }
                     }
                 } else if filtered_products.is_empty() {
-                    // No results
                     div { class: "text-center py-12",
                         div { class: "text-6xl mb-4", "📭" }
                         h2 { class: "text-xl font-semibold mb-2", "No Results" }
-                        p { class: "text-muted-foreground mb-4",
-                            "No products found for \"{query}\""
-                        }
-                        if min_price.read().is_some() || max_price.read().is_some() || !category_filter.read().is_empty() || *digital_only.read() || *physical_only.read() {
-                            p { class: "text-sm text-muted-foreground",
-                                "Try removing some filters"
-                            }
+                        p { class: "text-muted-foreground mb-4", "No products found for \"{query}\"" }
+                        if min_price.read().is_some() || max_price.read().is_some()
+                            || !category_filter.read().is_empty() || *digital_only.read()
+                            || *physical_only.read()
+                        {
+                            p { class: "text-sm text-muted-foreground", "Try removing some filters" }
                         }
                     }
                 } else {
-                    // Results header
                     div { class: "flex items-center justify-between mb-4",
                         p { class: "text-muted-foreground text-sm",
                             "{filtered_products.len()} products found"
                         }
                     }
-
-                    // Results grid
                     div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4",
                         for product in filtered_products.iter() {
                             ProductCard {
                                 key: "{product.naddr}",
                                 product: product.clone(),
-                                show_add_to_cart: true
+                                show_add_to_cart: true,
                             }
                         }
                     }

@@ -2,16 +2,13 @@
 //!
 //! Provides dirty state tracking and browser navigation warnings
 //! for forms with important content (articles, drafts, etc.)
-
 use dioxus::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
-
 /// Result of the unsaved changes hook
 ///
 /// This struct is Copy since Signal<T> is Copy, allowing it to be
@@ -23,7 +20,6 @@ pub struct UseUnsavedChanges {
     /// Hash of the last saved state (None if never saved)
     pub last_saved_hash: Signal<Option<u64>>,
 }
-
 impl UseUnsavedChanges {
     /// Mark current state as saved (updates hash, clears dirty flag)
     /// Kept for future manual save control integration
@@ -32,7 +28,6 @@ impl UseUnsavedChanges {
         self.last_saved_hash.set(Some(current_hash));
         self.is_dirty.set(false);
     }
-
     /// Reset to clean state (no saved hash)
     /// Kept for future "New Article" button that resets dirty state
     #[allow(dead_code)]
@@ -41,7 +36,6 @@ impl UseUnsavedChanges {
         self.is_dirty.set(false);
     }
 }
-
 /// Hook for tracking unsaved changes in forms
 ///
 /// Tracks whether content has changed and registers a `beforeunload`
@@ -75,43 +69,30 @@ impl UseUnsavedChanges {
 pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
     let mut is_dirty = use_signal(|| false);
     let mut last_saved_hash = use_signal(|| None::<u64>);
-
-    // Track dirty state when content changes
     use_effect(move || {
         let current = *content_hash.read();
-        // Copy the saved hash to avoid borrow conflict when mutating
         let saved_hash = *last_saved_hash.read();
-
         match saved_hash {
             Some(saved) => {
-                // Has been saved before - compare with saved state
                 is_dirty.set(current != saved);
             }
             None => {
-                // First observation - set current hash as baseline (not dirty)
-                // This correctly handles multi-field content hashes
                 last_saved_hash.set(Some(current));
                 is_dirty.set(false);
             }
         }
     });
-
-    // Register beforeunload handler (WASM only)
     #[cfg(target_arch = "wasm32")]
     {
         use_effect(move || {
             register_beforeunload(is_dirty);
-
-            // Cleanup is handled by the closure being replaced
         });
     }
-
     UseUnsavedChanges {
         is_dirty,
         last_saved_hash,
     }
 }
-
 /// Calculate hash for arbitrary content
 /// Kept for future single-field hash calculations
 #[allow(dead_code)]
@@ -120,7 +101,6 @@ pub fn calculate_hash<T: Hash>(content: &T) -> u64 {
     content.hash(&mut hasher);
     hasher.finish()
 }
-
 /// Calculate hash for multiple string fields
 pub fn calculate_multi_hash(fields: &[&str]) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -129,60 +109,54 @@ pub fn calculate_multi_hash(fields: &[&str]) -> u64 {
     }
     hasher.finish()
 }
-
-// ============================================================================
-// WASM beforeunload handling
-// ============================================================================
-
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     #[allow(clippy::type_complexity)]
-    static BEFOREUNLOAD_CLOSURE: std::cell::RefCell<Option<Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>> =
-        const { std::cell::RefCell::new(None) };
+    static BEFOREUNLOAD_CLOSURE: std::cell::RefCell<
+        Option<Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>,
+    > = const { std::cell::RefCell::new(None) };
 }
-
 #[cfg(target_arch = "wasm32")]
 fn register_beforeunload(is_dirty: Signal<bool>) {
     use web_sys::BeforeUnloadEvent;
-
     let window = match web_sys::window() {
         Some(w) => w,
         None => return,
     };
-
-    // Create closure that checks dirty state
-    let closure = Closure::wrap(Box::new(move |event: BeforeUnloadEvent| {
-        if *is_dirty.read() {
-            // Standard way to trigger browser's "Leave site?" dialog
-            event.set_return_value("You have unsaved changes. Are you sure you want to leave?");
-            event.prevent_default();
-        }
-    }) as Box<dyn FnMut(BeforeUnloadEvent)>);
-
-    // Remove any existing listener first
-    BEFOREUNLOAD_CLOSURE.with(|cell| {
-        if let Some(old_closure) = cell.borrow_mut().take() {
-            let _ = window.remove_event_listener_with_callback(
-                "beforeunload",
-                old_closure.as_ref().unchecked_ref(),
-            );
-        }
-    });
-
-    // Add new listener
-    if let Err(e) = window.add_event_listener_with_callback(
-        "beforeunload",
-        closure.as_ref().unchecked_ref(),
-    ) {
+    let closure = Closure::wrap(
+        Box::new(move |event: BeforeUnloadEvent| {
+            if *is_dirty.read() {
+                event
+                    .set_return_value(
+                        "You have unsaved changes. Are you sure you want to leave?",
+                    );
+                event.prevent_default();
+            }
+        }) as Box<dyn FnMut(BeforeUnloadEvent)>,
+    );
+    BEFOREUNLOAD_CLOSURE
+        .with(|cell| {
+            if let Some(old_closure) = cell.borrow_mut().take() {
+                let _ = window
+                    .remove_event_listener_with_callback(
+                        "beforeunload",
+                        old_closure.as_ref().unchecked_ref(),
+                    );
+            }
+        });
+    if let Err(e) = window
+        .add_event_listener_with_callback(
+            "beforeunload",
+            closure.as_ref().unchecked_ref(),
+        )
+    {
         log::warn!("Failed to add beforeunload listener: {:?}", e);
     }
-
-    // Store closure to prevent it from being dropped
-    BEFOREUNLOAD_CLOSURE.with(|cell| {
-        *cell.borrow_mut() = Some(closure);
-    });
+    BEFOREUNLOAD_CLOSURE
+        .with(|cell| {
+            *cell.borrow_mut() = Some(closure);
+        });
 }
-
 /// Unregister the beforeunload handler (call on component unmount if needed)
 /// Kept for future explicit cleanup when needed
 #[allow(dead_code)]
@@ -192,27 +166,20 @@ pub fn unregister_beforeunload() {
         Some(w) => w,
         None => return,
     };
-
-    BEFOREUNLOAD_CLOSURE.with(|cell| {
-        if let Some(closure) = cell.borrow_mut().take() {
-            let _ = window.remove_event_listener_with_callback(
-                "beforeunload",
-                closure.as_ref().unchecked_ref(),
-            );
-        }
-    });
+    BEFOREUNLOAD_CLOSURE
+        .with(|cell| {
+            if let Some(closure) = cell.borrow_mut().take() {
+                let _ = window
+                    .remove_event_listener_with_callback(
+                        "beforeunload",
+                        closure.as_ref().unchecked_ref(),
+                    );
+            }
+        });
 }
-
 #[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
-pub fn unregister_beforeunload() {
-    // No-op on non-WASM targets
-}
-
-// ============================================================================
-// Leave Confirmation Dialog Support
-// ============================================================================
-
+pub fn unregister_beforeunload() {}
 /// State for showing a leave confirmation dialog
 /// Kept for future in-app navigation warning implementation
 #[allow(dead_code)]
@@ -223,7 +190,6 @@ pub struct LeaveConfirmation {
     /// The intended navigation destination (for programmatic navigation)
     pub destination: Option<String>,
 }
-
 /// Hook for managing leave confirmation dialogs
 ///
 /// Use this alongside `use_unsaved_changes` for in-app navigation warnings.
@@ -234,27 +200,22 @@ pub struct LeaveConfirmation {
 pub fn use_leave_confirmation() -> Signal<LeaveConfirmation> {
     use_signal(LeaveConfirmation::default)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_calculate_hash() {
         let hash1 = calculate_hash(&"test");
         let hash2 = calculate_hash(&"test");
         let hash3 = calculate_hash(&"different");
-
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
     }
-
     #[test]
     fn test_calculate_multi_hash() {
         let hash1 = calculate_multi_hash(&["a", "b", "c"]);
         let hash2 = calculate_multi_hash(&["a", "b", "c"]);
         let hash3 = calculate_multi_hash(&["a", "b", "d"]);
-
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
     }

@@ -7,139 +7,104 @@
 //! 4. Blocked Relays (NIP-51 kind 10006)
 //! 5. Local Relays (browser storage only)
 //! 6. Connected Relays (read-only live stats)
-
-use dioxus::prelude::*;
-use crate::stores::{auth_store, nostr_client, relay};
 use crate::routes::Route;
+use crate::stores::{auth_store, nostr_client, relay};
+use dioxus::prelude::*;
 use std::collections::HashMap;
-
 #[component]
 pub fn SettingsRelays() -> Element {
     let auth = auth_store::AUTH_STATE.read();
-
-    // === STATE SIGNALS ===
-    // Use peek() during init to avoid reactive tracking (nostr.blue pattern)
     let mut general_relays = use_signal(|| {
-        relay::USER_RELAY_METADATA.peek().as_ref()
+        relay::USER_RELAY_METADATA
+            .peek()
+            .as_ref()
             .map(|m| m.relays.clone())
             .unwrap_or_else(relay::default_relays)
     });
     let mut dm_relays = use_signal(|| {
-        relay::USER_RELAY_METADATA.peek().as_ref()
+        relay::USER_RELAY_METADATA
+            .peek()
+            .as_ref()
             .map(|m| m.dm_relays.clone())
             .unwrap_or_else(relay::default_dm_relays)
     });
     let mut search_relays = use_signal(|| relay::SEARCH_RELAYS.peek().clone());
     let mut blocked_relays = use_signal(|| relay::BLOCKED_RELAYS.peek().clone());
     let mut local_relays = use_signal(|| relay::LOCAL_RELAYS.peek().clone());
-
-    // Input states
     let mut new_general_relay = use_signal(String::new);
     let mut new_dm_relay = use_signal(String::new);
     let mut new_search_relay = use_signal(String::new);
     let mut new_blocked_relay = use_signal(String::new);
     let mut new_local_relay = use_signal(String::new);
-
-    // Error states
     let mut general_error = use_signal(|| None::<String>);
     let mut dm_error = use_signal(|| None::<String>);
     let mut search_error = use_signal(|| None::<String>);
     let mut blocked_error = use_signal(|| None::<String>);
     let mut local_error = use_signal(|| None::<String>);
-
-    // Save status
     let mut save_status = use_signal(|| None::<String>);
-
-    // Re-entry guard for publish (Dioxus pattern: prevent concurrent spawns)
     let mut publishing = use_signal(|| false);
-
-    // === REACTIVE EFFECTS ===
-    // Watch global signals and sync to local state
-    // Use .read() to subscribe to changes (Dioxus pattern: .read() subscribes, .peek() does not)
     use_effect(move || {
         if let Some(metadata) = relay::USER_RELAY_METADATA.read().as_ref() {
             general_relays.set(metadata.relays.clone());
             dm_relays.set(metadata.dm_relays.clone());
         }
     });
-
     use_effect(move || {
         search_relays.set(relay::SEARCH_RELAYS.read().clone());
     });
-
     use_effect(move || {
         blocked_relays.set(relay::BLOCKED_RELAYS.read().clone());
     });
-
     use_effect(move || {
         local_relays.set(relay::LOCAL_RELAYS.read().clone());
     });
-
-    // === LIVE CONNECTION STATS ===
     let connection_info = use_resource(move || async move {
         let _initialized = *nostr_client::CLIENT_INITIALIZED.read();
         nostr_client::get_relay_display_info().await
     });
-
-    // Build stats lookup map for inline display
     let stats_map = use_memo(move || {
-        connection_info.read()
+        connection_info
+            .read()
             .as_ref()
-            .map(|infos| infos.iter()
-                .map(|info| (info.url.clone(), info.clone()))
-                .collect::<HashMap<_, _>>())
+            .map(|infos| {
+                infos
+                    .iter()
+                    .map(|info| (info.url.clone(), info.clone()))
+                    .collect::<HashMap<_, _>>()
+            })
             .unwrap_or_default()
     });
-
-    // === HELPER FUNCTIONS ===
-    // Normalize relay URL (add wss:// if needed)
     let normalize_relay_url = |input: &str| -> Result<String, String> {
         let trimmed = input.trim();
         if trimmed.is_empty() {
             return Err("URL cannot be empty".to_string());
         }
-
-        // Try parsing as-is
         if let Ok(url) = nostr::Url::parse(trimmed) {
-            // Enforce WebSocket schemes only
             let scheme = url.scheme();
             if scheme == "ws" || scheme == "wss" {
                 return Ok(url.to_string());
             }
             return Err("Unsupported URL scheme (use ws:// or wss://)".to_string());
         }
-
-        // Try adding wss:// prefix (only if no scheme present)
         if let Ok(url) = nostr::Url::parse(&format!("wss://{}", trimmed)) {
-            // Already wss:// so no need to check scheme
             return Ok(url.to_string());
         }
-
         Err("Invalid relay URL".to_string())
     };
-
-    // Normalize local relay URL (use ws:// for localhost/LAN)
     let normalize_local_relay_url = |input: &str| -> Result<String, String> {
         let trimmed = input.trim();
         if trimmed.is_empty() {
             return Err("URL cannot be empty".to_string());
         }
-
         let lower = trimmed.to_lowercase();
-
-        // Already has valid WebSocket scheme
         if lower.starts_with("ws://") || lower.starts_with("wss://") {
             return Ok(trimmed.to_string());
         }
-
-        // Reject unsupported schemes (http, https, or any other scheme)
-        if lower.starts_with("http://") || lower.starts_with("https://") || lower.contains("://") {
+        if lower.starts_with("http://") || lower.starts_with("https://")
+            || lower.contains("://")
+        {
             return Err("Unsupported URL scheme (use ws:// or wss://)".to_string());
         }
-
-        // No scheme present - add appropriate WebSocket scheme
-        // Check if it's a local/private address
-        // Helper to detect 172.16-31.x.x private range
         fn is_private_172(host: &str) -> bool {
             if let Some(rest) = host.strip_prefix("172.") {
                 if let Some(second_octet) = rest.split('.').next() {
@@ -150,34 +115,25 @@ pub fn SettingsRelays() -> Element {
             }
             false
         }
-
-        let is_local = lower.contains("127.0.0.1") ||
-            lower.contains("localhost") ||
-            lower.contains("192.168.") ||
-            lower.starts_with("10.") ||
-            is_private_172(&lower) ||
-            lower.contains("[::1]") ||
-            lower.contains("::1:") ||
-            lower.ends_with(".local") ||
-            lower.contains(".local:") ||
-            lower.contains(".local/") ||
-            lower.contains("umbrel:");
-
+        let is_local = lower.contains("127.0.0.1") || lower.contains("localhost")
+            || lower.contains("192.168.") || lower.starts_with("10.")
+            || is_private_172(&lower) || lower.contains("[::1]")
+            || lower.contains("::1:") || lower.ends_with(".local")
+            || lower.contains(".local:") || lower.contains(".local/")
+            || lower.contains("umbrel:");
         let scheme = if is_local { "ws://" } else { "wss://" };
         Ok(format!("{}{}", scheme, trimmed))
     };
-
-    // Strip protocol for display (include port for non-default ports)
     let display_relay_url = |url: &str| -> String {
         if let Ok(parsed) = nostr::Url::parse(url) {
             let host = parsed.host_str().unwrap_or(url);
-            // Include port if present (critical for non-default ports like 4443)
             let host_with_port = match parsed.port() {
                 Some(port) => format!("{}:{}", host, port),
                 None => host.to_string(),
             };
-
-            if (parsed.scheme() == "wss" || parsed.scheme() == "ws") && parsed.path() == "/" {
+            if (parsed.scheme() == "wss" || parsed.scheme() == "ws")
+                && parsed.path() == "/"
+            {
                 host_with_port
             } else {
                 format!("{}{}", host_with_port, parsed.path())
@@ -186,8 +142,6 @@ pub fn SettingsRelays() -> Element {
             url.to_string()
         }
     };
-
-    // Format bytes for display (KB, MB, GB)
     let format_bytes = |bytes: usize| -> String {
         if bytes < 1024 {
             format!("{} B", bytes)
@@ -199,8 +153,6 @@ pub fn SettingsRelays() -> Element {
             format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
         }
     };
-
-    // === GENERAL RELAY HANDLERS ===
     let add_general_relay = move |_| {
         let url = new_general_relay.read().clone();
         match normalize_relay_url(&url) {
@@ -209,40 +161,37 @@ pub fn SettingsRelays() -> Element {
                     general_error.set(Some("Relay already exists".to_string()));
                     return;
                 }
-                general_relays.write().push(relay::RelayConfig {
-                    url: normalized,
-                    read: true,
-                    write: true,
-                });
+                general_relays
+                    .write()
+                    .push(relay::RelayConfig {
+                        url: normalized,
+                        read: true,
+                        write: true,
+                    });
                 new_general_relay.set(String::new());
                 general_error.set(None);
             }
             Err(e) => general_error.set(Some(e)),
         }
     };
-
     let mut remove_general_relay = move |index: usize| {
         let mut relays = general_relays.write();
         if index < relays.len() {
             relays.remove(index);
         }
     };
-
     let mut toggle_relay_read = move |index: usize| {
         let mut relays = general_relays.write();
         if let Some(relay) = relays.get_mut(index) {
             relay.read = !relay.read;
         }
     };
-
     let mut toggle_relay_write = move |index: usize| {
         let mut relays = general_relays.write();
         if let Some(relay) = relays.get_mut(index) {
             relay.write = !relay.write;
         }
     };
-
-    // === DM RELAY HANDLERS ===
     let add_dm_relay = move |_| {
         let url = new_dm_relay.read().clone();
         match normalize_relay_url(&url) {
@@ -258,15 +207,12 @@ pub fn SettingsRelays() -> Element {
             Err(e) => dm_error.set(Some(e)),
         }
     };
-
     let mut remove_dm_relay = move |index: usize| {
         let mut relays = dm_relays.write();
         if index < relays.len() {
             relays.remove(index);
         }
     };
-
-    // === SEARCH RELAY HANDLERS ===
     let add_search_relay = move |_| {
         let url = new_search_relay.read().clone();
         match normalize_relay_url(&url) {
@@ -282,15 +228,12 @@ pub fn SettingsRelays() -> Element {
             Err(e) => search_error.set(Some(e)),
         }
     };
-
     let mut remove_search_relay = move |index: usize| {
         let mut relays = search_relays.write();
         if index < relays.len() {
             relays.remove(index);
         }
     };
-
-    // === BLOCKED RELAY HANDLERS ===
     let add_blocked_relay = move |_| {
         let url = new_blocked_relay.read().clone();
         match normalize_relay_url(&url) {
@@ -306,15 +249,12 @@ pub fn SettingsRelays() -> Element {
             Err(e) => blocked_error.set(Some(e)),
         }
     };
-
     let mut remove_blocked_relay = move |index: usize| {
         let mut relays = blocked_relays.write();
         if index < relays.len() {
             relays.remove(index);
         }
     };
-
-    // === LOCAL RELAY HANDLERS ===
     let add_local_relay = move |_| {
         let url = new_local_relay.read().clone();
         match normalize_local_relay_url(&url) {
@@ -325,9 +265,7 @@ pub fn SettingsRelays() -> Element {
                 }
                 let mut relays = local_relays.write();
                 relays.push(normalized);
-                // Save to LocalStorage immediately
                 relay::save_local_relays(&relays);
-                // Sync to global signal so other components observe the change
                 let relays_clone = relays.clone();
                 drop(relays);
                 *relay::LOCAL_RELAYS.write() = relays_clone;
@@ -337,72 +275,66 @@ pub fn SettingsRelays() -> Element {
             Err(e) => local_error.set(Some(e)),
         }
     };
-
     let mut remove_local_relay = move |index: usize| {
         let mut relays = local_relays.write();
         if index < relays.len() {
             relays.remove(index);
-            // Save to LocalStorage immediately
             relay::save_local_relays(&relays);
-            // Sync to global signal so other components observe the change
             *relay::LOCAL_RELAYS.write() = relays.clone();
         }
     };
-
-    // === PUBLISH HANDLER ===
     let publish_relay_lists = move |_| {
-        // Re-entry guard: prevent concurrent publishes (Dioxus pattern)
         if *publishing.read() {
             return;
         }
         publishing.set(true);
-
         let general = general_relays.read().clone();
         let dm = dm_relays.read().clone();
         let search = search_relays.read().clone();
         let blocked = blocked_relays.read().clone();
-
         spawn(async move {
             save_status.set(Some("Publishing...".to_string()));
-
             let client = match nostr_client::get_client() {
                 Some(c) => c,
                 None => {
                     save_status.set(Some("Client not initialized".to_string()));
-                    publishing.set(false);  // Clear guard on early return
+                    publishing.set(false);
                     return;
                 }
             };
-
-            // Publish kind 10002 (general relays)
-            if let Err(e) = relay::publish_relay_list(general.clone(), client.clone()).await {
-                save_status.set(Some(format!("Failed to publish general relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+            if let Err(e) = relay::publish_relay_list(general.clone(), client.clone())
+                .await
+            {
+                save_status
+                    .set(Some(format!("Failed to publish general relays: {}", e)));
+                publishing.set(false);
                 return;
             }
-
-            // Publish kind 10050 (DM relays)
-            if let Err(e) = relay::publish_dm_relay_list(dm.clone(), client.clone()).await {
+            if let Err(e) = relay::publish_dm_relay_list(dm.clone(), client.clone())
+                .await
+            {
                 save_status.set(Some(format!("Failed to publish DM relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+                publishing.set(false);
                 return;
             }
-
-            // Publish kind 10007 (search relays)
-            if let Err(e) = relay::publish_search_relays(search.clone(), client.clone()).await {
+            if let Err(e) = relay::publish_search_relays(search.clone(), client.clone())
+                .await
+            {
                 save_status.set(Some(format!("Failed to publish search relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+                publishing.set(false);
                 return;
             }
-
-            // Publish kind 10006 (blocked relays)
-            if let Err(e) = relay::publish_blocked_relays(blocked.clone(), client.clone()).await {
-                save_status.set(Some(format!("Failed to publish blocked relays: {}", e)));
-                publishing.set(false);  // Clear guard on error
+            if let Err(e) = relay::publish_blocked_relays(
+                    blocked.clone(),
+                    client.clone(),
+                )
+                .await
+            {
+                save_status
+                    .set(Some(format!("Failed to publish blocked relays: {}", e)));
+                publishing.set(false);
                 return;
             }
-
-            // Update local state
             let mut metadata = relay::USER_RELAY_METADATA.write();
             #[cfg(target_arch = "wasm32")]
             let now_secs = (js_sys::Date::now() / 1000.0) as u64;
@@ -414,82 +346,53 @@ pub fn SettingsRelays() -> Element {
                     log::warn!("System time before UNIX_EPOCH: {}", e);
                     0
                 });
-
             *metadata = Some(relay::RelayListMetadata {
                 relays: general,
                 dm_relays: dm,
                 updated_at: now_secs,
             });
-
-            // Update global signals
             *relay::SEARCH_RELAYS.write() = search;
             *relay::BLOCKED_RELAYS.write() = blocked;
-
-            // Invalidate search relay cache so next search uses the new relay list
             crate::services::search_relays::invalidate_search_relay_cache().await;
-
             save_status.set(Some("Relay lists published successfully!".to_string()));
-
-            // Clear message after 3 seconds
             gloo_timers::future::TimeoutFuture::new(3000).await;
             save_status.set(None);
-            publishing.set(false);  // Clear guard on completion
+            publishing.set(false);
         });
     };
-
     rsx! {
-        div {
-            class: "max-w-2xl mx-auto px-4 py-6 space-y-6",
-
-            // Header with back link
-            div {
-                class: "mb-6",
+        div { class: "max-w-2xl mx-auto px-4 py-6 space-y-6",
+            div { class: "mb-6",
                 Link {
                     to: Route::Settings {},
                     class: "text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2 mb-4",
                     span { "← Back to Settings" }
                 }
-                h1 {
-                    class: "text-2xl font-bold text-gray-900 dark:text-white",
-                    "Relay Management"
-                }
-                p {
-                    class: "text-sm text-gray-600 dark:text-gray-400 mt-2",
+                h1 { class: "text-2xl font-bold text-gray-900 dark:text-white", "Relay Management" }
+                p { class: "text-sm text-gray-600 dark:text-gray-400 mt-2",
                     "Configure which relays to use for different purposes. Changes are published to Nostr when you click the publish button."
                 }
             }
-
-            // Not authenticated message
             if !auth.is_authenticated {
-                div {
-                    class: "bg-yellow-100 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 text-center",
-                    p {
-                        class: "text-yellow-800 dark:text-yellow-200",
+                div { class: "bg-yellow-100 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 text-center",
+                    p { class: "text-yellow-800 dark:text-yellow-200",
                         "Please log in to manage your relay settings."
                     }
                 }
             }
-
-            // === SECTION 1: General Relays (NIP-65) ===
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
                         div {
-                            h3 {
-                                class: "text-lg font-semibold text-gray-900 dark:text-white",
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                                 "General Relays"
                             }
-                            p {
-                                class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                                 "NIP-65 • Read: fetch content • Write: publish content"
                             }
                         }
-                        div {
-                            class: "flex items-center gap-2",
-                            span {
-                                class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
                                 "kind 10002"
                             }
                             button {
@@ -502,44 +405,33 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Relay list
-                    div {
-                        class: "space-y-2 mb-4",
-                        for (index, relay_config) in general_relays.read().iter().enumerate() {
+                    div { class: "space-y-2 mb-4",
+                        for (index , relay_config) in general_relays.read().iter().enumerate() {
                             {
                                 let url = relay_config.url.clone();
                                 let stats = stats_map.read().get(&url).cloned();
                                 rsx! {
-                                    div {
-                                        key: "{url}",
-                                        class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                        // Row 1: URL + actions
-                                        div {
-                                            class: "flex items-center justify-between",
-                                            span {
-                                                class: "font-mono text-sm text-gray-900 dark:text-white",
-                                                {display_relay_url(&url)}
-                                            }
-                                            div {
-                                                class: "flex items-center gap-2",
+                                    div { key: "{url}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            span { class: "font-mono text-sm text-gray-900 dark:text-white", {display_relay_url(&url)} }
+                                            div { class: "flex items-center gap-2",
                                                 button {
-                                                    class: if relay_config.read {
-                                                        "px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded text-xs font-medium"
-                                                    } else {
-                                                        "px-2 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium"
-                                                    },
+                                                    class: if relay_config.read { "px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded text-xs font-medium" } else { "px-2 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium" },
                                                     onclick: move |_| toggle_relay_read(index),
-                                                    if relay_config.read { "R" } else { "R" }
+                                                    if relay_config.read {
+                                                        "R"
+                                                    } else {
+                                                        "R"
+                                                    }
                                                 }
                                                 button {
-                                                    class: if relay_config.write {
-                                                        "px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded text-xs font-medium"
-                                                    } else {
-                                                        "px-2 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium"
-                                                    },
+                                                    class: if relay_config.write { "px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded text-xs font-medium" } else { "px-2 py-1 bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-400 rounded text-xs font-medium" },
                                                     onclick: move |_| toggle_relay_write(index),
-                                                    if relay_config.write { "W" } else { "W" }
+                                                    if relay_config.write {
+                                                        "W"
+                                                    } else {
+                                                        "W"
+                                                    }
                                                 }
                                                 button {
                                                     class: "px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-800 dark:text-red-200 rounded text-xs transition",
@@ -548,10 +440,8 @@ pub fn SettingsRelays() -> Element {
                                                 }
                                             }
                                         }
-                                        // Row 2: Stats (if available)
                                         if let Some(info) = stats {
-                                            div {
-                                                class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                            div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
                                                 span {
                                                     class: match info.status_str() {
                                                         "Connected" => "text-green-600 dark:text-green-400",
@@ -563,8 +453,7 @@ pub fn SettingsRelays() -> Element {
                                                 span { "↓ {format_bytes(info.bytes_received)}" }
                                                 span { "↑ {format_bytes(info.bytes_sent)}" }
                                                 if info.connection_attempts > 0 {
-                                                    span {
-                                                        class: if info.success_rate > 80.0 { "text-green-600 dark:text-green-400" } else { "text-yellow-600 dark:text-yellow-400" },
+                                                    span { class: if info.success_rate > 80.0 { "text-green-600 dark:text-green-400" } else { "text-yellow-600 dark:text-yellow-400" },
                                                         "{info.success_rate as u8}%"
                                                     }
                                                 }
@@ -575,16 +464,13 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Add relay form
-                    div {
-                        class: "flex gap-2",
+                    div { class: "flex gap-2",
                         input {
                             class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                             r#type: "text",
                             placeholder: "wss://relay.example.com",
                             value: "{new_general_relay}",
-                            oninput: move |evt| new_general_relay.set(evt.value())
+                            oninput: move |evt| new_general_relay.set(evt.value()),
                         }
                         button {
                             class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
@@ -593,34 +479,25 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     if let Some(err) = general_error.read().as_ref() {
-                        div {
-                            class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "{err}"
                         }
                     }
                 }
             }
-
-            // === SECTION 2: DM Inbox Relays (NIP-17) ===
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
                         div {
-                            h3 {
-                                class: "text-lg font-semibold text-gray-900 dark:text-white",
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                                 "DM Inbox Relays"
                             }
-                            p {
-                                class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                                 "NIP-17 • Where others send you direct messages"
                             }
                         }
-                        div {
-                            class: "flex items-center gap-2",
-                            span {
-                                class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
                                 "kind 10050"
                             }
                             button {
@@ -633,22 +510,15 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // DM relay list
-                    div {
-                        class: "space-y-2 mb-4",
-                        for (index, url) in dm_relays.read().iter().enumerate() {
+                    div { class: "space-y-2 mb-4",
+                        for (index , url) in dm_relays.read().iter().enumerate() {
                             {
                                 let url_clone = url.clone();
                                 let stats = stats_map.read().get(&url_clone).cloned();
                                 rsx! {
-                                    div {
-                                        key: "{url_clone}",
-                                        class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                        div {
-                                            class: "flex items-center justify-between",
-                                            span {
-                                                class: "font-mono text-sm text-gray-900 dark:text-white",
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
                                                 "📨 {display_relay_url(&url_clone)}"
                                             }
                                             button {
@@ -658,8 +528,7 @@ pub fn SettingsRelays() -> Element {
                                             }
                                         }
                                         if let Some(info) = stats {
-                                            div {
-                                                class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                            div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
                                                 span {
                                                     class: match info.status_str() {
                                                         "Connected" => "text-green-600 dark:text-green-400",
@@ -677,16 +546,13 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Add DM relay form
-                    div {
-                        class: "flex gap-2",
+                    div { class: "flex gap-2",
                         input {
                             class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                             r#type: "text",
                             placeholder: "wss://relay.example.com",
                             value: "{new_dm_relay}",
-                            oninput: move |evt| new_dm_relay.set(evt.value())
+                            oninput: move |evt| new_dm_relay.set(evt.value()),
                         }
                         button {
                             class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
@@ -695,34 +561,25 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     if let Some(err) = dm_error.read().as_ref() {
-                        div {
-                            class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "{err}"
                         }
                     }
                 }
             }
-
-            // === SECTION 3: Search Relays (NIP-51) ===
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
                         div {
-                            h3 {
-                                class: "text-lg font-semibold text-gray-900 dark:text-white",
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                                 "Search Relays"
                             }
-                            p {
-                                class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                                 "NIP-50 • Relays that support full-text search"
                             }
                         }
-                        div {
-                            class: "flex items-center gap-2",
-                            span {
-                                class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                        div { class: "flex items-center gap-2",
+                            span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
                                 "kind 10007"
                             }
                             button {
@@ -734,22 +591,15 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Search relay list
-                    div {
-                        class: "space-y-2 mb-4",
-                        for (index, url) in search_relays.read().iter().enumerate() {
+                    div { class: "space-y-2 mb-4",
+                        for (index , url) in search_relays.read().iter().enumerate() {
                             {
                                 let url_clone = url.clone();
                                 let stats = stats_map.read().get(&url_clone).cloned();
                                 rsx! {
-                                    div {
-                                        key: "{url_clone}",
-                                        class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                        div {
-                                            class: "flex items-center justify-between",
-                                            span {
-                                                class: "font-mono text-sm text-gray-900 dark:text-white",
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
                                                 "🔍 {display_relay_url(&url_clone)}"
                                             }
                                             button {
@@ -759,8 +609,7 @@ pub fn SettingsRelays() -> Element {
                                             }
                                         }
                                         if let Some(info) = stats {
-                                            div {
-                                                class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                            div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
                                                 span {
                                                     class: match info.status_str() {
                                                         "Connected" => "text-green-600 dark:text-green-400",
@@ -778,16 +627,13 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Add search relay form
-                    div {
-                        class: "flex gap-2",
+                    div { class: "flex gap-2",
                         input {
                             class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                             r#type: "text",
                             placeholder: "wss://relay.nostr.band",
                             value: "{new_search_relay}",
-                            oninput: move |evt| new_search_relay.set(evt.value())
+                            oninput: move |evt| new_search_relay.set(evt.value()),
                         }
                         button {
                             class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
@@ -796,56 +642,40 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     if let Some(err) = search_error.read().as_ref() {
-                        div {
-                            class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "{err}"
                         }
                     }
                 }
             }
-
-            // === SECTION 4: Blocked Relays (NIP-51) ===
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
                         div {
-                            h3 {
-                                class: "text-lg font-semibold text-gray-900 dark:text-white",
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                                 "Blocked Relays"
                             }
-                            p {
-                                class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                                 "NIP-51 • Relays to never connect to"
                             }
                         }
-                        span {
-                            class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                        span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
                             "kind 10006"
                         }
                     }
-
-                    // Blocked relay list
-                    div {
-                        class: "space-y-2 mb-4",
+                    div { class: "space-y-2 mb-4",
                         if blocked_relays.read().is_empty() {
-                            div {
-                                class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
+                            div { class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
                                 "No blocked relays"
                             }
                         }
-                        for (index, url) in blocked_relays.read().iter().enumerate() {
+                        for (index , url) in blocked_relays.read().iter().enumerate() {
                             {
                                 let url_clone = url.clone();
                                 rsx! {
-                                    div {
-                                        key: "{url_clone}",
-                                        class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                        div {
-                                            class: "flex items-center justify-between",
-                                            span {
-                                                class: "font-mono text-sm text-gray-900 dark:text-white",
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
                                                 "🚫 {display_relay_url(&url_clone)}"
                                             }
                                             button {
@@ -859,16 +689,13 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Add blocked relay form
-                    div {
-                        class: "flex gap-2",
+                    div { class: "flex gap-2",
                         input {
                             class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                             r#type: "text",
                             placeholder: "wss://spam-relay.example.com",
                             value: "{new_blocked_relay}",
-                            oninput: move |evt| new_blocked_relay.set(evt.value())
+                            oninput: move |evt| new_blocked_relay.set(evt.value()),
                         }
                         button {
                             class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
@@ -877,57 +704,41 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     if let Some(err) = blocked_error.read().as_ref() {
-                        div {
-                            class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "{err}"
                         }
                     }
                 }
             }
-
-            // === SECTION 5: Local Relays ===
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                    div {
-                        class: "flex items-center justify-between mb-4",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                    div { class: "flex items-center justify-between mb-4",
                         div {
-                            h3 {
-                                class: "text-lg font-semibold text-gray-900 dark:text-white",
+                            h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                                 "Local Relays"
                             }
-                            p {
-                                class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                            p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                                 "Localhost/LAN relays (stored locally, not published to Nostr)"
                             }
                         }
-                        span {
-                            class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300 rounded text-xs",
+                        span { class: "px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300 rounded text-xs",
                             "local only"
                         }
                     }
-
-                    // Local relay list
-                    div {
-                        class: "space-y-2 mb-4",
+                    div { class: "space-y-2 mb-4",
                         if local_relays.read().is_empty() {
-                            div {
-                                class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
+                            div { class: "text-center py-4 text-gray-500 dark:text-gray-400 text-sm",
                                 "No local relays configured"
                             }
                         }
-                        for (index, url) in local_relays.read().iter().enumerate() {
+                        for (index , url) in local_relays.read().iter().enumerate() {
                             {
                                 let url_clone = url.clone();
                                 let stats = stats_map.read().get(&url_clone).cloned();
                                 rsx! {
-                                    div {
-                                        key: "{url_clone}",
-                                        class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                        div {
-                                            class: "flex items-center justify-between",
-                                            span {
-                                                class: "font-mono text-sm text-gray-900 dark:text-white",
+                                    div { key: "{url_clone}", class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
+                                        div { class: "flex items-center justify-between",
+                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
                                                 "🏠 {display_relay_url(&url_clone)}"
                                             }
                                             button {
@@ -937,8 +748,7 @@ pub fn SettingsRelays() -> Element {
                                             }
                                         }
                                         if let Some(info) = stats {
-                                            div {
-                                                class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                            div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
                                                 span {
                                                     class: match info.status_str() {
                                                         "Connected" => "text-green-600 dark:text-green-400",
@@ -956,16 +766,13 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                     }
-
-                    // Add local relay form
-                    div {
-                        class: "flex gap-2",
+                    div { class: "flex gap-2",
                         input {
                             class: "flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                             r#type: "text",
                             placeholder: "ws://localhost:7777 or ws://192.168.1.100:4869",
                             value: "{new_local_relay}",
-                            oninput: move |evt| new_local_relay.set(evt.value())
+                            oninput: move |evt| new_local_relay.set(evt.value()),
                         }
                         button {
                             class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition",
@@ -974,61 +781,47 @@ pub fn SettingsRelays() -> Element {
                         }
                     }
                     if let Some(err) = local_error.read().as_ref() {
-                        div {
-                            class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
+                        div { class: "mt-2 p-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded text-sm",
                             "{err}"
                         }
                     }
                 }
             }
-
-            // === SECTION 6: Connected Relays (Read-Only) ===
-            div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
-                div {
-                    class: "flex items-center justify-between mb-4",
+            div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "flex items-center justify-between mb-4",
                     div {
-                        h3 {
-                            class: "text-lg font-semibold text-gray-900 dark:text-white",
+                        h3 { class: "text-lg font-semibold text-gray-900 dark:text-white",
                             "Connected Relays"
                         }
-                        p {
-                            class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                        p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
                             "Currently active connections with live statistics"
                         }
                     }
-                    span {
-                        class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                    span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
                         "read-only"
                     }
                 }
-
                 match &*connection_info.read() {
                     Some(relays) if !relays.is_empty() => rsx! {
-                        div {
-                            class: "space-y-2",
+                        div { class: "space-y-2",
                             for relay_info in relays.iter() {
                                 div {
                                     key: "{relay_info.url}",
                                     class: "p-3 bg-gray-50 dark:bg-gray-700 rounded-lg",
-                                    div {
-                                        class: "flex items-center justify-between",
-                                        div {
-                                            class: "flex items-center gap-3",
+                                    div { class: "flex items-center justify-between",
+                                        div { class: "flex items-center gap-3",
                                             span {
                                                 class: match relay_info.status_str() {
                                                     "Connected" => "w-3 h-3 rounded-full bg-green-500",
                                                     "Connecting" | "Pending" => "w-3 h-3 rounded-full bg-yellow-500 animate-pulse",
                                                     _ => "w-3 h-3 rounded-full bg-gray-400",
-                                                }
+                                                },
                                             }
-                                            span {
-                                                class: "font-mono text-sm text-gray-900 dark:text-white",
+                                            span { class: "font-mono text-sm text-gray-900 dark:text-white",
                                                 {display_relay_url(&relay_info.url)}
                                             }
                                         }
-                                        div {
-                                            class: "flex items-center gap-2 text-xs",
+                                        div { class: "flex items-center gap-2 text-xs",
                                             if relay_info.has_read {
                                                 span { class: "text-green-600 dark:text-green-400", "R" }
                                             }
@@ -1040,20 +833,12 @@ pub fn SettingsRelays() -> Element {
                                             }
                                         }
                                     }
-                                    div {
-                                        class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
+                                    div { class: "flex items-center gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400",
                                         span { "{relay_info.status_str()}" }
                                         span { "↓ {format_bytes(relay_info.bytes_received)}" }
                                         span { "↑ {format_bytes(relay_info.bytes_sent)}" }
                                         if relay_info.connection_attempts > 0 {
-                                            span {
-                                                class: if relay_info.success_rate > 80.0 {
-                                                    "text-green-600 dark:text-green-400"
-                                                } else if relay_info.success_rate > 50.0 {
-                                                    "text-yellow-600 dark:text-yellow-400"
-                                                } else {
-                                                    "text-red-600 dark:text-red-400"
-                                                },
+                                            span { class: if relay_info.success_rate > 80.0 { "text-green-600 dark:text-green-400" } else if relay_info.success_rate > 50.0 { "text-yellow-600 dark:text-yellow-400" } else { "text-red-600 dark:text-red-400" },
                                                 "{relay_info.success_rate as u8}%"
                                             }
                                         }
@@ -1063,37 +848,26 @@ pub fn SettingsRelays() -> Element {
                         }
                     },
                     Some(_) => rsx! {
-                        div {
-                            class: "text-center py-8 text-gray-500 dark:text-gray-400",
-                            "No relays connected"
-                        }
+                        div { class: "text-center py-8 text-gray-500 dark:text-gray-400", "No relays connected" }
                     },
                     None => rsx! {
-                        div {
-                            class: "text-center py-8 text-gray-500 dark:text-gray-400",
-                            "Loading..."
-                        }
-                    }
+                        div { class: "text-center py-8 text-gray-500 dark:text-gray-400", "Loading..." }
+                    },
                 }
             }
-
-            // === PUBLISH BUTTON ===
             if auth.is_authenticated {
-                div {
-                    class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
+                div { class: "bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6",
                     button {
                         class: "w-full px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition text-lg",
                         onclick: publish_relay_lists,
                         "📤 Publish Relay Lists to Nostr"
                     }
                     if let Some(status) = save_status.read().as_ref() {
-                        div {
-                            class: "mt-3 p-3 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm text-center",
+                        div { class: "mt-3 p-3 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm text-center",
                             "{status}"
                         }
                     }
-                    p {
-                        class: "text-xs text-gray-500 dark:text-gray-400 mt-3 text-center",
+                    p { class: "text-xs text-gray-500 dark:text-gray-400 mt-3 text-center",
                         "This publishes your General, DM, Search, and Blocked relay lists to Nostr. Local relays are stored only in your browser."
                     }
                 }

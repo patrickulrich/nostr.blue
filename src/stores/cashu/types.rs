@@ -1,56 +1,42 @@
 //! Cashu wallet data types
 //!
 //! All data structures used throughout the cashu wallet module.
-
-// Allow dead_code for planned features not yet wired to UI
 #![allow(dead_code)]
-
 use dioxus_stores::Store;
 use nostr_sdk::nips::nip60::TransactionDirection;
 use serde::{Deserialize, Serialize};
-
 /// Default unit for Cashu proofs (per NIP-60 spec, defaults to "sat")
 pub fn default_unit() -> String {
     "sat".to_string()
 }
-
-// =============================================================================
-// Proof Types
-// =============================================================================
-
 /// Proof state enum aligned with CDK's State
 /// This replaces the dual is_pending/is_spent boolean flags to provide a single source of truth
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ProofState {
     #[default]
-    Unspent,      // Available for spending
-    Pending,      // Receive operation in progress
-    Reserved,     // Locked for current send operation (PreparedSend)
-    PendingSpent, // Sent but not yet confirmed by mint
-    Spent,        // Confirmed spent
+    Unspent,
+    Pending,
+    Reserved,
+    PendingSpent,
+    Spent,
 }
-
 impl ProofState {
     /// Returns true if the proof is available for spending
     pub fn is_spendable(&self) -> bool {
         matches!(self, ProofState::Unspent)
     }
-
     /// Returns true if the proof is in any pending state
     pub fn is_pending(&self) -> bool {
-        matches!(self, ProofState::Pending | ProofState::Reserved | ProofState::PendingSpent)
+        matches!(
+            self,
+            ProofState::Pending | ProofState::Reserved | ProofState::PendingSpent
+        )
     }
-
     /// Returns true if the proof is spent
     pub fn is_spent(&self) -> bool {
         matches!(self, ProofState::Spent)
     }
 }
-
-// =============================================================================
-// Send Options (CDK-compliant)
-// =============================================================================
-
 /// Send mode determines how the wallet handles proof selection
 ///
 /// Follows CDK's SendKind pattern for offline/online operations.
@@ -70,18 +56,15 @@ pub enum SendMode {
     /// Use locally available proofs, allow overpaying up to tolerance
     OfflineTolerance(u64),
 }
-
 impl SendMode {
     /// Check if this mode requires online connectivity
     pub fn is_online(&self) -> bool {
         matches!(self, Self::OnlineExact | Self::OnlineTolerance(_))
     }
-
     /// Check if this mode can work offline
     pub fn is_offline(&self) -> bool {
         matches!(self, Self::OfflineExact | Self::OfflineTolerance(_))
     }
-
     /// Get the tolerance amount (0 for exact modes)
     pub fn tolerance(&self) -> u64 {
         match self {
@@ -89,13 +72,11 @@ impl SendMode {
             _ => 0,
         }
     }
-
     /// Convert to CDK's SendKind
     #[allow(clippy::wrong_self_convention)]
     pub fn to_cdk_send_kind(&self) -> cdk::wallet::SendKind {
         use cdk::wallet::SendKind;
         use cdk::Amount;
-
         match self {
             Self::OnlineExact => SendKind::OnlineExact,
             Self::OnlineTolerance(t) => SendKind::OnlineTolerance(Amount::from(*t)),
@@ -104,7 +85,6 @@ impl SendMode {
         }
     }
 }
-
 /// Options for receive operations
 ///
 /// Follows CDK's ReceiveOptions pattern for P2PK/HTLC unlocking.
@@ -116,7 +96,6 @@ pub struct ReceiveOptions {
     /// Map of hash -> preimage (both as hex strings)
     pub preimages: Vec<String>,
 }
-
 impl ReceiveOptions {
     /// Create options with DLEQ verification enabled
     pub fn with_dleq_verification() -> Self {
@@ -125,7 +104,6 @@ impl ReceiveOptions {
             ..Default::default()
         }
     }
-
     /// Create options with HTLC preimages
     pub fn with_preimages(preimages: Vec<String>) -> Self {
         Self {
@@ -133,15 +111,16 @@ impl ReceiveOptions {
             ..Default::default()
         }
     }
-
     /// Add a preimage for HTLC unlocking
     pub fn add_preimage(mut self, preimage: String) -> Self {
         self.preimages.push(preimage);
         self
     }
-
     /// Convert to CDK's ReceiveOptions
-    pub fn to_cdk_options(&self, p2pk_signing_keys: Vec<cdk::nuts::SecretKey>) -> cdk::wallet::ReceiveOptions {
+    pub fn to_cdk_options(
+        &self,
+        p2pk_signing_keys: Vec<cdk::nuts::SecretKey>,
+    ) -> cdk::wallet::ReceiveOptions {
         cdk::wallet::ReceiveOptions {
             p2pk_signing_keys,
             preimages: self.preimages.clone(),
@@ -149,7 +128,6 @@ impl ReceiveOptions {
         }
     }
 }
-
 /// Options for send operations
 ///
 /// Follows CDK's SendOptions pattern for configuring send behavior.
@@ -164,13 +142,11 @@ pub struct SendOptions {
     /// Optional memo for the token
     pub memo: Option<String>,
 }
-
 impl SendOptions {
     /// Create options for a simple send
     pub fn simple() -> Self {
         Self::default()
     }
-
     /// Create options for offline send
     pub fn offline() -> Self {
         Self {
@@ -178,7 +154,6 @@ impl SendOptions {
             ..Default::default()
         }
     }
-
     /// Create options for offline send with tolerance
     pub fn offline_with_tolerance(tolerance_sats: u64) -> Self {
         Self {
@@ -186,7 +161,6 @@ impl SendOptions {
             ..Default::default()
         }
     }
-
     /// Create options for P2PK send
     pub fn p2pk(pubkey: String) -> Self {
         Self {
@@ -194,31 +168,29 @@ impl SendOptions {
             ..Default::default()
         }
     }
-
     /// Set memo
     pub fn with_memo(mut self, memo: String) -> Self {
         self.memo = Some(memo);
         self
     }
-
     /// Set include_fee flag
     pub fn with_include_fee(mut self, include: bool) -> Self {
         self.include_fee = include;
         self
     }
-
     /// Convert to CDK's SendOptions
     pub fn to_cdk_options(&self) -> cdk::wallet::SendOptions {
-        use cdk::wallet::SendOptions as CdkSendOptions;
-        use cdk::nuts::SpendingConditions;
         use cdk::nuts::PublicKey;
-
-        let conditions = self.p2pk_pubkey.as_ref().and_then(|pk| {
-            PublicKey::from_hex(pk).ok().map(|key| {
-                SpendingConditions::new_p2pk(key, None)
-            })
-        });
-
+        use cdk::nuts::SpendingConditions;
+        use cdk::wallet::SendOptions as CdkSendOptions;
+        let conditions = self
+            .p2pk_pubkey
+            .as_ref()
+            .and_then(|pk| {
+                PublicKey::from_hex(pk)
+                    .ok()
+                    .map(|key| SpendingConditions::new_p2pk(key, None))
+            });
         CdkSendOptions {
             conditions,
             include_fee: self.include_fee,
@@ -227,7 +199,6 @@ impl SendOptions {
         }
     }
 }
-
 /// DLEQ proof data (preserves P2PK verification capability)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DleqData {
@@ -235,7 +206,6 @@ pub struct DleqData {
     pub s: String,
     pub r: String,
 }
-
 /// Custom deserialization structure for proofs (allows missing fields)
 /// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -250,8 +220,6 @@ pub struct ProofData {
     pub witness: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dleq: Option<DleqData>,
-
-    // Local-only state tracking (not serialized to Nostr events)
     /// Proof state aligned with CDK's State enum
     #[serde(skip)]
     pub state: ProofState,
@@ -262,7 +230,6 @@ pub struct ProofData {
     #[serde(skip)]
     pub state_set_at: Option<u64>,
 }
-
 /// Extended Cashu proof with P2PK support (superset of nostr_sdk::nips::nip60::CashuProof)
 /// Preserves witness and DLEQ fields for P2PK verification while maintaining NIP-60 compatibility
 /// Uses uppercase "C" per NIP-60 spec, with alias for backward compatibility
@@ -278,7 +245,6 @@ pub struct ExtendedCashuProof {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dleq: Option<DleqData>,
 }
-
 impl From<ProofData> for ExtendedCashuProof {
     fn from(p: ProofData) -> Self {
         Self {
@@ -291,11 +257,6 @@ impl From<ProofData> for ExtendedCashuProof {
         }
     }
 }
-
-// =============================================================================
-// Token Event Types (NIP-60)
-// =============================================================================
-
 /// Custom deserialization structure for token events (more lenient than rust-nostr)
 /// Includes unit field per NIP-60 spec
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -307,7 +268,6 @@ pub struct TokenEventData {
     #[serde(default)]
     pub del: Vec<String>,
 }
-
 /// Extended token event with P2PK support (extends rust-nostr's TokenEvent)
 /// Uses ExtendedCashuProof instead of CashuProof to preserve witness/DLEQ fields
 /// Includes unit field per NIP-60 spec
@@ -320,11 +280,6 @@ pub struct ExtendedTokenEvent {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub del: Vec<String>,
 }
-
-// =============================================================================
-// Wallet State Types
-// =============================================================================
-
 /// Wallet state containing configuration
 #[derive(Clone, Debug, PartialEq)]
 pub struct WalletState {
@@ -333,7 +288,6 @@ pub struct WalletState {
     pub mints: Vec<String>,
     pub initialized: bool,
 }
-
 /// Sync state for incremental Nostr event fetching
 /// Tracks last sync timestamps to avoid fetching all events every time
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -348,7 +302,6 @@ pub struct SyncState {
     #[serde(default)]
     pub known_token_event_ids: std::collections::HashSet<String>,
 }
-
 /// Token data with event metadata
 /// Uses ProofData instead of CashuProof to preserve witness/DLEQ for P2PK support
 #[derive(Clone, Debug, PartialEq)]
@@ -359,7 +312,6 @@ pub struct TokenData {
     pub proofs: Vec<ProofData>,
     pub created_at: u64,
 }
-
 /// Transaction history item with event metadata
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryItem {
@@ -372,7 +324,6 @@ pub struct HistoryItem {
     pub destroyed_tokens: Vec<String>,
     pub redeemed_events: Vec<String>,
 }
-
 /// Wallet loading status
 #[derive(Clone, Debug, PartialEq)]
 pub enum WalletStatus {
@@ -383,28 +334,18 @@ pub enum WalletStatus {
     Ready,
     Error(String),
 }
-
 impl WalletStatus {
     pub fn is_ready(&self) -> bool {
         matches!(self, WalletStatus::Ready)
     }
-
     pub fn is_recovering(&self) -> bool {
         matches!(self, WalletStatus::Recovering)
     }
-
     /// Returns true if wallet is usable (Ready or Recovering)
     pub fn is_usable(&self) -> bool {
         matches!(self, WalletStatus::Ready | WalletStatus::Recovering)
     }
 }
-
-// Note: WalletBalances is defined in cashu_cdk_bridge.rs (single source of truth)
-
-// =============================================================================
-// Transaction Types
-// =============================================================================
-
 /// Transaction lifecycle status
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TransactionStatus {
@@ -429,7 +370,6 @@ pub enum TransactionStatus {
     /// Quote or token expired
     Expired,
 }
-
 /// Transaction type for lifecycle tracking
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TransactionType {
@@ -444,7 +384,6 @@ pub enum TransactionType {
     /// Lightning send (melt)
     Transfer,
 }
-
 /// Transaction data entry for state accumulation
 /// Each transaction maintains a full history of state changes
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -455,7 +394,6 @@ pub struct TransactionDataEntry {
     pub amount: Option<u64>,
     pub fee_paid: Option<u64>,
 }
-
 /// Status update entry for transaction history (legacy)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransactionStatusUpdate {
@@ -464,7 +402,6 @@ pub struct TransactionStatusUpdate {
     pub message: Option<String>,
     pub fee_paid: Option<u64>,
 }
-
 /// Active transaction tracking (local-only, not persisted to Nostr)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActiveTransaction {
@@ -482,14 +419,7 @@ pub struct ActiveTransaction {
     pub updated_at: u64,
     pub history: Vec<TransactionStatusUpdate>,
 }
-
-// =============================================================================
-// Quote Types (CDK-aligned)
-// =============================================================================
-
-// Re-export CDK quote state enums for direct use
-pub use cdk::nuts::{MintQuoteState, MeltQuoteState};
-
+pub use cdk::nuts::{MeltQuoteState, MintQuoteState};
 /// Mint quote information (lightning receive)
 /// Wraps CDK's quote response with mint_url context
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -500,7 +430,6 @@ pub struct MintQuoteInfo {
     pub expiry: Option<u64>,
     pub mint_url: String,
 }
-
 impl MintQuoteInfo {
     /// Create from CDK MintQuote response
     pub fn from_cdk(quote: &cdk::wallet::MintQuote, mint_url: String) -> Self {
@@ -513,7 +442,6 @@ impl MintQuoteInfo {
         }
     }
 }
-
 /// Melt quote information (lightning send)
 /// Wraps CDK's quote response with mint_url context
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -525,7 +453,6 @@ pub struct MeltQuoteInfo {
     pub mint_url: String,
     pub expiry: Option<u64>,
 }
-
 impl MeltQuoteInfo {
     /// Create from CDK MeltQuote response
     pub fn from_cdk(quote: &cdk::wallet::MeltQuote, mint_url: String) -> Self {
@@ -539,54 +466,29 @@ impl MeltQuoteInfo {
         }
     }
 }
-
-// =============================================================================
-// Progress Types
-// =============================================================================
-
 /// Melt progress tracking
 #[derive(Clone, Debug, PartialEq)]
 pub enum MeltProgress {
     CreatingQuote,
-    QuoteCreated {
-        quote_id: String,
-        amount: u64,
-        fee_reserve: u64,
-    },
+    QuoteCreated { quote_id: String, amount: u64, fee_reserve: u64 },
     PreparingPayment,
     PayingInvoice,
     WaitingForConfirmation,
-    Completed {
-        total_paid: u64,
-        fee_paid: u64,
-        preimage: Option<String>,
-    },
-    Failed {
-        error: String,
-    },
+    Completed { total_paid: u64, fee_paid: u64, preimage: Option<String> },
+    Failed { error: String },
 }
-
 /// Transfer progress tracking
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransferProgress {
     CreatingMintQuote,
     CreatingMeltQuote,
-    QuotesReady {
-        amount: u64,
-        fee_estimate: u64,
-    },
+    QuotesReady { amount: u64, fee_estimate: u64 },
     Melting,
     WaitingForPayment,
     Minting,
-    Completed {
-        amount_received: u64,
-        fees_paid: u64,
-    },
-    Failed {
-        error: String,
-    },
+    Completed { amount_received: u64, fees_paid: u64 },
+    Failed { error: String },
 }
-
 /// Transfer result
 #[derive(Clone, Debug)]
 pub struct TransferResult {
@@ -594,7 +496,6 @@ pub struct TransferResult {
     pub amount_received: u64,
     pub fees_paid: u64,
 }
-
 /// Revert result
 #[derive(Clone, Debug)]
 pub struct RevertResult {
@@ -602,7 +503,6 @@ pub struct RevertResult {
     pub fee_paid: u64,
     pub original_amount: u64,
 }
-
 /// Sync result
 #[derive(Clone, Debug, Default)]
 pub struct SyncResult {
@@ -611,7 +511,6 @@ pub struct SyncResult {
     pub proofs_cleaned: usize,
     pub sats_cleaned: u64,
 }
-
 /// Result of a proof consolidation operation
 #[derive(Clone, Debug)]
 pub struct ConsolidationResult {
@@ -622,11 +521,6 @@ pub struct ConsolidationResult {
     /// Fee paid for the swap (usually 0)
     pub fee_paid: u64,
 }
-
-// =============================================================================
-// Mint Discovery Types
-// =============================================================================
-
 /// Mint information for display
 #[derive(Clone, Debug, Default)]
 pub struct MintInfoDisplay {
@@ -638,7 +532,6 @@ pub struct MintInfoDisplay {
     pub motd: Option<String>,
     pub version: Option<String>,
 }
-
 /// NIP-87: Discovered Cashu mint from kind:38172 events
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiscoveredMint {
@@ -663,7 +556,6 @@ pub struct DiscoveredMint {
     /// Detailed recommendations with comments
     pub recommendations: Vec<MintRecommendation>,
 }
-
 /// NIP-87: Mint recommendation from kind:38000 events
 #[derive(Clone, Debug, PartialEq)]
 pub struct MintRecommendation {
@@ -672,16 +564,10 @@ pub struct MintRecommendation {
     /// Review/comment content
     pub content: String,
 }
-
-// =============================================================================
-// Payment Request Types (NUT-18) - DEPRECATED
-// Use cdk::nuts::{PaymentRequest, PaymentRequestPayload, Transport} instead
-// =============================================================================
-
 /// Payment request data for creating requests
 /// DEPRECATED: Use cdk::nuts::PaymentRequest instead
 #[deprecated(note = "Use cdk::nuts::PaymentRequest instead")]
-#[allow(deprecated)] // Using deprecated PaymentTransport within deprecated struct
+#[allow(deprecated)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PaymentRequestData {
     /// Unique request ID
@@ -706,7 +592,6 @@ pub struct PaymentRequestData {
     #[serde(rename = "t", skip_serializing_if = "Vec::is_empty", default)]
     pub transports: Vec<PaymentTransport>,
 }
-
 /// Payment transport (Nostr or HTTP)
 /// DEPRECATED: Use cdk::nuts::Transport instead
 #[deprecated(note = "Use cdk::nuts::Transport instead")]
@@ -722,7 +607,6 @@ pub struct PaymentTransport {
     #[serde(rename = "g", skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<Vec<String>>>,
 }
-
 /// Info needed to wait for a Nostr payment
 #[derive(Clone, Debug)]
 pub struct NostrPaymentWaitInfo {
@@ -735,7 +619,6 @@ pub struct NostrPaymentWaitInfo {
     /// Public key to receive on
     pub pubkey: nostr_sdk::PublicKey,
 }
-
 /// Payment request progress
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaymentRequestProgress {
@@ -748,7 +631,6 @@ pub enum PaymentRequestProgress {
     /// Error
     Error { message: String },
 }
-
 /// Payment request payload (what's sent via transport)
 /// DEPRECATED: Use cdk::nuts::PaymentRequestPayload instead
 #[deprecated(note = "Use cdk::nuts::PaymentRequestPayload instead")]
@@ -767,17 +649,11 @@ pub struct PaymentRequestPayload {
     /// Proofs
     pub proofs: Vec<ProofData>,
 }
-
-// =============================================================================
-// Store Types (Dioxus)
-// =============================================================================
-
 /// Store for wallet tokens with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
 pub struct WalletTokensStore {
     pub data: Vec<TokenData>,
 }
-
 impl WalletTokensStore {
     /// Compute available (spendable) balance from unspent proofs
     /// Following CDK pattern: balance is derived, never stored
@@ -785,61 +661,52 @@ impl WalletTokensStore {
     pub fn available_balance(&self) -> u64 {
         self.balance_breakdown().0
     }
-
     /// Compute pending balance (proofs in transient states)
     /// Optimized: reuses single-pass balance_breakdown()
     pub fn pending_balance(&self) -> u64 {
         self.balance_breakdown().1
     }
-
     /// Compute total balance (available + pending)
     /// Optimized: reuses single-pass balance_breakdown()
     pub fn total_balance(&self) -> u64 {
         let (avail, pend) = self.balance_breakdown();
         avail + pend
     }
-
     /// Get balance breakdown (available, pending) in single pass
     /// This is the primary balance computation - other methods delegate to this
     pub fn balance_breakdown(&self) -> (u64, u64) {
-        // Use normal addition - wallet balances can't realistically overflow u64
         self.data
             .iter()
             .flat_map(|token| &token.proofs)
-            .fold((0u64, 0u64), |(avail, pend), proof| {
-                if proof.state.is_spendable() {
-                    (avail + proof.amount, pend)
-                } else if proof.state.is_pending() {
-                    (avail, pend + proof.amount)
-                } else {
-                    (avail, pend)
-                }
-            })
+            .fold(
+                (0u64, 0u64),
+                |(avail, pend), proof| {
+                    if proof.state.is_spendable() {
+                        (avail + proof.amount, pend)
+                    } else if proof.state.is_pending() {
+                        (avail, pend + proof.amount)
+                    } else {
+                        (avail, pend)
+                    }
+                },
+            )
     }
 }
-
 /// Store for wallet history with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
 pub struct WalletHistoryStore {
     pub data: Vec<HistoryItem>,
 }
-
 /// Store for pending mint quotes
 #[derive(Clone, Debug, Default, Store)]
 pub struct PendingMintQuotesStore {
     pub data: Vec<MintQuoteInfo>,
 }
-
 /// Store for pending melt quotes
 #[derive(Clone, Debug, Default, Store)]
 pub struct PendingMeltQuotesStore {
     pub data: Vec<MeltQuoteInfo>,
 }
-
-// =============================================================================
-// Pending Event Types
-// =============================================================================
-
 /// Event type for pending Nostr event publication
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::enum_variant_names)]
@@ -851,7 +718,6 @@ pub enum PendingEventType {
     /// NIP-61 nutzap events (kind 9321)
     NutzapEvent,
 }
-
 /// Pending Nostr event awaiting publication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingNostrEvent {
@@ -863,45 +729,31 @@ pub struct PendingNostrEvent {
     /// Timestamp of last retry attempt (for proper backoff calculation)
     #[serde(default)]
     pub last_retry_at: Option<u64>,
-
     /// For TokenEvents: links pending event to token in WALLET_TOKENS
     /// Used to update event_id when background publish succeeds
     #[serde(default)]
     pub pending_token_id: Option<String>,
-
     /// Mint URL for recovery context if token lookup fails
     #[serde(default)]
     pub mint_url: Option<String>,
 }
-
-// =============================================================================
-// Counter Backup Types
-// =============================================================================
-
 /// Counter backup for mint removal/re-addition
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CounterBackup {
     pub mint_url: String,
-    pub counters: Vec<(String, u64)>, // keyset_id -> counter
+    pub counters: Vec<(String, u64)>,
     pub created_at: u64,
 }
-
-// =============================================================================
-// Recovery Types
-// =============================================================================
-
 /// Recovery result
 #[derive(Clone, Debug, Default)]
 pub struct RecoveryResult {
     pub recovered_amount: u64,
     pub message: Option<String>,
 }
-
 impl RecoveryResult {
     pub fn none() -> Self {
         Self::default()
     }
-
     pub fn recovered(amount: u64) -> Self {
         Self {
             recovered_amount: amount,
@@ -909,7 +761,6 @@ impl RecoveryResult {
         }
     }
 }
-
 /// Result type for melt recovery operations (CDK 0.14.2+)
 #[derive(Clone, Debug, Default)]
 pub struct MeltRecoveryResult {
@@ -922,7 +773,6 @@ pub struct MeltRecoveryResult {
     /// Errors encountered during recovery
     pub errors: Vec<String>,
 }
-
 /// Result of orphan proof sync operation (CDK → NIP-60)
 ///
 /// Tracks proofs found in CDK's IndexedDB that were not in WALLET_TOKENS,
@@ -936,26 +786,16 @@ pub struct OrphanSyncResult {
     /// Errors encountered during sync
     pub errors: Vec<String>,
 }
-
-// =============================================================================
-// In-Flight Melt Request Types (Crash Recovery)
-// =============================================================================
-
 /// Maximum time a proof can be Reserved before checking mint state (10 minutes)
 pub const RESERVED_PROOF_TIMEOUT_SECS: u64 = 600;
-
 /// Maximum time a proof can be PendingSpent before checking mint state (30 minutes)
 pub const PENDING_SPENT_TIMEOUT_SECS: u64 = 1800;
-
 /// Maximum time for in-flight melt before checking quote status (5 minutes)
 pub const IN_FLIGHT_MELT_TIMEOUT_SECS: u64 = 300;
-
 /// Maximum number of counter healing attempts
 pub const MAX_COUNTER_HEAL_ATTEMPTS: u32 = 3;
-
 /// Counter increments for each healing attempt
 pub const COUNTER_HEAL_INCREMENTS: [u32; 3] = [10, 50, 100];
-
 /// In-flight melt request for crash recovery
 ///
 /// Persisted BEFORE the melt network call to ensure we can recover
@@ -980,7 +820,6 @@ pub struct InFlightMeltRequest {
     /// Timestamp when request was created (seconds since epoch)
     pub created_at: u64,
 }
-
 /// Operation types for in-flight send/swap requests
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -992,7 +831,6 @@ pub enum OperationType {
     /// Token swap/consolidation operation
     Swap,
 }
-
 impl std::fmt::Display for OperationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1002,7 +840,6 @@ impl std::fmt::Display for OperationType {
         }
     }
 }
-
 /// Tracks in-flight send/swap operations for crash recovery and proof protection
 ///
 /// Similar to InFlightMeltRequest but for send/swap operations that don't have
@@ -1026,11 +863,6 @@ pub struct InFlightSendRequest {
     /// Timestamp when request was created (seconds since epoch)
     pub created_at: u64,
 }
-
-// =============================================================================
-// Manual Debug Implementations (rust-nostr patterns for sensitive data)
-// =============================================================================
-
 /// Manual Debug for ProofData - omits sensitive cryptographic fields
 /// Following rust-nostr Keys pattern: only show non-sensitive fields
 impl std::fmt::Debug for ProofData {
@@ -1038,11 +870,9 @@ impl std::fmt::Debug for ProofData {
         f.debug_struct("ProofData")
             .field("id", &self.id)
             .field("amount", &self.amount)
-            // Omit: secret, c, witness, dleq (sensitive cryptographic data)
             .finish_non_exhaustive()
     }
 }
-
 /// Manual Debug for InFlightMeltRequest - redacts proof data
 /// Following rust-nostr ConversationKey pattern: <sensitive> marker
 impl std::fmt::Debug for InFlightMeltRequest {
@@ -1051,14 +881,16 @@ impl std::fmt::Debug for InFlightMeltRequest {
             .field("transaction_id", &self.transaction_id)
             .field("mint_url", &self.mint_url)
             .field("quote_id", &self.quote_id)
-            .field("proofs_used", &format!("<{} proofs, sensitive>", self.proofs_used.len()))
+            .field(
+                "proofs_used",
+                &format!("<{} proofs, sensitive>", self.proofs_used.len()),
+            )
             .field("amount", &self.amount)
             .field("fee_reserve", &self.fee_reserve)
             .field("created_at", &self.created_at)
             .finish()
     }
 }
-
 /// Manual Debug for InFlightSendRequest - redacts proof secrets
 /// Following rust-nostr ConversationKey pattern: <sensitive> marker
 impl std::fmt::Debug for InFlightSendRequest {
@@ -1066,7 +898,10 @@ impl std::fmt::Debug for InFlightSendRequest {
         f.debug_struct("InFlightSendRequest")
             .field("transaction_id", &self.transaction_id)
             .field("mint_url", &self.mint_url)
-            .field("proof_secrets", &format!("<{} secrets, sensitive>", self.proof_secrets.len()))
+            .field(
+                "proof_secrets",
+                &format!("<{} secrets, sensitive>", self.proof_secrets.len()),
+            )
             .field("amount", &self.amount)
             .field("operation_type", &self.operation_type)
             .field("created_at", &self.created_at)

@@ -1,14 +1,14 @@
 //! Code Repository Tree Page
 //!
 //! Displays the file tree for a repository at a specific path and ref.
-
-use dioxus::prelude::*;
+use crate::components::{
+    BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton,
+};
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
-use crate::components::{CodeFileTree, FileTreeSkeleton, FilePathBreadcrumb, BranchSelector};
 use crate::utils::nip34::Repository;
-
+use dioxus::prelude::*;
 #[component]
 pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut loading = use_signal(|| true);
@@ -16,38 +16,28 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut files = use_signal(Vec::new);
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
-
-    // Create a load key that changes when route params change - this ensures the effect re-runs
     let load_key = use_memo({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || format!("{}:{}:{}", naddr, git_ref, path)
     });
-
-    // Load file tree when key changes
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || {
-            // Read the key to register as dependency
             let _key = load_key.read();
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-
             if !client_initialized {
                 return;
             }
-
             let naddr = naddr.clone();
             let git_ref = git_ref.clone();
             let path = path.clone();
-
             spawn(async move {
                 loading.set(true);
                 error.set(None);
-
-                // Fetch repository
                 let repo = match fetch_repository(&naddr).await {
                     Ok(r) => r,
                     Err(e) => {
@@ -57,8 +47,6 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                     }
                 };
                 repo_signal.set(Some(repo.clone()));
-
-                // Initialize git worker if needed
                 if !git_service::GitService::is_initialized() {
                     if let Err(e) = git_service::GitService::init().await {
                         error.set(Some(format!("Failed to initialize git: {}", e)));
@@ -66,14 +54,13 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                         return;
                     }
                 }
-
-                // Decode URL-encoded path (e.g., %20 → space)
                 let decoded_path = urlencoding::decode(&path)
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| path.clone());
-
-                // List files
-                match git_service().list_files(&repo, &decoded_path, Some(&git_ref)).await {
+                match git_service()
+                    .list_files(&repo, &decoded_path, Some(&git_ref))
+                    .await
+                {
                     Ok(entries) => {
                         files.set(entries);
                     }
@@ -81,61 +68,37 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                         error.set(Some(format!("Failed to load files: {}", e)));
                     }
                 }
-
-                // Get branches
                 if let Ok(branch_list) = git_service().get_branches(&repo).await {
                     branches.set(branch_list);
                 }
-
                 loading.set(false);
             });
         }
     });
-
     let repo_name = repo_signal()
         .map(|r| r.display_name().to_string())
         .unwrap_or_else(|| "Repository".to_string());
-
     rsx! {
-        div {
-            class: "min-h-screen",
-
-            // Header
-            div {
-                class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
-
-                // Repository name and navigation
-                div {
-                    class: "px-4 py-3 flex items-center gap-2",
-
+        div { class: "min-h-screen",
+            div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
+                div { class: "px-4 py-3 flex items-center gap-2",
                     Link {
-                        to: Route::CodeRepo { naddr: naddr.clone() },
+                        to: Route::CodeRepo {
+                            naddr: naddr.clone(),
+                        },
                         class: "text-blue-400 hover:underline font-medium",
                         "{repo_name}"
                     }
-
-                    span {
-                        class: "text-muted-foreground",
-                        "/"
-                    }
-
-                    span {
-                        class: "text-muted-foreground",
-                        "Files"
-                    }
+                    span { class: "text-muted-foreground", "/" }
+                    span { class: "text-muted-foreground", "Files" }
                 }
-
-                // Branch selector and breadcrumb
-                div {
-                    class: "px-4 py-2 flex items-center gap-4 border-t border-border/50",
-
+                div { class: "px-4 py-2 flex items-center gap-4 border-t border-border/50",
                     BranchSelector {
                         branches: branches(),
                         current_ref: git_ref.clone(),
                         naddr: naddr.clone(),
                         path: path.clone(),
                     }
-
                     FilePathBreadcrumb {
                         naddr: naddr.clone(),
                         git_ref: git_ref.clone(),
@@ -143,18 +106,12 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                     }
                 }
             }
-
-            // Content
-            div {
-                class: "p-4",
-
+            div { class: "p-4",
                 if loading() {
                     FileTreeSkeleton {}
                 } else if let Some(err) = error() {
-                    div {
-                        class: "text-center py-12",
-                        div {
-                            class: "text-red-400 mb-4",
+                    div { class: "text-center py-12",
+                        div { class: "text-red-400 mb-4",
                             svg {
                                 class: "w-12 h-12 mx-auto",
                                 xmlns: "http://www.w3.org/2000/svg",
@@ -167,23 +124,31 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
                                 circle { cx: "12", cy: "12", r: "10" }
-                                line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                                line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                                line {
+                                    x1: "12",
+                                    y1: "8",
+                                    x2: "12",
+                                    y2: "12",
+                                }
+                                line {
+                                    x1: "12",
+                                    y1: "16",
+                                    x2: "12.01",
+                                    y2: "16",
+                                }
                             }
                         }
-                        p {
-                            class: "text-muted-foreground",
-                            "{err}"
-                        }
+                        p { class: "text-muted-foreground", "{err}" }
                         Link {
-                            to: Route::CodeRepo { naddr: naddr.clone() },
+                            to: Route::CodeRepo {
+                                naddr: naddr.clone(),
+                            },
                             class: "inline-block mt-4 px-4 py-2 bg-muted hover:bg-accent rounded-lg transition",
                             "Back to Repository"
                         }
                     }
                 } else {
-                    div {
-                        class: "border border-border rounded-lg overflow-hidden",
+                    div { class: "border border-border rounded-lg overflow-hidden",
                         CodeFileTree {
                             entries: files(),
                             naddr: naddr.clone(),

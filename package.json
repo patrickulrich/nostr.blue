@@ -1,15 +1,15 @@
 {
   "name": "nostrblue",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "Nostr.blue Rust client",
   "scripts": {
     "dev": "npm run build:assets && dx serve",
     "build": "npm run build:assets && dx build --release",
     "build:assets": "npm run tailwind:build && npm run git-worker:build",
-    "tailwind:build": "tailwindcss -i tailwind.css -o assets/tailwind.css --minify",
-    "tailwind:watch": "tailwindcss -i tailwind.css -o assets/tailwind.css --watch",
-    "git-worker:build": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --minify",
-    "git-worker:watch": "esbuild assets/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --watch",
+    "tailwind:build": "tailwindcss -i tailwind.css -o public/tailwind.css --minify",
+    "tailwind:watch": "tailwindcss -i tailwind.css -o public/tailwind.css --watch",
+    "git-worker:build": "esbuild src/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --minify",
+    "git-worker:watch": "esbuild src/js/git-worker.js --bundle --outfile=public/git-worker.js --format=esm --platform=browser --target=es2020 --watch",
     "build:all": "npm run build:assets"
   },
   "devDependencies": {

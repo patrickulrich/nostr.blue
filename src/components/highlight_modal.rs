@@ -1,11 +1,9 @@
 //! Highlight Modal Component
 //!
 //! A modal that allows users to add an optional comment before publishing a highlight.
-
-use dioxus::prelude::*;
 use dioxus::events::MouseData;
 use dioxus::html::input_data::keyboard_types::Key;
-
+use dioxus::prelude::*;
 /// Props for the HighlightModal component
 #[derive(Props, Clone, PartialEq)]
 pub struct HighlightModalProps {
@@ -23,33 +21,25 @@ pub struct HighlightModalProps {
     #[props(default)]
     pub submitting: Option<bool>,
 }
-
 /// Modal for creating highlights with optional commentary
 #[component]
 pub fn HighlightModal(props: HighlightModalProps) -> Element {
     let mut comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
-
-    // Sync local is_submitting with parent's submitting prop when it changes to false
-    // This handles the case where parent closes the modal and reopens it
-    // Note: use_reactive! requires capturing the prop value first, not props.field syntax
     let parent_submitting = props.submitting;
-    use_effect(use_reactive!(|parent_submitting| {
-        if parent_submitting == Some(false) {
-            is_submitting.set(false);
-        }
-    }));
-
-    // Use parent's submitting if provided, otherwise use local state
+    use_effect(
+        use_reactive!(
+            | parent_submitting | { if parent_submitting == Some(false) { is_submitting
+            .set(false); } }
+        ),
+    );
     let effective_submitting = props.submitting.unwrap_or(*is_submitting.read());
-
-    // Cancel helper - resets submitting state before calling on_cancel
     let do_cancel = {
         let on_cancel = props.on_cancel;
         let parent_submitting = props.submitting;
         move || {
-            // Don't allow cancel while submitting
-            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
+            let currently_submitting = parent_submitting
+                .unwrap_or(*is_submitting.read());
             if currently_submitting {
                 return;
             }
@@ -57,14 +47,12 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
             on_cancel.call(());
         }
     };
-
-    // Extract submit logic into a helper closure that doesn't require event
     let do_submit = {
         let on_confirm = props.on_confirm;
         let parent_submitting = props.submitting;
         move || {
-            // Check effective submitting state (parent override or local)
-            let currently_submitting = parent_submitting.unwrap_or(*is_submitting.read());
+            let currently_submitting = parent_submitting
+                .unwrap_or(*is_submitting.read());
             if currently_submitting {
                 return;
             }
@@ -76,18 +64,14 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                 Some(comment_value)
             };
             on_confirm.call(comment_opt);
-            // Don't reset is_submitting - let the modal close naturally when parent closes it
-            // This prevents duplicate submissions while the async operation is in progress
         }
     };
-
     let on_submit_click = {
         let mut do_submit = do_submit;
         move |_: Event<MouseData>| {
             do_submit();
         }
     };
-
     let handle_keydown = {
         let mut do_cancel = do_cancel;
         move |evt: KeyboardEvent| {
@@ -97,9 +81,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
             }
         }
     };
-
     rsx! {
-        // Backdrop
         div {
             class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4",
             onclick: {
@@ -107,8 +89,6 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                 move |_| do_cancel()
             },
             onkeydown: handle_keydown,
-
-            // Modal container
             div {
                 class: "bg-card rounded-lg border border-border max-w-md w-full max-h-[80vh] overflow-hidden shadow-xl",
                 onclick: move |e| e.stop_propagation(),
@@ -124,10 +104,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                         }
                     }
                 },
-
-                // Header
-                div {
-                    class: "flex items-center justify-between p-4 border-b border-border",
+                div { class: "flex items-center justify-between p-4 border-b border-border",
                     h2 {
                         id: "highlight-modal-title",
                         class: "text-lg font-semibold",
@@ -150,32 +127,17 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                             path {
                                 stroke_linecap: "round",
                                 stroke_linejoin: "round",
-                                d: "M6 18L18 6M6 6l12 12"
+                                d: "M6 18L18 6M6 6l12 12",
                             }
                         }
                     }
                 }
-
-                // Body
-                div {
-                    class: "p-4 space-y-4 overflow-y-auto",
-
-                    // Quoted content
-                    div {
-                        class: "border-l-4 border-primary pl-4 py-2",
-                        p {
-                            class: "italic text-foreground leading-relaxed",
-                            "{props.content}"
-                        }
-                        p {
-                            class: "text-sm text-muted-foreground mt-2",
-                            "— {props.reference}"
-                        }
+                div { class: "p-4 space-y-4 overflow-y-auto",
+                    div { class: "border-l-4 border-primary pl-4 py-2",
+                        p { class: "italic text-foreground leading-relaxed", "{props.content}" }
+                        p { class: "text-sm text-muted-foreground mt-2", "— {props.reference}" }
                     }
-
-                    // Comment textarea
-                    div {
-                        class: "space-y-2",
+                    div { class: "space-y-2",
                         label {
                             class: "text-sm font-medium",
                             r#for: "highlight-comment",
@@ -191,8 +153,9 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                             onkeydown: {
                                 let mut do_submit = do_submit;
                                 move |evt: KeyboardEvent| {
-                                    // Ctrl+Enter or Cmd+Enter to submit
-                                    if evt.key() == Key::Enter && (evt.modifiers().ctrl() || evt.modifiers().meta()) {
+                                    if evt.key() == Key::Enter
+                                        && (evt.modifiers().ctrl() || evt.modifiers().meta())
+                                    {
                                         evt.stop_propagation();
                                         evt.prevent_default();
                                         do_submit();
@@ -200,16 +163,10 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                                 }
                             },
                         }
-                        p {
-                            class: "text-xs text-muted-foreground",
-                            "Press Ctrl+Enter to save"
-                        }
+                        p { class: "text-xs text-muted-foreground", "Press Ctrl+Enter to save" }
                     }
                 }
-
-                // Footer
-                div {
-                    class: "flex justify-end gap-3 p-4 border-t border-border",
+                div { class: "flex justify-end gap-3 p-4 border-t border-border",
                     button {
                         class: "px-4 py-2 rounded-lg hover:bg-accent transition-colors",
                         disabled: effective_submitting,
