@@ -242,7 +242,7 @@ pub fn Home(list: String) -> Element {
                 FeedType::Following => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
                     let cache_key = FeedCacheKey::Following {
-                        pubkey: pubkey_str,
+                        pubkey: pubkey_str.clone(),
                     };
                     let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
                         .await
@@ -258,6 +258,14 @@ pub fn Home(list: String) -> Element {
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                         cached_items
                     } else {
+                        // No cache: show quick global posts while contacts load
+                        log::info!("No cache, fetching quick global posts while loading contacts...");
+                        if let Ok(quick_posts) = fetch_quick_global_posts(20).await {
+                            if !quick_posts.is_empty() && !is_stale() {
+                                log::info!("Showing {} quick global posts while contacts load", quick_posts.len());
+                                feed_state.set(DataState::Loaded(quick_posts));
+                            }
+                        }
                         Vec::new()
                     };
                     let stream_req_id = request_id;
