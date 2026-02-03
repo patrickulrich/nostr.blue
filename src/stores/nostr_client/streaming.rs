@@ -224,6 +224,67 @@ where
     }
     Ok(accepted_count)
 }
+/// Stream events with immediate callback per event (no batching)
+///
+/// Optimized for time-to-first-post: calls on_event immediately for each event
+/// as it arrives from relays, enabling instant UI updates.
+///
+/// Use for initial feed load where displaying the first post ASAP is critical.
+pub async fn stream_events_immediate<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    mut on_event: F,
+) -> std::result::Result<usize, String>
+where
+    F: FnMut(nostr::Event),
+{
+    use futures::StreamExt;
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    let client = get_client().ok_or("Client not initialized")?;
+    ensure_relays_ready(&client).await;
+
+    let relays = client.relays().await;
+    let connected_urls: Vec<nostr::RelayUrl> = relays
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .collect();
+
+    if connected_urls.is_empty() {
+        log::warn!("No connected relays for immediate stream");
+        return Err("No connected relays".to_string());
+    }
+
+    log::info!(
+        "Immediate streaming from {} connected relays",
+        connected_urls.len()
+    );
+
+    let filter_authors = filter.authors.clone();
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors
+        .as_ref()
+        .map(|authors| authors.iter().collect());
+
+    let mut stream = client
+        .stream_events_from(connected_urls, filter, timeout)
+        .await
+        .map_err(|e| format!("Failed to create stream: {}", e))?;
+
+    let mut count = 0;
+    while let Some(event) = stream.next().await {
+        if let Some(ref authors) = author_set {
+            if !authors.contains(&event.pubkey) {
+                continue;
+            }
+        }
+        on_event(event);
+        count += 1;
+    }
+
+    log::info!("Immediate stream completed: {} events", count);
+    Ok(count)
+}
 /// Stream events and collect them into a Vec
 ///
 /// This is a convenience wrapper that collects all streamed events

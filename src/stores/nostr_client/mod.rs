@@ -84,7 +84,8 @@ pub use fetching::{
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected,
-    stream_events_from_connected_relays_batched, stream_events_with_callback,
+    stream_events_from_connected_relays_batched, stream_events_immediate,
+    stream_events_with_callback,
 };
 pub use articles::{
     fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
