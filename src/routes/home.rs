@@ -2158,6 +2158,26 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
         }
     }
 }
+/// Fetch a small batch of global posts quickly for immediate display
+/// Used while contacts are loading to show something immediately
+async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, String> {
+    log::info!("Fetching {} quick global posts...", limit);
+    let filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .limit(limit);
+
+    let events = nostr_client::fetch_events_from_connected_relays(
+        filter,
+        Duration::from_secs(3), // Short timeout for speed
+    )
+    .await?;
+
+    let mut feed_items = process_events_to_feed_items(events);
+    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+
+    log::info!("Got {} quick global posts", feed_items.len());
+    Ok(feed_items)
+}
 /// Batch prefetch author metadata for all feed items
 /// This checks the database first and only fetches missing metadata
 /// For reposts, it fetches both the original author AND the reposter
