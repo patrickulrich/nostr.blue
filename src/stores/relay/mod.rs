@@ -44,6 +44,7 @@ pub use pool::{add_relay, apply_relay_lists_to_client, remove_relay, DEFAULT_REL
 pub use connection::{
     disconnect, ensure_relays_ready, ensure_video_relay_connected,
     fetch_event_by_coordinate_with_relays, fetch_events_from_relays, reconnect,
+    try_connect_relays,
 };
 pub use hints::{get_write_relay_hints, make_naddr_with_hints};
 pub use specialty::{

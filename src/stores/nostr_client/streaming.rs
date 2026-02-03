@@ -74,6 +74,7 @@ where
 ///
 /// # Returns
 /// Total count of events received
+#[allow(dead_code)]
 pub async fn stream_events_batched<F>(
     filter: Filter,
     timeout: std::time::Duration,
@@ -153,6 +154,7 @@ where
 /// 3. Returns results much faster but may miss events from unconnected relays
 ///
 /// Use for initial feed load where speed is critical.
+#[allow(dead_code)]
 pub async fn stream_events_from_connected_relays_batched<F>(
     filter: Filter,
     timeout: std::time::Duration,

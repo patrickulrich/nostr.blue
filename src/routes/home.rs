@@ -258,14 +258,9 @@ pub fn Home(list: String) -> Element {
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                         cached_items
                     } else {
-                        // No cache: show quick global posts while contacts load
-                        log::info!("No cache, fetching quick global posts while loading contacts...");
-                        if let Ok(quick_posts) = fetch_quick_global_posts(20).await {
-                            if !quick_posts.is_empty() && !is_stale() {
-                                log::info!("Showing {} quick global posts while contacts load", quick_posts.len());
-                                feed_state.set(DataState::Loaded(quick_posts));
-                            }
-                        }
+                        // No cache: show loading state while contacts load
+                        // We don't show global posts here as it may contain explicit content
+                        log::info!("No cache, loading Following feed...");
                         Vec::new()
                     };
                     let stream_req_id = request_id;
@@ -2190,6 +2185,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
 }
 /// Fetch a small batch of global posts quickly for immediate display
 /// Used while contacts are loading to show something immediately
+#[allow(dead_code)]
 async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, String> {
     log::info!("Fetching {} quick global posts...", limit);
     let filter = Filter::new()

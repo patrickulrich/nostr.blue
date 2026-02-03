@@ -213,50 +213,28 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             log::warn!("Failed to add discovery relay {}: {}", discovery_url, e);
         }
     }
-    log::info!("Spawning relay connections...");
-    #[cfg(target_arch = "wasm32")]
-    {
-        let client_for_connect = client.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            client_for_connect.connect().await;
-            log::info!("Background relay connections initiated");
-        });
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let client_for_connect = client.clone();
-        tokio::spawn(async move {
-            client_for_connect.connect().await;
-            log::info!("Background relay connections initiated");
-        });
-    }
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
-    const TIMEOUT_MS: u64 = 3000;
-    const POLL_INTERVAL_MS: u64 = 100;
-    {
-        let start = instant::Instant::now();
-        loop {
-            platform_sleep_ms(POLL_INTERVAL_MS).await;
-            let relays_now = client.relays().await;
-            let connected = relays_now
-                .values()
-                .any(|r| r.status() == PoolRelayStatus::Connected);
-            if connected {
-                log::info!(
-                    "First relay connected after {}ms", start.elapsed().as_millis()
-                );
-                if !*RELAY_CONNECTED.peek() {
-                    *RELAY_CONNECTED.write() = true;
-                }
-                break;
-            }
-            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
-                log::warn!(
-                    "Relay connection timeout after {}ms, proceeding anyway", TIMEOUT_MS
-                );
-                *RELAY_CONNECTED.write() = false;
-                break;
-            }
+    // Use fast connection with 2-second timeout for quick initial connection
+    log::info!("Attempting fast relay connection...");
+    let connected = relay::try_connect_relays(&client, Duration::from_secs(2)).await;
+
+    if !connected {
+        // Spawn background retry if initial connection fails
+        log::info!("Fast connect failed, spawning background connection retry...");
+        #[cfg(target_arch = "wasm32")]
+        {
+            let client_for_connect = client.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                client_for_connect.connect().await;
+                log::info!("Background relay connections initiated");
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let client_for_connect = client.clone();
+            tokio::spawn(async move {
+                client_for_connect.connect().await;
+                log::info!("Background relay connections initiated");
+            });
         }
     }
     *CLIENT_INITIALIZED.write() = true;
