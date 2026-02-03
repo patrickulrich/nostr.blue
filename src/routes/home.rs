@@ -1995,18 +1995,40 @@ where
     }
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
-    let stream_result = nostr_client::stream_events_from_connected_relays_batched(
+    // Use immediate streaming for faster time-to-first-post
+    let stream_result = nostr_client::stream_events_immediate(
             filter,
             Duration::from_secs(10),
-            10,
-            |batch| {
-                let mut batch_items = process_events_to_feed_items(batch);
-                batch_items.retain(|item| seen_ids.insert(item.event().id));
-                if !batch_items.is_empty() {
-                    batch_items
-                        .sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-                    all_items.extend(batch_items.clone());
-                    on_batch(batch_items);
+            |event| {
+                use nostr_sdk::TagKind;
+                // Process single event immediately
+                let item = if event.kind == Kind::Repost {
+                    match extract_reposted_event(&event) {
+                        Ok(original) => Some(FeedItem::Repost {
+                            original,
+                            reposted_by: event.pubkey,
+                            repost_timestamp: event.created_at,
+                        }),
+                        Err(_) => None,
+                    }
+                } else if event.kind == Kind::TextNote {
+                    // Filter out replies (posts with e tags)
+                    let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
+                    if !is_reply {
+                        Some(FeedItem::OriginalPost(event))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(feed_item) = item {
+                    if seen_ids.insert(feed_item.event().id) {
+                        all_items.push(feed_item.clone());
+                        // Call on_batch with single item for immediate UI update
+                        on_batch(vec![feed_item]);
+                    }
                 }
             },
         )
