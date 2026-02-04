@@ -3,8 +3,7 @@ use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::video_kinds::{
-    all_video_kinds, dedupe_videos_by_url, get_video_url, horizontal_kinds, is_vertical_video,
-    vertical_kinds,
+    all_video_kinds, dedupe_videos_by_url, horizontal_kinds, is_vertical_video, vertical_kinds,
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -233,44 +232,25 @@ pub fn Videos() -> Element {
             };
             match result {
                 Ok((new_events, page_has_more)) => {
-                    let (existing_ids, existing_urls): (
-                        std::collections::HashSet<_>,
-                        std::collections::HashSet<_>,
-                    ) = {
-                        let current = feed_events.read();
-                        let ids = current.iter().map(|e| e.id).collect();
-                        let urls: std::collections::HashSet<_> =
-                            current.iter().filter_map(get_video_url).collect();
-                        (ids, urls)
-                    };
-                    let unique_events: Vec<_> = new_events
-                        .into_iter()
-                        .filter(|e| {
-                            // Exclude if we already have this event ID
-                            if existing_ids.contains(&e.id) {
-                                return false;
-                            }
-                            // Exclude if we already have a video with the same URL
-                            if let Some(url) = get_video_url(e) {
-                                if existing_urls.contains(&url) {
-                                    return false;
-                                }
-                            }
-                            true
-                        })
-                        .collect();
-                    if unique_events.is_empty() {
+                    // Merge existing feed with new events, then dedupe
+                    // This allows addressable kinds to replace non-addressable across pages
+                    // (Dioxus pattern: read().clone() + transform + set())
+                    let current = feed_events.read().clone();
+                    let old_len = current.len();
+                    let merged: Vec<_> = current.into_iter().chain(new_events).collect();
+                    let deduped = dedupe_videos_by_url(merged);
+
+                    // Check if we got new content
+                    if deduped.len() == old_len {
                         has_more.set(false);
                         loading_feed.set(false);
-                        log::info!("No new unique videos found, stopping pagination");
+                        log::info!("No new unique videos found after dedupe, stopping pagination");
                     } else {
-                        if let Some(last_event) = unique_events.last() {
+                        if let Some(last_event) = deduped.last() {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
                         has_more.set(page_has_more);
-                        let mut current = feed_events.read().clone();
-                        current.extend(unique_events);
-                        feed_events.set(current);
+                        feed_events.set(deduped);
                         loading_feed.set(false);
                     }
                 }

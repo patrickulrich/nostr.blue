@@ -268,8 +268,30 @@ where
         .collect();
 
     if connected_urls.is_empty() {
-        log::warn!("No connected relays for immediate stream");
-        return Err(NostrBlueError::NoRelaysConfigured);
+        log::warn!("No connected relays for immediate stream, falling back to gossip stream");
+        // Fall back to SDK's stream_events which uses gossip/outbox routing
+        let filter_authors = filter.authors.clone();
+        let author_set: Option<std::collections::HashSet<_>> = filter_authors
+            .as_ref()
+            .map(|authors| authors.iter().collect());
+
+        let mut stream = client
+            .stream_events(filter, timeout)
+            .await?;
+
+        let mut count = 0;
+        while let Some(event) = stream.next().await {
+            if let Some(ref authors) = author_set {
+                if !authors.contains(&event.pubkey) {
+                    continue;
+                }
+            }
+            on_event(event);
+            count += 1;
+        }
+
+        log::info!("Gossip fallback stream completed: {} events", count);
+        return Ok(count);
     }
 
     log::info!(

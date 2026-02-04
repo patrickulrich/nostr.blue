@@ -219,12 +219,12 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
 
     if !connected {
         // Spawn background retry if initial connection fails
+        // Note: ensure_relays_ready already calls client.connect() internally
         log::info!("Fast connect failed, spawning background connection retry...");
         #[cfg(target_arch = "wasm32")]
         {
             let client_for_connect = client.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                client_for_connect.connect().await;
                 relay::connection::ensure_relays_ready(&client_for_connect).await;
                 log::info!("Background relay connections completed");
             });
@@ -233,7 +233,6 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
         {
             let client_for_connect = client.clone();
             tokio::spawn(async move {
-                client_for_connect.connect().await;
                 relay::connection::ensure_relays_ready(&client_for_connect).await;
                 log::info!("Background relay connections completed");
             });

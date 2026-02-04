@@ -81,48 +81,67 @@ pub fn get_video_url(event: &nostr_sdk::Event) -> Option<String> {
 /// keeps only one instance. Prefers addressable kinds as they have more metadata.
 /// Events without extractable URLs are kept (deduplicated by event ID only).
 ///
-/// Optimized to use O(1) HashMap index lookups and swap_remove for replacements,
-/// avoiding O(n) position() and remove() operations.
+/// Uses SDK's DedupVal pattern with Vec<Option<T>> to preserve ordering.
+/// Best variant is placed at first occurrence position, avoiding swap_remove corruption.
 pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Event> {
     use std::collections::{HashMap, HashSet};
 
-    let mut seen_url_index: HashMap<String, usize> = HashMap::new();
-    let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
-    let mut result: Vec<nostr_sdk::Event> = Vec::new();
+    if events.is_empty() {
+        return events;
+    }
 
-    for event in events {
-        // Skip if we've seen this exact event ID
+    // Track first occurrence and best variant for each URL (SDK DedupVal pattern)
+    struct DedupVal {
+        first_idx: usize,
+        best_idx: usize,
+    }
+
+    let mut url_map: HashMap<String, DedupVal> = HashMap::new();
+    let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+
+    for (idx, event) in events.iter().enumerate() {
         if seen_ids.contains(&event.id) {
             continue;
         }
+        seen_ids.insert(event.id);
 
-        if let Some(url) = get_video_url(&event) {
-            if let Some(&existing_idx) = seen_url_index.get(&url) {
-                let existing = &result[existing_idx];
-                // Prefer addressable kinds (34235/34236) over regular (21/22)
-                // as they typically have more metadata
-                let keep_existing = is_addressable_video(existing.kind.as_u16())
-                    && !is_addressable_video(event.kind.as_u16());
-                if keep_existing {
-                    continue;
-                }
-                // Replace: swap_remove the existing and update indices
-                let removed_id = result[existing_idx].id;
-                result.swap_remove(existing_idx);
-                seen_ids.remove(&removed_id);
-                // Update index of the element that was swapped in (if any)
-                if existing_idx < result.len() {
-                    if let Some(swapped_url) = get_video_url(&result[existing_idx]) {
-                        seen_url_index.insert(swapped_url, existing_idx);
+        if let Some(url) = get_video_url(event) {
+            match url_map.entry(url) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let val = entry.get_mut();
+                    let existing = &events[val.best_idx];
+                    // Prefer addressable kinds over regular kinds
+                    let incoming_is_better = is_addressable_video(event.kind.as_u16())
+                        && !is_addressable_video(existing.kind.as_u16());
+                    if incoming_is_better {
+                        val.best_idx = idx;
                     }
                 }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(DedupVal { first_idx: idx, best_idx: idx });
+                }
             }
-            seen_url_index.insert(url, result.len());
         }
-
-        seen_ids.insert(event.id);
-        result.push(event);
     }
 
-    result
+    // Build result: place best variant at first occurrence position (SDK pattern)
+    let mut new_list: Vec<Option<nostr_sdk::Event>> = vec![None; events.len()];
+    let mut used_indices: HashSet<usize> = HashSet::new();
+
+    for DedupVal { first_idx, best_idx } in url_map.into_values() {
+        new_list[first_idx] = Some(events[best_idx].clone());
+        used_indices.insert(first_idx);
+        used_indices.insert(best_idx);
+    }
+
+    // Add events without URLs at their original positions
+    for (idx, event) in events.into_iter().enumerate() {
+        if !used_indices.contains(&idx) && new_list[idx].is_none() && get_video_url(&event).is_none()
+        {
+            new_list[idx] = Some(event);
+        }
+    }
+
+    // Flatten, preserving order
+    new_list.into_iter().flatten().collect()
 }

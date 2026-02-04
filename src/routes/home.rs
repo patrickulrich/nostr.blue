@@ -2224,7 +2224,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
 /// Fetch a small batch of global posts quickly for immediate display
 /// Used while contacts are loading to show something immediately
 #[allow(dead_code)]
-async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, String> {
+async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, crate::error::NostrBlueError> {
     log::info!("Fetching {} quick global posts...", limit);
     let filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
