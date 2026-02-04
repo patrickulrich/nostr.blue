@@ -174,7 +174,17 @@ pub fn Home(list: String) -> Element {
         let current_feed_type = feed_type.read().clone();
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !is_authenticated || !client_initialized {
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+
+        // Wait for client initialization
+        if !client_initialized {
+            return;
+        }
+        // For authenticated users, wait for signer restoration before loading feed
+        // This prevents race condition where CLIENT_INITIALIZED is true but
+        // restore_session_async() hasn't attached the signer yet
+        if is_authenticated && !has_signer {
+            log::debug!("Waiting for signer restoration before loading feed...");
             return;
         }
         let (last_refresh, last_feed) = last_loaded_trigger.peek().clone();
@@ -765,7 +775,15 @@ pub fn Home(list: String) -> Element {
         let current_feed_type = feed_type.read().clone();
         let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !is_authenticated || !client_initialized {
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+
+        // Wait for client initialization
+        if !client_initialized {
+            return;
+        }
+        // For authenticated users, wait for signer restoration before starting realtime
+        if is_authenticated && !has_signer {
+            log::debug!("Waiting for signer restoration before starting realtime...");
             return;
         }
         if *realtime_started.read() {

@@ -2,6 +2,9 @@ use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
+use crate::utils::video_kinds::{
+    all_video_kinds, get_video_url, horizontal_kinds, is_vertical_video, vertical_kinds,
+};
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
@@ -78,7 +81,18 @@ pub fn Videos() -> Element {
         let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+
+        // Wait for client initialization
         if !client_initialized {
+            return;
+        }
+        // For authenticated users, wait for signer restoration before loading feed
+        // This prevents race condition where CLIENT_INITIALIZED is true but
+        // restore_session_async() hasn't attached the signer yet
+        if is_authenticated && !has_signer {
+            log::debug!("Waiting for signer restoration before loading video feed...");
             return;
         }
         let (last_refresh, last_feed) = *last_loaded_trigger.peek();
@@ -208,13 +222,31 @@ pub fn Videos() -> Element {
             };
             match result {
                 Ok((new_events, page_has_more)) => {
-                    let existing_ids: std::collections::HashSet<_> = {
+                    let (existing_ids, existing_urls): (
+                        std::collections::HashSet<_>,
+                        std::collections::HashSet<_>,
+                    ) = {
                         let current = feed_events.read();
-                        current.iter().map(|e| e.id).collect()
+                        let ids = current.iter().map(|e| e.id).collect();
+                        let urls: std::collections::HashSet<_> =
+                            current.iter().filter_map(get_video_url).collect();
+                        (ids, urls)
                     };
                     let unique_events: Vec<_> = new_events
                         .into_iter()
-                        .filter(|e| !existing_ids.contains(&e.id))
+                        .filter(|e| {
+                            // Exclude if we already have this event ID
+                            if existing_ids.contains(&e.id) {
+                                return false;
+                            }
+                            // Exclude if we already have a video with the same URL
+                            if let Some(url) = get_video_url(e) {
+                                if existing_urls.contains(&url) {
+                                    return false;
+                                }
+                            }
+                            true
+                        })
                         .collect();
                     if unique_events.is_empty() {
                         has_more.set(false);
@@ -383,13 +415,14 @@ pub fn Videos() -> Element {
                                                 rsx! {}
                                             }
                                         }
-                                    } else if event.kind == Kind::Custom(22) {
+                                    } else if is_vertical_video(event.kind.as_u16()) {
                                         VertsVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
                                             feed_type: *feed_type.read(),
                                         }
-                                    } else if event.kind == Kind::Custom(21) {
+                                    } else {
+                                        // Horizontal videos (kinds 21, 34235)
                                         LandscapeVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
@@ -684,7 +717,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                 }
                 if !authors.is_empty() {
                     let filter = Filter::new()
-                        .kinds([Kind::Custom(21)])
+                        .kinds(horizontal_kinds())
                         .authors(authors)
                         .limit(20);
                     let all_events = nostr_client::fetch_video_events(
@@ -710,7 +743,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
         }
     }
     log::info!("Falling back to global feed for featured landscape videos");
-    let filter = Filter::new().kinds([Kind::Custom(21)]).limit(20);
+    let filter = Filter::new().kinds(horizontal_kinds()).limit(20);
     let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
         .await
         .unwrap_or_default();
@@ -732,7 +765,7 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
             }
             if !authors.is_empty() {
                 let filter = Filter::new()
-                    .kinds([Kind::Custom(22)])
+                    .kinds(vertical_kinds())
                     .authors(authors)
                     .limit(20);
                 let all_events = nostr_client::fetch_video_events(
@@ -794,7 +827,7 @@ async fn load_following_videos(
     }
     let authors_clone = authors.clone();
     let mut video_filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22)])
+        .kinds(all_video_kinds())
         .authors(authors)
         .limit(40);
     if let Some(until_ts) = until {
@@ -849,7 +882,7 @@ async fn load_following_videos(
 async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     log::info!("Loading global videos feed (until: {:?})...", until);
     let mut video_filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22)])
+        .kinds(all_video_kinds())
         .limit(40);
     if let Some(until_ts) = until {
         video_filter = video_filter.until(Timestamp::from(until_ts.saturating_sub(1)));

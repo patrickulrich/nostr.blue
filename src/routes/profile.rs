@@ -9,6 +9,7 @@ use crate::services::profile_stats;
 use crate::stores::{auth_store, dms, nostr_client, pinned_notes};
 use crate::utils::article_meta::{get_identifier, get_published_at};
 use crate::utils::repost::{expand_events_for_prefetch, extract_reposted_event};
+use crate::utils::video_kinds::{horizontal_kinds, vertical_kinds};
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::ToBech32;
 use nostr_sdk::prelude::*;
@@ -1461,10 +1462,10 @@ fn build_tab_filter(
             Filter::new().author(public_key).kind(Kind::Custom(20)).limit(limit)
         }
         ProfileTab::Media(MediaSubTab::Videos) => {
-            Filter::new().author(public_key).kind(Kind::Custom(21)).limit(limit)
+            Filter::new().author(public_key).kinds(horizontal_kinds()).limit(limit)
         }
         ProfileTab::Media(MediaSubTab::Verts) => {
-            Filter::new().author(public_key).kind(Kind::Custom(22)).limit(limit)
+            Filter::new().author(public_key).kinds(vertical_kinds()).limit(limit)
         }
         ProfileTab::Likes => {
             Filter::new().author(public_key).kind(Kind::Reaction).limit(limit)
@@ -1916,7 +1917,7 @@ async fn load_tab_events(
         ProfileTab::Media(MediaSubTab::Videos) => {
             let mut filter = Filter::new()
                 .author(public_key)
-                .kind(Kind::Custom(21))
+                .kinds(horizontal_kinds())
                 .limit(TARGET_COUNT);
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));
@@ -1941,7 +1942,7 @@ async fn load_tab_events(
         ProfileTab::Media(MediaSubTab::Verts) => {
             let mut filter = Filter::new()
                 .author(public_key)
-                .kind(Kind::Custom(22))
+                .kinds(vertical_kinds())
                 .limit(TARGET_COUNT);
             if let Some(until_ts) = until {
                 filter = filter.until(Timestamp::from(until_ts));

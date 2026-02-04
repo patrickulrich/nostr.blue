@@ -43,6 +43,7 @@ pub mod time;
 pub mod timed_serializer;
 pub mod url_metadata;
 pub mod validation;
+pub mod video_kinds;
 pub use data_state::DataState;
 pub use format::{
     format_relative_time_or, format_sats_compact, format_sats_with_separator,

@@ -174,6 +174,12 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                                 naddr: identifier.to_string(),
                             })
                         }
+                        34235 | 34236 => {
+                            // NIP-71 addressable video kinds
+                            Ok(Route::VideoDetail {
+                                video_id: identifier.to_string(),
+                            })
+                        }
                         _ => {
                             Err(
                                 format!(

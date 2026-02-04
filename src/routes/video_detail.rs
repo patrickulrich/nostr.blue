@@ -7,6 +7,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::format_sats_compact;
 use crate::utils::build_thread_tree;
+use crate::utils::video_kinds::{all_video_kinds, is_vertical_video, vertical_kinds};
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
@@ -70,7 +71,7 @@ pub fn VideoDetail(video_id: String) -> Element {
                     }
                 }
             } else if let Some(event) = video_event.read().as_ref() {
-                if event.kind == Kind::Custom(22) {
+                if is_vertical_video(event.kind.as_u16()) {
                     ShortsPlayer {
                         initial_video_id: clean_video_id_for_shorts.clone(),
                         feed_type,
@@ -1388,9 +1389,29 @@ fn parse_video_id_and_feed(video_id: &str) -> (String, FeedType) {
 }
 async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, String> {
     log::info!("Loading video by ID: {}", video_id);
+
+    // Handle naddr (addressable event coordinate)
+    if video_id.starts_with("naddr1") {
+        use nostr_sdk::nips::nip19::Nip19;
+        let nip19 = Nip19::from_bech32(video_id)
+            .map_err(|e| format!("Invalid naddr: {}", e))?;
+        if let Nip19::Coordinate(coord) = nip19 {
+            let filter = Filter::new()
+                .kind(coord.coordinate.kind)
+                .author(coord.coordinate.public_key)
+                .identifier(coord.coordinate.identifier);
+            let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
+                .await
+                .map_err(|e| format!("Failed to fetch addressable video: {}", e))?;
+            return events.into_iter().next().ok_or_else(|| "Addressable video not found".to_string());
+        }
+        return Err("Invalid naddr format for video".to_string());
+    }
+
+    // Handle regular event ID (hex or nevent)
     let event_id = EventId::parse(video_id)
         .map_err(|e| format!("Invalid video ID: {}", e))?;
-    let filter = Filter::new().id(event_id).kinds([Kind::Custom(21), Kind::Custom(22)]);
+    let filter = Filter::new().id(event_id).kinds(all_video_kinds());
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
         .await
         .map_err(|e| format!("Failed to fetch video: {}", e))?;
@@ -1417,7 +1438,7 @@ async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Ev
     if authors.is_empty() {
         return load_shorts_global(until).await;
     }
-    let mut filter = Filter::new().kind(Kind::Custom(22)).authors(authors).limit(50);
+    let mut filter = Filter::new().kinds(vertical_kinds()).authors(authors).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -1437,7 +1458,7 @@ async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Ev
     }
 }
 async fn load_shorts_global(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
-    let mut filter = Filter::new().kind(Kind::Custom(22)).limit(50);
+    let mut filter = Filter::new().kinds(vertical_kinds()).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
