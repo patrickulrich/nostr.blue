@@ -126,26 +126,71 @@ pub async fn ensure_video_relay(client: &Client) -> bool {
 pub async fn ensure_gif_relay(client: &Client) -> bool {
     ensure_connected(client, urls::GIF).await
 }
-/// Ensure DM inbox relays are connected (session-persistent).
-/// Adds user's DM relays (kind 10050) or defaults to the pool and connects them.
+/// Ensure DM inbox relays are connected with tiered fallback.
+/// Fallback chain: 10050 DM relays → 10002 write relays → hardcoded defaults
 /// Returns the list of relay URLs that successfully connected.
 pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
-    let dm_relays = super::nip65::get_dm_relays();
-    let mut connected = Vec::new();
-    for relay_url in &dm_relays {
-        if ensure_connected(client, relay_url).await {
-            connected.push(relay_url.clone());
-        } else {
-            log::warn!("Could not connect to DM relay: {}", relay_url);
+    // Tier 1: Try kind 10050 DM relays
+    let dm_relays_10050 = super::nip65::get_dm_relays_10050_only();
+    if !dm_relays_10050.is_empty() {
+        log::info!("Trying {} kind 10050 DM relays...", dm_relays_10050.len());
+        let connected = try_connect_relay_list(client, &dm_relays_10050).await;
+        if !connected.is_empty() {
+            log::info!(
+                "Connected to {} kind 10050 DM relays: {:?}",
+                connected.len(),
+                connected
+            );
+            return connected;
         }
-    }
-    if connected.is_empty() {
-        log::error!("No DM relays could be connected!");
+        log::warn!("No kind 10050 relays connected, falling back to kind 10002...");
     } else {
+        log::info!("No kind 10050 relays configured, trying kind 10002...");
+    }
+
+    // Tier 2: Fall back to kind 10002 write relays
+    let write_relays = super::nip65::get_write_relays();
+    if !write_relays.is_empty() {
+        log::info!("Trying {} kind 10002 write relays...", write_relays.len());
+        let connected = try_connect_relay_list(client, &write_relays).await;
+        if !connected.is_empty() {
+            log::info!(
+                "Connected to {} kind 10002 write relays for DMs: {:?}",
+                connected.len(),
+                connected
+            );
+            return connected;
+        }
+        log::warn!("No kind 10002 relays connected, falling back to defaults...");
+    } else {
+        log::info!("No kind 10002 relays configured, trying defaults...");
+    }
+
+    // Tier 3: Fall back to hardcoded defaults
+    let defaults = super::nip65::default_dm_relays();
+    log::info!("Trying {} default DM relays...", defaults.len());
+    let connected = try_connect_relay_list(client, &defaults).await;
+    if !connected.is_empty() {
         log::info!(
-            "DM relays connected: {}/{} - {:?}", connected.len(), dm_relays.len(),
+            "Connected to {} default DM relays: {:?}",
+            connected.len(),
             connected
         );
+        return connected;
+    }
+
+    log::error!("No DM relays could be connected from any tier (10050, 10002, or defaults)!");
+    Vec::new()
+}
+
+/// Helper to force connection to a list of relays.
+/// Uses ensure_connected which adds to pool + waits for connection.
+async fn try_connect_relay_list(client: &Client, relays: &[String]) -> Vec<String> {
+    let mut connected = Vec::new();
+    for relay_url in relays {
+        if ensure_connected(client, relay_url).await {
+            connected.push(relay_url.clone());
+        }
     }
     connected
 }
