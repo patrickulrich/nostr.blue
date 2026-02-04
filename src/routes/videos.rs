@@ -3,7 +3,8 @@ use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
 use crate::utils::video_kinds::{
-    all_video_kinds, get_video_url, horizontal_kinds, is_vertical_video, vertical_kinds,
+    all_video_kinds, dedupe_videos_by_url, get_video_url, horizontal_kinds, is_vertical_video,
+    vertical_kinds,
 };
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
@@ -730,7 +731,8 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         .into_iter()
                         .collect();
                     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                    let landscape_vec: Vec<Event> = all_events_vec
+                    let deduped = dedupe_videos_by_url(all_events_vec);
+                    let landscape_vec: Vec<Event> = deduped
                         .into_iter()
                         .take(3)
                         .collect();
@@ -749,7 +751,8 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
         .unwrap_or_default();
     let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let landscape_vec: Vec<Event> = all_events_vec.into_iter().take(3).collect();
+    let deduped = dedupe_videos_by_url(all_events_vec);
+    let landscape_vec: Vec<Event> = deduped.into_iter().take(3).collect();
     Ok(landscape_vec)
 }
 async fn load_recent_verts() -> Result<Vec<Event>, String> {
@@ -776,7 +779,8 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                     .unwrap_or_default();
                 let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
                 all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                let verts_vec: Vec<Event> = all_events_vec.into_iter().take(5).collect();
+                let deduped = dedupe_videos_by_url(all_events_vec);
+                let verts_vec: Vec<Event> = deduped.into_iter().take(5).collect();
                 return Ok(verts_vec);
             }
         }
@@ -875,9 +879,11 @@ async fn load_following_videos(
         return Ok((Vec::new(), false, false));
     }
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    log::info!("Loaded total of {} events from following", all_events.len());
+    // Deduplicate videos by URL (same video may exist as kind 21 and 34235)
+    let deduped = dedupe_videos_by_url(all_events);
+    log::info!("Loaded total of {} events from following (after dedup)", deduped.len());
     let has_more = video_hit_limit || stream_hit_limit;
-    Ok((all_events, has_more, false))
+    Ok((deduped, has_more, false))
 }
 async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     log::info!("Loading global videos feed (until: {:?})...", until);
@@ -923,7 +929,9 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
         return Err("Failed to load any content".to_string());
     }
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    log::info!("Loaded total of {} events", all_events.len());
+    // Deduplicate videos by URL (same video may exist as kind 21 and 34235)
+    let deduped = dedupe_videos_by_url(all_events);
+    log::info!("Loaded total of {} events (after dedup)", deduped.len());
     let has_more = video_hit_limit || stream_hit_limit;
-    Ok((all_events, has_more))
+    Ok((deduped, has_more))
 }

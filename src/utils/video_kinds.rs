@@ -76,3 +76,47 @@ pub fn get_video_url(event: &nostr_sdk::Event) -> Option<String> {
     }
     None
 }
+
+/// Deduplicate video events by URL within a batch
+/// When the same video exists as both regular (21/22) and addressable (34235/34236),
+/// keeps only one instance. Prefers addressable kinds as they have more metadata.
+/// Events without extractable URLs are kept (deduplicated by event ID only).
+pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Event> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut seen_urls: HashMap<String, nostr_sdk::Event> = HashMap::new();
+    let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+    let mut result: Vec<nostr_sdk::Event> = Vec::new();
+
+    for event in events {
+        // Skip if we've seen this exact event ID
+        if seen_ids.contains(&event.id) {
+            continue;
+        }
+
+        if let Some(url) = get_video_url(&event) {
+            // Check if we've seen this URL before
+            if let Some(existing) = seen_urls.get(&url) {
+                // Prefer addressable kinds (34235/34236) over regular (21/22)
+                // as they typically have more metadata
+                let dominated_by_addressable = is_addressable_video(existing.kind.as_u16())
+                    && !is_addressable_video(event.kind.as_u16());
+                if dominated_by_addressable {
+                    // Keep the existing addressable event
+                    continue;
+                }
+                // Replace with the new event (either it's addressable or same priority)
+                // Find and remove the existing event from result
+                if let Some(pos) = result.iter().position(|e| e.id == existing.id) {
+                    result.remove(pos);
+                }
+            }
+            seen_urls.insert(url, event.clone());
+        }
+
+        seen_ids.insert(event.id);
+        result.push(event);
+    }
+
+    result
+}
