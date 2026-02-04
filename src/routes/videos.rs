@@ -234,25 +234,23 @@ pub fn Videos() -> Element {
                 Ok((new_events, page_has_more)) => {
                     // Merge existing feed with new events, then dedupe
                     // This allows addressable kinds to replace non-addressable across pages
-                    // (Dioxus pattern: read().clone() + transform + set())
                     let current = feed_events.read().clone();
-                    let old_len = current.len();
-                    let merged: Vec<_> = current.into_iter().chain(new_events).collect();
+                    let merged: Vec<_> = current.clone().into_iter().chain(new_events).collect();
                     let deduped = dedupe_videos_by_url(merged);
 
-                    // Check if we got new content
-                    if deduped.len() == old_len {
-                        has_more.set(false);
-                        loading_feed.set(false);
-                        log::info!("No new unique videos found after dedupe, stopping pagination");
-                    } else {
+                    // Check if content actually changed (not just length)
+                    // Event PartialEq compares all fields, so addressable replacements are detected
+                    if deduped != current {
                         if let Some(last_event) = deduped.last() {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
                         has_more.set(page_has_more);
                         feed_events.set(deduped);
-                        loading_feed.set(false);
+                    } else {
+                        has_more.set(false);
+                        log::info!("No new unique videos found after dedupe, stopping pagination");
                     }
+                    loading_feed.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to load more videos: {}", e);

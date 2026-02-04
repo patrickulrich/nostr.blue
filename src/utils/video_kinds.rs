@@ -136,10 +136,16 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
 
     // Add events without URLs at their original positions
     for (idx, event) in events.into_iter().enumerate() {
-        if !used_indices.contains(&idx) && new_list[idx].is_none() && get_video_url(&event).is_none()
-        {
-            new_list[idx] = Some(event);
+        // Skip if: already processed, slot taken, has URL, or duplicate ID
+        if used_indices.contains(&idx) || new_list[idx].is_some() {
+            continue;
         }
+        if get_video_url(&event).is_some() || seen_ids.contains(&event.id) {
+            continue;
+        }
+        seen_ids.insert(event.id);
+        used_indices.insert(idx);
+        new_list[idx] = Some(event);
     }
 
     // Flatten, preserving order

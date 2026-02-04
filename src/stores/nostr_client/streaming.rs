@@ -21,6 +21,7 @@ use crate::stores::relay::USER_RELAYS_APPLIED;
 ///
 /// # Returns
 /// Total count of events received
+// TODO: remove dead_code allow when video/article feeds use per-event streaming
 #[allow(dead_code)]
 pub async fn stream_events_with_callback<F>(
     filter: Filter,
@@ -75,6 +76,7 @@ where
 ///
 /// # Returns
 /// Total count of events received
+// TODO: remove dead_code allow when batch streaming is used for feed loading
 #[allow(dead_code)]
 pub async fn stream_events_batched<F>(
     filter: Filter,
@@ -155,6 +157,7 @@ where
 /// 3. Returns results much faster but may miss events from unconnected relays
 ///
 /// Use for initial feed load where speed is critical.
+// TODO: remove dead_code allow when fast initial feed load uses batch streaming
 #[allow(dead_code)]
 pub async fn stream_events_from_connected_relays_batched<F>(
     filter: Filter,
@@ -327,6 +330,7 @@ where
 /// This is a convenience wrapper that collects all streamed events
 /// into a vector with deduplication and sorting.
 /// Uses HashSet for O(1) deduplication during collection (nostr-sdk pattern).
+// TODO: remove dead_code allow when collected stream is used for prefetching
 #[allow(dead_code)]
 pub async fn stream_events_collected(
     filter: Filter,
