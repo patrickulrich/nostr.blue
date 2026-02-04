@@ -3,6 +3,7 @@ use nostr_sdk::prelude::*;
 use std::time::Duration;
 use super::search_relays::get_connected_search_relays;
 use crate::stores::nostr_client::{ensure_relays_ready, NOSTR_CLIENT};
+use crate::utils::video_kinds::all_video_kinds;
 /// Result type for content search
 #[derive(Clone, Debug)]
 pub struct ContentSearchResult {
@@ -186,7 +187,7 @@ pub async fn search_videos(
     log::debug!("Searching for videos matching: {}", query);
     ensure_relays_ready(&client).await;
     let filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22)])
+        .kinds(all_video_kinds())
         .search(query)
         .limit(limit);
     let search_urls = get_connected_search_relays(&client).await;

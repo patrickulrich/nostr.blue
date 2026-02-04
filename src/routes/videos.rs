@@ -2,6 +2,9 @@ use crate::components::{ClientInitializing, MiniLiveStreamCard};
 use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
+use crate::utils::video_kinds::{
+    all_video_kinds, dedupe_videos_by_url, horizontal_kinds, is_vertical_video, vertical_kinds,
+};
 use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
@@ -78,7 +81,28 @@ pub fn Videos() -> Element {
         let refresh = *refresh_trigger.read();
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
+
+        // Wait for client initialization
         if !client_initialized {
+            return;
+        }
+        // For authenticated users with signing capability, wait for signer restoration
+        // This prevents race condition where CLIENT_INITIALIZED is true but
+        // restore_session_async() hasn't attached the signer yet
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if is_authenticated && requires_signer && !has_signer {
+            log::debug!("Waiting for signer restoration before loading video feed...");
             return;
         }
         let (last_refresh, last_feed) = *last_loaded_trigger.peek();
@@ -208,28 +232,25 @@ pub fn Videos() -> Element {
             };
             match result {
                 Ok((new_events, page_has_more)) => {
-                    let existing_ids: std::collections::HashSet<_> = {
-                        let current = feed_events.read();
-                        current.iter().map(|e| e.id).collect()
-                    };
-                    let unique_events: Vec<_> = new_events
-                        .into_iter()
-                        .filter(|e| !existing_ids.contains(&e.id))
-                        .collect();
-                    if unique_events.is_empty() {
-                        has_more.set(false);
-                        loading_feed.set(false);
-                        log::info!("No new unique videos found, stopping pagination");
-                    } else {
-                        if let Some(last_event) = unique_events.last() {
+                    // Merge existing feed with new events, then dedupe
+                    // This allows addressable kinds to replace non-addressable across pages
+                    let current = feed_events.read().clone();
+                    let merged: Vec<_> = current.clone().into_iter().chain(new_events).collect();
+                    let deduped = dedupe_videos_by_url(merged);
+
+                    // Check if content actually changed (not just length)
+                    // Event PartialEq compares all fields, so addressable replacements are detected
+                    if deduped != current {
+                        if let Some(last_event) = deduped.last() {
                             oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         }
                         has_more.set(page_has_more);
-                        let mut current = feed_events.read().clone();
-                        current.extend(unique_events);
-                        feed_events.set(current);
-                        loading_feed.set(false);
+                        feed_events.set(deduped);
+                    } else {
+                        has_more.set(false);
+                        log::info!("No new unique videos found after dedupe, stopping pagination");
                     }
+                    loading_feed.set(false);
                 }
                 Err(e) => {
                     log::error!("Failed to load more videos: {}", e);
@@ -383,13 +404,14 @@ pub fn Videos() -> Element {
                                                 rsx! {}
                                             }
                                         }
-                                    } else if event.kind == Kind::Custom(22) {
+                                    } else if is_vertical_video(event.kind.as_u16()) {
                                         VertsVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
                                             feed_type: *feed_type.read(),
                                         }
-                                    } else if event.kind == Kind::Custom(21) {
+                                    } else {
+                                        // Horizontal videos (kinds 21, 34235)
                                         LandscapeVideoCard {
                                             key: "{event.id}",
                                             event: event.clone(),
@@ -684,7 +706,7 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                 }
                 if !authors.is_empty() {
                     let filter = Filter::new()
-                        .kinds([Kind::Custom(21)])
+                        .kinds(horizontal_kinds())
                         .authors(authors)
                         .limit(20);
                     let all_events = nostr_client::fetch_video_events(
@@ -697,7 +719,8 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
                         .into_iter()
                         .collect();
                     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                    let landscape_vec: Vec<Event> = all_events_vec
+                    let deduped = dedupe_videos_by_url(all_events_vec);
+                    let landscape_vec: Vec<Event> = deduped
                         .into_iter()
                         .take(3)
                         .collect();
@@ -710,13 +733,14 @@ async fn load_featured_content() -> Result<Vec<Event>, String> {
         }
     }
     log::info!("Falling back to global feed for featured landscape videos");
-    let filter = Filter::new().kinds([Kind::Custom(21)]).limit(20);
+    let filter = Filter::new().kinds(horizontal_kinds()).limit(20);
     let all_events = nostr_client::fetch_video_events(filter, Duration::from_secs(10))
         .await
         .unwrap_or_default();
     let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
     all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let landscape_vec: Vec<Event> = all_events_vec.into_iter().take(3).collect();
+    let deduped = dedupe_videos_by_url(all_events_vec);
+    let landscape_vec: Vec<Event> = deduped.into_iter().take(3).collect();
     Ok(landscape_vec)
 }
 async fn load_recent_verts() -> Result<Vec<Event>, String> {
@@ -732,7 +756,7 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
             }
             if !authors.is_empty() {
                 let filter = Filter::new()
-                    .kinds([Kind::Custom(22)])
+                    .kinds(vertical_kinds())
                     .authors(authors)
                     .limit(20);
                 let all_events = nostr_client::fetch_video_events(
@@ -743,7 +767,8 @@ async fn load_recent_verts() -> Result<Vec<Event>, String> {
                     .unwrap_or_default();
                 let mut all_events_vec: Vec<Event> = all_events.into_iter().collect();
                 all_events_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                let verts_vec: Vec<Event> = all_events_vec.into_iter().take(5).collect();
+                let deduped = dedupe_videos_by_url(all_events_vec);
+                let verts_vec: Vec<Event> = deduped.into_iter().take(5).collect();
                 return Ok(verts_vec);
             }
         }
@@ -794,7 +819,7 @@ async fn load_following_videos(
     }
     let authors_clone = authors.clone();
     let mut video_filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22)])
+        .kinds(all_video_kinds())
         .authors(authors)
         .limit(40);
     if let Some(until_ts) = until {
@@ -842,14 +867,16 @@ async fn load_following_videos(
         return Ok((Vec::new(), false, false));
     }
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    log::info!("Loaded total of {} events from following", all_events.len());
+    // Deduplicate videos by URL (same video may exist as kind 21 and 34235)
+    let deduped = dedupe_videos_by_url(all_events);
+    log::info!("Loaded total of {} events from following (after dedup)", deduped.len());
     let has_more = video_hit_limit || stream_hit_limit;
-    Ok((all_events, has_more, false))
+    Ok((deduped, has_more, false))
 }
 async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), String> {
     log::info!("Loading global videos feed (until: {:?})...", until);
     let mut video_filter = Filter::new()
-        .kinds([Kind::Custom(21), Kind::Custom(22)])
+        .kinds(all_video_kinds())
         .limit(40);
     if let Some(until_ts) = until {
         video_filter = video_filter.until(Timestamp::from(until_ts.saturating_sub(1)));
@@ -890,7 +917,9 @@ async fn load_global_videos(until: Option<u64>) -> Result<(Vec<Event>, bool), St
         return Err("Failed to load any content".to_string());
     }
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    log::info!("Loaded total of {} events", all_events.len());
+    // Deduplicate videos by URL (same video may exist as kind 21 and 34235)
+    let deduped = dedupe_videos_by_url(all_events);
+    log::info!("Loaded total of {} events (after dedup)", deduped.len());
     let has_more = video_hit_limit || stream_hit_limit;
-    Ok((all_events, has_more))
+    Ok((deduped, has_more))
 }

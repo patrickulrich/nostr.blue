@@ -128,11 +128,22 @@ pub fn get_write_relays() -> Vec<String> {
 }
 /// Get the user's DM inbox relays (for private messages)
 /// Returns relays from kind 10050, or defaults if none configured
+#[allow(dead_code)]
 pub fn get_dm_relays() -> Vec<String> {
     let metadata = USER_RELAY_METADATA.read();
     match metadata.as_ref() {
         Some(m) if !m.dm_relays.is_empty() => m.dm_relays.clone(),
         _ => DEFAULT_DM_RELAYS.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// Get only the user's kind 10050 DM relays (no fallback)
+/// Used by ensure_dm_relays_connected for tiered fallback logic
+pub fn get_dm_relays_10050_only() -> Vec<String> {
+    let metadata = USER_RELAY_METADATA.read();
+    match metadata.as_ref() {
+        Some(m) if !m.dm_relays.is_empty() => m.dm_relays.clone(),
+        _ => Vec::new(),
     }
 }
 /// Parse relay list from kind 10002 event

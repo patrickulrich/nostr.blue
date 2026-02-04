@@ -29,6 +29,10 @@ Thumbs.db
 *.wasm
 *.wasm.map
 
+# Claude-mem auto-generated context files (keep root CLAUDE.md)
+**/CLAUDE.md
+!/CLAUDE.md
+
 # Logs
 *.log
 npm-debug.log*
