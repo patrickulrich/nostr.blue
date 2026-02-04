@@ -83,16 +83,26 @@ pub fn Videos() -> Element {
         let current_feed_type = *feed_type.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *nostr_client::HAS_SIGNER.read();
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
 
         // Wait for client initialization
         if !client_initialized {
             return;
         }
-        // For authenticated users, wait for signer restoration before loading feed
+        // For authenticated users with signing capability, wait for signer restoration
         // This prevents race condition where CLIENT_INITIALIZED is true but
         // restore_session_async() hasn't attached the signer yet
-        if is_authenticated && !has_signer {
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before loading video feed...");
             return;
         }

@@ -225,7 +225,8 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             let client_for_connect = client.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 client_for_connect.connect().await;
-                log::info!("Background relay connections initiated");
+                relay::connection::ensure_relays_ready(&client_for_connect).await;
+                log::info!("Background relay connections completed");
             });
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -233,7 +234,8 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             let client_for_connect = client.clone();
             tokio::spawn(async move {
                 client_for_connect.connect().await;
-                log::info!("Background relay connections initiated");
+                relay::connection::ensure_relays_ready(&client_for_connect).await;
+                log::info!("Background relay connections completed");
             });
         }
     }

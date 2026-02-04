@@ -100,7 +100,14 @@ pub fn use_user_lists() -> (
             return;
         }
         // Wait for signer before fetching lists (needed for private list decryption)
-        if !has_signer {
+        // ReadOnly (npub) users don't need a signer - they can still see public list info
+        let requires_signer = matches!(
+            auth.login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if requires_signer && !has_signer {
             log::debug!("Waiting for signer before fetching lists...");
             return;
         }

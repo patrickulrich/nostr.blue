@@ -485,7 +485,7 @@ async fn publish_music_status(track: &MusicTrack) {
             format!("https://nostr.blue/music/rss/album/{}", feed_id)
         }
         TrackSource::Radio { d_tag, .. } => {
-            format!("https://nostr.blue/radio/{}", d_tag)
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag))
         }
     };
     let mut status = LiveStatus {

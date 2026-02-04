@@ -1,4 +1,5 @@
 use crate::routes::Route;
+use crate::utils::video_kinds;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 #[component]
@@ -174,8 +175,8 @@ async fn decode_and_redirect(identifier: &str) -> std::result::Result<Route, Str
                                 naddr: identifier.to_string(),
                             })
                         }
-                        34235 | 34236 => {
-                            // NIP-71 addressable video kinds
+                        kind if video_kinds::is_addressable_video(kind) => {
+                            // NIP-71 addressable video kinds (34235, 34236)
                             Ok(Route::VideoDetail {
                                 video_id: identifier.to_string(),
                             })

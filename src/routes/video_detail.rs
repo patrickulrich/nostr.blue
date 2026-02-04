@@ -1403,7 +1403,9 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, String> 
             let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Failed to fetch addressable video: {}", e))?;
-            return events.into_iter().next().ok_or_else(|| "Addressable video not found".to_string());
+            return events.into_iter()
+                .max_by_key(|e| e.created_at)
+                .ok_or_else(|| "Addressable video not found".to_string());
         }
         return Err("Invalid naddr format for video".to_string());
     }

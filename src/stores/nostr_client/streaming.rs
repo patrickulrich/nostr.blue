@@ -1,6 +1,7 @@
 //! Progressive event streaming
 //!
 //! Functions for streaming events with callbacks for progressive UI updates.
+use crate::error::NostrBlueError;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
@@ -236,14 +237,27 @@ pub async fn stream_events_immediate<F>(
     filter: Filter,
     timeout: std::time::Duration,
     mut on_event: F,
-) -> std::result::Result<usize, String>
+) -> std::result::Result<usize, NostrBlueError>
 where
     F: FnMut(nostr::Event),
 {
     use futures::StreamExt;
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
 
-    let client = get_client().ok_or("Client not initialized")?;
+    let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
+
+    // Wait for user relay lists if signer is present
+    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
+        log::debug!("stream_events_immediate: waiting for user relay lists...");
+        let start = instant::Instant::now();
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+            platform_sleep_ms(50).await;
+        }
+        if *USER_RELAYS_APPLIED.peek() {
+            log::debug!("stream_events_immediate: user relay lists applied");
+        }
+    }
+
     ensure_relays_ready(&client).await;
 
     let relays = client.relays().await;
@@ -255,7 +269,7 @@ where
 
     if connected_urls.is_empty() {
         log::warn!("No connected relays for immediate stream");
-        return Err("No connected relays".to_string());
+        return Err(NostrBlueError::NoRelaysConfigured);
     }
 
     log::info!(
@@ -270,8 +284,7 @@ where
 
     let mut stream = client
         .stream_events_from(connected_urls, filter, timeout)
-        .await
-        .map_err(|e| format!("Failed to create stream: {}", e))?;
+        .await?;
 
     let mut count = 0;
     while let Some(event) = stream.next().await {

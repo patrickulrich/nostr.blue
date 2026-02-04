@@ -143,9 +143,9 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
                 .tags
                 .iter()
                 .any(|t| {
-                    let vec = t.clone().to_vec();
-                    vec.first().map(|s| s.as_str()) == Some("t")
-                        && vec
+                    let slice = t.as_slice();
+                    slice.first().map(|s| s.as_str()) == Some("t")
+                        && slice
                             .get(1)
                             .map(|s| s.to_lowercase().contains("nostrcooking"))
                             .unwrap_or(false)
@@ -177,9 +177,9 @@ fn extract_addressable_metadata(event: &Event, kind: u16) -> PinPreviewMetadata 
 /// Extract image URL from imeta tags (NIP-92)
 fn extract_imeta_image(event: &Event) -> Option<String> {
     for tag in event.tags.iter() {
-        let tag_vec = tag.clone().to_vec();
-        if tag_vec.first().map(|s| s.as_str()) == Some("imeta") {
-            for field in tag_vec.iter().skip(1) {
+        let tag_slice = tag.as_slice();
+        if tag_slice.first().map(|s| s.as_str()) == Some("imeta") {
+            for field in tag_slice.iter().skip(1) {
                 if let Some(url) = field.strip_prefix("url ") {
                     if is_image_url(url) {
                         return Some(url.to_string());

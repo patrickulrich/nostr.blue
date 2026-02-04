@@ -172,7 +172,10 @@ pub fn Home(list: String) -> Element {
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_feed_type = feed_type.read().clone();
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *nostr_client::HAS_SIGNER.read();
 
@@ -180,10 +183,17 @@ pub fn Home(list: String) -> Element {
         if !client_initialized {
             return;
         }
-        // For authenticated users, wait for signer restoration before loading feed
+        // For authenticated users with signing capability, wait for signer restoration
         // This prevents race condition where CLIENT_INITIALIZED is true but
         // restore_session_async() hasn't attached the signer yet
-        if is_authenticated && !has_signer {
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before loading feed...");
             return;
         }
@@ -773,7 +783,10 @@ pub fn Home(list: String) -> Element {
     });
     use_effect(move || {
         let current_feed_type = feed_type.read().clone();
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         let has_signer = *nostr_client::HAS_SIGNER.read();
 
@@ -781,8 +794,15 @@ pub fn Home(list: String) -> Element {
         if !client_initialized {
             return;
         }
-        // For authenticated users, wait for signer restoration before starting realtime
-        if is_authenticated && !has_signer {
+        // For authenticated users with signing capability, wait for signer restoration
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before starting realtime...");
             return;
         }
