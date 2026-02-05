@@ -172,9 +172,29 @@ pub fn Home(list: String) -> Element {
     use_effect(move || {
         let refresh = *refresh_trigger.read();
         let current_feed_type = feed_type.read().clone();
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !is_authenticated || !client_initialized {
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+
+        // Wait for client initialization
+        if !client_initialized {
+            return;
+        }
+        // For authenticated users with signing capability, wait for signer restoration
+        // This prevents race condition where CLIENT_INITIALIZED is true but
+        // restore_session_async() hasn't attached the signer yet
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if is_authenticated && requires_signer && !has_signer {
+            log::debug!("Waiting for signer restoration before loading feed...");
             return;
         }
         let (last_refresh, last_feed) = last_loaded_trigger.peek().clone();
@@ -242,7 +262,7 @@ pub fn Home(list: String) -> Element {
                 FeedType::Following => {
                     let pubkey_str = auth_store::get_pubkey().unwrap_or_default();
                     let cache_key = FeedCacheKey::Following {
-                        pubkey: pubkey_str,
+                        pubkey: pubkey_str.clone(),
                     };
                     let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
                         .await
@@ -258,6 +278,9 @@ pub fn Home(list: String) -> Element {
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                         cached_items
                     } else {
+                        // No cache: show loading state while contacts load
+                        // We don't show global posts here as it may contain explicit content
+                        log::info!("No cache, loading Following feed...");
                         Vec::new()
                     };
                     let stream_req_id = request_id;
@@ -760,9 +783,27 @@ pub fn Home(list: String) -> Element {
     });
     use_effect(move || {
         let current_feed_type = feed_type.read().clone();
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !is_authenticated || !client_initialized {
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+
+        // Wait for client initialization
+        if !client_initialized {
+            return;
+        }
+        // For authenticated users with signing capability, wait for signer restoration
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if is_authenticated && requires_signer && !has_signer {
+            log::debug!("Waiting for signer restoration before starting realtime...");
             return;
         }
         if *realtime_started.read() {
@@ -1881,11 +1922,9 @@ async fn load_following_feed(
                         }
                     }
                 } else if event.kind == Kind::TextNote {
-                    use nostr_sdk::TagKind;
-                    let is_reply = event
-                        .tags
-                        .iter()
-                        .any(|tag| tag.kind() == TagKind::e());
+                    // Posts with root/reply markers are thread replies - filter these out
+                    // Mentions (e-tags without markers) are preserved in the feed
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
@@ -1910,7 +1949,6 @@ async fn load_following_feed(
 }
 /// Process raw events into FeedItems (extracted for reuse in streaming)
 fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> {
-    use nostr_sdk::TagKind;
     let mut feed_items: Vec<FeedItem> = Vec::new();
     for event in events.into_iter() {
         if event.kind == Kind::Repost {
@@ -1928,7 +1966,9 @@ fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> 
                 }
             }
         } else if event.kind == Kind::TextNote {
-            let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
+            // Posts with root/reply markers are thread replies - filter these out
+            // Mentions (e-tags without markers) are preserved in the feed
+            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
@@ -1987,18 +2027,40 @@ where
     }
     let mut all_items: Vec<FeedItem> = Vec::new();
     let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
-    let stream_result = nostr_client::stream_events_from_connected_relays_batched(
+    // Use immediate streaming for faster time-to-first-post
+    let stream_result = nostr_client::stream_events_immediate(
             filter,
             Duration::from_secs(10),
-            10,
-            |batch| {
-                let mut batch_items = process_events_to_feed_items(batch);
-                batch_items.retain(|item| seen_ids.insert(item.event().id));
-                if !batch_items.is_empty() {
-                    batch_items
-                        .sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
-                    all_items.extend(batch_items.clone());
-                    on_batch(batch_items);
+            |event| {
+                // Process single event immediately
+                let item = if event.kind == Kind::Repost {
+                    match extract_reposted_event(&event) {
+                        Ok(original) => Some(FeedItem::Repost {
+                            original,
+                            reposted_by: event.pubkey,
+                            repost_timestamp: event.created_at,
+                        }),
+                        Err(_) => None,
+                    }
+                } else if event.kind == Kind::TextNote {
+                    // Posts with root/reply markers are thread replies - filter these out
+                    // Mentions (e-tags without markers) are preserved in the feed
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                    if !is_reply {
+                        Some(FeedItem::OriginalPost(event))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(feed_item) = item {
+                    if seen_ids.insert(feed_item.event().id) {
+                        all_items.push(feed_item.clone());
+                        // Call on_batch with single item for immediate UI update
+                        on_batch(vec![feed_item]);
+                    }
                 }
             },
         )
@@ -2157,6 +2219,27 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
             Err(format!("Failed to load feed: {}", e))
         }
     }
+}
+/// Fetch a small batch of global posts quickly for immediate display
+/// Used while contacts are loading to show something immediately
+#[allow(dead_code)]
+async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, crate::error::NostrBlueError> {
+    log::info!("Fetching {} quick global posts...", limit);
+    let filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .limit(limit);
+
+    let events = nostr_client::fetch_events_from_connected_relays(
+        filter,
+        Duration::from_secs(3), // Short timeout for speed
+    )
+    .await?;
+
+    let mut feed_items = process_events_to_feed_items(events);
+    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+
+    log::info!("Got {} quick global posts", feed_items.len());
+    Ok(feed_items)
 }
 /// Batch prefetch author metadata for all feed items
 /// This checks the database first and only fetches missing metadata
