@@ -264,7 +264,7 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::Following {
                         pubkey: pubkey_str.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -413,7 +413,7 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::FollowingWithReplies {
                         pubkey: pubkey_str,
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -531,7 +531,7 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::Global => {
                     let cache_key = FeedCacheKey::Global;
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -645,7 +645,7 @@ pub fn Home(list: String) -> Element {
                         pubkey: pubkey_str,
                         list_id: list.identifier.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -1883,7 +1883,7 @@ async fn load_following_feed(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -2021,7 +2021,7 @@ where
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -2115,7 +2115,7 @@ async fn load_following_with_replies(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(150);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
@@ -2286,7 +2286,7 @@ async fn load_people_list_feed(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(members)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }

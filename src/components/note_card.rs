@@ -94,14 +94,27 @@ pub fn NoteCard(
                         repost_count.set(counts.reposts.min(500));
                         zap_amount_sats.set(counts.zap_amount_sats);
                     }
+                    if let Some(reposted) = counts.user_reposted {
+                        is_reposted.set(reposted);
+                    }
+                    if let Some(ref repost_id) = counts.user_repost_id {
+                        user_repost_id.set(Some(repost_id.clone()));
+                    }
+                    if let Some(zapped) = counts.user_zapped {
+                        is_zapped.set(zapped);
+                    }
                 }
             },
         ),
     );
+    let has_precomputed = precomputed_counts.is_some();
     use_effect(
         use_reactive(
-            &event_id_counts,
-            move |event_id_for_counts| {
+            &(event_id_counts, has_precomputed),
+            move |(event_id_for_counts, has_precomputed)| {
+                if has_precomputed {
+                    return;
+                }
                 spawn(async move {
                     let client = match get_client() {
                         Some(c) => c,

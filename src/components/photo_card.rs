@@ -7,6 +7,7 @@ use crate::stores::nostr_client::{
     get_client, publish_note_tracked, publish_repost, HAS_SIGNER,
 };
 use crate::stores::signer::SIGNER_INFO;
+use crate::services::aggregation::InteractionCounts;
 use crate::utils::{format_relative_time_or, format_sats_compact, truncate_pubkey};
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, FromBech32, Kind, PublicKey};
@@ -93,7 +94,11 @@ pub fn get_title(event: &Event) -> Option<String> {
     None
 }
 #[component]
-pub fn PhotoCard(event: Event) -> Element {
+pub fn PhotoCard(
+    event: Event,
+    #[props(default = None)]
+    precomputed_counts: Option<InteractionCounts>,
+) -> Element {
     let images = parse_imeta_tags(&event);
     let title = get_title(&event);
     let description = &event.content;
@@ -117,7 +122,7 @@ pub fn PhotoCard(event: Event) -> Element {
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_memo);
     let has_signer = *HAS_SIGNER.read();
-    let reaction = use_reaction(event_id_like.clone(), author_pubkey_like.clone(), None);
+    let reaction = use_reaction(event_id_like.clone(), author_pubkey_like.clone(), precomputed_counts.as_ref());
     let mut current_image_index = use_signal(|| 0usize);
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
@@ -135,8 +140,30 @@ pub fn PhotoCard(event: Event) -> Element {
     }
     use_effect(
         use_reactive(
-            &event_id_counts,
-            move |event_id_for_counts| {
+            &precomputed_counts,
+            move |counts_opt| {
+                if let Some(counts) = counts_opt {
+                    reply_count.set(counts.replies);
+                    repost_count.set(counts.reposts);
+                    zap_amount_sats.set(counts.zap_amount_sats);
+                    if let Some(reposted) = counts.user_reposted {
+                        is_reposted.set(reposted);
+                    }
+                    if let Some(zapped) = counts.user_zapped {
+                        is_zapped.set(zapped);
+                    }
+                }
+            },
+        ),
+    );
+    let has_precomputed = precomputed_counts.is_some();
+    use_effect(
+        use_reactive(
+            &(event_id_counts, has_precomputed),
+            move |(event_id_for_counts, has_precomputed)| {
+                if has_precomputed {
+                    return;
+                }
                 spawn(async move {
                     let client = match get_client() {
                         Some(c) => c,
