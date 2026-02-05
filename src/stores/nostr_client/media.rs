@@ -6,6 +6,7 @@ use nostr_sdk::prelude::*;
 use super::fetching::get_client;
 use super::signals::HAS_SIGNER;
 use super::types::{detect_mime_type, PublishResult};
+use crate::utils::video_kinds::{VIDEO_HORIZONTAL_ADDR, VIDEO_VERTICAL_ADDR};
 /// Extract root event information from a reply event (NIP-10/NIP-22)
 /// Returns (root_event_id, root_pubkey, root_relay_url)
 /// Note: Kind is not available from standard e-tags, so caller should use parent's kind as fallback
@@ -189,8 +190,11 @@ pub async fn publish_picture(
         .await
         .map(|result| result.event_id)
 }
-/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait) with relay feedback
+/// Publish a video post as addressable event (Kind 34235 for landscape, Kind 34236 for portrait)
 /// NIP-71: https://github.com/nostr-protocol/nips/blob/master/71.md
+///
+/// Videos are published as addressable events with a d-tag identifier, allowing them to be
+/// updated by republishing with the same d-tag.
 pub async fn publish_video_tracked(
     title: String,
     description: String,
@@ -216,10 +220,29 @@ pub async fn publish_video_tracked(
     if title.trim().is_empty() {
         return Err("Title is required".to_string());
     }
-    let kind = if is_portrait { 22 } else { 21 };
-    log::info!("Publishing video (kind {}): {}", kind, title);
+    // Use addressable video kinds (NIP-71)
+    let kind = if is_portrait { VIDEO_VERTICAL_ADDR } else { VIDEO_HORIZONTAL_ADDR };
+    log::info!("Publishing addressable video (kind {}): {}", kind, title);
     use nostr::Tag;
-    let mut tags = vec![Tag::title(title.clone())];
+
+    // Generate d-tag identifier: slug from title + timestamp for uniqueness
+    // Use millisecond precision to prevent collisions on rapid publishes
+    #[cfg(target_family = "wasm")]
+    let timestamp_ms = js_sys::Date::now() as u64; // Already milliseconds
+    #[cfg(not(target_family = "wasm"))]
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let slug = crate::utils::slugify(&title);
+    let identifier = format!("{}-{}", slug, timestamp_ms);
+
+    // d-tag must be first for addressable events
+    let mut tags = vec![
+        Tag::identifier(identifier.clone()),
+        Tag::title(title.clone()),
+    ];
+
     let mut imeta_fields = vec![format!("url {}", video_url)];
     let video_mime: Option<&str> = {
         let url_lower = video_url.to_lowercase();
@@ -260,8 +283,8 @@ pub async fn publish_video_tracked(
         .map_err(|e| format!("Failed to publish video: {}", e))?;
     let result = PublishResult::from_output(output);
     log::info!(
-        "Video '{}' published: {} ({}/{} relays succeeded)", title, result.event_id,
-        result.success_count(), result.total_attempted()
+        "Addressable video '{}' published: {} (d-tag: {}, {}/{} relays succeeded)",
+        title, result.event_id, identifier, result.success_count(), result.total_attempted()
     );
     if result.has_failures() {
         for (relay, error) in &result.failed_relays {
@@ -270,7 +293,7 @@ pub async fn publish_video_tracked(
     }
     Ok(result)
 }
-/// Publish a video post (Kind 21 for landscape, Kind 22 for portrait)
+/// Publish a video post as addressable event (Kind 34235 for landscape, Kind 34236 for portrait)
 /// For relay feedback, use publish_video_tracked instead
 pub async fn publish_video(
     title: String,

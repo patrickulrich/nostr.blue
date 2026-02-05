@@ -89,6 +89,7 @@ pub fn use_user_lists() -> (
     use_effect(move || {
         let _trigger = refresh_trigger.read();
         let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
+        let has_signer = *nostr_client::HAS_SIGNER.read();
         let auth = auth_store::AUTH_STATE.read();
         if !auth.is_authenticated {
             lists.set(Vec::new());
@@ -96,6 +97,18 @@ pub fn use_user_lists() -> (
         }
         if !client_ready {
             loading.set(false);
+            return;
+        }
+        // Wait for signer before fetching lists (needed for private list decryption)
+        // ReadOnly (npub) users don't need a signer - they can still see public list info
+        let requires_signer = matches!(
+            auth.login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if requires_signer && !has_signer {
+            log::debug!("Waiting for signer before fetching lists...");
             return;
         }
         let pubkey_str = match &auth.pubkey {
