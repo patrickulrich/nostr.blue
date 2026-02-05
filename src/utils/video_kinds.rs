@@ -97,15 +97,19 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
     }
 
     let mut url_map: HashMap<String, DedupVal> = HashMap::new();
-    let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+    // Only track IDs of events that have URLs (fixes bug where non-URL events were skipped)
+    let mut seen_url_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
     for (idx, event) in events.iter().enumerate() {
-        if seen_ids.contains(&event.id) {
+        // Skip if we've already processed this exact event ID with a URL
+        if seen_url_ids.contains(&event.id) {
             continue;
         }
-        seen_ids.insert(event.id);
 
         if let Some(url) = get_video_url(event) {
+            // Only mark ID as seen when it HAS a URL
+            seen_url_ids.insert(event.id);
+
             match url_map.entry(url) {
                 std::collections::hash_map::Entry::Occupied(mut entry) => {
                     let val = entry.get_mut();
@@ -135,15 +139,21 @@ pub fn dedupe_videos_by_url(events: Vec<nostr_sdk::Event>) -> Vec<nostr_sdk::Eve
     }
 
     // Add events without URLs at their original positions
+    // Use separate tracking for non-URL event deduplication
+    let mut seen_non_url_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
     for (idx, event) in events.into_iter().enumerate() {
-        // Skip if: already processed, slot taken, has URL, or duplicate ID
+        // Skip if: already processed as URL event, or slot taken
         if used_indices.contains(&idx) || new_list[idx].is_some() {
             continue;
         }
-        if get_video_url(&event).is_some() || seen_ids.contains(&event.id) {
+        // Skip URL events (they were handled above)
+        if get_video_url(&event).is_some() {
             continue;
         }
-        seen_ids.insert(event.id);
+        // Skip duplicate non-URL events (SDK pattern: insert returns false if already present)
+        if !seen_non_url_ids.insert(event.id) {
+            continue;
+        }
         used_indices.insert(idx);
         new_list[idx] = Some(event);
     }

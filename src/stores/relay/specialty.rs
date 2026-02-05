@@ -183,16 +183,27 @@ pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
     Vec::new()
 }
 
-/// Helper to force connection to a list of relays.
+/// Helper to force connection to a list of relays in parallel.
 /// Uses ensure_connected which adds to pool + waits for connection.
 async fn try_connect_relay_list(client: &Client, relays: &[String]) -> Vec<String> {
-    let mut connected = Vec::new();
-    for relay_url in relays {
-        if ensure_connected(client, relay_url).await {
-            connected.push(relay_url.clone());
-        }
-    }
-    connected
+    use futures::future::join_all;
+
+    let futures: Vec<_> = relays
+        .iter()
+        .map(|relay_url| {
+            let relay_url = relay_url.clone();
+            let client = client.clone();
+            async move {
+                if ensure_connected(&client, &relay_url).await {
+                    Some(relay_url)
+                } else {
+                    None
+                }
+            }
+        })
+        .collect();
+
+    join_all(futures).await.into_iter().flatten().collect()
 }
 /// Ensure search relays are connected (session-persistent).
 /// Adds user's search relays (kind 10007) or defaults to the pool and connects them.

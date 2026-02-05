@@ -226,6 +226,10 @@ pub async fn publish_video_tracked(
     use nostr::Tag;
 
     // Generate d-tag identifier: slug from title + timestamp for uniqueness
+    // Use WASM-safe timestamp generation (js_sys::Date in WASM, SystemTime otherwise)
+    #[cfg(target_family = "wasm")]
+    let timestamp = (js_sys::Date::now() / 1000.0) as u64;
+    #[cfg(not(target_family = "wasm"))]
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

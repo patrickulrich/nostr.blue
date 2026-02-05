@@ -60,23 +60,68 @@ pub fn Notifications() -> Element {
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
-        if !client_initialized || !is_authenticated {
+        let has_signer = *nostr_client::HAS_SIGNER.read();
+        let auth_state = auth_store::AUTH_STATE.read();
+        let is_authenticated = auth_state.is_authenticated;
+        let login_method = auth_state.login_method.clone();
+        drop(auth_state); // Release lock before async operations
+
+        // Wait for client initialization
+        if !client_initialized {
             return;
         }
+
+        // Notifications require authentication
+        if !is_authenticated {
+            return;
+        }
+
+        // For authenticated users with signing capability, wait for signer restoration
+        // This prevents race condition where CLIENT_INITIALIZED is true but
+        // restore_session_async() hasn't attached the signer yet
+        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        let requires_signer = matches!(
+            login_method,
+            Some(auth_store::LoginMethod::BrowserExtension)
+                | Some(auth_store::LoginMethod::PrivateKey)
+                | Some(auth_store::LoginMethod::RemoteSigner)
+        );
+        if requires_signer && !has_signer {
+            log::debug!("Waiting for signer restoration before loading notifications...");
+            return;
+        }
+
         let now = Timestamp::now().as_secs() as i64;
         notif_store::set_checked_at(now);
         loading.set(true);
         error.set(None);
+
+        // Use streaming for progressive loading
         spawn(async move {
-            match load_notifications(None).await {
-                Ok(notifs) => {
-                    if !notifs.is_empty() {
+            let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+
+            let result = stream_notifications(None, |notif| {
+                let event_id = get_event_id(&notif);
+
+                // SDK pattern: insert() returns true if newly inserted (atomic check-and-insert)
+                if seen_ids.insert(event_id) {
+                    // Dioxus pattern: use peek() in async contexts (non-subscribing read)
+                    let mut current = notifications.peek().clone();
+                    current.push(notif);
+                    current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                    notifications.set(current);
+                }
+            })
+            .await;
+
+            match result {
+                Ok(count) => {
+                    if count > 0 {
+                        // Dioxus pattern: peek() in async, not read()
+                        let notifs = notifications.peek().clone();
                         let oldest = notifs.iter().map(get_timestamp).min();
                         oldest_timestamp.set(oldest);
-                        let len = notifs.len();
-                        notifications.set(notifs.clone());
-                        has_more.set(len >= 100);
+                        has_more.set(count >= 100);
                         spawn(async move {
                             prefetch_notification_authors(&notifs).await;
                         });
@@ -85,6 +130,8 @@ pub fn Notifications() -> Element {
                     }
                 }
                 Err(e) => {
+                    // SDK pattern: log error but continue gracefully
+                    log::error!("Failed to stream notifications: {:?}", e);
                     error.set(Some(e));
                     has_more.set(false);
                 }
@@ -98,15 +145,30 @@ pub fn Notifications() -> Element {
             return;
         }
         refreshing.set(true);
+        // Clear existing notifications for fresh load
+        notifications.set(Vec::new());
+
         spawn(async move {
-            match load_notifications(None).await {
-                Ok(notifs) => {
-                    if !notifs.is_empty() {
+            let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
+
+            let result = stream_notifications(None, |notif| {
+                let event_id = get_event_id(&notif);
+                if seen_ids.insert(event_id) {
+                    let mut current = notifications.peek().clone();
+                    current.push(notif);
+                    current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                    notifications.set(current);
+                }
+            })
+            .await;
+
+            match result {
+                Ok(count) => {
+                    if count > 0 {
+                        let notifs = notifications.peek().clone();
                         let oldest = notifs.iter().map(get_timestamp).min();
                         oldest_timestamp.set(oldest);
-                        let len = notifs.len();
-                        notifications.set(notifs.clone());
-                        has_more.set(len >= 100);
+                        has_more.set(count >= 100);
                         spawn(async move {
                             prefetch_notification_authors(&notifs).await;
                         });
@@ -125,16 +187,41 @@ pub fn Notifications() -> Element {
         }
         let until = *oldest_timestamp.read();
         loading.set(true);
+
         spawn(async move {
-            match load_notifications(until).await {
-                Ok(new_notifs) => {
-                    if !new_notifs.is_empty() {
-                        let oldest = new_notifs.iter().map(get_timestamp).min();
+            // Get existing IDs to avoid duplicates when loading more
+            let existing_ids: HashSet<nostr_sdk::EventId> = notifications
+                .peek()
+                .iter()
+                .map(get_event_id)
+                .collect();
+            let mut seen_ids = existing_ids.clone();
+            let initial_count = seen_ids.len();
+
+            let result = stream_notifications(until, |notif| {
+                let event_id = get_event_id(&notif);
+                if seen_ids.insert(event_id) {
+                    let mut current = notifications.peek().clone();
+                    current.push(notif);
+                    current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
+                    notifications.set(current);
+                }
+            })
+            .await;
+
+            match result {
+                Ok(count) => {
+                    let new_count = seen_ids.len() - initial_count;
+                    if new_count > 0 {
+                        let notifs = notifications.peek().clone();
+                        let oldest = notifs.iter().map(get_timestamp).min();
                         oldest_timestamp.set(oldest);
-                        let mut current = notifications.read().clone();
-                        current.extend(new_notifs.clone());
-                        notifications.set(current);
-                        has_more.set(new_notifs.len() >= 100);
+                        has_more.set(count >= 100);
+                        let new_notifs: Vec<_> = notifs
+                            .iter()
+                            .filter(|n| !existing_ids.contains(&get_event_id(n)))
+                            .cloned()
+                            .collect::<Vec<_>>();
                         spawn(async move {
                             prefetch_notification_authors(&new_notifs).await;
                         });
@@ -825,6 +912,107 @@ fn get_timestamp(notification: &NotificationType) -> u64 {
         | NotificationType::Zap(e) => e.created_at.as_secs(),
     }
 }
+
+/// Helper to get event ID from notification
+fn get_event_id(notification: &NotificationType) -> nostr_sdk::EventId {
+    match notification {
+        NotificationType::Mention(e)
+        | NotificationType::Reply(e)
+        | NotificationType::Reaction(e)
+        | NotificationType::Repost(e)
+        | NotificationType::Zap(e) => e.id,
+    }
+}
+
+/// Classify an event into a notification type
+fn classify_notification(event: &NostrEvent, my_pubkey: &str) -> Option<NotificationType> {
+    // Skip self-notifications
+    if event.pubkey.to_hex() == my_pubkey {
+        return None;
+    }
+
+    match event.kind {
+        Kind::TextNote => {
+            // NIP-10: Only e tags with root/reply markers indicate thread replies
+            // Unmarked e tags are mentions in the preferred scheme
+            let is_reply = event.tags.iter().any(|tag| {
+                matches!(
+                    tag.as_standardized(),
+                    Some(nostr_sdk::TagStandard::Event {
+                        marker: Some(nostr_sdk::nips::nip10::Marker::Root),
+                        ..
+                    }) | Some(nostr_sdk::TagStandard::Event {
+                        marker: Some(nostr_sdk::nips::nip10::Marker::Reply),
+                        ..
+                    })
+                )
+            });
+            if is_reply {
+                Some(NotificationType::Reply(event.clone()))
+            } else {
+                Some(NotificationType::Mention(event.clone()))
+            }
+        }
+        Kind::Reaction => Some(NotificationType::Reaction(event.clone())),
+        Kind::Repost => Some(NotificationType::Repost(event.clone())),
+        Kind::ZapReceipt => Some(NotificationType::Zap(event.clone())),
+        _ => None,
+    }
+}
+
+/// Stream notifications with progressive loading
+/// Calls on_notification for each notification as it arrives
+async fn stream_notifications<F>(
+    until: Option<u64>,
+    mut on_notification: F,
+) -> Result<usize, NostrBlueError>
+where
+    F: FnMut(NotificationType),
+{
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
+    log::info!(
+        "Streaming notifications for {} (until: {:?})",
+        pubkey_str,
+        until
+    );
+
+    let mut filter = Filter::new()
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
+        .custom_tag(
+            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
+            pubkey_str.clone(),
+        )
+        .limit(100);
+
+    if let Some(until_ts) = until {
+        filter = filter.until(Timestamp::from(until_ts));
+    }
+
+    let mut count = 0;
+    let pubkey_for_classify = pubkey_str.clone();
+
+    let stream_result = nostr_client::stream_events_immediate(
+        filter,
+        Duration::from_secs(10),
+        |event| {
+            if let Some(notif) = classify_notification(&event, &pubkey_for_classify) {
+                on_notification(notif);
+                count += 1;
+            }
+        },
+    )
+    .await;
+
+    if let Err(e) = stream_result {
+        log::error!("Failed to stream notifications: {:?}", e);
+        return Err(e);
+    }
+
+    log::info!("Streamed {} notifications", count);
+    Ok(count)
+}
+
+#[allow(dead_code)]
 async fn load_notifications(
     until: Option<u64>,
 ) -> Result<Vec<NotificationType>, NostrBlueError> {
