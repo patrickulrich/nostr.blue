@@ -1,4 +1,5 @@
-use crate::components::{RichContent, VoiceRecorder};
+use super::recorder::VoiceRecorder;
+use crate::components::RichContent;
 use crate::stores::{blossom_store, nostr_client::HAS_SIGNER};
 use crate::utils::format::display_server_url;
 use crate::utils::thread_tree::invalidate_thread_tree_cache;

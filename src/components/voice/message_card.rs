@@ -1,5 +1,6 @@
 use crate::components::icons::{MessageCircleIcon, Repeat2Icon, ZapIcon};
-use crate::components::{ReactionButton, VoiceReplyComposer, ZapModal};
+use super::reply_composer::VoiceReplyComposer;
+use crate::components::{ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::stores::nostr_client::get_client;

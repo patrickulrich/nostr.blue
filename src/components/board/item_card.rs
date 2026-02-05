@@ -3,7 +3,8 @@
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{FromBech32, ToBech32};
-use crate::components::{pin_menu::PinToBoardRequest, PinMenu};
+use crate::components::PinMenu;
+use super::pin_menu::PinToBoardRequest;
 use crate::routes::Route;
 use crate::stores::pin_boards_store::{Pin, PinContentType, PinMetadata, PinReference};
 use crate::utils::validation::is_valid_http_url;

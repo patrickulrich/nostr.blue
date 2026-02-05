@@ -1,6 +1,6 @@
 //! Recipe Tag Selector Component
 //! Autocomplete tag input for selecting recipe categories
-use crate::components::recipe_tag_chip::RecipeTagChipEditable;
+use super::tag_chip::RecipeTagChipEditable;
 use crate::utils::recipe_tags::{get_section_tags, search_tags, CURATED_TAG_SECTIONS};
 use dioxus::prelude::*;
 /// Tag selector with autocomplete and curated sections

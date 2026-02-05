@@ -354,6 +354,26 @@ async fn run_post_login_init() {
     if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
         log::warn!("Failed to fetch Blossom servers: {}", e);
     }
+    // Wait for user relay lists before starting subscriptions
+    // Critical for NIP-46 where signer restoration is slow and
+    // relay application happens concurrently in set_signer()'s spawn_forever
+    if !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+        log::debug!("run_post_login_init: waiting for user relay lists...");
+        let start = instant::Instant::now();
+        while !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
+            && start.elapsed() < std::time::Duration::from_secs(5)
+        {
+            nostr_client::platform_sleep_ms(100).await;
+        }
+        if *crate::stores::relay::USER_RELAYS_APPLIED.peek() {
+            log::debug!(
+                "run_post_login_init: user relay lists applied after {}ms",
+                start.elapsed().as_millis()
+            );
+        } else {
+            log::warn!("run_post_login_init: proceeding without user relay lists after 5s timeout");
+        }
+    }
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();
