@@ -126,13 +126,22 @@ pub async fn ensure_video_relay(client: &Client) -> bool {
 pub async fn ensure_gif_relay(client: &Client) -> bool {
     ensure_connected(client, urls::GIF).await
 }
-/// Ensure DM inbox relays are connected with tiered fallback.
-/// Fallback chain: 10050 DM relays → 10002 write relays → hardcoded defaults
+/// Ensure DM inbox relays are connected with privacy-respecting fallback.
+///
+/// Fallback behavior:
+/// - If user configured kind 10050 relays: ONLY use those (privacy-first)
+/// - If no 10050 configured: fallback to 10002 → defaults (UX-first)
+///
+/// This follows NIP-17 privacy requirements: users choose 10050 relays specifically
+/// for DM privacy, so we shouldn't leak DM subscriptions to other relays.
+///
 /// Returns the list of relay URLs that successfully connected.
 pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
     // Tier 1: Try kind 10050 DM relays
     let dm_relays_10050 = super::nip65::get_dm_relays_10050_only();
-    if !dm_relays_10050.is_empty() {
+    let user_configured_dm_relays = !dm_relays_10050.is_empty();
+
+    if user_configured_dm_relays {
         log::info!("Trying {} kind 10050 DM relays...", dm_relays_10050.len());
         let connected = try_connect_relay_list(client, &dm_relays_10050).await;
         if !connected.is_empty() {
@@ -143,10 +152,17 @@ pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
             );
             return connected;
         }
-        log::warn!("No kind 10050 relays connected, falling back to kind 10002...");
-    } else {
-        log::info!("No kind 10050 relays configured, trying kind 10002...");
+        // User explicitly configured DM relays - don't fallback (privacy-first per NIP-17)
+        log::warn!(
+            "No kind 10050 relays connected. Skipping fallback to preserve DM privacy. \
+             User configured {} DM relays but none are reachable.",
+            dm_relays_10050.len()
+        );
+        return Vec::new();
     }
+
+    // No 10050 configured - user hasn't set DM relay preferences, fallback is OK
+    log::info!("No kind 10050 relays configured, trying kind 10002...");
 
     // Tier 2: Fall back to kind 10002 write relays
     let write_relays = super::nip65::get_write_relays();
@@ -179,7 +195,7 @@ pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
         return connected;
     }
 
-    log::error!("No DM relays could be connected from any tier (10050, 10002, or defaults)!");
+    log::error!("No DM relays could be connected from any tier!");
     Vec::new()
 }
 

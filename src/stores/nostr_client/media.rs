@@ -226,16 +226,16 @@ pub async fn publish_video_tracked(
     use nostr::Tag;
 
     // Generate d-tag identifier: slug from title + timestamp for uniqueness
-    // Use WASM-safe timestamp generation (js_sys::Date in WASM, SystemTime otherwise)
+    // Use millisecond precision to prevent collisions on rapid publishes
     #[cfg(target_family = "wasm")]
-    let timestamp = (js_sys::Date::now() / 1000.0) as u64;
+    let timestamp_ms = js_sys::Date::now() as u64; // Already milliseconds
     #[cfg(not(target_family = "wasm"))]
-    let timestamp = std::time::SystemTime::now()
+    let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     let slug = crate::utils::slugify(&title);
-    let identifier = format!("{}-{}", slug, timestamp);
+    let identifier = format!("{}-{}", slug, timestamp_ms);
 
     // d-tag must be first for addressable events
     let mut tags = vec![
