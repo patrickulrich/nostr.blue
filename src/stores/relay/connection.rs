@@ -3,9 +3,71 @@
 //! Functions for managing relay connections and fetching events from specific relays.
 //! All functions take `client: &Client` as parameter to avoid circular dependencies.
 use dioxus::signals::ReadableExt;
+use nostr_relay_pool::RelayStatus as PoolRelayStatus;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 use super::signals::RELAY_CONNECTED;
+
+/// Fast relay connection using SDK's try_connect() with timeout
+///
+/// Uses the SDK's `try_connect()` method which attempts connection within the
+/// timeout without spawning background retry tasks on failure. This is faster
+/// for initial connection attempts than the polling-based approach.
+///
+/// # Arguments
+/// * `client` - The Nostr client instance
+/// * `timeout` - Maximum time to wait for connection
+///
+/// # Returns
+/// `true` if at least one relay connected, `false` if timeout was reached
+pub async fn try_connect_relays(client: &Client, timeout: Duration) -> bool {
+    // Check if already connected
+    let relays = client.relays().await;
+    let any_connected = relays
+        .values()
+        .any(|r| r.status() == PoolRelayStatus::Connected);
+
+    if any_connected {
+        log::debug!("[Fast connect] Already connected to at least one relay");
+        if !*RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = true;
+        }
+        return true;
+    }
+
+    log::info!("[Fast connect] Attempting relay connection with {:?} timeout...", timeout);
+
+    // Use SDK's try_connect which attempts connection with timeout
+    // This is faster than spawning connect() and then polling
+    // Returns Output<()> with success/failed relay lists
+    let output = client.try_connect(timeout).await;
+
+    let success_count = output.success.len();
+    let failed_count = output.failed.len();
+
+    if success_count > 0 {
+        log::info!(
+            "[Fast connect] Connected to {} relay(s), {} failed",
+            success_count,
+            failed_count
+        );
+        if !*RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = true;
+        }
+        true
+    } else {
+        log::warn!(
+            "[Fast connect] No relays connected after timeout ({} failed)",
+            failed_count
+        );
+        // Clear stale RELAY_CONNECTED from prior sessions
+        if *RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = false;
+        }
+        false
+    }
+}
+
 /// Wait for at least one relay to be ready before fetching
 /// This is needed because connect() is non-blocking and spawns background tasks
 /// Ensure at least one relay is connected before fetching
@@ -19,7 +81,6 @@ use super::signals::RELAY_CONNECTED;
 ///
 /// IMPORTANT: Takes client as parameter to avoid circular dependency
 pub async fn ensure_relays_ready(client: &Client) {
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
     let relays = client.relays().await;
     let any_connected = relays
         .values()
@@ -127,7 +188,6 @@ pub async fn disconnect(client: &Client) {
 /// true if at least one relay connected, false otherwise
 #[allow(dead_code)]
 pub async fn reconnect(client: &Client) -> bool {
-    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
     client.connect().await;
     const TIMEOUT_MS: u64 = 3000;
     const POLL_INTERVAL_MS: u64 = 100;

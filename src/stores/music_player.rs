@@ -451,7 +451,7 @@ async fn publish_music_status(track: &MusicTrack) {
                     vec![],
                 );
                 if let Ok(naddr) = nip19_coord.to_bech32() {
-                    format!("nostr:{}", naddr)
+                    format!("https://nostr.blue/podcast/nostr/episode/{}", naddr)
                 } else {
                     format!(
                         "https://nostr.blue/podcast/nostr/episode/30054:{}:{}",
@@ -467,36 +467,25 @@ async fn publish_music_status(track: &MusicTrack) {
                 )
             }
         }
-        TrackSource::RssPodcast { feed_url, episode_guid, .. } => {
-            format!(
-                "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
-                urlencoding::encode(feed_url),
-                urlencoding::encode(episode_guid),
-            )
+        TrackSource::RssPodcast { podcast_id, feed_url, episode_guid, .. } => {
+            match podcast_id {
+                Some(id) => format!(
+                    "https://nostr.blue/podcast/rss/episode/{}/{}",
+                    id,
+                    urlencoding::encode(episode_guid),
+                ),
+                None => format!(
+                    "https://nostr.blue/podcast/rss/episode?feed={}&ep={}",
+                    urlencoding::encode(feed_url),
+                    urlencoding::encode(episode_guid),
+                ),
+            }
         }
         TrackSource::RssMusic { feed_id, .. } => {
             format!("https://nostr.blue/music/rss/album/{}", feed_id)
         }
-        TrackSource::Radio { pubkey, d_tag, .. } => {
-            use nostr::prelude::*;
-            if let Ok(pk) = PublicKey::from_hex(pubkey) {
-                let coord = nostr::nips::nip01::Coordinate::new(
-                        nostr::Kind::from(crate::utils::radio::KIND_RADIO_STATION),
-                        pk,
-                    )
-                    .identifier(d_tag);
-                let nip19_coord = nostr::nips::nip19::Nip19Coordinate::new(
-                    coord,
-                    vec![],
-                );
-                if let Ok(naddr) = nip19_coord.to_bech32() {
-                    format!("nostr:{}", naddr)
-                } else {
-                    format!("https://nostr.blue/radio/{}", d_tag)
-                }
-            } else {
-                format!("https://nostr.blue/radio/{}", d_tag)
-            }
+        TrackSource::Radio { d_tag, .. } => {
+            format!("https://nostr.blue/radio/{}", urlencoding::encode(d_tag))
         }
     };
     let mut status = LiveStatus {

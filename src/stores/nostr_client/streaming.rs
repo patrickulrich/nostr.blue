@@ -1,6 +1,7 @@
 //! Progressive event streaming
 //!
 //! Functions for streaming events with callbacks for progressive UI updates.
+use crate::error::NostrBlueError;
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
@@ -20,6 +21,7 @@ use crate::stores::relay::USER_RELAYS_APPLIED;
 ///
 /// # Returns
 /// Total count of events received
+// TODO: remove dead_code allow when video/article feeds use per-event streaming
 #[allow(dead_code)]
 pub async fn stream_events_with_callback<F>(
     filter: Filter,
@@ -74,6 +76,8 @@ where
 ///
 /// # Returns
 /// Total count of events received
+// TODO: remove dead_code allow when batch streaming is used for feed loading
+#[allow(dead_code)]
 pub async fn stream_events_batched<F>(
     filter: Filter,
     timeout: std::time::Duration,
@@ -153,6 +157,8 @@ where
 /// 3. Returns results much faster but may miss events from unconnected relays
 ///
 /// Use for initial feed load where speed is critical.
+// TODO: remove dead_code allow when fast initial feed load uses batch streaming
+#[allow(dead_code)]
 pub async fn stream_events_from_connected_relays_batched<F>(
     filter: Filter,
     timeout: std::time::Duration,
@@ -224,11 +230,107 @@ where
     }
     Ok(accepted_count)
 }
+/// Stream events with immediate callback per event (no batching)
+///
+/// Optimized for time-to-first-post: calls on_event immediately for each event
+/// as it arrives from relays, enabling instant UI updates.
+///
+/// Use for initial feed load where displaying the first post ASAP is critical.
+pub async fn stream_events_immediate<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    mut on_event: F,
+) -> std::result::Result<usize, NostrBlueError>
+where
+    F: FnMut(nostr::Event),
+{
+    use futures::StreamExt;
+    use nostr_relay_pool::RelayStatus as PoolRelayStatus;
+
+    let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
+
+    // Wait for user relay lists if signer is present
+    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
+        log::debug!("stream_events_immediate: waiting for user relay lists...");
+        let start = instant::Instant::now();
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+            platform_sleep_ms(50).await;
+        }
+        if *USER_RELAYS_APPLIED.peek() {
+            log::debug!("stream_events_immediate: user relay lists applied");
+        }
+    }
+
+    ensure_relays_ready(&client).await;
+
+    let relays = client.relays().await;
+    let connected_urls: Vec<nostr::RelayUrl> = relays
+        .iter()
+        .filter(|(_, r)| r.status() == PoolRelayStatus::Connected)
+        .filter_map(|(url, _)| nostr::RelayUrl::parse(url.as_str()).ok())
+        .collect();
+
+    if connected_urls.is_empty() {
+        log::warn!("No connected relays for immediate stream, falling back to gossip stream");
+        // Fall back to SDK's stream_events which uses gossip/outbox routing
+        let filter_authors = filter.authors.clone();
+        let author_set: Option<std::collections::HashSet<_>> = filter_authors
+            .as_ref()
+            .map(|authors| authors.iter().collect());
+
+        let mut stream = client
+            .stream_events(filter, timeout)
+            .await?;
+
+        let mut count = 0;
+        while let Some(event) = stream.next().await {
+            if let Some(ref authors) = author_set {
+                if !authors.contains(&event.pubkey) {
+                    continue;
+                }
+            }
+            on_event(event);
+            count += 1;
+        }
+
+        log::info!("Gossip fallback stream completed: {} events", count);
+        return Ok(count);
+    }
+
+    log::info!(
+        "Immediate streaming from {} connected relays",
+        connected_urls.len()
+    );
+
+    let filter_authors = filter.authors.clone();
+    let author_set: Option<std::collections::HashSet<_>> = filter_authors
+        .as_ref()
+        .map(|authors| authors.iter().collect());
+
+    let mut stream = client
+        .stream_events_from(connected_urls, filter, timeout)
+        .await?;
+
+    let mut count = 0;
+    while let Some(event) = stream.next().await {
+        if let Some(ref authors) = author_set {
+            if !authors.contains(&event.pubkey) {
+                continue;
+            }
+        }
+        on_event(event);
+        count += 1;
+    }
+
+    log::info!("Immediate stream completed: {} events", count);
+    Ok(count)
+}
 /// Stream events and collect them into a Vec
 ///
 /// This is a convenience wrapper that collects all streamed events
 /// into a vector with deduplication and sorting.
 /// Uses HashSet for O(1) deduplication during collection (nostr-sdk pattern).
+// TODO: remove dead_code allow when collected stream is used for prefetching
 #[allow(dead_code)]
 pub async fn stream_events_collected(
     filter: Filter,
