@@ -60,6 +60,10 @@ pub async fn try_connect_relays(client: &Client, timeout: Duration) -> bool {
             "[Fast connect] No relays connected after timeout ({} failed)",
             failed_count
         );
+        // Clear stale RELAY_CONNECTED from prior sessions
+        if *RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = false;
+        }
         false
     }
 }

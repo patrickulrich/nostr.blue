@@ -1396,10 +1396,20 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, String> 
         let nip19 = Nip19::from_bech32(video_id)
             .map_err(|e| format!("Invalid naddr: {}", e))?;
         if let Nip19::Coordinate(coord) = nip19 {
+            // Validate the kind is a video kind
+            let kind = coord.coordinate.kind;
+            if !all_video_kinds().contains(&kind) {
+                return Err(format!(
+                    "Invalid video kind in naddr: expected one of {:?}, got {}",
+                    all_video_kinds().iter().map(|k| k.as_u16()).collect::<Vec<_>>(),
+                    kind.as_u16()
+                ));
+            }
             let filter = Filter::new()
-                .kind(coord.coordinate.kind)
+                .kind(kind)
                 .author(coord.coordinate.public_key)
-                .identifier(coord.coordinate.identifier);
+                .identifier(coord.coordinate.identifier)
+                .limit(1);
             let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
                 .await
                 .map_err(|e| format!("Failed to fetch addressable video: {}", e))?;

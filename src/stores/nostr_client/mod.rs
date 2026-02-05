@@ -215,28 +215,26 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     }
     // Use fast connection with 2-second timeout for quick initial connection
     log::info!("Attempting fast relay connection...");
-    let connected = relay::try_connect_relays(&client, Duration::from_secs(2)).await;
+    let _connected = relay::try_connect_relays(&client, Duration::from_secs(2)).await;
 
-    if !connected {
-        // Spawn background retry if initial connection fails
-        // Note: ensure_relays_ready already calls client.connect() internally
-        log::info!("Fast connect failed, spawning background connection retry...");
-        #[cfg(target_arch = "wasm32")]
-        {
-            let client_for_connect = client.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                relay::connection::ensure_relays_ready(&client_for_connect).await;
-                log::info!("Background relay connections completed");
-            });
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let client_for_connect = client.clone();
-            tokio::spawn(async move {
-                relay::connection::ensure_relays_ready(&client_for_connect).await;
-                log::info!("Background relay connections completed");
-            });
-        }
+    // Always spawn background retry to ensure all relays get connection attempts
+    // Even if some relays connected, others may have failed and need retries
+    log::info!("Spawning background connection task for relay reliability...");
+    #[cfg(target_arch = "wasm32")]
+    {
+        let client_for_connect = client.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            relay::connection::ensure_relays_ready(&client_for_connect).await;
+            log::info!("Background relay connections completed");
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let client_for_connect = client.clone();
+        tokio::spawn(async move {
+            relay::connection::ensure_relays_ready(&client_for_connect).await;
+            log::info!("Background relay connections completed");
+        });
     }
     *CLIENT_INITIALIZED.write() = true;
     log::info!("Nostr client initialized with relays ready");

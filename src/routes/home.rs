@@ -1922,11 +1922,9 @@ async fn load_following_feed(
                         }
                     }
                 } else if event.kind == Kind::TextNote {
-                    use nostr_sdk::TagKind;
-                    let is_reply = event
-                        .tags
-                        .iter()
-                        .any(|tag| tag.kind() == TagKind::e());
+                    // Posts with root/reply markers are thread replies - filter these out
+                    // Mentions (e-tags without markers) are preserved in the feed
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
                     }
@@ -1951,7 +1949,6 @@ async fn load_following_feed(
 }
 /// Process raw events into FeedItems (extracted for reuse in streaming)
 fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> {
-    use nostr_sdk::TagKind;
     let mut feed_items: Vec<FeedItem> = Vec::new();
     for event in events.into_iter() {
         if event.kind == Kind::Repost {
@@ -1969,7 +1966,9 @@ fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> 
                 }
             }
         } else if event.kind == Kind::TextNote {
-            let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
+            // Posts with root/reply markers are thread replies - filter these out
+            // Mentions (e-tags without markers) are preserved in the feed
+            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
@@ -2033,7 +2032,6 @@ where
             filter,
             Duration::from_secs(10),
             |event| {
-                use nostr_sdk::TagKind;
                 // Process single event immediately
                 let item = if event.kind == Kind::Repost {
                     match extract_reposted_event(&event) {
@@ -2045,8 +2043,9 @@ where
                         Err(_) => None,
                     }
                 } else if event.kind == Kind::TextNote {
-                    // Filter out replies (posts with e tags)
-                    let is_reply = event.tags.iter().any(|tag| tag.kind() == TagKind::e());
+                    // Posts with root/reply markers are thread replies - filter these out
+                    // Mentions (e-tags without markers) are preserved in the feed
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
                     if !is_reply {
                         Some(FeedItem::OriginalPost(event))
                     } else {
