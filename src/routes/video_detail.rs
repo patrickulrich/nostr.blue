@@ -2,6 +2,7 @@ use crate::components::{
     icons::MessageCircleIcon, ClientInitializing, CommentComposer, ShareModal,
     ThreadedComment,
 };
+use crate::error::NostrBlueError;
 use crate::stores::signer::SIGNER_INFO;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{format_relative_time_or, truncate_pubkey};
@@ -44,7 +45,7 @@ pub fn VideoDetail(video_id: String) -> Element {
                     loading.set(false);
                 }
                 Err(e) => {
-                    error.set(Some(e));
+                    error.set(Some(e.to_string()));
                     loading.set(false);
                 }
             }
@@ -1387,23 +1388,23 @@ fn parse_video_id_and_feed(video_id: &str) -> (String, FeedType) {
         (video_id.to_string(), FeedType::Global)
     }
 }
-async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, String> {
+async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlueError> {
     log::info!("Loading video by ID: {}", video_id);
 
     // Handle naddr (addressable event coordinate)
     if video_id.starts_with("naddr1") {
         use nostr_sdk::nips::nip19::Nip19;
         let nip19 = Nip19::from_bech32(video_id)
-            .map_err(|e| format!("Invalid naddr: {}", e))?;
+            .map_err(|e| NostrBlueError::Other(format!("Invalid naddr: {}", e)))?;
         if let Nip19::Coordinate(coord) = nip19 {
             // Validate the kind is a video kind
             let kind = coord.coordinate.kind;
             if !all_video_kinds().contains(&kind) {
-                return Err(format!(
+                return Err(NostrBlueError::Other(format!(
                     "Invalid video kind in naddr: expected one of {:?}, got {}",
                     all_video_kinds().iter().map(|k| k.as_u16()).collect::<Vec<_>>(),
                     kind.as_u16()
-                ));
+                )));
             }
             let filter = Filter::new()
                 .kind(kind)
@@ -1412,22 +1413,22 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, String> 
                 .limit(1);
             let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
                 .await
-                .map_err(|e| format!("Failed to fetch addressable video: {}", e))?;
+                .map_err(|e| NostrBlueError::Other(format!("Failed to fetch addressable video: {}", e)))?;
             return events.into_iter()
                 .max_by_key(|e| e.created_at)
-                .ok_or_else(|| "Addressable video not found".to_string());
+                .ok_or_else(|| NostrBlueError::Other("Addressable video not found".into()));
         }
-        return Err("Invalid naddr format for video".to_string());
+        return Err(NostrBlueError::Other("Invalid naddr format for video".into()));
     }
 
     // Handle regular event ID (hex or nevent)
     let event_id = EventId::parse(video_id)
-        .map_err(|e| format!("Invalid video ID: {}", e))?;
+        .map_err(|e| NostrBlueError::Other(format!("Invalid video ID: {}", e)))?;
     let filter = Filter::new().id(event_id).kinds(all_video_kinds());
     let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
         .await
-        .map_err(|e| format!("Failed to fetch video: {}", e))?;
-    events.into_iter().next().ok_or_else(|| "Video not found".to_string())
+        .map_err(|e| NostrBlueError::Other(format!("Failed to fetch video: {}", e)))?;
+    events.into_iter().next().ok_or_else(|| NostrBlueError::Other("Video not found".into()))
 }
 async fn load_shorts_following(until: Option<u64>) -> std::result::Result<Vec<Event>, String> {
     let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;

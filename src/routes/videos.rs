@@ -232,23 +232,30 @@ pub fn Videos() -> Element {
             };
             match result {
                 Ok((new_events, page_has_more)) => {
+                    // Capture oldest timestamp from new page BEFORE merge (for cursor advancement)
+                    // This ensures the cursor advances past duplicates even if they get deduped
+                    let oldest_new_ts = new_events.iter().min_by_key(|e| e.created_at).map(|e| e.created_at.as_secs());
+
                     // Merge existing feed with new events, then dedupe
                     // This allows addressable kinds to replace non-addressable across pages
-                    let current = feed_events.read().clone();
+                    let current = feed_events.cloned();
                     let merged: Vec<_> = current.clone().into_iter().chain(new_events).collect();
                     let deduped = dedupe_videos_by_url(merged);
 
-                    // Check if content actually changed (not just length)
-                    // Event PartialEq compares all fields, so addressable replacements are detected
+                    // Always advance cursor based on fetched page (not deduped list)
+                    // This prevents getting stuck when a page contains only duplicates
+                    if let Some(ts) = oldest_new_ts {
+                        oldest_timestamp.set(Some(ts));
+                    }
+
+                    // Always trust API for pagination state
+                    has_more.set(page_has_more);
+
+                    // Only update UI when content actually changed
                     if deduped != current {
-                        if let Some(last_event) = deduped.last() {
-                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                        }
-                        has_more.set(page_has_more);
                         feed_events.set(deduped);
                     } else {
-                        has_more.set(false);
-                        log::info!("No new unique videos found after dedupe, stopping pagination");
+                        log::info!("Page contained only duplicates, cursor advanced to continue discovery");
                     }
                     loading_feed.set(false);
                 }
