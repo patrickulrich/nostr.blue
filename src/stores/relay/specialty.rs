@@ -199,15 +199,16 @@ pub async fn ensure_dm_relays_connected(client: &Client) -> Vec<String> {
     Vec::new()
 }
 
-/// Helper to force connection to a list of relays in parallel.
+/// Maximum concurrent relay connection attempts to prevent overwhelming WASM event loop
+const MAX_CONCURRENT_RELAY_CONNECTIONS: usize = 5;
+
+/// Helper to force connection to a list of relays in parallel with bounded concurrency.
 /// Uses ensure_connected which adds to pool + waits for connection.
 async fn try_connect_relay_list(client: &Client, relays: &[String]) -> Vec<String> {
-    use futures::future::join_all;
+    use futures::stream::{self, StreamExt};
 
-    let futures: Vec<_> = relays
-        .iter()
+    stream::iter(relays.iter().cloned())
         .map(|relay_url| {
-            let relay_url = relay_url.clone();
             let client = client.clone();
             async move {
                 if ensure_connected(&client, &relay_url).await {
@@ -217,9 +218,10 @@ async fn try_connect_relay_list(client: &Client, relays: &[String]) -> Vec<Strin
                 }
             }
         })
-        .collect();
-
-    join_all(futures).await.into_iter().flatten().collect()
+        .buffer_unordered(MAX_CONCURRENT_RELAY_CONNECTIONS)
+        .filter_map(|result| async { result })
+        .collect()
+        .await
 }
 /// Ensure search relays are connected (session-persistent).
 /// Adds user's search relays (kind 10007) or defaults to the pool and connects them.

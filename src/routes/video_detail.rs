@@ -1410,7 +1410,7 @@ async fn load_video_by_id(video_id: &str) -> std::result::Result<Event, NostrBlu
                 .kind(kind)
                 .author(coord.coordinate.public_key)
                 .identifier(coord.coordinate.identifier)
-                .limit(1);
+                .limit(20);
             let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(5))
                 .await
                 .map_err(|e| NostrBlueError::Other(format!("Failed to fetch addressable video: {}", e)))?;
