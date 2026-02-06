@@ -82,8 +82,10 @@ pub fn init_auth() {
             "read_only" => {
                 if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored read-only session");
+                    let pubkey_hex =
+                        crate::utils::nip19::normalize_pubkey(&npub).unwrap_or(npub);
                     *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
+                        pubkey: Some(pubkey_hex),
                         is_authenticated: false,
                         login_method: Some(LoginMethod::ReadOnly),
                     };
@@ -264,7 +266,7 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
         is_authenticated: false,
         login_method: Some(LoginMethod::ReadOnly),
     };
-    LocalStorage::set(STORAGE_KEY_NPUB, npub).ok();
+    LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
     LocalStorage::set(STORAGE_KEY_METHOD, "read_only").ok();
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
     Ok(())
