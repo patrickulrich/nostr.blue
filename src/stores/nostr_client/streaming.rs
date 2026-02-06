@@ -36,7 +36,7 @@ where
     if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
         log::debug!("Streaming callback: Waiting for user relay lists...");
         let start = instant::Instant::now();
-        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_millis(500) {
             platform_sleep_ms(50).await;
         }
         if *USER_RELAYS_APPLIED.peek() {
@@ -95,7 +95,7 @@ where
     if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
         log::debug!("Streaming: Waiting for user relay lists to be applied...");
         let start = instant::Instant::now();
-        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_millis(500) {
             platform_sleep_ms(50).await;
         }
         if *USER_RELAYS_APPLIED.peek() {
@@ -253,7 +253,7 @@ where
     if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
         log::debug!("stream_events_immediate: waiting for user relay lists...");
         let start = instant::Instant::now();
-        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
+        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_millis(500) {
             platform_sleep_ms(50).await;
         }
         if *USER_RELAYS_APPLIED.peek() {

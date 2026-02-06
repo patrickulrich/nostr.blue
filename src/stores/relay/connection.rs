@@ -93,67 +93,21 @@ pub async fn ensure_relays_ready(client: &Client) {
         return;
     }
     log::info!("No relays connected, attempting connection with timeout...");
-    client.connect().await;
-    const TIMEOUT_MS: u64 = 3000;
-    const POLL_INTERVAL_MS: u64 = 100;
-    #[cfg(target_arch = "wasm32")]
-    {
-        use gloo_timers::future::TimeoutFuture;
-        let start = instant::Instant::now();
-        loop {
-            let relays_now = client.relays().await;
-            let connected = relays_now
-                .values()
-                .any(|r| r.status() == PoolRelayStatus::Connected);
-            if connected {
-                log::info!("Relay connected after {}ms", start.elapsed().as_millis());
-                if !*RELAY_CONNECTED.peek() {
-                    *RELAY_CONNECTED.write() = true;
-                }
-                return;
-            }
-            if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
-                break;
-            }
-            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_millis(TIMEOUT_MS);
-        loop {
-            let relays_now = client.relays().await;
-            let connected = relays_now
-                .values()
-                .any(|r| r.status() == PoolRelayStatus::Connected);
-            if connected {
-                log::info!("Relay connected after {:?}", start.elapsed());
-                if !*RELAY_CONNECTED.peek() {
-                    *RELAY_CONNECTED.write() = true;
-                }
-                return;
-            }
-            if start.elapsed() > timeout {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
-        }
-    }
-    let relays_after = client.relays().await;
-    let connected_count = relays_after
-        .values()
-        .filter(|r| r.status() == PoolRelayStatus::Connected)
-        .count();
-    if connected_count == 0 {
-        log::warn!(
-            "After timeout: no relays connected - fetches may fail or use cached data"
+    let output = client.try_connect(Duration::from_secs(3)).await;
+    if !output.success.is_empty() {
+        log::info!(
+            "Connected to {} relay(s), {} failed",
+            output.success.len(),
+            output.failed.len()
         );
-    } else {
-        log::info!("After connection attempt: {} relay(s) connected", connected_count);
         if !*RELAY_CONNECTED.peek() {
             *RELAY_CONNECTED.write() = true;
         }
+    } else {
+        log::warn!(
+            "After timeout: no relays connected ({} failed) - fetches may fail or use cached data",
+            output.failed.len()
+        );
     }
 }
 /// Reset the RELAY_CONNECTED signal to false

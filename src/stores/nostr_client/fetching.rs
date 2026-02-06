@@ -144,7 +144,7 @@ async fn fetch_events_aggregated_outbox_with_client(
         #[cfg(target_arch = "wasm32")]
         {
             while !*USER_RELAYS_APPLIED.peek()
-                && start.elapsed() < Duration::from_secs(2)
+                && start.elapsed() < Duration::from_millis(500)
             {
                 gloo_timers::future::TimeoutFuture::new(50).await;
             }
@@ -152,7 +152,7 @@ async fn fetch_events_aggregated_outbox_with_client(
         #[cfg(not(target_arch = "wasm32"))]
         {
             while !*USER_RELAYS_APPLIED.peek()
-                && start.elapsed() < Duration::from_secs(2)
+                && start.elapsed() < Duration::from_millis(500)
             {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }

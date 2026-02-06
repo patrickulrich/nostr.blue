@@ -377,6 +377,20 @@ async fn run_post_login_init() {
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();
+    // Prefetch contacts into memory cache so Home feed loads faster
+    if let Some(pubkey) = get_pubkey() {
+        let pk = pubkey.clone();
+        spawn(async move {
+            match nostr_client::fetch_contacts(pk).await {
+                Ok(contacts) => {
+                    log::info!("Prefetched {} contacts into memory cache", contacts.len());
+                }
+                Err(e) => {
+                    log::warn!("Failed to prefetch contacts: {}", e);
+                }
+            }
+        });
+    }
     spawn(async move {
         if let Some(client) = crate::stores::nostr_client::get_client() {
             log::info!("Prefetching metadata for all contacts...");
