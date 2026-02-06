@@ -96,7 +96,6 @@ pub fn use_user_lists() -> (
             return;
         }
         if !client_ready {
-            loading.set(false);
             return;
         }
         // Wait for signer before fetching lists (needed for private list decryption)

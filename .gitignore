@@ -14,6 +14,9 @@
 .env
 .env.local
 
+# Cargo local config (machine-specific build settings)
+.cargo/config.toml
+
 # Editor
 .vscode/
 .idea/

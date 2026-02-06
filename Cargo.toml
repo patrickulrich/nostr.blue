@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.7.10"
+version = "0.7.11"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -163,6 +163,7 @@ opt-level = 0
 [profile.wasm-dev]
 inherits = "dev"
 opt-level = 1
+debug = false
 
 [profile.server-dev]
 inherits = "dev"
