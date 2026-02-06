@@ -90,10 +90,12 @@ pub fn init_auth() {
                 }
             }
             "remote_signer" => {
-                if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(stored_pubkey) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored remote signer session");
+                    let pubkey_hex = crate::utils::nip19::normalize_pubkey(&stored_pubkey)
+                        .unwrap_or(stored_pubkey);
                     *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
+                        pubkey: Some(pubkey_hex),
                         is_authenticated: true,
                         login_method: Some(LoginMethod::RemoteSigner),
                     };
@@ -425,9 +427,7 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         .get_public_key()
         .await
         .map_err(|e| format!("Failed to get public key: {}", e))?;
-    let pubkey_str = public_key
-        .to_bech32()
-        .map_err(|e| format!("Failed to convert public key: {}", e))?;
+    let pubkey_str = public_key.to_hex();
     LocalStorage::set(STORAGE_KEY_BUNKER_URI, bunker_uri)
         .map_err(|e| format!("Failed to store bunker URI: {}", e))?;
     let app_keys_bech32 = app_keys
@@ -462,9 +462,13 @@ pub fn generate_keys() -> Keys {
 pub fn get_keys() -> Option<Keys> {
     KEYS.read().clone()
 }
-/// Get current public key
+/// Get current public key (hex format)
 pub fn get_pubkey() -> Option<String> {
-    AUTH_STATE.read().pubkey.clone()
+    let p = AUTH_STATE.read().pubkey.clone();
+    if let Some(ref s) = p {
+        debug_assert!(!s.starts_with("npub"), "get_pubkey returned bech32 instead of hex");
+    }
+    p
 }
 /// Check if user is authenticated (can sign events)
 pub fn is_authenticated() -> bool {

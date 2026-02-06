@@ -52,7 +52,7 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
     }
     let my_pubkey_str = auth_store::get_pubkey()
         .ok_or_else(|| "Not logged in".to_string())?;
-    let my_pubkey = PublicKey::from_hex(&my_pubkey_str)
+    let my_pubkey = PublicKey::parse(&my_pubkey_str)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Reaction)
@@ -126,7 +126,7 @@ pub async fn load_user_stars() -> Result<(), String> {
         Some(pk) => pk,
         None => return Err("Not logged in".to_string()),
     };
-    let my_pubkey = PublicKey::from_hex(&my_pubkey_str)
+    let my_pubkey = PublicKey::parse(&my_pubkey_str)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().kind(Kind::Reaction).author(my_pubkey).limit(500);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
