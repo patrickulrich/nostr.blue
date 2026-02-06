@@ -82,25 +82,41 @@ pub fn init_auth() {
             "read_only" => {
                 if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored read-only session");
-                    let pubkey_hex =
-                        crate::utils::nip19::normalize_pubkey(&npub).unwrap_or(npub);
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(pubkey_hex),
-                        is_authenticated: false,
-                        login_method: Some(LoginMethod::ReadOnly),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&npub) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: false,
+                                login_method: Some(LoginMethod::ReadOnly),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted read-only pubkey in storage, clearing");
+                            LocalStorage::delete(STORAGE_KEY_NPUB);
+                            LocalStorage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             "remote_signer" => {
                 if let Ok(stored_pubkey) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored remote signer session");
-                    let pubkey_hex = crate::utils::nip19::normalize_pubkey(&stored_pubkey)
-                        .unwrap_or(stored_pubkey);
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(pubkey_hex),
-                        is_authenticated: true,
-                        login_method: Some(LoginMethod::RemoteSigner),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&stored_pubkey) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: true,
+                                login_method: Some(LoginMethod::RemoteSigner),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted remote signer pubkey in storage, clearing");
+                            LocalStorage::delete(STORAGE_KEY_NPUB);
+                            LocalStorage::delete(STORAGE_KEY_BUNKER_URI);
+                            LocalStorage::delete(STORAGE_KEY_APP_KEYS);
+                            LocalStorage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -584,6 +600,7 @@ pub fn export_nsec() -> Result<String, String> {
 }
 /// Export public key as npub
 pub fn export_npub() -> Result<String, String> {
-    let pubkey = get_pubkey().ok_or("Not logged in")?;
-    Ok(pubkey)
+    let pubkey_hex = get_pubkey().ok_or("Not logged in")?;
+    let pubkey = PublicKey::parse(&pubkey_hex).map_err(|e| e.to_string())?;
+    pubkey.to_bech32().map_err(|e| e.to_string())
 }
