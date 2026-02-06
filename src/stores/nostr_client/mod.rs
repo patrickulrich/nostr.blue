@@ -127,10 +127,10 @@ pub use crate::stores::relay::display::RelayDisplayInfo;
 pub use crate::stores::relay::pool::DEFAULT_RELAYS;
 pub use crate::stores::relay::{
     RelayInfo, RelayPoolStoreStoreExt, RelayStatus, RELAY_CONNECTED, RELAY_POOL,
-    USER_RELAYS_APPLIED,
+    USER_RELAYS_APPLIED, wait_for_user_relays,
 };
 /// Cross-platform async sleep helper (Dioxus pattern: compile-time cfg)
-pub(crate) async fn platform_sleep_ms(ms: u64) {
+pub async fn platform_sleep_ms(ms: u64) {
     #[cfg(target_arch = "wasm32")]
     gloo_timers::future::TimeoutFuture::new(ms as u32).await;
     #[cfg(not(target_arch = "wasm32"))]

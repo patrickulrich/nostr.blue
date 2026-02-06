@@ -98,6 +98,11 @@ pub fn Notifications() -> Element {
 
         // Use streaming for progressive loading
         spawn(async move {
+            // Wait for relays before fetching (NIP-46 timing)
+            nostr_client::wait_for_user_relays(
+                Duration::from_secs(5), "notifications_initial_load"
+            ).await;
+
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
             let result = stream_notifications(None, |notif| {
@@ -126,41 +131,7 @@ pub fn Notifications() -> Element {
                             prefetch_notification_authors(&notifs).await;
                         });
                     } else {
-                        // Retry once after delay — relays may not have been ready
-                        // on first attempt (common with NIP-46 on mobile)
-                        log::info!("No notifications on first attempt, retrying after delay...");
-                        nostr_client::platform_sleep_ms(3000).await;
-
-                        let retry_result = stream_notifications(None, |notif| {
-                            let event_id = get_event_id(&notif);
-                            if seen_ids.insert(event_id) {
-                                let mut current = notifications.peek().clone();
-                                current.push(notif);
-                                current.sort_by_key(|n| std::cmp::Reverse(get_timestamp(n)));
-                                notifications.set(current);
-                            }
-                        })
-                        .await;
-
-                        match retry_result {
-                            Ok(retry_count) => {
-                                if retry_count > 0 {
-                                    let notifs = notifications.peek().clone();
-                                    let oldest = notifs.iter().map(get_timestamp).min();
-                                    oldest_timestamp.set(oldest);
-                                    has_more.set(retry_count >= 100);
-                                    spawn(async move {
-                                        prefetch_notification_authors(&notifs).await;
-                                    });
-                                } else {
-                                    has_more.set(false);
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("Notification retry failed: {:?}", e);
-                                has_more.set(false);
-                            }
-                        }
+                        has_more.set(false);
                     }
                 }
                 Err(e) => {

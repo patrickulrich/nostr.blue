@@ -138,35 +138,9 @@ async fn fetch_events_aggregated_outbox_with_client(
     filter: Filter,
     timeout: Duration,
 ) -> std::result::Result<Vec<nostr::Event>, String> {
-    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
-        log::debug!("Waiting for user relay lists to be applied...");
-        let start = instant::Instant::now();
-        #[cfg(target_arch = "wasm32")]
-        {
-            while !*USER_RELAYS_APPLIED.peek()
-                && start.elapsed() < Duration::from_millis(500)
-            {
-                gloo_timers::future::TimeoutFuture::new(50).await;
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            while !*USER_RELAYS_APPLIED.peek()
-                && start.elapsed() < Duration::from_millis(500)
-            {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        }
-        if *USER_RELAYS_APPLIED.peek() {
-            log::debug!(
-                "User relay lists applied after {}ms", start.elapsed().as_millis()
-            );
-        } else {
-            log::warn!(
-                "User relay lists not applied after timeout, proceeding with defaults"
-            );
-        }
-    }
+    crate::stores::relay::wait_for_user_relays(
+        Duration::from_millis(500), "fetch_events_aggregated_outbox"
+    ).await;
     ensure_relays_ready(client).await;
     let filter_authors = filter.authors.clone();
     let events = client

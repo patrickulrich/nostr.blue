@@ -6,7 +6,27 @@ use dioxus::signals::ReadableExt;
 use nostr_relay_pool::RelayStatus as PoolRelayStatus;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-use super::signals::RELAY_CONNECTED;
+use super::signals::{RELAY_CONNECTED, USER_RELAYS_APPLIED};
+
+/// Process the result of client.try_connect(), updating RELAY_CONNECTED and logging.
+/// Returns true if at least one relay connected.
+fn handle_connect_output(output: &Output<()>, log_prefix: &str) -> bool {
+    let success_count = output.success.len();
+    let failed_count = output.failed.len();
+    if success_count > 0 {
+        log::info!("{log_prefix}Connected to {success_count} relay(s), {failed_count} failed");
+        if !*RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = true;
+        }
+        true
+    } else {
+        log::warn!("{log_prefix}No relays connected after timeout ({failed_count} failed)");
+        if *RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = false;
+        }
+        false
+    }
+}
 
 /// Fast relay connection using SDK's try_connect() with timeout
 ///
@@ -41,31 +61,7 @@ pub async fn try_connect_relays(client: &Client, timeout: Duration) -> bool {
     // This is faster than spawning connect() and then polling
     // Returns Output<()> with success/failed relay lists
     let output = client.try_connect(timeout).await;
-
-    let success_count = output.success.len();
-    let failed_count = output.failed.len();
-
-    if success_count > 0 {
-        log::info!(
-            "[Fast connect] Connected to {} relay(s), {} failed",
-            success_count,
-            failed_count
-        );
-        if !*RELAY_CONNECTED.peek() {
-            *RELAY_CONNECTED.write() = true;
-        }
-        true
-    } else {
-        log::warn!(
-            "[Fast connect] No relays connected after timeout ({} failed)",
-            failed_count
-        );
-        // Clear stale RELAY_CONNECTED from prior sessions
-        if *RELAY_CONNECTED.peek() {
-            *RELAY_CONNECTED.write() = false;
-        }
-        false
-    }
+    handle_connect_output(&output, "[Fast connect] ")
 }
 
 /// Wait for at least one relay to be ready before fetching
@@ -94,26 +90,32 @@ pub async fn ensure_relays_ready(client: &Client) {
     }
     log::info!("No relays connected, attempting connection with timeout...");
     let output = client.try_connect(Duration::from_secs(3)).await;
-    if !output.success.is_empty() {
-        log::info!(
-            "Connected to {} relay(s), {} failed",
-            output.success.len(),
-            output.failed.len()
-        );
-        if !*RELAY_CONNECTED.peek() {
-            *RELAY_CONNECTED.write() = true;
-        }
-    } else {
-        log::warn!(
-            "After timeout: no relays connected ({} failed) - fetches may fail or use cached data",
-            output.failed.len()
-        );
-        // Clear stale RELAY_CONNECTED from prior sessions
-        if *RELAY_CONNECTED.peek() {
-            *RELAY_CONNECTED.write() = false;
-        }
-    }
+    handle_connect_output(&output, "");
 }
+
+/// Wait for USER_RELAYS_APPLIED signal, polling at 50ms intervals.
+/// Only waits if HAS_SIGNER is true (NIP-46 timing issue).
+/// Returns true if relays were applied within timeout, false if timed out.
+pub async fn wait_for_user_relays(timeout: Duration, context: &str) -> bool {
+    if !*crate::stores::nostr_client::HAS_SIGNER.peek()
+        || *USER_RELAYS_APPLIED.peek()
+    {
+        return true;
+    }
+    log::debug!("{context}: waiting for user relay lists...");
+    let start = instant::Instant::now();
+    while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < timeout {
+        crate::stores::nostr_client::platform_sleep_ms(50).await;
+    }
+    let applied = *USER_RELAYS_APPLIED.peek();
+    if applied {
+        log::debug!("{context}: user relay lists applied after {}ms", start.elapsed().as_millis());
+    } else {
+        log::warn!("{context}: proceeding without user relay lists after timeout");
+    }
+    applied
+}
+
 /// Reset the RELAY_CONNECTED signal to false
 ///
 /// Call this when disconnecting from relays to ensure components

@@ -213,23 +213,9 @@ pub async fn start_realtime_subscription() {
         }
     };
     // Wait for user relay lists before subscribing (prevents empty subscriptions on NIP-46 mobile)
-    if *nostr_client::HAS_SIGNER.peek() && !*crate::stores::relay::USER_RELAYS_APPLIED.peek() {
-        log::debug!("start_realtime_subscription: waiting for user relay lists...");
-        let start = instant::Instant::now();
-        while !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
-            && start.elapsed() < std::time::Duration::from_secs(5)
-        {
-            nostr_client::platform_sleep_ms(100).await;
-        }
-        if *crate::stores::relay::USER_RELAYS_APPLIED.peek() {
-            log::debug!(
-                "start_realtime_subscription: user relay lists applied after {}ms",
-                start.elapsed().as_millis()
-            );
-        } else {
-            log::warn!("start_realtime_subscription: user relay lists not applied after 5s timeout, proceeding anyway");
-        }
-    }
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5), "start_realtime_subscription"
+    ).await;
     nostr_client::ensure_relays_ready(&client).await;
     let filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])

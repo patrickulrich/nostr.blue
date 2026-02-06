@@ -141,25 +141,9 @@ async fn fetch_user_lists(pubkey_str: &str) -> Result<Vec<UserList>, String> {
         .clone();
     // Wait for user relay lists if signer is present (critical for NIP-46
     // where signer restoration triggers HAS_SIGNER before relays are applied)
-    if *nostr_client::HAS_SIGNER.peek()
-        && !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
-    {
-        log::debug!("fetch_user_lists: waiting for user relay lists...");
-        let start = instant::Instant::now();
-        while !*crate::stores::relay::USER_RELAYS_APPLIED.peek()
-            && start.elapsed() < std::time::Duration::from_secs(5)
-        {
-            nostr_client::platform_sleep_ms(100).await;
-        }
-        if *crate::stores::relay::USER_RELAYS_APPLIED.peek() {
-            log::debug!(
-                "fetch_user_lists: user relay lists applied after {}ms",
-                start.elapsed().as_millis()
-            );
-        } else {
-            log::warn!("fetch_user_lists: proceeding without user relay lists after timeout");
-        }
-    }
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5), "fetch_user_lists"
+    ).await;
     nostr_client::ensure_relays_ready(&client).await;
     let pubkey = PublicKey::parse(pubkey_str)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
