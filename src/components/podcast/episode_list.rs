@@ -2,7 +2,7 @@
 //!
 //! Displays a list of podcast episodes with optional filtering
 //! and continuous playback support.
-use crate::components::podcast_episode_card::{
+use super::episode_card::{
     DisplayEpisode, PodcastEpisodeCard, PodcastEpisodeCardSkeleton,
 };
 use crate::stores::music_player::MusicTrack;

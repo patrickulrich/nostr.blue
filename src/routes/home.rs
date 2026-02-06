@@ -58,7 +58,7 @@ pub fn Home(list: String) -> Element {
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(||
     None);
     let mut request_id = use_signal(|| 0u32);
-    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
     let (all_lists, _lists_loading, _lists_error, _) = use_user_lists();
     let people_lists = use_memo(move || {
         all_lists
@@ -183,21 +183,17 @@ pub fn Home(list: String) -> Element {
         if !client_initialized {
             return;
         }
-        // For authenticated users with signing capability, wait for signer restoration
-        // This prevents race condition where CLIENT_INITIALIZED is true but
-        // restore_session_async() hasn't attached the signer yet
-        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        // For authenticated users with signing capability, allow cache display
+        // before signer restoration, then do full relay load once signer is ready
         let requires_signer = matches!(
             login_method,
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
         );
-        if is_authenticated && requires_signer && !has_signer {
-            log::debug!("Waiting for signer restoration before loading feed...");
-            return;
-        }
-        let (last_refresh, last_feed) = last_loaded_trigger.peek().clone();
+        let signer_available = !requires_signer || has_signer;
+        let cache_only = is_authenticated && requires_signer && !has_signer;
+        let (last_refresh, last_feed, last_signer_available) = last_loaded_trigger.peek().clone();
         let (is_loading, has_data) = {
             let current_state = &*feed_state.peek();
             let loading = matches!(current_state, DataState::Loading);
@@ -210,17 +206,18 @@ pub fn Home(list: String) -> Element {
         };
         let feed_type_changed = current_feed_type != last_feed;
         let refresh_changed = refresh != last_refresh;
-        if is_loading && !feed_type_changed && !refresh_changed {
+        let signer_changed = signer_available != last_signer_available;
+        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed {
             log::debug!("Skipping feed re-load: already loading, no intentional change");
             return;
         }
-        if has_data && !feed_type_changed && !refresh_changed {
+        if has_data && !feed_type_changed && !refresh_changed && !signer_changed {
             log::debug!(
                 "Skipping feed re-load: data already present, no intentional change"
             );
             return;
         }
-        last_loaded_trigger.set((refresh, current_feed_type.clone()));
+        last_loaded_trigger.set((refresh, current_feed_type.clone(), signer_available));
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
         if !has_data || feed_type_changed {
@@ -264,7 +261,7 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::Following {
                         pubkey: pubkey_str.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -283,6 +280,13 @@ pub fn Home(list: String) -> Element {
                         log::info!("No cache, loading Following feed...");
                         Vec::new()
                     };
+                    if cache_only {
+                        log::info!(
+                            "Phase 1: showing {} cached items while signer restores",
+                            accumulated_items.len()
+                        );
+                        return;
+                    }
                     let stream_req_id = request_id;
                     let stream_curr_id = current_id;
                     let result = load_following_feed_streaming(
@@ -413,7 +417,7 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::FollowingWithReplies {
                         pubkey: pubkey_str,
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -425,6 +429,13 @@ pub fn Home(list: String) -> Element {
                             cached_items.len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
+                    }
+                    if cache_only {
+                        log::info!(
+                            "Phase 1: showing {} cached items while signer restores",
+                            cached_items.len()
+                        );
+                        return;
                     }
                     let result = load_following_with_replies(None).await;
                     if is_stale() {
@@ -531,7 +542,7 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::Global => {
                     let cache_key = FeedCacheKey::Global;
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -543,6 +554,13 @@ pub fn Home(list: String) -> Element {
                             .len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
+                    }
+                    if cache_only {
+                        log::info!(
+                            "Phase 1: showing {} cached items while signer restores",
+                            cached_items.len()
+                        );
+                        return;
                     }
                     let result = load_global_feed(None).await;
                     if is_stale() {
@@ -645,7 +663,7 @@ pub fn Home(list: String) -> Element {
                         pubkey: pubkey_str,
                         list_id: list.identifier.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -657,6 +675,13 @@ pub fn Home(list: String) -> Element {
                             cached_items.len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
+                    }
+                    if cache_only {
+                        log::info!(
+                            "Phase 1: showing {} cached items while signer restores",
+                            cached_items.len()
+                        );
+                        return;
                     }
                     let result = load_people_list_feed(&list, None).await;
                     if is_stale() {
@@ -1883,7 +1908,7 @@ async fn load_following_feed(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -2021,7 +2046,7 @@ where
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -2115,7 +2140,7 @@ async fn load_following_with_replies(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(150);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
@@ -2286,7 +2311,7 @@ async fn load_people_list_feed(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(members)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }

@@ -43,6 +43,12 @@ pub struct InteractionCounts {
     pub user_reaction: Option<String>,
     /// The URL for custom emoji reactions (NIP-30) - only set if user_reaction is a custom emoji
     pub user_reaction_url: Option<String>,
+    /// Whether the current user has reposted this event (None if not checked)
+    pub user_reposted: Option<bool>,
+    /// The event ID of the current user's repost (for undo)
+    pub user_repost_id: Option<String>,
+    /// Whether the current user has zapped this event (None if not checked)
+    pub user_zapped: Option<bool>,
 }
 /// Cache entry with TTL tracking
 #[derive(Clone, Debug)]
@@ -517,11 +523,22 @@ pub async fn fetch_interaction_counts_batch(
                     }
                 }
             }
-            Kind::Repost => counts.reposts += 1,
+            Kind::Repost => {
+                counts.reposts += 1;
+                if is_current_user {
+                    counts.user_reposted = Some(true);
+                    counts.user_repost_id = Some(event.id.to_hex());
+                }
+            }
             Kind::ZapReceipt => {
                 counts.zaps += 1;
                 if let Some(amount) = extract_zap_amount(&event) {
                     counts.zap_amount_sats += amount;
+                }
+                if let Some(sender) = extract_zap_sender(&event) {
+                    if current_user_pk.map(|pk| sender == pk.to_hex()).unwrap_or(false) {
+                        counts.user_zapped = Some(true);
+                    }
                 }
             }
             _ => {}
@@ -669,11 +686,22 @@ pub async fn sync_interaction_counts(
                             }
                         }
                     }
-                    Kind::Repost => counts.reposts += 1,
+                    Kind::Repost => {
+                        counts.reposts += 1;
+                        if is_current_user {
+                            counts.user_reposted = Some(true);
+                            counts.user_repost_id = Some(event.id.to_hex());
+                        }
+                    }
                     Kind::ZapReceipt => {
                         counts.zaps += 1;
                         if let Some(amount) = extract_zap_amount(&event) {
                             counts.zap_amount_sats += amount;
+                        }
+                        if let Some(sender) = extract_zap_sender(&event) {
+                            if current_user_pk.map(|pk| sender == pk.to_hex()).unwrap_or(false) {
+                                counts.user_zapped = Some(true);
+                            }
                         }
                     }
                     _ => {}
@@ -757,6 +785,37 @@ fn extract_referenced_event(
         }
     }
     None
+}
+/// Extract the zap sender's pubkey from a zap receipt event (kind 9735)
+///
+/// Checks uppercase `P` tag first (standard), then falls back to
+/// parsing the `description` tag JSON for the `pubkey` field.
+fn extract_zap_sender(event: &Event) -> Option<String> {
+    // Try uppercase P tag first (zap sender)
+    if let Some(sender) = event.tags.iter().find_map(|tag| {
+        let slice = tag.as_slice();
+        if slice.len() >= 2 && slice.first()?.as_str() == "P" {
+            Some(slice.get(1)?.as_str().to_string())
+        } else {
+            None
+        }
+    }) {
+        return Some(sender);
+    }
+    // Fall back to description tag JSON pubkey
+    event.tags.iter().find_map(|tag| {
+        let slice = tag.as_slice();
+        if slice.first()?.as_str() == "description" {
+            let zap_request_json = slice.get(1)?.as_str();
+            if let Ok(zap_request) = serde_json::from_str::<serde_json::Value>(zap_request_json) {
+                return zap_request
+                    .get("pubkey")
+                    .and_then(|p| p.as_str())
+                    .map(|s| s.to_string());
+            }
+        }
+        None
+    })
 }
 /// Extract zap amount in satoshis from a zap event (kind 9735)
 fn extract_zap_amount(event: &Event) -> Option<u64> {
@@ -944,11 +1003,19 @@ pub fn increment_cached_counts(
                     }
                 }
             }
-            Kind::Repost => cached.counts.reposts += 1,
+            Kind::Repost => {
+                cached.counts.reposts += 1;
+                if is_current_user {
+                    cached.counts.user_reposted = Some(true);
+                }
+            }
             Kind::ZapReceipt => {
                 cached.counts.zaps += 1;
                 if let Some(amount) = zap_amount {
                     cached.counts.zap_amount_sats += amount;
+                }
+                if is_current_user {
+                    cached.counts.user_zapped = Some(true);
                 }
             }
             _ => {}
@@ -1090,9 +1157,15 @@ pub async fn stream_interaction_counts(
                             Some(id) => id,
                             None => return Ok(false),
                         };
-                        let is_current_user = current_user_pk
-                            .map(|pk| event.pubkey == pk)
-                            .unwrap_or(false);
+                        let is_current_user = if event.kind == Kind::ZapReceipt {
+                            extract_zap_sender(&event)
+                                .map(|sender| current_user_pk.map(|pk| sender == pk.to_hex()).unwrap_or(false))
+                                .unwrap_or(false)
+                        } else {
+                            current_user_pk
+                                .map(|pk| event.pubkey == pk)
+                                .unwrap_or(false)
+                        };
                         let zap_amount = if event.kind == Kind::ZapReceipt {
                             extract_zap_amount(&event)
                         } else {

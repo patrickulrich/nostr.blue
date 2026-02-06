@@ -1,9 +1,9 @@
 //! Recipe Form Component
 //! Complete form for creating or editing recipes
 use crate::components::media_uploader::MediaUploader;
-use crate::components::recipe_directions_editor::RecipeDirectionsEditor;
-use crate::components::recipe_ingredients_editor::RecipeIngredientsEditor;
-use crate::components::recipe_tag_selector::RecipeTagSelector;
+use super::directions_editor::RecipeDirectionsEditor;
+use super::ingredients_editor::RecipeIngredientsEditor;
+use super::tag_selector::RecipeTagSelector;
 use crate::stores::recipe_store::CachedRecipe;
 use dioxus::prelude::*;
 /// Form data for recipe creation/editing

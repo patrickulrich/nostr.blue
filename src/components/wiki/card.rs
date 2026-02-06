@@ -1,6 +1,6 @@
 //! Wiki Card Component
 //! Display card for wiki pages (NIP-54 Kind 30818)
-use crate::components::asciidoc_content::AsciiDocPreview;
+use crate::components::publication::asciidoc_content::AsciiDocPreview;
 use crate::components::content_menu::{ContentMenu, ContentMenuType};
 use crate::components::icons::{FileVideoIcon, Link2Icon};
 use crate::routes::Route;

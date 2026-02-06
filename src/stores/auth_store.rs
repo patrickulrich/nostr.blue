@@ -82,21 +82,41 @@ pub fn init_auth() {
             "read_only" => {
                 if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored read-only session");
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
-                        is_authenticated: false,
-                        login_method: Some(LoginMethod::ReadOnly),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&npub) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: false,
+                                login_method: Some(LoginMethod::ReadOnly),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted read-only pubkey in storage, clearing");
+                            LocalStorage::delete(STORAGE_KEY_NPUB);
+                            LocalStorage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             "remote_signer" => {
-                if let Ok(npub) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
+                if let Ok(stored_pubkey) = LocalStorage::get::<String>(STORAGE_KEY_NPUB) {
                     log::info!("Found stored remote signer session");
-                    *AUTH_STATE.write() = AuthState {
-                        pubkey: Some(npub),
-                        is_authenticated: true,
-                        login_method: Some(LoginMethod::RemoteSigner),
-                    };
+                    match crate::utils::nip19::normalize_pubkey(&stored_pubkey) {
+                        Ok(pubkey_hex) => {
+                            *AUTH_STATE.write() = AuthState {
+                                pubkey: Some(pubkey_hex),
+                                is_authenticated: true,
+                                login_method: Some(LoginMethod::RemoteSigner),
+                            };
+                        }
+                        Err(_) => {
+                            log::warn!("Corrupted remote signer pubkey in storage, clearing");
+                            LocalStorage::delete(STORAGE_KEY_NPUB);
+                            LocalStorage::delete(STORAGE_KEY_BUNKER_URI);
+                            LocalStorage::delete(STORAGE_KEY_APP_KEYS);
+                            LocalStorage::delete(STORAGE_KEY_METHOD);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -262,7 +282,7 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
         is_authenticated: false,
         login_method: Some(LoginMethod::ReadOnly),
     };
-    LocalStorage::set(STORAGE_KEY_NPUB, npub).ok();
+    LocalStorage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
     LocalStorage::set(STORAGE_KEY_METHOD, "read_only").ok();
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
     Ok(())
@@ -354,9 +374,28 @@ async fn run_post_login_init() {
     if let Err(e) = crate::stores::blossom_store::fetch_user_servers().await {
         log::warn!("Failed to fetch Blossom servers: {}", e);
     }
+    // Wait for user relay lists before starting subscriptions
+    // Critical for NIP-46 where signer restoration is slow and
+    // relay application happens concurrently in set_signer()'s spawn_forever
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5), "run_post_login_init"
+    ).await;
     crate::stores::notifications::start_realtime_subscription().await;
     crate::stores::relay::start_relay_list_subscription().await;
     crate::stores::emoji_store::init_emoji_fetch();
+    // Prefetch contacts into memory cache so Home feed loads faster
+    if let Some(pubkey) = get_pubkey() {
+        spawn(async move {
+            match nostr_client::fetch_contacts(pubkey).await {
+                Ok(contacts) => {
+                    log::info!("Prefetched {} contacts into memory cache", contacts.len());
+                }
+                Err(e) => {
+                    log::warn!("Failed to prefetch contacts: {}", e);
+                }
+            }
+        });
+    }
     spawn(async move {
         if let Some(client) = crate::stores::nostr_client::get_client() {
             log::info!("Prefetching metadata for all contacts...");
@@ -391,9 +430,7 @@ pub async fn login_with_nostr_connect(bunker_uri: &str) -> Result<(), String> {
         .get_public_key()
         .await
         .map_err(|e| format!("Failed to get public key: {}", e))?;
-    let pubkey_str = public_key
-        .to_bech32()
-        .map_err(|e| format!("Failed to convert public key: {}", e))?;
+    let pubkey_str = public_key.to_hex();
     LocalStorage::set(STORAGE_KEY_BUNKER_URI, bunker_uri)
         .map_err(|e| format!("Failed to store bunker URI: {}", e))?;
     let app_keys_bech32 = app_keys
@@ -428,9 +465,13 @@ pub fn generate_keys() -> Keys {
 pub fn get_keys() -> Option<Keys> {
     KEYS.read().clone()
 }
-/// Get current public key
+/// Get current public key (hex format)
 pub fn get_pubkey() -> Option<String> {
-    AUTH_STATE.read().pubkey.clone()
+    let p = AUTH_STATE.read().pubkey.clone();
+    if let Some(ref s) = p {
+        debug_assert!(!s.starts_with("npub"), "get_pubkey returned bech32 instead of hex");
+    }
+    p
 }
 /// Check if user is authenticated (can sign events)
 pub fn is_authenticated() -> bool {
@@ -559,6 +600,7 @@ pub fn export_nsec() -> Result<String, String> {
 }
 /// Export public key as npub
 pub fn export_npub() -> Result<String, String> {
-    let pubkey = get_pubkey().ok_or("Not logged in")?;
-    Ok(pubkey)
+    let pubkey_hex = get_pubkey().ok_or("Not logged in")?;
+    let pubkey = PublicKey::parse(&pubkey_hex).map_err(|e| e.to_string())?;
+    pubkey.to_bech32().map_err(|e| e.to_string())
 }

@@ -51,7 +51,7 @@ impl NotificationFilter {
 #[component]
 pub fn Notifications() -> Element {
     let mut notifications = use_signal(Vec::<NotificationType>::new);
-    let mut loading = use_signal(|| false);
+    let mut loading = use_signal(|| true);
     let mut refreshing = use_signal(|| false);
     let mut error = use_signal(|| None::<NostrBlueError>);
     let mut active_filter = use_signal(|| NotificationFilter::All);
@@ -98,6 +98,11 @@ pub fn Notifications() -> Element {
 
         // Use streaming for progressive loading
         spawn(async move {
+            // Wait for relays before fetching (NIP-46 timing)
+            nostr_client::wait_for_user_relays(
+                Duration::from_secs(5), "notifications_initial_load"
+            ).await;
+
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 
             let result = stream_notifications(None, |notif| {
@@ -975,13 +980,12 @@ where
         pubkey_str,
         until
     );
+    let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
+        .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
 
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
-        .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
-            pubkey_str.clone(),
-        )
+        .pubkey(pubkey)
         .limit(100);
 
     if let Some(until_ts) = until {
@@ -1024,13 +1028,12 @@ async fn load_notifications(
     nostr_client::ensure_relays_ready(&client).await;
     let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!("Loading notifications for {} (until: {:?})", pubkey_str, until);
+    let pubkey = nostr_sdk::PublicKey::parse(&pubkey_str)
+        .map_err(|e| NostrBlueError::Other(format!("Invalid pubkey: {}", e)))?;
     let mut all_notifications = Vec::new();
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
-        .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
-            pubkey_str.clone(),
-        )
+        .pubkey(pubkey)
         .limit(100);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));

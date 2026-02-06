@@ -1,8 +1,8 @@
 //! Reaction button component with emoji picker
 //! Encapsulates the like button, reaction picker, and click-outside-to-close behavior
 use crate::components::icons::HeartIcon;
-use crate::components::InlineReactionPicker;
-use crate::components::ReactionDefaultsModal;
+use super::defaults_modal::ReactionDefaultsModal;
+use super::picker::InlineReactionPicker;
 use crate::hooks::{format_count, ReactionEmoji, ReactionState, UseReaction};
 use crate::stores::reactions_store::get_default_reaction;
 use dioxus::prelude::*;
