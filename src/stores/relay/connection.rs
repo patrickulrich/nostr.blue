@@ -108,6 +108,10 @@ pub async fn ensure_relays_ready(client: &Client) {
             "After timeout: no relays connected ({} failed) - fetches may fail or use cached data",
             output.failed.len()
         );
+        // Clear stale RELAY_CONNECTED from prior sessions
+        if *RELAY_CONNECTED.peek() {
+            *RELAY_CONNECTED.write() = false;
+        }
     }
 }
 /// Reset the RELAY_CONNECTED signal to false
