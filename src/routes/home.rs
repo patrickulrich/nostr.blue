@@ -281,10 +281,14 @@ pub fn Home(list: String) -> Element {
                         Vec::new()
                     };
                     if cache_only {
-                        log::info!(
-                            "Phase 1: showing {} cached items while signer restores",
-                            accumulated_items.len()
-                        );
+                        if accumulated_items.is_empty() {
+                            log::info!("Phase 1 cache-only: no cached items for Following, waiting for signer restore");
+                        } else {
+                            log::info!(
+                                "Phase 1 cache-only: showing {} cached items for Following while signer restores",
+                                accumulated_items.len()
+                            );
+                        }
                         return;
                     }
                     let stream_req_id = request_id;
@@ -431,10 +435,14 @@ pub fn Home(list: String) -> Element {
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
                     if cache_only {
-                        log::info!(
-                            "Phase 1: showing {} cached items while signer restores",
-                            cached_items.len()
-                        );
+                        if cached_items.is_empty() {
+                            log::info!("Phase 1 cache-only: no cached items for FollowingWithReplies, waiting for signer restore");
+                        } else {
+                            log::info!(
+                                "Phase 1 cache-only: showing {} cached items for FollowingWithReplies while signer restores",
+                                cached_items.len()
+                            );
+                        }
                         return;
                     }
                     let result = load_following_with_replies(None).await;
@@ -555,13 +563,6 @@ pub fn Home(list: String) -> Element {
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
-                    if cache_only {
-                        log::info!(
-                            "Phase 1: showing {} cached items while signer restores",
-                            cached_items.len()
-                        );
-                        return;
-                    }
                     let result = load_global_feed(None).await;
                     if is_stale() {
                         return;
@@ -677,10 +678,14 @@ pub fn Home(list: String) -> Element {
                         feed_state.set(DataState::Loaded(cached_items.clone()));
                     }
                     if cache_only {
-                        log::info!(
-                            "Phase 1: showing {} cached items while signer restores",
-                            cached_items.len()
-                        );
+                        if cached_items.is_empty() {
+                            log::info!("Phase 1 cache-only: no cached items for PeopleList, waiting for signer restore");
+                        } else {
+                            log::info!(
+                                "Phase 1 cache-only: showing {} cached items for PeopleList while signer restores",
+                                cached_items.len()
+                            );
+                        }
                         return;
                     }
                     let result = load_people_list_feed(&list, None).await;
