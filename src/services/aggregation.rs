@@ -965,12 +965,14 @@ impl InteractionStreamHandle {
 /// * `content` - The event content (used for reactions to detect "-" unlikes)
 /// * `is_current_user` - Whether this interaction is from the current user
 /// * `zap_amount` - Optional zap amount in satoshis
+/// * `repost_event_id` - Optional repost event ID for undo functionality
 pub fn increment_cached_counts(
     event_id: &str,
     kind: Kind,
     content: Option<&str>,
     is_current_user: bool,
     zap_amount: Option<u64>,
+    repost_event_id: Option<&str>,
 ) -> Option<InteractionCounts> {
     let mut cache = get_counts_cache()
         .lock()
@@ -1007,6 +1009,9 @@ pub fn increment_cached_counts(
                 cached.counts.reposts += 1;
                 if is_current_user {
                     cached.counts.user_reposted = Some(true);
+                    if let Some(id) = repost_event_id {
+                        cached.counts.user_repost_id = Some(id.to_string());
+                    }
                 }
             }
             Kind::ZapReceipt => {
@@ -1176,12 +1181,18 @@ pub async fn stream_interaction_counts(
                         } else {
                             None
                         };
+                        let repost_id = if event.kind == Kind::Repost && is_current_user {
+                            Some(event.id.to_hex())
+                        } else {
+                            None
+                        };
                         if let Some(updated_counts) = increment_cached_counts(
                             &referenced_id,
                             event.kind,
                             content,
                             is_current_user,
                             zap_amount,
+                            repost_id.as_deref(),
                         ) {
                             interaction_counts
                                 .write()

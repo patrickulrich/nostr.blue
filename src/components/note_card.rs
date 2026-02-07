@@ -94,15 +94,9 @@ pub fn NoteCard(
                         repost_count.set(counts.reposts.min(500));
                         zap_amount_sats.set(counts.zap_amount_sats);
                     }
-                    if let Some(reposted) = counts.user_reposted {
-                        is_reposted.set(reposted);
-                    }
-                    if let Some(ref repost_id) = counts.user_repost_id {
-                        user_repost_id.set(Some(repost_id.clone()));
-                    }
-                    if let Some(zapped) = counts.user_zapped {
-                        is_zapped.set(zapped);
-                    }
+                    is_reposted.set(counts.user_reposted.unwrap_or(false));
+                    user_repost_id.set(counts.user_repost_id.clone());
+                    is_zapped.set(counts.user_zapped.unwrap_or(false));
                 }
             },
         ),

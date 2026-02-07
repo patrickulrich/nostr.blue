@@ -146,12 +146,8 @@ pub fn PhotoCard(
                     reply_count.set(counts.replies);
                     repost_count.set(counts.reposts);
                     zap_amount_sats.set(counts.zap_amount_sats);
-                    if let Some(reposted) = counts.user_reposted {
-                        is_reposted.set(reposted);
-                    }
-                    if let Some(zapped) = counts.user_zapped {
-                        is_zapped.set(zapped);
-                    }
+                    is_reposted.set(counts.user_reposted.unwrap_or(false));
+                    is_zapped.set(counts.user_zapped.unwrap_or(false));
                 }
             },
         ),
