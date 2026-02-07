@@ -1,6 +1,7 @@
 use crate::components::{
     ArticleCard, ClientInitializing, NoteCard, NoteCardSkeleton, NoteComposer,
 };
+use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
 use crate::routes::Route;
 use crate::services::aggregation::{
@@ -410,7 +411,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if accumulated_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -543,7 +544,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -653,7 +654,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -780,7 +781,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -1061,12 +1062,12 @@ pub fn Home(list: String) -> Element {
                 "load_more spawn executing - until: {:?}, feed_type: {:?}", until,
                 current_feed_type
             );
-            let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
+            let fetch_result: Result<Vec<FeedItem>, NostrBlueError> = match current_feed_type {
                 FeedType::Following => {
                     match load_following_feed(until).await {
                         Ok((items, did_fallback)) => {
                             if did_fallback {
-                                Err("Contact fetch failed during pagination".to_string())
+                                Err(NostrBlueError::Other("Contact fetch failed during pagination".to_string()))
                             } else {
                                 Ok(items)
                             }
@@ -1078,7 +1079,7 @@ pub fn Home(list: String) -> Element {
                     match load_following_with_replies(until).await {
                         Ok((items, did_fallback)) => {
                             if did_fallback {
-                                Err("Contact fetch failed during pagination".to_string())
+                                Err(NostrBlueError::Other("Contact fetch failed during pagination".to_string()))
                             } else {
                                 Ok(items)
                             }
@@ -1880,8 +1881,8 @@ async fn append_paginated_items(
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_feed(
     until: Option<u64>,
-) -> Result<(Vec<FeedItem>, bool), String> {
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!("Loading following feed for {} (until: {:?})", pubkey_str, until);
     let contacts_future = nostr_client::fetch_contacts(pubkey_str.clone());
     let global_future = load_global_feed(until);
@@ -2017,12 +2018,12 @@ fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> 
 async fn load_following_feed_streaming<F>(
     until: Option<u64>,
     mut on_batch: F,
-) -> Result<(Vec<FeedItem>, bool), String>
+) -> Result<(Vec<FeedItem>, bool), NostrBlueError>
 where
     F: FnMut(Vec<FeedItem>),
 {
     use std::collections::HashSet;
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
         "Loading following feed (streaming) for {} (until: {:?})", pubkey_str, until
     );
@@ -2115,8 +2116,8 @@ where
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_with_replies(
     until: Option<u64>,
-) -> Result<(Vec<FeedItem>, bool), String> {
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
         "Loading following feed with replies for {} (until: {:?})", pubkey_str, until
     );
@@ -2209,7 +2210,7 @@ async fn load_following_with_replies(
         }
     }
 }
-async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
+async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
     let mut filter = Filter::new().kinds(vec![Kind::TextNote, Kind::Repost]).limit(50);
     if let Some(until_ts) = until {
@@ -2249,7 +2250,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
         }
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
-            Err(format!("Failed to load feed: {}", e))
+            Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
     }
 }
@@ -2300,13 +2301,13 @@ async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
 async fn load_people_list_feed(
     list: &UserList,
     until: Option<u64>,
-) -> Result<Vec<FeedItem>, String> {
+) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading people list feed for '{}' (until: {:?})", list.name, until);
     let members = get_all_list_members(&list.event)
         .await
         .map_err(|e| {
             log::error!("Failed to get list members: {}", e);
-            format!("Failed to decrypt list members: {}", e)
+            NostrBlueError::Other(format!("Failed to decrypt list members: {}", e))
         })?;
     if members.is_empty() {
         log::warn!(
@@ -2360,7 +2361,7 @@ async fn load_people_list_feed(
         }
         Err(e) => {
             log::error!("Failed to fetch events for people list '{}': {}", list.name, e);
-            Err(format!("Failed to load feed: {}", e))
+            Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
     }
 }
