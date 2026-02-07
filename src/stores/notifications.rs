@@ -212,12 +212,23 @@ pub async fn start_realtime_subscription() {
             return;
         }
     };
+    // Wait for user relay lists before subscribing (prevents empty subscriptions on NIP-46 mobile)
+    crate::stores::relay::wait_for_user_relays(
+        std::time::Duration::from_secs(5), "start_realtime_subscription"
+    ).await;
+    // Re-check after await: another call may have started, or user may have logged out
+    if SUBSCRIPTION_ID.read().is_some() {
+        log::debug!("Notification subscription started by another call during relay wait");
+        return;
+    }
+    if auth_store::get_pubkey().as_deref() != Some(my_pubkey_str.as_str()) {
+        log::warn!("Pubkey changed during relay wait, aborting notification subscription");
+        return;
+    }
+    nostr_client::ensure_relays_ready(&client).await;
     let filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Reaction, Kind::ZapReceipt])
-        .custom_tag(
-            nostr_sdk::SingleLetterTag::lowercase(nostr_sdk::Alphabet::P),
-            my_pubkey_str,
-        )
+        .pubkey(my_pubkey)
         .limit(20);
     log::info!("Starting real-time notification subscription using gossip (limit: 20)");
     let subscription_result = subscription_manager::subscribe_realtime(

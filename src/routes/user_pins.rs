@@ -2,7 +2,7 @@
 //! View and search your pinned content and boards
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::{PinBoardMosaicGrid, PinMosaicGrid, PinToBoardRequest};
 use crate::routes::Route;
 use crate::stores::auth_store;

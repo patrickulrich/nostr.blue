@@ -2,7 +2,7 @@
 //! A reusable dropdown menu for Wiki, Recipe, Publication, and other content types
 //! Similar to NoteMenu but designed for addressable events with naddr
 use crate::components::icons::MoreHorizontalIcon;
-use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::{AddToListModal, ReportModal};
 use crate::stores::nostr_client::{self, HAS_SIGNER};
 use crate::stores::pin_boards_store::{PinContentType, PinReference};

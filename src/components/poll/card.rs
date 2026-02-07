@@ -1,4 +1,4 @@
-use crate::components::PollTimer;
+use super::timer::PollTimer;
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::utils::format::format_relative_time_or;

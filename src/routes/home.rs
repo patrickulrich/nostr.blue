@@ -1,6 +1,7 @@
 use crate::components::{
     ArticleCard, ClientInitializing, NoteCard, NoteCardSkeleton, NoteComposer,
 };
+use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_user_lists, UserList};
 use crate::routes::Route;
 use crate::services::aggregation::{
@@ -58,7 +59,7 @@ pub fn Home(list: String) -> Element {
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(||
     None);
     let mut request_id = use_signal(|| 0u32);
-    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following));
+    let mut last_loaded_trigger = use_signal(|| (0u32, FeedType::Following, false));
     let (all_lists, _lists_loading, _lists_error, _) = use_user_lists();
     let people_lists = use_memo(move || {
         all_lists
@@ -183,21 +184,17 @@ pub fn Home(list: String) -> Element {
         if !client_initialized {
             return;
         }
-        // For authenticated users with signing capability, wait for signer restoration
-        // This prevents race condition where CLIENT_INITIALIZED is true but
-        // restore_session_async() hasn't attached the signer yet
-        // ReadOnly (npub) users don't need a signer and should bypass this guard
+        // For authenticated users with signing capability, allow cache display
+        // before signer restoration, then do full relay load once signer is ready
         let requires_signer = matches!(
             login_method,
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
         );
-        if is_authenticated && requires_signer && !has_signer {
-            log::debug!("Waiting for signer restoration before loading feed...");
-            return;
-        }
-        let (last_refresh, last_feed) = last_loaded_trigger.peek().clone();
+        let signer_available = !requires_signer || has_signer;
+        let cache_only = is_authenticated && requires_signer && !has_signer;
+        let (last_refresh, last_feed, last_signer_available) = last_loaded_trigger.peek().clone();
         let (is_loading, has_data) = {
             let current_state = &*feed_state.peek();
             let loading = matches!(current_state, DataState::Loading);
@@ -210,17 +207,18 @@ pub fn Home(list: String) -> Element {
         };
         let feed_type_changed = current_feed_type != last_feed;
         let refresh_changed = refresh != last_refresh;
-        if is_loading && !feed_type_changed && !refresh_changed {
+        let signer_changed = signer_available != last_signer_available;
+        if is_loading && !feed_type_changed && !refresh_changed && !signer_changed {
             log::debug!("Skipping feed re-load: already loading, no intentional change");
             return;
         }
-        if has_data && !feed_type_changed && !refresh_changed {
+        if has_data && !feed_type_changed && !refresh_changed && !signer_changed {
             log::debug!(
                 "Skipping feed re-load: data already present, no intentional change"
             );
             return;
         }
-        last_loaded_trigger.set((refresh, current_feed_type.clone()));
+        last_loaded_trigger.set((refresh, current_feed_type.clone(), signer_available));
         let current_id = *request_id.peek() + 1;
         request_id.set(current_id);
         if !has_data || feed_type_changed {
@@ -264,7 +262,7 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::Following {
                         pubkey: pubkey_str.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -283,6 +281,18 @@ pub fn Home(list: String) -> Element {
                         log::info!("No cache, loading Following feed...");
                         Vec::new()
                     };
+                    if cache_only {
+                        if accumulated_items.is_empty() {
+                            log::info!("Phase 1 cache-only: no cached items for Following, waiting for signer restore");
+                        } else {
+                            log::info!(
+                                "Phase 1 cache-only: showing {} cached items for Following while signer restores",
+                                accumulated_items.len()
+                            );
+                        }
+                        has_more.set(false);
+                        return;
+                    }
                     let stream_req_id = request_id;
                     let stream_curr_id = current_id;
                     let result = load_following_feed_streaming(
@@ -401,7 +411,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if accumulated_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -413,7 +423,7 @@ pub fn Home(list: String) -> Element {
                     let cache_key = FeedCacheKey::FollowingWithReplies {
                         pubkey: pubkey_str,
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -425,6 +435,18 @@ pub fn Home(list: String) -> Element {
                             cached_items.len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
+                    }
+                    if cache_only {
+                        if cached_items.is_empty() {
+                            log::info!("Phase 1 cache-only: no cached items for FollowingWithReplies, waiting for signer restore");
+                        } else {
+                            log::info!(
+                                "Phase 1 cache-only: showing {} cached items for FollowingWithReplies while signer restores",
+                                cached_items.len()
+                            );
+                        }
+                        has_more.set(false);
+                        return;
                     }
                     let result = load_following_with_replies(None).await;
                     if is_stale() {
@@ -522,7 +544,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -531,7 +553,7 @@ pub fn Home(list: String) -> Element {
                 }
                 FeedType::Global => {
                     let cache_key = FeedCacheKey::Global;
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -632,7 +654,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -645,7 +667,7 @@ pub fn Home(list: String) -> Element {
                         pubkey: pubkey_str,
                         list_id: list.identifier.clone(),
                     };
-                    let cached_items = feed_cache::load_cached_feed(&cache_key, 100)
+                    let cached_items = feed_cache::load_cached_feed(&cache_key, 50)
                         .await
                         .unwrap_or_default();
                     if is_stale() {
@@ -657,6 +679,18 @@ pub fn Home(list: String) -> Element {
                             cached_items.len()
                         );
                         feed_state.set(DataState::Loaded(cached_items.clone()));
+                    }
+                    if cache_only {
+                        if cached_items.is_empty() {
+                            log::info!("Phase 1 cache-only: no cached items for PeopleList, waiting for signer restore");
+                        } else {
+                            log::info!(
+                                "Phase 1 cache-only: showing {} cached items for PeopleList while signer restores",
+                                cached_items.len()
+                            );
+                        }
+                        has_more.set(false);
+                        return;
                     }
                     let result = load_people_list_feed(&list, None).await;
                     if is_stale() {
@@ -747,7 +781,7 @@ pub fn Home(list: String) -> Element {
                         }
                         Err(e) => {
                             if cached_items.is_empty() {
-                                feed_state.set(DataState::Error(e));
+                                feed_state.set(DataState::Error(e.to_string()));
                             } else {
                                 log::warn!("Network error but showing cached data: {}", e);
                             }
@@ -1028,12 +1062,12 @@ pub fn Home(list: String) -> Element {
                 "load_more spawn executing - until: {:?}, feed_type: {:?}", until,
                 current_feed_type
             );
-            let fetch_result: Result<Vec<FeedItem>, String> = match current_feed_type {
+            let fetch_result: Result<Vec<FeedItem>, NostrBlueError> = match current_feed_type {
                 FeedType::Following => {
                     match load_following_feed(until).await {
                         Ok((items, did_fallback)) => {
                             if did_fallback {
-                                Err("Contact fetch failed during pagination".to_string())
+                                Err(NostrBlueError::Other("Contact fetch failed during pagination".to_string()))
                             } else {
                                 Ok(items)
                             }
@@ -1045,7 +1079,7 @@ pub fn Home(list: String) -> Element {
                     match load_following_with_replies(until).await {
                         Ok((items, did_fallback)) => {
                             if did_fallback {
-                                Err("Contact fetch failed during pagination".to_string())
+                                Err(NostrBlueError::Other("Contact fetch failed during pagination".to_string()))
                             } else {
                                 Ok(items)
                             }
@@ -1847,8 +1881,8 @@ async fn append_paginated_items(
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_feed(
     until: Option<u64>,
-) -> Result<(Vec<FeedItem>, bool), String> {
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!("Loading following feed for {} (until: {:?})", pubkey_str, until);
     let contacts_future = nostr_client::fetch_contacts(pubkey_str.clone());
     let global_future = load_global_feed(until);
@@ -1883,7 +1917,7 @@ async fn load_following_feed(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -1984,12 +2018,12 @@ fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> 
 async fn load_following_feed_streaming<F>(
     until: Option<u64>,
     mut on_batch: F,
-) -> Result<(Vec<FeedItem>, bool), String>
+) -> Result<(Vec<FeedItem>, bool), NostrBlueError>
 where
     F: FnMut(Vec<FeedItem>),
 {
     use std::collections::HashSet;
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
         "Loading following feed (streaming) for {} (until: {:?})", pubkey_str, until
     );
@@ -2021,7 +2055,7 @@ where
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -2082,8 +2116,8 @@ where
 /// Returns (feed_items, did_fallback) where did_fallback indicates if we fell back to global.
 async fn load_following_with_replies(
     until: Option<u64>,
-) -> Result<(Vec<FeedItem>, bool), String> {
-    let pubkey_str = auth_store::get_pubkey().ok_or("Not authenticated")?;
+) -> Result<(Vec<FeedItem>, bool), NostrBlueError> {
+    let pubkey_str = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     log::info!(
         "Loading following feed with replies for {} (until: {:?})", pubkey_str, until
     );
@@ -2115,7 +2149,7 @@ async fn load_following_with_replies(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(authors)
-        .limit(150);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
@@ -2176,7 +2210,7 @@ async fn load_following_with_replies(
         }
     }
 }
-async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
+async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
     let mut filter = Filter::new().kinds(vec![Kind::TextNote, Kind::Repost]).limit(50);
     if let Some(until_ts) = until {
@@ -2216,7 +2250,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, String> {
         }
         Err(e) => {
             log::error!("Failed to fetch events: {}", e);
-            Err(format!("Failed to load feed: {}", e))
+            Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
     }
 }
@@ -2267,13 +2301,13 @@ async fn prefetch_author_metadata(feed_items: &[FeedItem]) {
 async fn load_people_list_feed(
     list: &UserList,
     until: Option<u64>,
-) -> Result<Vec<FeedItem>, String> {
+) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading people list feed for '{}' (until: {:?})", list.name, until);
     let members = get_all_list_members(&list.event)
         .await
         .map_err(|e| {
             log::error!("Failed to get list members: {}", e);
-            format!("Failed to decrypt list members: {}", e)
+            NostrBlueError::Other(format!("Failed to decrypt list members: {}", e))
         })?;
     if members.is_empty() {
         log::warn!(
@@ -2286,7 +2320,7 @@ async fn load_people_list_feed(
     let mut filter = Filter::new()
         .kinds(vec![Kind::TextNote, Kind::Repost])
         .authors(members)
-        .limit(100);
+        .limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -2327,7 +2361,7 @@ async fn load_people_list_feed(
         }
         Err(e) => {
             log::error!("Failed to fetch events for people list '{}': {}", list.name, e);
-            Err(format!("Failed to load feed: {}", e))
+            Err(NostrBlueError::Other(format!("Failed to load feed: {}", e)))
         }
     }
 }

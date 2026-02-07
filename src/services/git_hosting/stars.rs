@@ -5,16 +5,17 @@
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
+use crate::error::NostrBlueError;
 use crate::stores::auth_store;
 use crate::stores::code_store::{is_repo_starred, star_repo, unstar_repo, STARRED_REPOS};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Star a repository (publish reaction event)
-pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, String> {
+pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, NostrBlueError> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
-        return Err("No signer attached. Cannot publish events.".to_string());
+        return Err("No signer attached. Cannot publish events.".into());
     }
     let coord_str = format!(
         "{}:{}:{}",
@@ -23,7 +24,7 @@ pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, String> {
         coordinate.identifier,
     );
     if is_repo_starred(&coord_str) {
-        return Err("Already starred".to_string());
+        return Err("Already starred".into());
     }
     let builder = EventBuilder::new(Kind::Reaction, "+")
         .tag(Tag::coordinate(coordinate.clone(), None));
@@ -36,10 +37,10 @@ pub async fn publish_star(coordinate: &Coordinate) -> Result<EventId, String> {
     Ok(event_id)
 }
 /// Unstar a repository (publish delete event for the reaction)
-pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
+pub async fn remove_star(coordinate: &Coordinate) -> Result<(), NostrBlueError> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
-        return Err("No signer attached. Cannot publish events.".to_string());
+        return Err("No signer attached. Cannot publish events.".into());
     }
     let coord_str = format!(
         "{}:{}:{}",
@@ -48,12 +49,11 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
         coordinate.identifier,
     );
     if !is_repo_starred(&coord_str) {
-        return Err("Not starred".to_string());
+        return Err("Not starred".into());
     }
     let my_pubkey_str = auth_store::get_pubkey()
-        .ok_or_else(|| "Not logged in".to_string())?;
-    let my_pubkey = PublicKey::from_hex(&my_pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+        .ok_or("Not logged in")?;
+    let my_pubkey = PublicKey::parse(&my_pubkey_str)?;
     let filter = Filter::new()
         .kind(Kind::Reaction)
         .author(my_pubkey)
@@ -74,7 +74,7 @@ pub async fn remove_star(coordinate: &Coordinate) -> Result<(), String> {
     Ok(())
 }
 /// Fetch star count for a repository
-pub async fn fetch_star_count(coordinate: &Coordinate) -> Result<u32, String> {
+pub async fn fetch_star_count(coordinate: &Coordinate) -> Result<u32, NostrBlueError> {
     let filter = Filter::new()
         .kind(Kind::Reaction)
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coordinate.to_string());
@@ -89,7 +89,7 @@ pub async fn fetch_star_count(coordinate: &Coordinate) -> Result<u32, String> {
     Ok(unique_stars.len() as u32)
 }
 /// Check if the current user has starred a repository
-pub async fn check_user_star(coordinate: &Coordinate) -> Result<bool, String> {
+pub async fn check_user_star(coordinate: &Coordinate) -> Result<bool, NostrBlueError> {
     let coord_str = format!(
         "{}:{}:{}",
         coordinate.kind.as_u16(),
@@ -121,13 +121,12 @@ pub async fn check_user_star(coordinate: &Coordinate) -> Result<bool, String> {
     Ok(is_starred)
 }
 /// Load user's starred repositories from relays
-pub async fn load_user_stars() -> Result<(), String> {
+pub async fn load_user_stars() -> Result<(), NostrBlueError> {
     let my_pubkey_str = match auth_store::get_pubkey() {
         Some(pk) => pk,
-        None => return Err("Not logged in".to_string()),
+        None => return Err("Not logged in".into()),
     };
-    let my_pubkey = PublicKey::from_hex(&my_pubkey_str)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let my_pubkey = PublicKey::parse(&my_pubkey_str)?;
     let filter = Filter::new().kind(Kind::Reaction).author(my_pubkey).limit(500);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await

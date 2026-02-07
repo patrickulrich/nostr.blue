@@ -3,7 +3,7 @@
 //! NIP-73 external content display cards for books, papers, Bitcoin, podcasts, etc.
 //! Each card type provides appropriate visualization and linking.
 use crate::components::icons;
-use crate::components::podcast_episode_card::DisplayEpisode;
+use crate::components::podcast::episode_card::DisplayEpisode;
 use crate::routes::Route;
 use crate::services::{
     mempool, openlibrary::{self, CoverSize},

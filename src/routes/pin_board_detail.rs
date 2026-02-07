@@ -1,7 +1,7 @@
 //! Pin Board Detail Page
 //! View a pin board with its pins, engagement, and actions
 //! Uses two-stage loading: board metadata first, then pins
-use crate::components::pin_board_item_selector::PinToBoardModal;
+use crate::components::board::item_selector::PinToBoardModal;
 use crate::components::{
     ConfirmModal, HashtagBadge, PinCardMosaicSkeleton, PinMosaicGrid, PinToBoardRequest,
     ShareModal, ZapModal,
