@@ -98,10 +98,19 @@ pub fn Notifications() -> Element {
 
         // Use streaming for progressive loading
         spawn(async move {
+            let initial_pubkey = auth_store::get_pubkey();
+
             // Wait for relays before fetching (NIP-46 timing)
             nostr_client::wait_for_user_relays(
                 Duration::from_secs(5), "notifications_initial_load"
             ).await;
+
+            // Abort if user changed during relay wait
+            if auth_store::get_pubkey() != initial_pubkey {
+                log::debug!("Pubkey changed during relay wait, aborting notification load");
+                loading.set(false);
+                return;
+            }
 
             let mut seen_ids: HashSet<nostr_sdk::EventId> = HashSet::new();
 

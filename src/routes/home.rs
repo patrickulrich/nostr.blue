@@ -289,6 +289,7 @@ pub fn Home(list: String) -> Element {
                                 accumulated_items.len()
                             );
                         }
+                        has_more.set(false);
                         return;
                     }
                     let stream_req_id = request_id;
@@ -443,6 +444,7 @@ pub fn Home(list: String) -> Element {
                                 cached_items.len()
                             );
                         }
+                        has_more.set(false);
                         return;
                     }
                     let result = load_following_with_replies(None).await;
@@ -686,6 +688,7 @@ pub fn Home(list: String) -> Element {
                                 cached_items.len()
                             );
                         }
+                        has_more.set(false);
                         return;
                     }
                     let result = load_people_list_feed(&list, None).await;
