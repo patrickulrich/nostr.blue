@@ -48,13 +48,13 @@ use nostr_sdk::{
 };
 use crate::components::article_card::ArticleCard;
 use crate::components::code::repo_card::CodeRepoCardCompact;
-use crate::components::pin_board_card::PinBoardCardCompact;
-use crate::components::podcast_episode_card::{DisplayEpisode, PodcastEpisodeCard};
-use crate::components::podcast_show_card::{PodcastShow, PodcastShowCard};
-use crate::components::publication_card::PublicationCardCompact;
-use crate::components::radio_card::RadioCard;
-use crate::components::recipe_card::RecipeCard;
-use crate::components::wiki_card::WikiCardCompact;
+use crate::components::board::card::PinBoardCardCompact;
+use crate::components::podcast::episode_card::{DisplayEpisode, PodcastEpisodeCard};
+use crate::components::podcast::show_card::{PodcastShow, PodcastShowCard};
+use crate::components::publication::card::PublicationCardCompact;
+use crate::components::music::radio_card::RadioCard;
+use crate::components::recipe::card::RecipeCard;
+use crate::components::wiki::card::WikiCardCompact;
 use crate::utils::podcast::parse_podcast_metadata;
 use crate::utils::radio::RadioStation;
 #[component]

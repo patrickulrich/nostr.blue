@@ -4,10 +4,10 @@
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use crate::components::icons::PinIcon;
-use crate::components::pin_board_card::HashtagBadge;
-use crate::components::pin_board_item_card::PinCard;
-use crate::components::pin_board_item_selector::PinToBoardModal;
-use crate::components::pin_menu::PinToBoardRequest;
+use super::card::HashtagBadge;
+use super::item_card::PinCard;
+use super::item_selector::PinToBoardModal;
+use super::pin_menu::PinToBoardRequest;
 use crate::components::{ConfirmModal, ShareModal, ZapModal};
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
