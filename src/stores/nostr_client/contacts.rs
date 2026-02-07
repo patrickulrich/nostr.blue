@@ -4,7 +4,7 @@
 use dioxus::prelude::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
-use super::fetching::{fetch_events_aggregated_outbox, get_client};
+use super::fetching::{fetch_events_aggregated, get_client};
 use super::signals::{
     get_cache_generation, get_contacts_cache, invalidate_contacts_cache, CachedContacts,
     HAS_SIGNER,
@@ -113,7 +113,7 @@ async fn fetch_enriched_contacts_from_relay_impl(
     let pubkey = PublicKey::from_hex(&normalized_pubkey)
         .map_err(|e| format!("Invalid pubkey: {}", e))?;
     let filter = Filter::new().author(pubkey).kind(Kind::ContactList).limit(1);
-    match fetch_events_aggregated_outbox(filter, Duration::from_secs(10)).await {
+    match fetch_events_aggregated(filter, Duration::from_secs(10)).await {
         Ok(events) => {
             if let Some(event) = events.into_iter().max_by_key(|e| e.created_at) {
                 if let Err(e) = event.verify() {

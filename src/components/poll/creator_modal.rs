@@ -1,4 +1,4 @@
-use crate::components::{PollOptionData, PollOptionList};
+use super::option_list::{PollOptionData, PollOptionList};
 use crate::stores::{nostr_client, relay};
 use crate::utils::{generate_option_id, time::calculate_end_time};
 use dioxus::prelude::*;

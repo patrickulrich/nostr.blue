@@ -33,21 +33,9 @@ where
 {
     use futures::StreamExt;
     let client = get_client().ok_or("Client not initialized")?;
-    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
-        log::debug!("Streaming callback: Waiting for user relay lists...");
-        let start = instant::Instant::now();
-        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
-            platform_sleep_ms(50).await;
-        }
-        if *USER_RELAYS_APPLIED.peek() {
-            log::debug!(
-                "Streaming callback: User relays applied after {}ms", start.elapsed()
-                .as_millis()
-            );
-        } else {
-            log::warn!("Streaming callback: User relays not applied after timeout");
-        }
-    }
+    crate::stores::relay::wait_for_user_relays(
+        Duration::from_millis(500), "stream_events_with_callback"
+    ).await;
     ensure_relays_ready(&client).await;
     let mut stream = client
         .stream_events(filter, timeout)
@@ -92,23 +80,9 @@ where
         return Err("batch_size must be greater than 0".to_string());
     }
     let client = get_client().ok_or("Client not initialized")?;
-    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
-        log::debug!("Streaming: Waiting for user relay lists to be applied...");
-        let start = instant::Instant::now();
-        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
-            platform_sleep_ms(50).await;
-        }
-        if *USER_RELAYS_APPLIED.peek() {
-            log::debug!(
-                "Streaming: User relay lists applied after {}ms", start.elapsed()
-                .as_millis()
-            );
-        } else {
-            log::warn!(
-                "Streaming: User relay lists not applied after timeout, proceeding with defaults"
-            );
-        }
-    }
+    crate::stores::relay::wait_for_user_relays(
+        Duration::from_millis(500), "stream_events_with_batches"
+    ).await;
     ensure_relays_ready(&client).await;
     let filter_authors = filter.authors.clone();
     let author_set: Option<std::collections::HashSet<_>> = filter_authors
@@ -250,17 +224,9 @@ where
     let client = get_client().ok_or(NostrBlueError::Other("Client not initialized".into()))?;
 
     // Wait for user relay lists if signer is present
-    if *HAS_SIGNER.peek() && !*USER_RELAYS_APPLIED.peek() {
-        log::debug!("stream_events_immediate: waiting for user relay lists...");
-        let start = instant::Instant::now();
-        while !*USER_RELAYS_APPLIED.peek() && start.elapsed() < Duration::from_secs(2) {
-            platform_sleep_ms(50).await;
-        }
-        if *USER_RELAYS_APPLIED.peek() {
-            log::debug!("stream_events_immediate: user relay lists applied");
-        }
-    }
-
+    crate::stores::relay::wait_for_user_relays(
+        Duration::from_millis(500), "stream_events_immediate"
+    ).await;
     ensure_relays_ready(&client).await;
 
     let relays = client.relays().await;

@@ -1,6 +1,6 @@
 //! Recipe Detail View Component
 //! Displays a full recipe with all sections, engagement, and actions
-use crate::components::recipe_tag_chip::RecipeTagChip;
+use super::tag_chip::RecipeTagChip;
 use crate::components::AddToCookbookModal;
 use crate::hooks::use_author_metadata;
 use crate::routes::Route;
