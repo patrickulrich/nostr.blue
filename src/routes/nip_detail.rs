@@ -42,7 +42,91 @@ pub fn NipDetail(nip_id: String) -> Element {
         spawn(async move {
             loading.set(true);
             error.set(None);
-            if id.starts_with("naddr") {
+            if let Some(num) = id.strip_prefix("nut-") {
+                // Cashu NUT document
+                is_custom.set(false);
+                nip_title.set(format!("NUT-{}", num));
+                match github_nips::fetch_nut_content(num).await {
+                    Ok(content) => {
+                        if let Some(first_line) = content
+                            .lines()
+                            .find(|l| l.starts_with("# "))
+                        {
+                            let title = first_line.trim_start_matches('#').trim();
+                            nip_title.set(format!("NUT-{}: {}", num, title));
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if let Some(num) = id.strip_prefix("bud-") {
+                // Blossom BUD document
+                is_custom.set(false);
+                nip_title.set(format!("BUD-{}", num));
+                match github_nips::fetch_bud_content(num).await {
+                    Ok(content) => {
+                        if let Some(first_line) = content
+                            .lines()
+                            .find(|l| l.starts_with("# "))
+                        {
+                            let title = first_line.trim_start_matches('#').trim();
+                            nip_title.set(format!("BUD-{}: {}", num, title));
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if let Some(num) = id.strip_prefix("nkbip-") {
+                // NKBIP document
+                is_custom.set(false);
+                nip_title.set(format!("NKBIP-{}", num));
+                match github_nips::fetch_nkbip_content(num).await {
+                    Ok(content) => {
+                        if let Some(first_line) = content
+                            .lines()
+                            .find(|l| l.starts_with("# "))
+                        {
+                            let title = first_line.trim_start_matches('#').trim();
+                            nip_title.set(format!("NKBIP-{}: {}", num, title));
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if id == "market-spec" {
+                // Market specification document
+                is_custom.set(false);
+                nip_title.set("Market Specification".to_string());
+                match github_nips::fetch_market_spec().await {
+                    Ok(content) => {
+                        if let Some(first_line) = content
+                            .lines()
+                            .find(|l| l.starts_with("# "))
+                        {
+                            let title = first_line.trim_start_matches('#').trim();
+                            nip_title.set(title.to_string());
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if id.starts_with("naddr") {
                 is_custom.set(true);
                 if !client_initialized {
                     log::info!(
@@ -85,6 +169,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                     }
                 }
             } else {
+                // Official NIP
                 is_custom.set(false);
                 nip_title.set(format!("NIP-{}", id));
                 match github_nips::fetch_nip_content(&id).await {
@@ -324,13 +409,13 @@ pub fn NipDetail(nip_id: String) -> Element {
                 div { class: "max-w-4xl mx-auto",
                     div { class: "p-6 bg-destructive/10 border border-destructive rounded-lg text-center",
                         h2 { class: "text-xl font-semibold mb-2 text-destructive",
-                            "Error Loading NIP"
+                            "Error Loading Specification"
                         }
                         p { class: "text-muted-foreground mb-4", "{err}" }
                         Link {
                             to: Route::NipsHome {},
                             class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
-                            "← Back to NIPs"
+                            "← Back to Docs"
                         }
                     }
                 }
@@ -458,15 +543,13 @@ pub fn NipDetail(nip_id: String) -> Element {
                 if !*is_custom.read() {
                     div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
                         p {
-                            "This NIP is from the official "
+                            "This specification is from the "
                             a {
-                                href: "https://github.com/nostr-protocol/nips",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
+                                href: "/docs/nips/",
                                 class: "text-primary hover:underline",
-                                "nostr-protocol/nips"
+                                "nostr.blue documentation"
                             }
-                            " repository."
+                            "."
                         }
                     }
                 }
