@@ -2024,9 +2024,6 @@
   .min-w-\[200px\] {
     min-width: 200px;
   }
-  .min-w-\[240px\] {
-    min-width: 240px;
-  }
   .min-w-\[350px\] {
     min-width: 350px;
   }
@@ -2506,9 +2503,6 @@
   }
   .border-blue-300 {
     border-color: var(--color-blue-300);
-  }
-  .border-blue-400 {
-    border-color: var(--color-blue-400);
   }
   .border-blue-500 {
     border-color: var(--color-blue-500);
@@ -4654,9 +4648,6 @@
   }
   .opacity-25 {
     opacity: 25%;
-  }
-  .opacity-40 {
-    opacity: 40%;
   }
   .opacity-50 {
     opacity: 50%;
