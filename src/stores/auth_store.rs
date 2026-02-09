@@ -488,6 +488,7 @@ pub async fn logout() {
     crate::stores::relay::stop_relay_list_subscription().await;
     crate::stores::cashu_cdk_bridge::clear_multi_wallet();
     crate::stores::shop_store::clear_caches();
+    crate::stores::dms::clear_caches();
     crate::stores::shop_store::reset_orders_loaded_flag();
     spawn(async move {
         crate::services::search_relays::invalidate_search_relay_cache().await;

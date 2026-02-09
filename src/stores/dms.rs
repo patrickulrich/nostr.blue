@@ -24,6 +24,12 @@ fn get_decrypt_cache() -> &'static Mutex<HashMap<EventId, DecryptResult>> {
 
 const RETRY_COOLDOWN_SECS: u64 = 10;
 
+/// Clear DM caches (called on logout/account switch)
+pub fn clear_caches() {
+    CONVERSATIONS.read().data().write().clear();
+    get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 /// Represents a message in a conversation, handling NIP-04 and NIP-17
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationMessage {
