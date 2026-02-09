@@ -1,11 +1,11 @@
 //! Modal for customizing sidebar navigation layout
-//! Supports drag-to-reorder and moving items between active/available pools
+//! Supports drag-to-reorder with visual page boundary dividers
 use crate::components::icons::{
     self as icons, BellIcon, BookOpenIcon, BookmarkIcon, CameraIcon, CompassIcon,
     HomeIcon, MailIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, VideoIcon,
 };
 use crate::stores::sidebar_store::{
-    default_sidebar_items, get_available_items, save_sidebar_preferences, SidebarItem,
+    default_sidebar_items, save_sidebar_preferences, SidebarItem,
     DEFAULT_MAIN_SIDEBAR_SLOTS, MAX_MAIN_SIDEBAR_SLOTS, SIDEBAR_ITEMS, SIDEBAR_SLOT_COUNT,
 };
 use dioxus::prelude::*;
@@ -15,49 +15,17 @@ pub struct SidebarCustomizerModalProps {
 }
 #[component]
 pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
-    let mut local_active_items = use_signal(|| SIDEBAR_ITEMS.read().clone());
+    let mut local_items = use_signal(|| SIDEBAR_ITEMS.read().clone());
     let mut local_slot_count = use_signal(|| *SIDEBAR_SLOT_COUNT.read());
     let mut saving = use_signal(|| false);
     let mut error_msg = use_signal(|| None::<String>);
-    let mut dragging_from_active = use_signal(|| None::<usize>);
-    let mut dragging_from_available = use_signal(|| None::<SidebarItem>);
-    let mut drag_over_active_index = use_signal(|| None::<usize>);
-    let mut drag_over_available = use_signal(|| false);
-    let mut drag_over_active_end = use_signal(|| false);
+    let mut dragging_from_index = use_signal(|| None::<usize>);
+    let mut drag_over_index = use_signal(|| None::<usize>);
     let mut touch_dragging_index = use_signal(|| None::<usize>);
-    let _touch_dragging_item = use_signal(|| None::<SidebarItem>);
     let mut touch_over_index = use_signal(|| None::<usize>);
     let mut is_touch_dragging = use_signal(|| false);
-    let available_items = use_memo(move || get_available_items(
-        &local_active_items.read(),
-    ));
-    let mut remove_from_active = move |index: usize| {
-        local_active_items
-            .with_mut(|items| {
-                if index < items.len() {
-                    items.remove(index);
-                }
-            });
-    };
-    let mut add_to_active = move |item: SidebarItem| {
-        local_active_items
-            .with_mut(|items| {
-                if !items.contains(&item) {
-                    items.push(item);
-                }
-            });
-    };
-    let mut add_to_active_at = move |item: SidebarItem, index: usize| {
-        local_active_items
-            .with_mut(|items| {
-                if !items.contains(&item) {
-                    let insert_idx = index.min(items.len());
-                    items.insert(insert_idx, item);
-                }
-            });
-    };
-    let mut reorder_active = move |from_idx: usize, to_idx: usize| {
-        local_active_items
+    let mut reorder_items = move |from_idx: usize, to_idx: usize| {
+        local_items
             .with_mut(|items| {
                 if from_idx != to_idx && from_idx < items.len() && to_idx <= items.len()
                 {
@@ -71,10 +39,10 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
     let handle_save = move |_| {
         saving.set(true);
         error_msg.set(None);
-        let items = local_active_items.read().clone();
-        let slot_count = *local_slot_count.read();
+        let items = local_items.read().clone();
+        let items_per_page = *local_slot_count.read();
         spawn(async move {
-            match save_sidebar_preferences(items, slot_count).await {
+            match save_sidebar_preferences(items, items_per_page).await {
                 Ok(_) => {
                     props.on_close.call(());
                 }
@@ -90,10 +58,9 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
             props.on_close.call(());
         }
     };
-    let active_count = local_active_items.read().len();
-    let slot_count = *local_slot_count.read();
-    let main_count = active_count.min(slot_count);
-    let more_count = active_count.saturating_sub(slot_count);
+    let total_count = local_items.read().len();
+    let slot_count = (*local_slot_count.read()).max(1);
+    let total_pages = if slot_count > 0 { total_count.div_ceil(slot_count) } else { 1 };
     rsx! {
         div {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4",
@@ -116,10 +83,10 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                     }
                 }
                 p { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
-                    "Drag to reorder items. Adjust how many appear in the main sidebar vs More menu."
+                    "Drag to reorder items. Adjust how many items appear per page."
                 }
                 div { class: "flex items-center gap-3 mb-4 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg",
-                    span { class: "text-sm text-gray-700 dark:text-gray-300", "Main sidebar items:" }
+                    span { class: "text-sm text-gray-700 dark:text-gray-300", "Items per page:" }
                     div { class: "flex items-center gap-1",
                         button {
                             class: "w-8 h-8 flex items-center justify-center rounded bg-gray-200 dark:bg-gray-600 \
@@ -154,88 +121,57 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                         }
                     }
                     span { class: "text-xs text-gray-500 dark:text-gray-400",
-                        "(1-{MAX_MAIN_SIDEBAR_SLOTS})"
+                        "{total_count} items · {total_pages} pages"
                     }
                 }
                 div { class: "mb-6",
                     div { class: "flex items-center justify-between mb-2",
                         h4 { class: "font-medium text-gray-700 dark:text-gray-300",
-                            "Active Items"
+                            "Item Order"
                         }
-                        span { class: "text-xs text-gray-500", "{main_count} main + {more_count} more" }
                     }
                     div {
-                        class: format!(
-                            "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg min-h-[60px] transition-colors {}",
-                            if *drag_over_active_end.read() && dragging_from_available().is_some() {
-                                "ring-2 ring-blue-500"
-                            } else {
-                                ""
-                            },
-                        ),
-                        ondragover: move |e| {
-                            e.prevent_default();
-                            drag_over_active_end.set(true);
-                        },
-                        ondragleave: move |_| {
-                            drag_over_active_end.set(false);
-                        },
-                        ondrop: move |e| {
-                            e.prevent_default();
-                            if let Some(item) = *dragging_from_available.read() {
-                                add_to_active(item);
-                            }
-                            dragging_from_available.set(None);
-                            dragging_from_active.set(None);
-                            drag_over_active_end.set(false);
-                        },
-                        for (index , item) in local_active_items.read().iter().cloned().enumerate() {
-                            Fragment { key: "{index}-{item:?}",
-                                if index == *local_slot_count.read() {
+                        class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg min-h-[60px] transition-colors",
+                        for (index , item) in local_items.read().iter().cloned().enumerate() {
+                            Fragment { key: "{item:?}",
+                                if index > 0 && index % slot_count == 0 {
                                     div { class: "w-full flex items-center gap-2 my-1",
                                         div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
                                         span { class: "text-xs text-gray-500 dark:text-gray-400 px-2",
-                                            "More Menu"
+                                            "Page {index / slot_count + 1}"
                                         }
                                         div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
                                     }
                                 }
                                 div {
                                     id: "sidebar-item-{index}",
-                                    class: "relative group",
+                                    class: "relative",
                                     draggable: "true",
                                     ondragstart: move |e| {
-                                        dragging_from_active.set(Some(index));
-                                        dragging_from_available.set(None);
-                                        let _ = e.data_transfer().set_data("text/plain", &format!("active:{}", index));
+                                        dragging_from_index.set(Some(index));
+                                        let _ = e.data_transfer().set_data("text/plain", &format!("{}", index));
                                     },
                                     ondragend: move |_| {
-                                        dragging_from_active.set(None);
-                                        drag_over_active_index.set(None);
-                                        drag_over_active_end.set(false);
+                                        dragging_from_index.set(None);
+                                        drag_over_index.set(None);
                                     },
                                     ondragover: move |e| {
                                         e.prevent_default();
-                                        drag_over_active_index.set(Some(index));
-                                        drag_over_active_end.set(false);
+                                        drag_over_index.set(Some(index));
                                     },
                                     ondragleave: move |_| {
-                                        if drag_over_active_index() == Some(index) {
-                                            drag_over_active_index.set(None);
+                                        if drag_over_index() == Some(index) {
+                                            drag_over_index.set(None);
                                         }
                                     },
                                     ondrop: move |e| {
                                         e.prevent_default();
                                         e.stop_propagation();
-                                        if let Some(from_idx) = *dragging_from_active.read() {
-                                            reorder_active(from_idx, index);
+                                        if let Some(from_idx) = *dragging_from_index.read() {
+                                            reorder_items(from_idx, index);
                                         }
-                                        if let Some(avail_item) = *dragging_from_available.read() {
-                                            add_to_active_at(avail_item, index);
-                                        }
-                                        drag_over_active_index.set(None);
-                                        dragging_from_active.set(None);
-                                        dragging_from_available.set(None);
+                                        drag_over_index.set(None);
+                                        dragging_from_index.set(None);
                                     },
                                     ontouchstart: move |_| {
                                         touch_dragging_index.set(Some(index));
@@ -286,7 +222,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                             *touch_over_index.read(),
                                         ) {
                                             if from_idx != to_idx {
-                                                reorder_active(from_idx, to_idx);
+                                                reorder_items(from_idx, to_idx);
                                             }
                                         }
                                         touch_dragging_index.set(None);
@@ -301,15 +237,15 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                     div {
                                         class: format!(
                                             "px-3 py-2 bg-white dark:bg-gray-600 rounded-lg cursor-move \
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 transition-all flex items-center gap-2 {} {}",
-                                            if dragging_from_active() == Some(index) || touch_dragging_index() == Some(index)
+                                             transition-all flex items-center gap-2 {} {}",
+                                            if dragging_from_index() == Some(index) || touch_dragging_index() == Some(index)
                                             {
                                                 "opacity-50 scale-95"
                                             } else {
                                                 "opacity-100"
                                             },
-                                            if (drag_over_active_index() == Some(index)
-                                                && dragging_from_active() != Some(index))
+                                            if (drag_over_index() == Some(index)
+                                                && dragging_from_index() != Some(index))
                                                 || (touch_over_index() == Some(index)
                                                     && touch_dragging_index() != Some(index) && *is_touch_dragging.read())
                                             {
@@ -322,99 +258,8 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                         span { class: "text-sm text-gray-700 dark:text-gray-200",
                                             "{item.label()}"
                                         }
-                                        button {
-                                            class: "ml-1 w-5 h-5 bg-red-500 hover:bg-red-600 text-white \
-                                                rounded-full text-xs opacity-0 group-hover:opacity-100 \
-                                                transition-opacity flex items-center justify-center",
-                                            onclick: move |e| {
-                                                e.stop_propagation();
-                                                remove_from_active(index);
-                                            },
-                                            "×"
-                                        }
                                     }
                                 }
-                            }
-                        }
-                        if local_active_items.read().is_empty() {
-                            div { class: "w-full text-center text-gray-400 py-4",
-                                "No items. Drag items from below to add them."
-                            }
-                        }
-                    }
-                }
-                div { class: "mb-4",
-                    h4 { class: "font-medium text-gray-700 dark:text-gray-300 mb-2",
-                        "Available Items (Hidden)"
-                    }
-                    div {
-                        class: format!(
-                            "flex flex-wrap gap-2 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg \
-                                                                                                                                                                                                                                                                                                                     min-h-[40px] border-2 border-dashed {} transition-colors",
-                            if *drag_over_available.read() || dragging_from_active().is_some() {
-                                "border-blue-400"
-                            } else {
-                                "border-gray-300 dark:border-gray-600"
-                            },
-                        ),
-                        ondragover: move |e| {
-                            e.prevent_default();
-                            drag_over_available.set(true);
-                        },
-                        ondragleave: move |_| {
-                            drag_over_available.set(false);
-                        },
-                        ondrop: move |e| {
-                            e.prevent_default();
-                            if let Some(from_idx) = *dragging_from_active.read() {
-                                remove_from_active(from_idx);
-                            }
-                            drag_over_available.set(false);
-                            dragging_from_active.set(None);
-                        },
-                        for item in available_items.read().iter().cloned() {
-                            div {
-                                key: "{item:?}-available",
-                                class: "relative",
-                                draggable: "true",
-                                ondragstart: move |e| {
-                                    dragging_from_available.set(Some(item));
-                                    dragging_from_active.set(None);
-                                    let _ = e
-                                        .data_transfer()
-                                        .set_data("text/plain", &format!("available:{:?}", item));
-                                },
-                                ondragend: move |_| {
-                                    dragging_from_available.set(None);
-                                    drag_over_active_end.set(false);
-                                },
-                                div {
-                                    class: format!(
-                                        "px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg \
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         cursor-move flex items-center gap-2 opacity-60 \
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         hover:opacity-100 transition-opacity {}",
-                                        if dragging_from_available() == Some(item) { "opacity-40 scale-95" } else { "" },
-                                    ),
-                                    {render_sidebar_icon(&item, "w-5 h-5")}
-                                    span { class: "text-sm text-gray-600 dark:text-gray-300",
-                                        "{item.label()}"
-                                    }
-                                    button {
-                                        class: "ml-1 w-5 h-5 bg-green-500 hover:bg-green-600 \
-                                                text-white rounded-full text-xs flex items-center \
-                                                justify-center",
-                                        onclick: move |e| {
-                                            e.stop_propagation();
-                                            add_to_active(item);
-                                        },
-                                        "+"
-                                    }
-                                }
-                            }
-                        }
-                        if available_items.read().is_empty() {
-                            div { class: "w-full text-center text-gray-400 py-2 text-sm",
-                                "All items are active. Drag items here to hide them."
                             }
                         }
                     }
@@ -431,7 +276,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                         class: "text-sm text-gray-500 hover:text-gray-700 \
                                 dark:hover:text-gray-300",
                         onclick: move |_| {
-                            local_active_items.set(default_sidebar_items());
+                            local_items.set(default_sidebar_items());
                             local_slot_count.set(DEFAULT_MAIN_SIDEBAR_SLOTS);
                         },
                         disabled: *saving.read(),
@@ -448,7 +293,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                         button {
                             class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white \
                                     rounded font-medium disabled:opacity-50",
-                            disabled: *saving.read() || local_active_items.read().is_empty(),
+                            disabled: *saving.read() || local_items.read().is_empty(),
                             onclick: handle_save,
                             if *saving.read() {
                                 "Saving..."

@@ -11,6 +11,20 @@ use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
+fn extract_title_from_content(content: &str) -> Option<String> {
+    content.lines()
+        .find(|l| l.starts_with("# ") || l.starts_with("## "))
+        .map(|l| l.trim_start_matches('#').trim().to_string())
+}
+
+/// Format a spec title, stripping duplicate prefix if the extracted title already contains it.
+/// e.g. prefix="NUT", num="00", title="NUT-00: Notation..." → "NUT-00: Notation..."
+fn format_spec_title(prefix: &str, num: &str, extracted_title: &str) -> String {
+    let prefix_pattern = format!("{}-{}: ", prefix, num);
+    let clean = extracted_title.strip_prefix(&prefix_pattern).unwrap_or(extracted_title);
+    format!("{}-{}: {}", prefix, num, clean)
+}
+
 /// NIP detail page - displays either an official NIP from GitHub or a custom NIP from Nostr
 #[component]
 pub fn NipDetail(nip_id: String) -> Element {
@@ -36,13 +50,82 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut like_count = use_signal(|| 0usize);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = *nostr_client::HAS_SIGNER.read();
+    let nip_id_for_render = nip_id.clone();
     use_effect(move || {
         let id = nip_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         spawn(async move {
             loading.set(true);
             error.set(None);
-            if id.starts_with("naddr") {
+            if let Some(num) = id.strip_prefix("nut-") {
+                // Cashu NUT document
+                is_custom.set(false);
+                nip_title.set(format!("NUT-{}", num));
+                match github_nips::fetch_nut_content(num).await {
+                    Ok(content) => {
+                        if let Some(title) = extract_title_from_content(&content) {
+                            nip_title.set(format_spec_title("NUT", num, &title));
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if let Some(num) = id.strip_prefix("bud-") {
+                // Blossom BUD document
+                is_custom.set(false);
+                nip_title.set(format!("BUD-{}", num));
+                match github_nips::fetch_bud_content(num).await {
+                    Ok(content) => {
+                        if let Some(title) = extract_title_from_content(&content) {
+                            nip_title.set(format_spec_title("BUD", num, &title));
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if let Some(num) = id.strip_prefix("nkbip-") {
+                // NKBIP document
+                is_custom.set(false);
+                nip_title.set(format!("NKBIP-{}", num));
+                match github_nips::fetch_nkbip_content(num).await {
+                    Ok(content) => {
+                        if let Some(title) = extract_title_from_content(&content) {
+                            nip_title.set(format_spec_title("NKBIP", num, &title));
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if id == "market-spec" {
+                // Market specification document
+                is_custom.set(false);
+                nip_title.set("Market Specification".to_string());
+                match github_nips::fetch_market_spec().await {
+                    Ok(content) => {
+                        if let Some(title) = extract_title_from_content(&content) {
+                            nip_title.set(title);
+                        }
+                        nip_content.set(Some(content));
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        loading.set(false);
+                    }
+                }
+            } else if id.starts_with("naddr") {
                 is_custom.set(true);
                 if !client_initialized {
                     log::info!(
@@ -85,15 +168,12 @@ pub fn NipDetail(nip_id: String) -> Element {
                     }
                 }
             } else {
+                // Official NIP
                 is_custom.set(false);
                 nip_title.set(format!("NIP-{}", id));
                 match github_nips::fetch_nip_content(&id).await {
                     Ok(content) => {
-                        if let Some(first_line) = content
-                            .lines()
-                            .find(|l| l.starts_with("# ") || l.starts_with("## "))
-                        {
-                            let title = first_line.trim_start_matches('#').trim();
+                        if let Some(title) = extract_title_from_content(&content) {
                             nip_title.set(format!("NIP-{}: {}", id, title));
                         }
                         nip_content.set(Some(content));
@@ -324,13 +404,13 @@ pub fn NipDetail(nip_id: String) -> Element {
                 div { class: "max-w-4xl mx-auto",
                     div { class: "p-6 bg-destructive/10 border border-destructive rounded-lg text-center",
                         h2 { class: "text-xl font-semibold mb-2 text-destructive",
-                            "Error Loading NIP"
+                            "Error Loading Specification"
                         }
                         p { class: "text-muted-foreground mb-4", "{err}" }
                         Link {
                             to: Route::NipsHome {},
                             class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
-                            "← Back to NIPs"
+                            "← Back to Docs"
                         }
                     }
                 }
@@ -456,17 +536,30 @@ pub fn NipDetail(nip_id: String) -> Element {
                     }
                 }
                 if !*is_custom.read() {
-                    div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
-                        p {
-                            "This NIP is from the official "
-                            a {
-                                href: "https://github.com/nostr-protocol/nips",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                class: "text-primary hover:underline",
-                                "nostr-protocol/nips"
+                    {
+                        let docs_path = if nip_id_for_render.starts_with("nut-") {
+                            "/docs/nuts/"
+                        } else if nip_id_for_render.starts_with("bud-") {
+                            "/docs/blossom/"
+                        } else if nip_id_for_render.starts_with("nkbip-") {
+                            "/docs/NKBIPs/"
+                        } else if nip_id_for_render == "market-spec" {
+                            "/docs/market-spec/"
+                        } else {
+                            "/docs/nips/"
+                        };
+                        rsx! {
+                            div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
+                                p {
+                                    "This specification is from the "
+                                    a {
+                                        href: docs_path,
+                                        class: "text-primary hover:underline",
+                                        "nostr.blue documentation"
+                                    }
+                                    "."
+                                }
                             }
-                            " repository."
                         }
                     }
                 }

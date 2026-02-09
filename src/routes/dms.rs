@@ -5,6 +5,7 @@ use crate::utils::time;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::Task;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 /// Guard struct that cancels polling task on drop
 #[derive(Clone)]
@@ -46,6 +47,44 @@ extern "C" {
     fn isDMsScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
     fn isPageVisible() -> bool;
 }
+/// Run the decrypt previews pass if not already running.
+async fn run_decrypt_if_idle(
+    mut decrypting: Signal<bool>,
+    previews: Signal<HashMap<String, String>>,
+) {
+    if !*decrypting.peek() {
+        decrypting.set(true);
+        decrypt_previews_sequentially(previews).await;
+        decrypting.set(false);
+    }
+}
+/// Decrypt the last message preview for each conversation sequentially,
+/// so extension signers show at most one popup at a time.
+async fn decrypt_previews_sequentially(mut previews: Signal<HashMap<String, String>>) {
+    let conversations = dms::get_conversations_sorted();
+    for conversation in &conversations {
+        let pubkey = conversation.pubkey.clone();
+        if let Some(last_msg) = conversation.messages.last() {
+            match dms::decrypt_dm(last_msg).await {
+                Ok(content) => {
+                    let preview = if content.chars().count() > 50 {
+                        let truncated: String = content.chars().take(50).collect();
+                        format!("{}...", truncated)
+                    } else {
+                        content
+                    };
+                    previews.write().insert(pubkey, preview);
+                }
+                Err(_) => {
+                    previews.write().insert(pubkey, "[Unable to decrypt]".to_string());
+                }
+            }
+        } else {
+            previews.write().insert(pubkey, "No messages".to_string());
+        }
+    }
+}
+
 #[component]
 pub fn DMs() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -54,6 +93,10 @@ pub fn DMs() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
+    let mut previews = use_signal(HashMap::<String, String>::new);
+    let mut decrypting = use_signal(|| false);
+    let mut dm_poll_task = use_signal(|| None::<Task>);
+    use_hook(move || PollTaskGuard { task: dm_poll_task });
     use_effect(
         use_reactive(
             (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
@@ -65,6 +108,8 @@ pub fn DMs() -> Element {
                     return;
                 }
                 if !is_authenticated {
+                    previews.write().clear();
+                    decrypting.set(false);
                     return;
                 }
                 loading.set(true);
@@ -73,6 +118,7 @@ pub fn DMs() -> Element {
                     match dms::init_dms().await {
                         Ok(_) => {
                             log::info!("DMs loaded successfully");
+                            run_decrypt_if_idle(decrypting, previews).await;
                         }
                         Err(e) => {
                             error.set(Some(e));
@@ -87,19 +133,25 @@ pub fn DMs() -> Element {
         use_reactive(
             (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
             move |(client_initialized, is_authenticated)| {
+                if let Some(task) = dm_poll_task.peek().as_ref() {
+                    task.cancel();
+                }
                 if !client_initialized || !is_authenticated {
                     return;
                 }
-                spawn(async move {
+                let task = spawn(async move {
                     loop {
                         gloo_timers::future::sleep(std::time::Duration::from_secs(30))
                             .await;
                         if auth_store::is_authenticated() && isPageVisible() {
                             log::debug!("Auto-refreshing DMs...");
-                            let _ = dms::init_dms().await;
+                            if dms::init_dms().await.is_ok() {
+                                run_decrypt_if_idle(decrypting, previews).await;
+                            }
                         }
                     }
                 });
+                dm_poll_task.set(Some(task));
             },
         ),
     );
@@ -112,6 +164,7 @@ pub fn DMs() -> Element {
             match dms::init_dms().await {
                 Ok(_) => {
                     log::info!("DMs refreshed successfully");
+                    run_decrypt_if_idle(decrypting, previews).await;
                 }
                 Err(e) => {
                     log::error!("Failed to refresh DMs: {}", e);
@@ -190,11 +243,13 @@ pub fn DMs() -> Element {
                                             for conversation in conversations {
                                                 {
                                                     let conv_pubkey = conversation.pubkey.clone();
+                                                    let preview = previews.read().get(&conv_pubkey).cloned().unwrap_or_else(|| "Decrypting...".to_string());
                                                     rsx! {
                                                         ConversationListItem {
                                                             key: "{conv_pubkey}",
                                                             conversation: conversation.clone(),
                                                             selected: selected_conversation.read().as_ref() == Some(&conversation.pubkey),
+                                                            preview,
                                                             on_select: move |pk: String| {
                                                                 log::info!("Selected conversation: {}", pk);
                                                                 selected_conversation.set(Some(pk));
@@ -239,10 +294,10 @@ pub fn DMs() -> Element {
 fn ConversationListItem(
     conversation: dms::Conversation,
     selected: bool,
+    preview: String,
     on_select: EventHandler<String>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
-    let mut decrypted_preview = use_signal(|| "Loading...".to_string());
     let pubkey = conversation.pubkey.clone();
     use_effect(move || {
         let pk = pubkey.clone();
@@ -253,31 +308,6 @@ fn ConversationListItem(
             }
         });
     });
-    let last_msg = conversation.messages.last().cloned();
-    use_effect(move || {
-        if let Some(msg) = &last_msg {
-            let msg_clone = msg.clone();
-            spawn(async move {
-                match dms::decrypt_dm(&msg_clone).await {
-                    Ok(content) => {
-                        let preview = if content.chars().count() > 50 {
-                            let truncated: String = content.chars().take(50).collect();
-                            format!("{}...", truncated)
-                        } else {
-                            content
-                        };
-                        decrypted_preview.set(preview);
-                    }
-                    Err(_) => {
-                        decrypted_preview.set("[Unable to decrypt]".to_string());
-                    }
-                }
-            });
-        } else {
-            decrypted_preview.set("No messages".to_string());
-        }
-    });
-    let preview = decrypted_preview.read().clone();
     let display_name = profile
         .read()
         .as_ref()
@@ -446,14 +476,13 @@ fn ConversationView(pubkey: String) -> Element {
             }
         });
     });
-    let send_message = move |_| {
+    let mut do_send = move |recipient: String| {
         let content = message_input.read().clone();
         if content.trim().is_empty() {
             return;
         }
         sending.set(true);
         send_feedback.set(None);
-        let recipient = pubkey_for_send.clone();
         spawn(async move {
             match dms::send_dm(recipient, content).await {
                 Ok(result) => {
@@ -509,6 +538,9 @@ fn ConversationView(pubkey: String) -> Element {
                 }
             }
         });
+    };
+    let send_message = move |_| {
+        do_send(pubkey_for_send.clone());
     };
     let display_name = profile
         .read()
@@ -601,68 +633,7 @@ fn ConversationView(pubkey: String) -> Element {
                         oninput: move |evt| message_input.set(evt.value().clone()),
                         onkeydown: move |evt| {
                             if evt.key() == Key::Enter && !evt.modifiers().shift() {
-                                let content = message_input.read().clone();
-                                if content.trim().is_empty() {
-                                    return;
-                                }
-                                sending.set(true);
-                                send_feedback.set(None);
-                                let recipient = pubkey_for_input.clone();
-                                spawn(async move {
-                                    match dms::send_dm(recipient, content).await {
-                                        Ok(result) => {
-                                            sending.set(false);
-                                            let rate = result.success_rate();
-                                            if !result.is_success() {
-                                                feedback_version.set(feedback_version() + 1);
-                                                let current_version = feedback_version();
-                                                send_feedback
-                                                    .set(
-                                                        Some((false, "Failed to send to any relay".to_string())),
-                                                    );
-                                                gloo_timers::future::TimeoutFuture::new(3000).await;
-                                                if feedback_version() == current_version {
-                                                    send_feedback.set(None);
-                                                }
-                                            } else if result.has_failures() {
-                                                message_input.set(String::new());
-                                                log::info!("Message sent successfully");
-                                                feedback_version.set(feedback_version() + 1);
-                                                let current_version = feedback_version();
-                                                send_feedback
-                                                    .set(
-                                                        Some((
-                                                            true,
-                                                            format!(
-                                                                "Sent to {:.0}% of relays ({}/{})",
-                                                                rate,
-                                                                result.success_count(),
-                                                                result.total_attempted(),
-                                                            ),
-                                                        )),
-                                                    );
-                                                gloo_timers::future::TimeoutFuture::new(3000).await;
-                                                if feedback_version() == current_version {
-                                                    send_feedback.set(None);
-                                                }
-                                            } else {
-                                                message_input.set(String::new());
-                                                log::info!("Message sent successfully");
-                                            }
-                                        }
-                                        Err(e) => {
-                                            sending.set(false);
-                                            log::error!("Failed to send message: {}", e);
-                                            feedback_version.set(feedback_version() + 1);
-                                            let current_version = feedback_version();
-                                            send_feedback.set(Some((false, format!("Error: {}", e))));
-                                            gloo_timers::future::TimeoutFuture::new(5000).await;
-                                            if feedback_version() == current_version {
-                                                send_feedback.set(None);
-                                            }
-                                        }
-                                    }
-                                });
+                                do_send(pubkey_for_input.clone());
                             }
                         },
                     }
