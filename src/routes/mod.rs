@@ -738,8 +738,8 @@ fn Layout() -> Element {
                 aside { class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
                         {
-                            let current_page = *sidebar_page.read();
                             let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
+                            let current_page = (*sidebar_page.read()).min(total_pages.saturating_sub(1));
                             let is_last_page = current_page >= total_pages.saturating_sub(1);
                             let has_more = total_pages > 1 && !is_last_page;
                             rsx! {
@@ -933,8 +933,8 @@ fn Layout() -> Element {
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
                                 {
-                                    let current_page = *sidebar_page.read();
                                     let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
+                                    let current_page = (*sidebar_page.read()).min(total_pages.saturating_sub(1));
                                     let is_last_page = current_page >= total_pages.saturating_sub(1);
                                     let has_more = total_pages > 1 && !is_last_page;
                                     rsx! {

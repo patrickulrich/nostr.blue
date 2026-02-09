@@ -93,8 +93,8 @@ pub fn DMs() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
-    let previews = use_signal(HashMap::<String, String>::new);
-    let decrypting = use_signal(|| false);
+    let mut previews = use_signal(HashMap::<String, String>::new);
+    let mut decrypting = use_signal(|| false);
     let mut dm_poll_task = use_signal(|| None::<Task>);
     use_hook(move || PollTaskGuard { task: dm_poll_task });
     use_effect(
@@ -108,6 +108,8 @@ pub fn DMs() -> Element {
                     return;
                 }
                 if !is_authenticated {
+                    previews.write().clear();
+                    decrypting.set(false);
                     return;
                 }
                 loading.set(true);
