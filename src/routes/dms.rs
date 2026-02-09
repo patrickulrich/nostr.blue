@@ -476,14 +476,13 @@ fn ConversationView(pubkey: String) -> Element {
             }
         });
     });
-    let send_message = move |_| {
+    let mut do_send = move |recipient: String| {
         let content = message_input.read().clone();
         if content.trim().is_empty() {
             return;
         }
         sending.set(true);
         send_feedback.set(None);
-        let recipient = pubkey_for_send.clone();
         spawn(async move {
             match dms::send_dm(recipient, content).await {
                 Ok(result) => {
@@ -539,6 +538,9 @@ fn ConversationView(pubkey: String) -> Element {
                 }
             }
         });
+    };
+    let send_message = move |_| {
+        do_send(pubkey_for_send.clone());
     };
     let display_name = profile
         .read()
@@ -631,68 +633,7 @@ fn ConversationView(pubkey: String) -> Element {
                         oninput: move |evt| message_input.set(evt.value().clone()),
                         onkeydown: move |evt| {
                             if evt.key() == Key::Enter && !evt.modifiers().shift() {
-                                let content = message_input.read().clone();
-                                if content.trim().is_empty() {
-                                    return;
-                                }
-                                sending.set(true);
-                                send_feedback.set(None);
-                                let recipient = pubkey_for_input.clone();
-                                spawn(async move {
-                                    match dms::send_dm(recipient, content).await {
-                                        Ok(result) => {
-                                            sending.set(false);
-                                            let rate = result.success_rate();
-                                            if !result.is_success() {
-                                                feedback_version.set(feedback_version() + 1);
-                                                let current_version = feedback_version();
-                                                send_feedback
-                                                    .set(
-                                                        Some((false, "Failed to send to any relay".to_string())),
-                                                    );
-                                                gloo_timers::future::TimeoutFuture::new(3000).await;
-                                                if feedback_version() == current_version {
-                                                    send_feedback.set(None);
-                                                }
-                                            } else if result.has_failures() {
-                                                message_input.set(String::new());
-                                                log::info!("Message sent successfully");
-                                                feedback_version.set(feedback_version() + 1);
-                                                let current_version = feedback_version();
-                                                send_feedback
-                                                    .set(
-                                                        Some((
-                                                            true,
-                                                            format!(
-                                                                "Sent to {:.0}% of relays ({}/{})",
-                                                                rate,
-                                                                result.success_count(),
-                                                                result.total_attempted(),
-                                                            ),
-                                                        )),
-                                                    );
-                                                gloo_timers::future::TimeoutFuture::new(3000).await;
-                                                if feedback_version() == current_version {
-                                                    send_feedback.set(None);
-                                                }
-                                            } else {
-                                                message_input.set(String::new());
-                                                log::info!("Message sent successfully");
-                                            }
-                                        }
-                                        Err(e) => {
-                                            sending.set(false);
-                                            log::error!("Failed to send message: {}", e);
-                                            feedback_version.set(feedback_version() + 1);
-                                            let current_version = feedback_version();
-                                            send_feedback.set(Some((false, format!("Error: {}", e))));
-                                            gloo_timers::future::TimeoutFuture::new(5000).await;
-                                            if feedback_version() == current_version {
-                                                send_feedback.set(None);
-                                            }
-                                        }
-                                    }
-                                });
+                                do_send(pubkey_for_input.clone());
                             }
                         },
                     }
