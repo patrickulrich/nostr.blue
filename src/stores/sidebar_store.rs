@@ -500,6 +500,7 @@ pub async fn save_sidebar_preferences(
     items: Vec<SidebarItem>,
     items_per_page: usize,
 ) -> Result<(), String> {
+    let items_per_page = items_per_page.clamp(1, MAX_MAIN_SIDEBAR_SLOTS);
     log::info!(
         "Saving {} sidebar items with {} per page to Nostr (NIP-78)...", items.len(),
         items_per_page

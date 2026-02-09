@@ -5,21 +5,28 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use instant::Instant;
+use lru::LruCache;
 use nostr_sdk::nips::nip17;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+
+const MAX_DECRYPT_CACHE_SIZE: usize = 500;
+
 /// Cached decryption result for NIP-04 messages
 enum DecryptResult {
     Success(String),
     RetryableFailure(Instant),
 }
 
-static DECRYPT_CACHE: OnceLock<Mutex<HashMap<EventId, DecryptResult>>> = OnceLock::new();
+static DECRYPT_CACHE: OnceLock<Mutex<LruCache<EventId, DecryptResult>>> = OnceLock::new();
 
-fn get_decrypt_cache() -> &'static Mutex<HashMap<EventId, DecryptResult>> {
-    DECRYPT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn get_decrypt_cache() -> &'static Mutex<LruCache<EventId, DecryptResult>> {
+    DECRYPT_CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(NonZeroUsize::new(MAX_DECRYPT_CACHE_SIZE).unwrap()))
+    })
 }
 
 const RETRY_COOLDOWN_SECS: u64 = 10;
@@ -395,7 +402,7 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
     }
     // Check decrypt cache first
     {
-        let cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.get(&event.id) {
             match cached {
                 DecryptResult::Success(content) => return Ok(content.clone()),
@@ -437,13 +444,13 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueEr
         Ok(decrypted) => {
             log::debug!("Successfully decrypted NIP-04 message");
             let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
-            cache.insert(event.id, DecryptResult::Success(decrypted.clone()));
+            cache.put(event.id, DecryptResult::Success(decrypted.clone()));
             Ok(decrypted)
         }
         Err(e) => {
             log::error!("Failed to decrypt NIP-04 message: {}", e);
             let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
-            cache.insert(event.id, DecryptResult::RetryableFailure(Instant::now()));
+            cache.put(event.id, DecryptResult::RetryableFailure(Instant::now()));
             Err(NostrBlueError::Other(format!("Failed to decrypt NIP-04 message: {}", e)))
         }
     }

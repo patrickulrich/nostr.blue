@@ -59,7 +59,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
         }
     };
     let total_count = local_items.read().len();
-    let slot_count = *local_slot_count.read();
+    let slot_count = (*local_slot_count.read()).max(1);
     let total_pages = if slot_count > 0 { total_count.div_ceil(slot_count) } else { 1 };
     rsx! {
         div {

@@ -47,6 +47,17 @@ extern "C" {
     fn isDMsScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
     fn isPageVisible() -> bool;
 }
+/// Run the decrypt previews pass if not already running.
+async fn run_decrypt_if_idle(
+    mut decrypting: Signal<bool>,
+    previews: Signal<HashMap<String, String>>,
+) {
+    if !*decrypting.peek() {
+        decrypting.set(true);
+        decrypt_previews_sequentially(previews).await;
+        decrypting.set(false);
+    }
+}
 /// Decrypt the last message preview for each conversation sequentially,
 /// so extension signers show at most one popup at a time.
 async fn decrypt_previews_sequentially(mut previews: Signal<HashMap<String, String>>) {
@@ -83,7 +94,9 @@ pub fn DMs() -> Element {
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
     let previews = use_signal(HashMap::<String, String>::new);
-    let mut decrypting = use_signal(|| false);
+    let decrypting = use_signal(|| false);
+    let mut dm_poll_task = use_signal(|| None::<Task>);
+    use_hook(move || PollTaskGuard { task: dm_poll_task });
     use_effect(
         use_reactive(
             (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
@@ -103,11 +116,7 @@ pub fn DMs() -> Element {
                     match dms::init_dms().await {
                         Ok(_) => {
                             log::info!("DMs loaded successfully");
-                            if !*decrypting.peek() {
-                                decrypting.set(true);
-                                decrypt_previews_sequentially(previews).await;
-                                decrypting.set(false);
-                            }
+                            run_decrypt_if_idle(decrypting, previews).await;
                         }
                         Err(e) => {
                             error.set(Some(e));
@@ -122,23 +131,25 @@ pub fn DMs() -> Element {
         use_reactive(
             (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
             move |(client_initialized, is_authenticated)| {
+                if let Some(task) = dm_poll_task.peek().as_ref() {
+                    task.cancel();
+                }
                 if !client_initialized || !is_authenticated {
                     return;
                 }
-                spawn(async move {
+                let task = spawn(async move {
                     loop {
                         gloo_timers::future::sleep(std::time::Duration::from_secs(30))
                             .await;
                         if auth_store::is_authenticated() && isPageVisible() {
                             log::debug!("Auto-refreshing DMs...");
-                            if dms::init_dms().await.is_ok() && !*decrypting.peek() {
-                                decrypting.set(true);
-                                decrypt_previews_sequentially(previews).await;
-                                decrypting.set(false);
+                            if dms::init_dms().await.is_ok() {
+                                run_decrypt_if_idle(decrypting, previews).await;
                             }
                         }
                     }
                 });
+                dm_poll_task.set(Some(task));
             },
         ),
     );
@@ -151,11 +162,7 @@ pub fn DMs() -> Element {
             match dms::init_dms().await {
                 Ok(_) => {
                     log::info!("DMs refreshed successfully");
-                    if !*decrypting.peek() {
-                        decrypting.set(true);
-                        decrypt_previews_sequentially(previews).await;
-                        decrypting.set(false);
-                    }
+                    run_decrypt_if_idle(decrypting, previews).await;
                 }
                 Err(e) => {
                     log::error!("Failed to refresh DMs: {}", e);

@@ -970,7 +970,8 @@ fn Layout() -> Element {
                                         } else {
                                             button {
                                                 class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2",
-                                                onclick: move |_| {
+                                                onclick: move |e| {
+                                                    e.stop_propagation();
                                                     let prev = sidebar_page.read().saturating_sub(1);
                                                     sidebar_page.set(prev);
                                                 },
