@@ -561,7 +561,7 @@ fn Layout() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let notif_count = use_memo(notif_store::get_unread_count);
     let mut sidebar_open = use_signal(|| false);
-    let mut more_menu_open = use_signal(|| false);
+    let mut sidebar_page = use_signal(|| 0usize);
     let mut radial_menu_open = use_signal(|| false);
     let mut sidebar_customizer_open = use_signal(|| false);
     let mut mobile_search_open = use_signal(|| false);
@@ -730,117 +730,112 @@ fn Layout() -> Element {
         div {
             class: "min-h-screen bg-background transition-colors",
             onclick: move |_| {
-                if *more_menu_open.read() {
-                    more_menu_open.set(false);
+                if *sidebar_page.read() != 0 {
+                    sidebar_page.set(0);
                 }
             },
             div { class: "flex justify-center max-w-[1600px] mx-auto",
                 aside { class: "w-[275px] shrink-0 border-r border-border sticky top-0 h-screen hidden lg:block bg-background",
                     div { class: "h-full flex flex-col p-4 overflow-y-auto scrollbar-hide",
-                        div {
-                            class: "flex items-center gap-2 hover:opacity-80 transition mb-6 cursor-pointer",
-                            onclick: move |_| {
-                                if is_home_page {
-                                    if let Some(window) = web_sys::window() {
-                                        window.scroll_to_with_x_and_y(0.0, 0.0);
+                        {
+                            let current_page = *sidebar_page.read();
+                            let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
+                            let is_last_page = current_page >= total_pages.saturating_sub(1);
+                            let has_more = total_pages > 1 && !is_last_page;
+                            rsx! {
+                                if current_page == 0 {
+                                    // Page 0: Logo
+                                    div {
+                                        class: "flex items-center gap-2 hover:opacity-80 transition mb-6 cursor-pointer",
+                                        onclick: move |_| {
+                                            if is_home_page {
+                                                if let Some(window) = web_sys::window() {
+                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                }
+                                            } else {
+                                                navigator.push(Route::Home { list: String::new() });
+                                            }
+                                        },
+                                        div { class: "w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl transition",
+                                            "N"
+                                        }
                                     }
                                 } else {
-                                    navigator.push(Route::Home { list: String::new() });
-                                }
-                            },
-                            div { class: "w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl transition",
-                                "N"
-                            }
-                        }
-                        nav { class: "flex flex-col gap-1",
-                            for item in crate::stores::sidebar_store::get_main_sidebar_items(auth.is_authenticated) {
-                                {
-                                    use crate::stores::sidebar_store::SidebarItem;
-                                    match item {
-                                        SidebarItem::Home => rsx! {
-                                            div {
-                                                key: "{item:?}",
-                                                class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
-                                                onclick: move |_| {
-                                                    if is_home_page {
-                                                        if let Some(window) = web_sys::window() {
-                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                        }
-                                                    } else {
-                                                        navigator.push(Route::Home { list: String::new() });
-                                                    }
-                                                },
-                                                {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
-                                                span { "Home" }
-                                            }
+                                    // Pages 1+: Back button
+                                    button {
+                                        class: "flex items-center gap-2 mb-4 p-2 rounded-lg hover:bg-accent transition cursor-pointer",
+                                        onclick: move |_| {
+                                            let prev = sidebar_page.read().saturating_sub(1);
+                                            sidebar_page.set(prev);
                                         },
-                                        SidebarItem::Profile => {
-                                            if let Some(pubkey) = &auth.pubkey {
-                                                rsx! {
-                                                    NavLink {
-                                                        key: "{item:?}",
-                                                        to: Route::Profile {
-                                                            pubkey: pubkey.clone(),
-                                                        },
-                                                        icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
-                                                        label: "Profile",
-                                                    }
-                                                }
-                                            } else {
-                                                rsx! {}
-                                            }
-                                        }
-                                        SidebarItem::Notifications => rsx! {
-                                            NavLink {
-                                                key: "{item:?}",
-                                                to: Route::Notifications {},
-                                                icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
-                                                label: "Notifications",
-                                                badge: Some(*notif_count.read()),
-                                            }
-                                        },
-                                        _ => {
-                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
-                                                rsx! {
-                                                    NavLink {
-                                                        key: "{item:?}",
-                                                        to: route,
-                                                        icon: render_sidebar_icon(&item, "w-7 h-7"),
-                                                        label: item.label(),
-                                                    }
-                                                }
-                                            } else {
-                                                rsx! {}
-                                            }
-                                        }
+                                        "← Back"
                                     }
                                 }
-                            }
-                            div { class: "relative",
-                                button {
-                                    class: "flex items-center justify-start gap-4 px-4 py-6 rounded-full hover:bg-accent transition text-xl w-full",
-                                    onclick: move |e| {
-                                        e.stop_propagation();
-                                        let is_open = *more_menu_open.read();
-                                        more_menu_open.set(!is_open);
-                                    },
-                                    crate::components::icons::MoreHorizontalIcon { class: "w-7 h-7" }
-                                    span { "More" }
-                                }
-                                if *more_menu_open.read() {
-                                    div { class: "absolute left-0 bottom-full mb-2 bg-card border border-border rounded-lg shadow-lg min-w-[240px] overflow-hidden z-50",
-                                        div { class: "flex flex-col",
-                                            for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
-                                                {
+                                nav { class: "flex flex-col gap-1",
+                                    for item in crate::stores::sidebar_store::get_sidebar_page_items(current_page, auth.is_authenticated) {
+                                        {
+                                            use crate::stores::sidebar_store::SidebarItem;
+                                            match item {
+                                                SidebarItem::Home => rsx! {
+                                                    div {
+                                                        key: "{item:?}",
+                                                        class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                                        onclick: move |_| {
+                                                            sidebar_page.set(0);
+                                                            if is_home_page {
+                                                                if let Some(window) = web_sys::window() {
+                                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                                }
+                                                            } else {
+                                                                navigator.push(Route::Home { list: String::new() });
+                                                            }
+                                                        },
+                                                        {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
+                                                        span { "Home" }
+                                                    }
+                                                },
+                                                SidebarItem::Profile => {
+                                                    if let Some(pubkey) = &auth.pubkey {
+                                                        rsx! {
+                                                            div {
+                                                                key: "{item:?}",
+                                                                onclick: move |_| sidebar_page.set(0),
+                                                                NavLink {
+                                                                    to: Route::Profile {
+                                                                        pubkey: pubkey.clone(),
+                                                                    },
+                                                                    icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
+                                                                    label: "Profile",
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        rsx! {}
+                                                    }
+                                                }
+                                                SidebarItem::Notifications => rsx! {
+                                                    div {
+                                                        key: "{item:?}",
+                                                        onclick: move |_| sidebar_page.set(0),
+                                                        NavLink {
+                                                            to: Route::Notifications {},
+                                                            icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
+                                                            label: "Notifications",
+                                                            badge: Some(*notif_count.read()),
+                                                        }
+                                                    }
+                                                },
+                                                _ => {
                                                     if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
                                                         rsx! {
-                                                            Link {
-                                                                key: "{item:?}-more",
-                                                                to: route,
-                                                                onclick: move |_| more_menu_open.set(false),
-                                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base",
-                                                                {render_sidebar_icon(&item, "w-5 h-5")}
-                                                                span { "{item.label()}" }
+                                                            div {
+                                                                key: "{item:?}",
+                                                                onclick: move |_| sidebar_page.set(0),
+                                                                NavLink {
+                                                                    to: route,
+                                                                    icon: render_sidebar_icon(&item, "w-7 h-7"),
+                                                                    label: item.label(),
+                                                                }
                                                             }
                                                         }
                                                     } else {
@@ -848,16 +843,30 @@ fn Layout() -> Element {
                                                     }
                                                 }
                                             }
-                                            div { class: "border-t border-border my-1" }
-                                            button {
-                                                class: "flex items-center gap-4 px-4 py-4 hover:bg-accent transition text-base w-full text-left",
-                                                onclick: move |_| {
-                                                    more_menu_open.set(false);
-                                                    sidebar_customizer_open.set(true);
-                                                },
-                                                crate::components::icons::SettingsIcon { class: "w-5 h-5" }
-                                                span { "Edit Sidebar" }
-                                            }
+                                        }
+                                    }
+                                    if has_more {
+                                        button {
+                                            class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full",
+                                            onclick: move |e| {
+                                                e.stop_propagation();
+                                                let next = *sidebar_page.read() + 1;
+                                                sidebar_page.set(next);
+                                            },
+                                            crate::components::icons::MoreHorizontalIcon { class: "w-7 h-7" }
+                                            span { "More" }
+                                        }
+                                    }
+                                    if is_last_page && current_page > 0 {
+                                        div { class: "border-t border-border my-2" }
+                                        button {
+                                            class: "flex items-center gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full text-left",
+                                            onclick: move |_| {
+                                                sidebar_page.set(0);
+                                                sidebar_customizer_open.set(true);
+                                            },
+                                            crate::components::icons::SettingsIcon { class: "w-7 h-7" }
+                                            span { "Edit Sidebar" }
                                         }
                                     }
                                 }
@@ -915,161 +924,168 @@ fn Layout() -> Element {
                         class: "fixed inset-0 bg-black/50 z-40 lg:hidden",
                         onclick: move |_| {
                             sidebar_open.set(false);
-                            more_menu_open.set(false);
+                            sidebar_page.set(0);
                         },
                         aside {
                             class: "w-64 bg-white dark:bg-gray-900 h-full overflow-y-auto",
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
-                                if *more_menu_open.read() {
-                                    button {
-                                        class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2",
-                                        onclick: move |_| more_menu_open.set(false),
-                                        "← Back"
-                                    }
-                                    div { class: "flex items-center gap-2 mb-6",
-                                        crate::components::icons::MoreHorizontalIcon { class: "w-8 h-8".to_string() }
-                                        span { class: "text-2xl font-bold text-gray-900 dark:text-white",
-                                            "More"
-                                        }
-                                    }
-                                    nav { class: "flex flex-col gap-2",
-                                        for item in crate::stores::sidebar_store::get_more_menu_items(auth.is_authenticated) {
-                                            {
-                                                if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
-                                                    rsx! {
-                                                        Link {
-                                                            key: "{item:?}-mobile-more",
-                                                            to: route,
-                                                            onclick: move |_| {
-                                                                more_menu_open.set(false);
-                                                                sidebar_open.set(false);
-                                                            },
-                                                            class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl",
-                                                            {render_sidebar_icon(&item, "w-7 h-7")}
-                                                            span { "{item.label()}" }
+                                {
+                                    let current_page = *sidebar_page.read();
+                                    let total_pages = crate::stores::sidebar_store::get_total_pages(auth.is_authenticated);
+                                    let is_last_page = current_page >= total_pages.saturating_sub(1);
+                                    let has_more = total_pages > 1 && !is_last_page;
+                                    rsx! {
+                                        if current_page == 0 {
+                                            button {
+                                                class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800",
+                                                onclick: move |_| {
+                                                    sidebar_open.set(false);
+                                                    sidebar_page.set(0);
+                                                },
+                                                "✕ Close"
+                                            }
+                                            div {
+                                                class: "flex items-center gap-2 hover:opacity-80 transition mb-8 cursor-pointer",
+                                                onclick: move |_| {
+                                                    sidebar_open.set(false);
+                                                    sidebar_page.set(0);
+                                                    if is_home_page {
+                                                        if let Some(window) = web_sys::window() {
+                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
                                                         }
+                                                    } else {
+                                                        navigator.push(Route::Home { list: String::new() });
                                                     }
-                                                } else {
-                                                    rsx! {}
+                                                },
+                                                div { class: "w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl",
+                                                    "N"
+                                                }
+                                                span { class: "text-2xl font-bold text-gray-900 dark:text-white",
+                                                    "nostr.blue"
                                                 }
                                             }
-                                        }
-                                        div { class: "border-t border-border my-2" }
-                                        button {
-                                            class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full text-left",
-                                            onclick: move |_| {
-                                                more_menu_open.set(false);
-                                                sidebar_open.set(false);
-                                                sidebar_customizer_open.set(true);
-                                            },
-                                            crate::components::icons::SettingsIcon { class: "w-7 h-7" }
-                                            span { "Edit Sidebar" }
-                                        }
-                                    }
-                                } else {
-                                    button {
-                                        class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800",
-                                        onclick: move |_| sidebar_open.set(false),
-                                        "✕ Close"
-                                    }
-                                    div {
-                                        class: "flex items-center gap-2 hover:opacity-80 transition mb-8 cursor-pointer",
-                                        onclick: move |_| {
-                                            sidebar_open.set(false);
-                                            if is_home_page {
-                                                if let Some(window) = web_sys::window() {
-                                                    window.scroll_to_with_x_and_y(0.0, 0.0);
-                                                }
-                                            } else {
-                                                navigator.push(Route::Home { list: String::new() });
+                                        } else {
+                                            button {
+                                                class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2",
+                                                onclick: move |_| {
+                                                    let prev = sidebar_page.read().saturating_sub(1);
+                                                    sidebar_page.set(prev);
+                                                },
+                                                "← Back"
                                             }
-                                        },
-                                        div { class: "w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl",
-                                            "N"
                                         }
-                                        span { class: "text-2xl font-bold text-gray-900 dark:text-white",
-                                            "nostr.blue"
-                                        }
-                                    }
-                                    nav { class: "flex flex-col gap-2",
-                                        for item in crate::stores::sidebar_store::get_main_sidebar_items(auth.is_authenticated) {
-                                            {
-                                                use crate::stores::sidebar_store::SidebarItem;
-                                                match item {
-                                                    SidebarItem::Home => rsx! {
-                                                        div {
-                                                            key: "{item:?}-mobile",
-                                                            class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
-                                                            onclick: move |_| {
-                                                                sidebar_open.set(false);
-                                                                if is_home_page {
-                                                                    if let Some(window) = web_sys::window() {
-                                                                        window.scroll_to_with_x_and_y(0.0, 0.0);
+                                        nav { class: "flex flex-col gap-2",
+                                            for item in crate::stores::sidebar_store::get_sidebar_page_items(current_page, auth.is_authenticated) {
+                                                {
+                                                    use crate::stores::sidebar_store::SidebarItem;
+                                                    match item {
+                                                        SidebarItem::Home => rsx! {
+                                                            div {
+                                                                key: "{item:?}-mobile",
+                                                                class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full cursor-pointer {home_font_weight}",
+                                                                onclick: move |_| {
+                                                                    sidebar_open.set(false);
+                                                                    sidebar_page.set(0);
+                                                                    if is_home_page {
+                                                                        if let Some(window) = web_sys::window() {
+                                                                            window.scroll_to_with_x_and_y(0.0, 0.0);
+                                                                        }
+                                                                    } else {
+                                                                        navigator.push(Route::Home { list: String::new() });
                                                                     }
-                                                                } else {
-                                                                    navigator.push(Route::Home { list: String::new() });
-                                                                }
-                                                            },
-                                                            {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
-                                                            span { "Home" }
-                                                        }
-                                                    },
-                                                    SidebarItem::Profile => {
-                                                        if let Some(pubkey) = &auth.pubkey {
-                                                            rsx! {
-                                                                div { key: "{item:?}-mobile", onclick: move |_| sidebar_open.set(false),
-                                                                    NavLink {
-                                                                        to: Route::Profile {
-                                                                            pubkey: pubkey.clone(),
+                                                                },
+                                                                {render_sidebar_icon(&SidebarItem::Home, "w-7 h-7")}
+                                                                span { "Home" }
+                                                            }
+                                                        },
+                                                        SidebarItem::Profile => {
+                                                            if let Some(pubkey) = &auth.pubkey {
+                                                                rsx! {
+                                                                    div {
+                                                                        key: "{item:?}-mobile",
+                                                                        onclick: move |_| {
+                                                                            sidebar_open.set(false);
+                                                                            sidebar_page.set(0);
                                                                         },
-                                                                        icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
-                                                                        label: "Profile",
+                                                                        NavLink {
+                                                                            to: Route::Profile {
+                                                                                pubkey: pubkey.clone(),
+                                                                            },
+                                                                            icon: render_sidebar_icon(&SidebarItem::Profile, "w-7 h-7"),
+                                                                            label: "Profile",
+                                                                        }
                                                                     }
                                                                 }
-                                                            }
-                                                        } else {
-                                                            rsx! {}
-                                                        }
-                                                    }
-                                                    SidebarItem::Notifications => rsx! {
-                                                        div { key: "{item:?}-mobile", onclick: move |_| sidebar_open.set(false),
-                                                            NavLink {
-                                                                to: Route::Notifications {},
-                                                                icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
-                                                                label: "Notifications",
-                                                                badge: Some(*notif_count.read()),
+                                                            } else {
+                                                                rsx! {}
                                                             }
                                                         }
-                                                    },
-                                                    _ => {
-                                                        if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
-                                                            rsx! {
-                                                                div { key: "{item:?}-mobile", onclick: move |_| sidebar_open.set(false),
-                                                                    NavLink {
-                                                                        to: route,
-                                                                        icon: render_sidebar_icon(&item, "w-7 h-7"),
-                                                                        label: item.label(),
-                                                                    }
+                                                        SidebarItem::Notifications => rsx! {
+                                                            div {
+                                                                key: "{item:?}-mobile",
+                                                                onclick: move |_| {
+                                                                    sidebar_open.set(false);
+                                                                    sidebar_page.set(0);
+                                                                },
+                                                                NavLink {
+                                                                    to: Route::Notifications {},
+                                                                    icon: render_sidebar_icon(&SidebarItem::Notifications, "w-7 h-7"),
+                                                                    label: "Notifications",
+                                                                    badge: Some(*notif_count.read()),
                                                                 }
                                                             }
-                                                        } else {
-                                                            rsx! {}
+                                                        },
+                                                        _ => {
+                                                            if let Some(route) = item.as_route(auth.pubkey.as_deref()) {
+                                                                rsx! {
+                                                                    div {
+                                                                        key: "{item:?}-mobile",
+                                                                        onclick: move |_| {
+                                                                            sidebar_open.set(false);
+                                                                            sidebar_page.set(0);
+                                                                        },
+                                                                        NavLink {
+                                                                            to: route,
+                                                                            icon: render_sidebar_icon(&item, "w-7 h-7"),
+                                                                            label: item.label(),
+                                                                        }
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                rsx! {}
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                        button {
-                                            class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full",
-                                            onclick: move |e| {
-                                                e.stop_propagation();
-                                                more_menu_open.set(true);
-                                            },
-                                            crate::components::icons::MoreHorizontalIcon { class: "w-7 h-7".to_string() }
-                                            span { "More" }
-                                            span { class: "ml-auto text-muted-foreground",
-                                                "→"
+                                            if has_more {
+                                                button {
+                                                    class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full",
+                                                    onclick: move |e| {
+                                                        e.stop_propagation();
+                                                        let next = *sidebar_page.read() + 1;
+                                                        sidebar_page.set(next);
+                                                    },
+                                                    crate::components::icons::MoreHorizontalIcon { class: "w-7 h-7".to_string() }
+                                                    span { "More" }
+                                                    span { class: "ml-auto text-muted-foreground",
+                                                        "→"
+                                                    }
+                                                }
+                                            }
+                                            if is_last_page && current_page > 0 {
+                                                div { class: "border-t border-border my-2" }
+                                                button {
+                                                    class: "flex items-center gap-4 px-4 py-3 rounded-full hover:bg-accent transition text-xl w-full text-left",
+                                                    onclick: move |_| {
+                                                        sidebar_page.set(0);
+                                                        sidebar_open.set(false);
+                                                        sidebar_customizer_open.set(true);
+                                                    },
+                                                    crate::components::icons::SettingsIcon { class: "w-7 h-7" }
+                                                    span { "Edit Sidebar" }
+                                                }
                                             }
                                         }
                                     }

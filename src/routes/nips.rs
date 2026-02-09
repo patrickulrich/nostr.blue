@@ -1,31 +1,49 @@
 use crate::components::{
-    ClientInitializing, CustomNipCard, MarkdownEditor, NipCardSkeleton, OfficialNipCard,
+    ArticleContent, ClientInitializing, CustomNipCard, DocSpecCard, MarkdownEditor,
+    NipCardSkeleton, OfficialNipCard,
 };
 use crate::hooks::use_infinite_scroll;
-use crate::services::github_nips::{self, EventKindInfo, OfficialNip};
+use crate::services::github_nips::{self, DocSpec, EventKindInfo, OfficialNip};
 use crate::stores::{auth_store, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::Event;
-/// Tab selection for the NIPs page
+/// Tab selection for the Protocol Docs page
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum NipsTab {
-    Official,
+enum DocsTab {
+    NIPs,
+    NUTs,
+    BUDs,
+    NKBIPs,
+    Market,
     Custom,
     EventKinds,
 }
-impl NipsTab {
+impl DocsTab {
     fn label(&self) -> &'static str {
         match self {
-            NipsTab::Official => "Official",
-            NipsTab::Custom => "Custom",
-            NipsTab::EventKinds => "Event Kinds",
+            DocsTab::NIPs => "NIPs",
+            DocsTab::NUTs => "NUTs",
+            DocsTab::BUDs => "BUDs",
+            DocsTab::NKBIPs => "NKBIPs",
+            DocsTab::Market => "Market",
+            DocsTab::Custom => "Custom",
+            DocsTab::EventKinds => "Event Kinds",
         }
     }
 }
-/// NIPs home page - displays official and custom NIPs
+const ALL_TABS: [DocsTab; 7] = [
+    DocsTab::NIPs,
+    DocsTab::NUTs,
+    DocsTab::BUDs,
+    DocsTab::NKBIPs,
+    DocsTab::Market,
+    DocsTab::Custom,
+    DocsTab::EventKinds,
+];
+/// Protocol Docs home page - displays NIPs, NUTs, BUDs, NKBIPs, Market spec, and custom NIPs
 #[component]
 pub fn NipsHome() -> Element {
-    let mut active_tab = use_signal(|| NipsTab::Official);
+    let mut active_tab = use_signal(|| DocsTab::NIPs);
     let mut search_query = use_signal(String::new);
     let mut search_input = use_signal(String::new);
     let mut search_results = use_signal(Vec::<Event>::new);
@@ -34,6 +52,10 @@ pub fn NipsHome() -> Element {
     let mut official_nips = use_signal(Vec::<OfficialNip>::new);
     let mut custom_nips = use_signal(Vec::<Event>::new);
     let mut event_kinds = use_signal(Vec::<EventKindInfo>::new);
+    let mut nuts = use_signal(Vec::<DocSpec>::new);
+    let mut buds = use_signal(Vec::<DocSpec>::new);
+    let mut nkbips = use_signal(Vec::<DocSpec>::new);
+    let mut market_spec_content = use_signal(|| None::<String>);
     let mut loading = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
@@ -47,7 +69,7 @@ pub fn NipsHome() -> Element {
         spawn(async move {
             loading.set(true);
             match tab {
-                NipsTab::Official | NipsTab::EventKinds => {
+                DocsTab::NIPs | DocsTab::EventKinds => {
                     match github_nips::fetch_nips_readme().await {
                         Ok(readme) => {
                             let nips = github_nips::parse_nips_from_readme(&readme);
@@ -63,7 +85,48 @@ pub fn NipsHome() -> Element {
                         }
                     }
                 }
-                NipsTab::Custom => {
+                DocsTab::NUTs => {
+                    match github_nips::fetch_nuts_readme().await {
+                        Ok(readme) => {
+                            let parsed = github_nips::parse_nuts_from_readme(&readme);
+                            nuts.set(parsed);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch NUTs README: {}", e);
+                            error.set(Some(e));
+                        }
+                    }
+                }
+                DocsTab::BUDs => {
+                    match github_nips::fetch_buds_readme().await {
+                        Ok(readme) => {
+                            let parsed = github_nips::parse_buds_from_readme(&readme);
+                            buds.set(parsed);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch BUDs README: {}", e);
+                            error.set(Some(e));
+                        }
+                    }
+                }
+                DocsTab::NKBIPs => {
+                    // NKBIPs README has no structured list — synchronous hardcoded
+                    // parse avoids a network fetch, so no loading state is needed.
+                    let parsed = github_nips::parse_nkbips_from_readme("");
+                    nkbips.set(parsed);
+                }
+                DocsTab::Market => {
+                    match github_nips::fetch_market_spec().await {
+                        Ok(content) => {
+                            market_spec_content.set(Some(content));
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch market spec: {}", e);
+                            error.set(Some(e));
+                        }
+                    }
+                }
+                DocsTab::Custom => {
                     if client_initialized {
                         match nostr_client::fetch_custom_nips(50, None).await {
                             Ok(events) => {
@@ -85,7 +148,7 @@ pub fn NipsHome() -> Element {
         });
     });
     let load_more = move || {
-        if *loading.read() || !*has_more.read() || *active_tab.read() != NipsTab::Custom
+        if *loading.read() || !*has_more.read() || *active_tab.read() != DocsTab::Custom
         {
             return;
         }
@@ -110,8 +173,13 @@ pub fn NipsHome() -> Element {
         });
     };
     let sentinel_id = use_infinite_scroll(load_more, has_more, loading);
+    // Custom NIP relay search
     use_effect(move || {
         let query = search_input.read().clone();
+        if *active_tab.read() != DocsTab::Custom {
+            is_searching.set(false);
+            return;
+        }
         if query.trim().is_empty() {
             is_searching.set(false);
             search_results.set(Vec::new());
@@ -208,6 +276,49 @@ pub fn NipsHome() -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
+    let filtered_nuts = use_memo(move || {
+        let query = search_query.read().to_lowercase();
+        if query.is_empty() {
+            return nuts.read().clone();
+        }
+        nuts.read()
+            .iter()
+            .filter(|n| {
+                n.title.to_lowercase().contains(&query)
+                    || n.number.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let filtered_buds = use_memo(move || {
+        let query = search_query.read().to_lowercase();
+        if query.is_empty() {
+            return buds.read().clone();
+        }
+        buds.read()
+            .iter()
+            .filter(|b| {
+                b.title.to_lowercase().contains(&query)
+                    || b.number.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let filtered_nkbips = use_memo(move || {
+        let query = search_query.read().to_lowercase();
+        if query.is_empty() {
+            return nkbips.read().clone();
+        }
+        nkbips
+            .read()
+            .iter()
+            .filter(|n| {
+                n.title.to_lowercase().contains(&query)
+                    || n.number.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    });
     let is_loading = *loading.read();
     let error_msg = error.read();
     let current_tab = *active_tab.read();
@@ -216,7 +327,7 @@ pub fn NipsHome() -> Element {
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "px-4 py-3",
                     div { class: "flex items-center justify-between mb-4",
-                        h1 { class: "text-2xl font-bold", "NIPs" }
+                        h1 { class: "text-2xl font-bold", "Protocol Docs" }
                         if auth_store::AUTH_STATE.read().is_authenticated {
                             Link {
                                 to: crate::routes::Route::NipNew {},
@@ -225,56 +336,70 @@ pub fn NipsHome() -> Element {
                             }
                         }
                     }
-                    div { class: "flex gap-1 mb-4",
-                        for tab in [NipsTab::Official, NipsTab::Custom, NipsTab::EventKinds] {
+                    div { class: "flex gap-1 mb-4 overflow-x-auto scrollbar-none",
+                        for tab in ALL_TABS {
                             button {
-                                class: if current_tab == tab { "px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium transition" } else { "px-4 py-2 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition" },
-                                onclick: move |_| active_tab.set(tab),
+                                class: if current_tab == tab {
+                                    "px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium transition whitespace-nowrap"
+                                } else {
+                                    "px-4 py-2 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition whitespace-nowrap"
+                                },
+                                onclick: move |_| {
+                                    active_tab.set(tab);
+                                    search_query.set(String::new());
+                                    search_input.set(String::new());
+                                },
                                 "{tab.label()}"
                             }
                         }
                     }
-                    div { class: "relative",
-                        input {
-                            r#type: "text",
-                            placeholder: match current_tab {
-                                NipsTab::Official => "Search NIPs by title or number...",
-                                NipsTab::Custom => "Search custom NIPs (searches relays)...",
-                                NipsTab::EventKinds => "Search event kinds...",
-                            },
-                            class: "w-full px-4 py-2 pl-10 pr-10 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
-                            value: "{search_query}",
-                            oninput: move |e| {
-                                let val = e.value();
-                                search_query.set(val.clone());
-                                search_input.set(val);
-                            },
-                        }
-                        svg {
-                            class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            fill: "none",
-                            view_box: "0 0 24 24",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            circle { cx: "11", cy: "11", r: "8" }
-                            path { d: "m21 21-4.3-4.3" }
-                        }
-                        if !search_query.read().is_empty() {
-                            button {
-                                class: "absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground hover:text-foreground transition",
-                                onclick: move |_| {
-                                    search_query.set(String::new());
-                                    search_input.set(String::new());
+                    if current_tab != DocsTab::Market {
+                        div { class: "relative",
+                            input {
+                                r#type: "text",
+                                placeholder: match current_tab {
+                                    DocsTab::NIPs => "Search NIPs by title or number...",
+                                    DocsTab::NUTs => "Search NUTs by title or number...",
+                                    DocsTab::BUDs => "Search BUDs by title or number...",
+                                    DocsTab::NKBIPs => "Search NKBIPs by title or number...",
+                                    DocsTab::Custom => "Search custom NIPs (searches relays)...",
+                                    DocsTab::EventKinds => "Search event kinds...",
+                                    DocsTab::Market => "",
                                 },
-                                svg {
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    fill: "none",
-                                    view_box: "0 0 24 24",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    class: "w-4 h-4",
-                                    path { d: "M6 18L18 6M6 6l12 12" }
+                                class: "w-full px-4 py-2 pl-10 pr-10 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
+                                value: "{search_query}",
+                                oninput: move |e| {
+                                    let val = e.value();
+                                    search_query.set(val.clone());
+                                    search_input.set(val);
+                                },
+                            }
+                            svg {
+                                class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                fill: "none",
+                                view_box: "0 0 24 24",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                circle { cx: "11", cy: "11", r: "8" }
+                                path { d: "m21 21-4.3-4.3" }
+                            }
+                            if !search_query.read().is_empty() {
+                                button {
+                                    class: "absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground hover:text-foreground transition",
+                                    onclick: move |_| {
+                                        search_query.set(String::new());
+                                        search_input.set(String::new());
+                                    },
+                                    svg {
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        fill: "none",
+                                        view_box: "0 0 24 24",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        class: "w-4 h-4",
+                                        path { d: "M6 18L18 6M6 6l12 12" }
+                                    }
                                 }
                             }
                         }
@@ -286,7 +411,8 @@ pub fn NipsHome() -> Element {
                     p { "Error: {err}" }
                 }
             }
-            if *is_searching.read() {
+            // Custom NIP search results (only shown when searching on Custom tab)
+            if *is_searching.read() && current_tab == DocsTab::Custom {
                 div { class: "p-4",
                     div { class: "flex items-center justify-between mb-4",
                         h2 { class: "text-lg font-semibold", "Search Results" }
@@ -343,14 +469,18 @@ pub fn NipsHome() -> Element {
             } else {
                 div { class: "p-4",
                     if is_loading
-                        && ((current_tab == NipsTab::Official && official_nips.read().is_empty())
-                            || (current_tab == NipsTab::Custom && custom_nips.read().is_empty())
-                            || (current_tab == NipsTab::EventKinds && event_kinds.read().is_empty()))
+                        && ((current_tab == DocsTab::NIPs && official_nips.read().is_empty())
+                            || (current_tab == DocsTab::Custom && custom_nips.read().is_empty())
+                            || (current_tab == DocsTab::EventKinds && event_kinds.read().is_empty())
+                            || (current_tab == DocsTab::NUTs && nuts.read().is_empty())
+                            || (current_tab == DocsTab::BUDs && buds.read().is_empty())
+                            || (current_tab == DocsTab::NKBIPs && nkbips.read().is_empty())
+                            || (current_tab == DocsTab::Market && market_spec_content.read().is_none()))
                     {
                         ClientInitializing {}
                     } else {
                         match current_tab {
-                            NipsTab::Official => rsx! {
+                            DocsTab::NIPs => rsx! {
                                 if filtered_official().is_empty() {
                                     EmptyState {
                                         icon: "📜",
@@ -365,7 +495,80 @@ pub fn NipsHome() -> Element {
                                     }
                                 }
                             },
-                            NipsTab::Custom => rsx! {
+                            DocsTab::NUTs => rsx! {
+                                if filtered_nuts().is_empty() {
+                                    EmptyState {
+                                        icon: "🥜",
+                                        title: "No NUTs Found",
+                                        description: "No Cashu NUTs match your search.",
+                                    }
+                                } else {
+                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
+                                        for spec in filtered_nuts().iter() {
+                                            DocSpecCard {
+                                                key: "nut-{spec.number}",
+                                                prefix: "NUT".to_string(),
+                                                spec: spec.clone(),
+                                                route_id: format!("nut-{}", spec.number),
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            DocsTab::BUDs => rsx! {
+                                if filtered_buds().is_empty() {
+                                    EmptyState {
+                                        icon: "🌸",
+                                        title: "No BUDs Found",
+                                        description: "No Blossom BUDs match your search.",
+                                    }
+                                } else {
+                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
+                                        for spec in filtered_buds().iter() {
+                                            DocSpecCard {
+                                                key: "bud-{spec.number}",
+                                                prefix: "BUD".to_string(),
+                                                spec: spec.clone(),
+                                                route_id: format!("bud-{}", spec.number),
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            DocsTab::NKBIPs => rsx! {
+                                if filtered_nkbips().is_empty() {
+                                    EmptyState {
+                                        icon: "📚",
+                                        title: "No NKBIPs Found",
+                                        description: "No NKBIPs match your search.",
+                                    }
+                                } else {
+                                    div { class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4",
+                                        for spec in filtered_nkbips().iter() {
+                                            DocSpecCard {
+                                                key: "nkbip-{spec.number}",
+                                                prefix: "NKBIP".to_string(),
+                                                spec: spec.clone(),
+                                                route_id: format!("nkbip-{}", spec.number),
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            DocsTab::Market => rsx! {
+                                if let Some(content) = market_spec_content.read().as_ref() {
+                                    div { class: "max-w-4xl mx-auto",
+                                        ArticleContent { content: content.clone() }
+                                    }
+                                } else {
+                                    EmptyState {
+                                        icon: "🏪",
+                                        title: "Market Specification",
+                                        description: "Loading market specification...",
+                                    }
+                                }
+                            },
+                            DocsTab::Custom => rsx! {
                                 if !*nostr_client::CLIENT_INITIALIZED.read() {
                                     ClientInitializing {}
                                 } else if custom_nips.read().is_empty() {
@@ -401,7 +604,7 @@ pub fn NipsHome() -> Element {
                                     }
                                 }
                             },
-                            NipsTab::EventKinds => rsx! {
+                            DocsTab::EventKinds => rsx! {
                                 if filtered_kinds().is_empty() {
                                     EmptyState {
                                         icon: "🔢",
