@@ -17,6 +17,14 @@ fn extract_title_from_content(content: &str) -> Option<String> {
         .map(|l| l.trim_start_matches('#').trim().to_string())
 }
 
+/// Format a spec title, stripping duplicate prefix if the extracted title already contains it.
+/// e.g. prefix="NUT", num="00", title="NUT-00: Notation..." → "NUT-00: Notation..."
+fn format_spec_title(prefix: &str, num: &str, extracted_title: &str) -> String {
+    let prefix_pattern = format!("{}-{}: ", prefix, num);
+    let clean = extracted_title.strip_prefix(&prefix_pattern).unwrap_or(extracted_title);
+    format!("{}-{}: {}", prefix, num, clean)
+}
+
 /// NIP detail page - displays either an official NIP from GitHub or a custom NIP from Nostr
 #[component]
 pub fn NipDetail(nip_id: String) -> Element {
@@ -42,6 +50,7 @@ pub fn NipDetail(nip_id: String) -> Element {
     let mut like_count = use_signal(|| 0usize);
     let mut comment_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = *nostr_client::HAS_SIGNER.read();
+    let nip_id_for_render = nip_id.clone();
     use_effect(move || {
         let id = nip_id.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -55,7 +64,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 match github_nips::fetch_nut_content(num).await {
                     Ok(content) => {
                         if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format!("NUT-{}: {}", num, title));
+                            nip_title.set(format_spec_title("NUT", num, &title));
                         }
                         nip_content.set(Some(content));
                         loading.set(false);
@@ -72,7 +81,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 match github_nips::fetch_bud_content(num).await {
                     Ok(content) => {
                         if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format!("BUD-{}: {}", num, title));
+                            nip_title.set(format_spec_title("BUD", num, &title));
                         }
                         nip_content.set(Some(content));
                         loading.set(false);
@@ -89,7 +98,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 match github_nips::fetch_nkbip_content(num).await {
                     Ok(content) => {
                         if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format!("NKBIP-{}: {}", num, title));
+                            nip_title.set(format_spec_title("NKBIP", num, &title));
                         }
                         nip_content.set(Some(content));
                         loading.set(false);
@@ -527,15 +536,30 @@ pub fn NipDetail(nip_id: String) -> Element {
                     }
                 }
                 if !*is_custom.read() {
-                    div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
-                        p {
-                            "This specification is from the "
-                            a {
-                                href: "/docs/nips/",
-                                class: "text-primary hover:underline",
-                                "nostr.blue documentation"
+                    {
+                        let docs_path = if nip_id_for_render.starts_with("nut-") {
+                            "/docs/nuts/"
+                        } else if nip_id_for_render.starts_with("bud-") {
+                            "/docs/blossom/"
+                        } else if nip_id_for_render.starts_with("nkbip-") {
+                            "/docs/NKBIPs/"
+                        } else if nip_id_for_render == "market-spec" {
+                            "/docs/market-spec/"
+                        } else {
+                            "/docs/nips/"
+                        };
+                        rsx! {
+                            div { class: "mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground",
+                                p {
+                                    "This specification is from the "
+                                    a {
+                                        href: docs_path,
+                                        class: "text-primary hover:underline",
+                                        "nostr.blue documentation"
+                                    }
+                                    "."
+                                }
                             }
-                            "."
                         }
                     }
                 }

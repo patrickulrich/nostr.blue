@@ -231,6 +231,10 @@ impl SidebarPreferencesData {
             }
             self.version = 2;
         }
+        // Always validate items_per_page regardless of version
+        if self.items_per_page == 0 || self.items_per_page > MAX_MAIN_SIDEBAR_SLOTS {
+            self.items_per_page = DEFAULT_MAIN_SIDEBAR_SLOTS;
+        }
         self
     }
 }

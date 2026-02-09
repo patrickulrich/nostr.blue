@@ -764,7 +764,8 @@ fn Layout() -> Element {
                                     // Pages 1+: Back button
                                     button {
                                         class: "flex items-center gap-2 mb-4 p-2 rounded-lg hover:bg-accent transition cursor-pointer",
-                                        onclick: move |_| {
+                                        onclick: move |e| {
+                                            e.stop_propagation();
                                             let prev = sidebar_page.read().saturating_sub(1);
                                             sidebar_page.set(prev);
                                         },
@@ -861,7 +862,8 @@ fn Layout() -> Element {
                                         div { class: "border-t border-border my-2" }
                                         button {
                                             class: "flex items-center gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full text-left",
-                                            onclick: move |_| {
+                                            onclick: move |e| {
+                                                e.stop_propagation();
                                                 sidebar_page.set(0);
                                                 sidebar_customizer_open.set(true);
                                             },
