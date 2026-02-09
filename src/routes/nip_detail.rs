@@ -11,6 +11,12 @@ use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::Event as NostrEvent;
 use std::time::Duration;
+fn extract_title_from_content(content: &str) -> Option<String> {
+    content.lines()
+        .find(|l| l.starts_with("# ") || l.starts_with("## "))
+        .map(|l| l.trim_start_matches('#').trim().to_string())
+}
+
 /// NIP detail page - displays either an official NIP from GitHub or a custom NIP from Nostr
 #[component]
 pub fn NipDetail(nip_id: String) -> Element {
@@ -48,11 +54,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 nip_title.set(format!("NUT-{}", num));
                 match github_nips::fetch_nut_content(num).await {
                     Ok(content) => {
-                        if let Some(first_line) = content
-                            .lines()
-                            .find(|l| l.starts_with("# "))
-                        {
-                            let title = first_line.trim_start_matches('#').trim();
+                        if let Some(title) = extract_title_from_content(&content) {
                             nip_title.set(format!("NUT-{}: {}", num, title));
                         }
                         nip_content.set(Some(content));
@@ -69,11 +71,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 nip_title.set(format!("BUD-{}", num));
                 match github_nips::fetch_bud_content(num).await {
                     Ok(content) => {
-                        if let Some(first_line) = content
-                            .lines()
-                            .find(|l| l.starts_with("# "))
-                        {
-                            let title = first_line.trim_start_matches('#').trim();
+                        if let Some(title) = extract_title_from_content(&content) {
                             nip_title.set(format!("BUD-{}: {}", num, title));
                         }
                         nip_content.set(Some(content));
@@ -90,11 +88,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 nip_title.set(format!("NKBIP-{}", num));
                 match github_nips::fetch_nkbip_content(num).await {
                     Ok(content) => {
-                        if let Some(first_line) = content
-                            .lines()
-                            .find(|l| l.starts_with("# "))
-                        {
-                            let title = first_line.trim_start_matches('#').trim();
+                        if let Some(title) = extract_title_from_content(&content) {
                             nip_title.set(format!("NKBIP-{}: {}", num, title));
                         }
                         nip_content.set(Some(content));
@@ -111,12 +105,8 @@ pub fn NipDetail(nip_id: String) -> Element {
                 nip_title.set("Market Specification".to_string());
                 match github_nips::fetch_market_spec().await {
                     Ok(content) => {
-                        if let Some(first_line) = content
-                            .lines()
-                            .find(|l| l.starts_with("# "))
-                        {
-                            let title = first_line.trim_start_matches('#').trim();
-                            nip_title.set(title.to_string());
+                        if let Some(title) = extract_title_from_content(&content) {
+                            nip_title.set(title);
                         }
                         nip_content.set(Some(content));
                         loading.set(false);
@@ -174,11 +164,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 nip_title.set(format!("NIP-{}", id));
                 match github_nips::fetch_nip_content(&id).await {
                     Ok(content) => {
-                        if let Some(first_line) = content
-                            .lines()
-                            .find(|l| l.starts_with("# ") || l.starts_with("## "))
-                        {
-                            let title = first_line.trim_start_matches('#').trim();
+                        if let Some(title) = extract_title_from_content(&content) {
                             nip_title.set(format!("NIP-{}: {}", id, title));
                         }
                         nip_content.set(Some(content));

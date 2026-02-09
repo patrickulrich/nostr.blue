@@ -133,7 +133,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                     div {
                         class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg min-h-[60px] transition-colors",
                         for (index , item) in local_items.read().iter().cloned().enumerate() {
-                            Fragment { key: "{index}-{item:?}",
+                            Fragment { key: "{item:?}",
                                 if index > 0 && index % slot_count == 0 {
                                     div { class: "w-full flex items-center gap-2 my-1",
                                         div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }

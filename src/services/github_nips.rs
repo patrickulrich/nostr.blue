@@ -286,17 +286,13 @@ pub fn parse_buds_from_readme(content: &str) -> Vec<DocSpec> {
     buds
 }
 /// Parse NKBIP entries. The README has no structured list, so we hardcode known entries.
-pub fn parse_nkbips_from_readme(content: &str) -> Vec<DocSpec> {
-    let mut nkbips = Vec::new();
-    // Extract title from first heading if present in the content
-    // For now, hardcode known NKBIP-01 since only 01.md exists
-    let _ = content;
-    nkbips.push(DocSpec {
+/// TODO: parse README headings to build DocSpec entries dynamically
+pub fn parse_nkbips_from_readme(_content: &str) -> Vec<DocSpec> {
+    vec![DocSpec {
         number: "01".to_string(),
         title: "Knowledge Base Specification".to_string(),
         category: None,
-    });
-    nkbips
+    }]
 }
 #[cfg(test)]
 mod tests {

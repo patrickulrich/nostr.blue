@@ -110,7 +110,8 @@ pub fn NipsHome() -> Element {
                     }
                 }
                 DocsTab::NKBIPs => {
-                    // NKBIPs README has no structured list; use hardcoded parse
+                    // NKBIPs README has no structured list — synchronous hardcoded
+                    // parse avoids a network fetch, so no loading state is needed.
                     let parsed = github_nips::parse_nkbips_from_readme("");
                     nkbips.set(parsed);
                 }

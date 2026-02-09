@@ -1,3 +1,4 @@
+use crate::error::NostrBlueError;
 use crate::stores::nostr_client::PublishResult;
 use crate::stores::{auth_store, nostr_client, relay};
 use dioxus::prelude::*;
@@ -12,7 +13,6 @@ use std::time::Duration;
 /// Cached decryption result for NIP-04 messages
 enum DecryptResult {
     Success(String),
-    PermanentFailure,
     RetryableFailure(Instant),
 }
 
@@ -372,16 +372,16 @@ pub async fn send_dm(
 }
 /// Decrypt a DM message (supports NIP-04 and NIP-17)
 /// NIP-04 results are cached to avoid repeated signer popup spam.
-pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
+pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, NostrBlueError> {
     if let ConversationMessage::Nip17 { rumor, .. } = msg {
         log::debug!("Returning NIP-17 message content from rumor");
         return Ok(rumor.content.clone());
     }
     let ConversationMessage::Nip04 { event } = msg else {
-        return Err("Invalid message type".to_string());
+        return Err(NostrBlueError::Other("Invalid message type".to_string()));
     };
     if event.kind != Kind::EncryptedDirectMessage {
-        return Err(format!("Unsupported message kind: {:?}", event.kind));
+        return Err(NostrBlueError::Other(format!("Unsupported message kind: {:?}", event.kind)));
     }
     // Unencrypted NIP-04 content (no ?iv= parameter)
     if !event.content.contains("?iv=") {
@@ -393,44 +393,38 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
         if let Some(cached) = cache.get(&event.id) {
             match cached {
                 DecryptResult::Success(content) => return Ok(content.clone()),
-                DecryptResult::PermanentFailure => {
-                    return Err("Decryption permanently failed".to_string());
-                }
                 DecryptResult::RetryableFailure(failed_at) => {
                     if failed_at.elapsed().as_secs() < RETRY_COOLDOWN_SECS {
-                        return Err("Decryption failed, retrying soon".to_string());
+                        return Err(NostrBlueError::Other("Decryption failed, retrying soon".to_string()));
                     }
                     // Cooldown expired, fall through to retry
                 }
             }
         }
     }
-    let my_pubkey = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let my_pubkey = auth_store::get_pubkey().ok_or(NostrBlueError::NotAuthenticated)?;
     let other_pubkey = if event.pubkey.to_string() == my_pubkey {
         event
             .tags
             .iter()
             .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
             .and_then(|tag| tag.content())
-            .ok_or("No recipient found in sent message")?
+            .ok_or(NostrBlueError::Other("No recipient found in sent message".to_string()))?
             .to_string()
     } else {
         event.pubkey.to_string()
     };
-    let other_pk = PublicKey::parse(&other_pubkey)
-        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let other_pk = PublicKey::parse(&other_pubkey)?;
     let signer_result = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
-        .ok_or("Client not initialized")?
+        .ok_or(NostrBlueError::Other("Client not initialized".to_string()))?
         .signer()
         .await;
     let signer = match signer_result {
         Ok(s) => s,
         Err(_) => {
-            let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
-            cache.insert(event.id, DecryptResult::PermanentFailure);
-            return Err("No signer available for decryption".to_string());
+            return Err(NostrBlueError::SignerNotAvailable);
         }
     };
     match signer.nip04_decrypt(&other_pk, &event.content).await {
@@ -444,7 +438,7 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
             log::error!("Failed to decrypt NIP-04 message: {}", e);
             let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
             cache.insert(event.id, DecryptResult::RetryableFailure(Instant::now()));
-            Err(format!("Failed to decrypt NIP-04 message: {}", e))
+            Err(NostrBlueError::Other(format!("Failed to decrypt NIP-04 message: {}", e)))
         }
     }
 }

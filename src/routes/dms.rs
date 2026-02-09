@@ -83,6 +83,7 @@ pub fn DMs() -> Element {
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
     let previews = use_signal(HashMap::<String, String>::new);
+    let mut decrypting = use_signal(|| false);
     use_effect(
         use_reactive(
             (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
@@ -102,7 +103,11 @@ pub fn DMs() -> Element {
                     match dms::init_dms().await {
                         Ok(_) => {
                             log::info!("DMs loaded successfully");
-                            decrypt_previews_sequentially(previews).await;
+                            if !*decrypting.peek() {
+                                decrypting.set(true);
+                                decrypt_previews_sequentially(previews).await;
+                                decrypting.set(false);
+                            }
                         }
                         Err(e) => {
                             error.set(Some(e));
@@ -126,8 +131,10 @@ pub fn DMs() -> Element {
                             .await;
                         if auth_store::is_authenticated() && isPageVisible() {
                             log::debug!("Auto-refreshing DMs...");
-                            if dms::init_dms().await.is_ok() {
+                            if dms::init_dms().await.is_ok() && !*decrypting.peek() {
+                                decrypting.set(true);
                                 decrypt_previews_sequentially(previews).await;
+                                decrypting.set(false);
                             }
                         }
                     }
@@ -144,7 +151,11 @@ pub fn DMs() -> Element {
             match dms::init_dms().await {
                 Ok(_) => {
                     log::info!("DMs refreshed successfully");
-                    decrypt_previews_sequentially(previews).await;
+                    if !*decrypting.peek() {
+                        decrypting.set(true);
+                        decrypt_previews_sequentially(previews).await;
+                        decrypting.set(false);
+                    }
                 }
                 Err(e) => {
                     log::error!("Failed to refresh DMs: {}", e);
