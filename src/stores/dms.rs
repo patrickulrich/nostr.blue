@@ -3,10 +3,27 @@ use crate::stores::{auth_store, nostr_client, relay};
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
+use instant::Instant;
 use nostr_sdk::nips::nip17;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp, UnsignedEvent};
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+/// Cached decryption result for NIP-04 messages
+enum DecryptResult {
+    Success(String),
+    PermanentFailure,
+    RetryableFailure(Instant),
+}
+
+static DECRYPT_CACHE: OnceLock<Mutex<HashMap<EventId, DecryptResult>>> = OnceLock::new();
+
+fn get_decrypt_cache() -> &'static Mutex<HashMap<EventId, DecryptResult>> {
+    DECRYPT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+const RETRY_COOLDOWN_SECS: u64 = 10;
+
 /// Represents a message in a conversation, handling NIP-04 and NIP-17
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationMessage {
@@ -354,6 +371,7 @@ pub async fn send_dm(
     Ok(combined_result)
 }
 /// Decrypt a DM message (supports NIP-04 and NIP-17)
+/// NIP-04 results are cached to avoid repeated signer popup spam.
 pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
     if let ConversationMessage::Nip17 { rumor, .. } = msg {
         log::debug!("Returning NIP-17 message content from rumor");
@@ -362,52 +380,73 @@ pub async fn decrypt_dm(msg: &ConversationMessage) -> Result<String, String> {
     let ConversationMessage::Nip04 { event } = msg else {
         return Err("Invalid message type".to_string());
     };
-    let _client = nostr_client::NOSTR_CLIENT
+    if event.kind != Kind::EncryptedDirectMessage {
+        return Err(format!("Unsupported message kind: {:?}", event.kind));
+    }
+    // Unencrypted NIP-04 content (no ?iv= parameter)
+    if !event.content.contains("?iv=") {
+        return Ok(event.content.clone());
+    }
+    // Check decrypt cache first
+    {
+        let cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = cache.get(&event.id) {
+            match cached {
+                DecryptResult::Success(content) => return Ok(content.clone()),
+                DecryptResult::PermanentFailure => {
+                    return Err("Decryption permanently failed".to_string());
+                }
+                DecryptResult::RetryableFailure(failed_at) => {
+                    if failed_at.elapsed().as_secs() < RETRY_COOLDOWN_SECS {
+                        return Err("Decryption failed, retrying soon".to_string());
+                    }
+                    // Cooldown expired, fall through to retry
+                }
+            }
+        }
+    }
+    let my_pubkey = auth_store::get_pubkey().ok_or("Not authenticated")?;
+    let other_pubkey = if event.pubkey.to_string() == my_pubkey {
+        event
+            .tags
+            .iter()
+            .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
+            .and_then(|tag| tag.content())
+            .ok_or("No recipient found in sent message")?
+            .to_string()
+    } else {
+        event.pubkey.to_string()
+    };
+    let other_pk = PublicKey::parse(&other_pubkey)
+        .map_err(|e| format!("Invalid pubkey: {}", e))?;
+    let signer_result = nostr_client::NOSTR_CLIENT
         .read()
         .as_ref()
         .ok_or("Client not initialized")?
-        .clone();
-    if event.kind == Kind::EncryptedDirectMessage {
-        if event.content.contains("?iv=") {
-            let my_pubkey = auth_store::get_pubkey().ok_or("Not authenticated")?;
-            let other_pubkey = if event.pubkey.to_string() == my_pubkey {
-                event
-                    .tags
-                    .iter()
-                    .find(|tag| tag.kind() == nostr_sdk::TagKind::p())
-                    .and_then(|tag| tag.content())
-                    .ok_or("No recipient found in sent message")?
-                    .to_string()
-            } else {
-                event.pubkey.to_string()
-            };
-            let other_pk = PublicKey::parse(&other_pubkey)
-                .map_err(|e| format!("Invalid pubkey: {}", e))?;
-            let signer_result = nostr_client::NOSTR_CLIENT
-                .read()
-                .as_ref()
-                .ok_or("Client not initialized")?
-                .signer()
-                .await;
-            if let Ok(signer) = signer_result {
-                match signer.nip04_decrypt(&other_pk, &event.content).await {
-                    Ok(decrypted) => {
-                        log::debug!("Successfully decrypted NIP-04 message");
-                        return Ok(decrypted);
-                    }
-                    Err(e) => {
-                        log::error!("Failed to decrypt NIP-04 message: {}", e);
-                        return Err(format!("Failed to decrypt NIP-04 message: {}", e));
-                    }
-                }
-            } else {
-                return Err("No signer available for decryption".to_string());
-            }
-        } else {
-            return Ok(event.content.clone());
+        .signer()
+        .await;
+    let signer = match signer_result {
+        Ok(s) => s,
+        Err(_) => {
+            let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(event.id, DecryptResult::PermanentFailure);
+            return Err("No signer available for decryption".to_string());
+        }
+    };
+    match signer.nip04_decrypt(&other_pk, &event.content).await {
+        Ok(decrypted) => {
+            log::debug!("Successfully decrypted NIP-04 message");
+            let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(event.id, DecryptResult::Success(decrypted.clone()));
+            Ok(decrypted)
+        }
+        Err(e) => {
+            log::error!("Failed to decrypt NIP-04 message: {}", e);
+            let mut cache = get_decrypt_cache().lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(event.id, DecryptResult::RetryableFailure(Instant::now()));
+            Err(format!("Failed to decrypt NIP-04 message: {}", e))
         }
     }
-    Err(format!("Unsupported message kind: {:?}", event.kind))
 }
 /// Get a specific conversation
 pub fn get_conversation(pubkey: &str) -> Option<Conversation> {

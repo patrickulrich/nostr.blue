@@ -5,6 +5,7 @@ use crate::utils::time;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::Task;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 /// Guard struct that cancels polling task on drop
 #[derive(Clone)]
@@ -46,6 +47,33 @@ extern "C" {
     fn isDMsScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
     fn isPageVisible() -> bool;
 }
+/// Decrypt the last message preview for each conversation sequentially,
+/// so extension signers show at most one popup at a time.
+async fn decrypt_previews_sequentially(mut previews: Signal<HashMap<String, String>>) {
+    let conversations = dms::get_conversations_sorted();
+    for conversation in &conversations {
+        let pubkey = conversation.pubkey.clone();
+        if let Some(last_msg) = conversation.messages.last() {
+            match dms::decrypt_dm(last_msg).await {
+                Ok(content) => {
+                    let preview = if content.chars().count() > 50 {
+                        let truncated: String = content.chars().take(50).collect();
+                        format!("{}...", truncated)
+                    } else {
+                        content
+                    };
+                    previews.write().insert(pubkey, preview);
+                }
+                Err(_) => {
+                    previews.write().insert(pubkey, "[Unable to decrypt]".to_string());
+                }
+            }
+        } else {
+            previews.write().insert(pubkey, "No messages".to_string());
+        }
+    }
+}
+
 #[component]
 pub fn DMs() -> Element {
     let auth = auth_store::AUTH_STATE.read();
@@ -54,6 +82,7 @@ pub fn DMs() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut selected_conversation = use_signal(|| None::<String>);
     let mut new_dm_mode = use_signal(|| false);
+    let previews = use_signal(HashMap::<String, String>::new);
     use_effect(
         use_reactive(
             (&*nostr_client::CLIENT_INITIALIZED.read(), &auth_store::AUTH_STATE.read().is_authenticated),
@@ -73,6 +102,7 @@ pub fn DMs() -> Element {
                     match dms::init_dms().await {
                         Ok(_) => {
                             log::info!("DMs loaded successfully");
+                            decrypt_previews_sequentially(previews).await;
                         }
                         Err(e) => {
                             error.set(Some(e));
@@ -96,7 +126,9 @@ pub fn DMs() -> Element {
                             .await;
                         if auth_store::is_authenticated() && isPageVisible() {
                             log::debug!("Auto-refreshing DMs...");
-                            let _ = dms::init_dms().await;
+                            if dms::init_dms().await.is_ok() {
+                                decrypt_previews_sequentially(previews).await;
+                            }
                         }
                     }
                 });
@@ -112,6 +144,7 @@ pub fn DMs() -> Element {
             match dms::init_dms().await {
                 Ok(_) => {
                     log::info!("DMs refreshed successfully");
+                    decrypt_previews_sequentially(previews).await;
                 }
                 Err(e) => {
                     log::error!("Failed to refresh DMs: {}", e);
@@ -190,11 +223,13 @@ pub fn DMs() -> Element {
                                             for conversation in conversations {
                                                 {
                                                     let conv_pubkey = conversation.pubkey.clone();
+                                                    let preview = previews.read().get(&conv_pubkey).cloned().unwrap_or_else(|| "Decrypting...".to_string());
                                                     rsx! {
                                                         ConversationListItem {
                                                             key: "{conv_pubkey}",
                                                             conversation: conversation.clone(),
                                                             selected: selected_conversation.read().as_ref() == Some(&conversation.pubkey),
+                                                            preview,
                                                             on_select: move |pk: String| {
                                                                 log::info!("Selected conversation: {}", pk);
                                                                 selected_conversation.set(Some(pk));
@@ -239,10 +274,10 @@ pub fn DMs() -> Element {
 fn ConversationListItem(
     conversation: dms::Conversation,
     selected: bool,
+    preview: String,
     on_select: EventHandler<String>,
 ) -> Element {
     let mut profile = use_signal(|| None::<profiles::Profile>);
-    let mut decrypted_preview = use_signal(|| "Loading...".to_string());
     let pubkey = conversation.pubkey.clone();
     use_effect(move || {
         let pk = pubkey.clone();
@@ -253,31 +288,6 @@ fn ConversationListItem(
             }
         });
     });
-    let last_msg = conversation.messages.last().cloned();
-    use_effect(move || {
-        if let Some(msg) = &last_msg {
-            let msg_clone = msg.clone();
-            spawn(async move {
-                match dms::decrypt_dm(&msg_clone).await {
-                    Ok(content) => {
-                        let preview = if content.chars().count() > 50 {
-                            let truncated: String = content.chars().take(50).collect();
-                            format!("{}...", truncated)
-                        } else {
-                            content
-                        };
-                        decrypted_preview.set(preview);
-                    }
-                    Err(_) => {
-                        decrypted_preview.set("[Unable to decrypt]".to_string());
-                    }
-                }
-            });
-        } else {
-            decrypted_preview.set("No messages".to_string());
-        }
-    });
-    let preview = decrypted_preview.read().clone();
     let display_name = profile
         .read()
         .as_ref()
