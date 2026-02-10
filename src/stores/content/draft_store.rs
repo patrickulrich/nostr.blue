@@ -9,7 +9,7 @@ use nostr_sdk::{
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use super::nostr_client;
+use crate::stores::nostr_client;
 #[cfg(target_arch = "wasm32")]
 use js_sys;
 /// Kind 31234 - Draft Wraps (NIP-37)
