@@ -1697,6 +1697,9 @@
   .h-96 {
     height: calc(var(--spacing) * 96);
   }
+  .h-\[calc\(100vh-4\.5rem\)\] {
+    height: calc(100vh - 4.5rem);
+  }
   .h-\[calc\(100vh-4rem\)\] {
     height: calc(100vh - 4rem);
   }
@@ -2566,9 +2569,6 @@
   }
   .border-gray-300 {
     border-color: var(--color-gray-300);
-  }
-  .border-gray-400 {
-    border-color: var(--color-gray-400);
   }
   .border-gray-500\/20 {
     border-color: color-mix(in srgb, oklch(55.1% 0.027 264.364) 20%, transparent);
@@ -6791,9 +6791,24 @@
       display: none;
     }
   }
+  .lg\:h-screen {
+    @media (width >= 64rem) {
+      height: 100vh;
+    }
+  }
   .lg\:w-96 {
     @media (width >= 64rem) {
       width: calc(var(--spacing) * 96);
+    }
+  }
+  .lg\:flex-1 {
+    @media (width >= 64rem) {
+      flex: 1;
+    }
+  }
+  .lg\:flex-none {
+    @media (width >= 64rem) {
+      flex: none;
     }
   }
   .lg\:columns-4 {
@@ -6834,6 +6849,11 @@
   .lg\:items-center {
     @media (width >= 64rem) {
       align-items: center;
+    }
+  }
+  .lg\:overflow-y-auto {
+    @media (width >= 64rem) {
+      overflow-y: auto;
     }
   }
   .lg\:border-t-0 {
@@ -6906,11 +6926,6 @@
   .dark\:border-blue-800 {
     &:where(.dark, .dark *) {
       border-color: var(--color-blue-800);
-    }
-  }
-  .dark\:border-gray-500 {
-    &:where(.dark, .dark *) {
-      border-color: var(--color-gray-500);
     }
   }
   .dark\:border-gray-600 {
@@ -7566,15 +7581,6 @@
       &:hover {
         @media (hover: hover) {
           background-color: var(--color-gray-700);
-        }
-      }
-    }
-  }
-  .dark\:hover\:bg-gray-800 {
-    &:where(.dark, .dark *) {
-      &:hover {
-        @media (hover: hover) {
-          background-color: var(--color-gray-800);
         }
       }
     }
