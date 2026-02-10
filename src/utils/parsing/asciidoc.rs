@@ -19,8 +19,8 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use super::markdown::{render_markdown, sanitize_html};
-use super::nip54::render_wikilinks_to_html;
-use super::nkbip03::{
+use crate::utils::nip54::render_wikilinks_to_html;
+use crate::utils::nkbip03::{
     extract_citations, generate_endnotes_html_with_data,
     generate_footnotes_html_with_data, has_citations, render_citations_with_data,
     CitationReference, ResolvedCitation,
