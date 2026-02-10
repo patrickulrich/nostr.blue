@@ -325,7 +325,7 @@ pub fn CommentComposer(
                     div { class: "flex items-center gap-3",
                         if has_signer {
                             button {
-                                class: if *show_media_uploader.read() { "px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium transition" } else { "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition" },
+                                class: if *show_media_uploader.read() { "px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium transition" } else { "px-3 py-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm font-medium transition" },
                                 onclick: move |_| {
                                     let current = *show_media_uploader.read();
                                     show_media_uploader.set(!current);

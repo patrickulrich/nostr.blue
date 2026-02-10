@@ -223,13 +223,13 @@ impl SidebarPreferencesData {
     /// Migrate v1 format to v2 by appending any missing variants
     pub fn migrate_to_v2(mut self) -> Self {
         if self.version < 2 {
-            // Append any missing SidebarItem variants that weren't in the v1 active list
-            for variant in SidebarItem::iter() {
-                if !self.items_order.contains(&variant) {
-                    self.items_order.push(variant);
-                }
-            }
             self.version = 2;
+        }
+        // Always ensure all variants present (handles new variants added post-v2)
+        for variant in SidebarItem::iter() {
+            if !self.items_order.contains(&variant) {
+                self.items_order.push(variant);
+            }
         }
         // Always validate items_per_page regardless of version
         if self.items_per_page == 0 || self.items_per_page > MAX_MAIN_SIDEBAR_SLOTS {
@@ -327,7 +327,7 @@ pub fn get_total_pages(is_authenticated: bool) -> usize {
         .iter()
         .filter(|item| !item.requires_auth() || is_authenticated)
         .count();
-    visible_count.div_ceil(slot_count)
+    visible_count.div_ceil(slot_count).max(1)
 }
 /// Load cached sidebar preferences from localStorage
 fn load_cached_sidebar() -> Option<SidebarPreferencesData> {
@@ -501,6 +501,12 @@ pub async fn save_sidebar_preferences(
     items_per_page: usize,
 ) -> Result<(), String> {
     let items_per_page = items_per_page.clamp(1, MAX_MAIN_SIDEBAR_SLOTS);
+    let mut items = items;
+    for variant in SidebarItem::iter() {
+        if !items.contains(&variant) {
+            items.push(variant);
+        }
+    }
     log::info!(
         "Saving {} sidebar items with {} per page to Nostr (NIP-78)...", items.len(),
         items_per_page

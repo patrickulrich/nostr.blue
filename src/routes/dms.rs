@@ -54,15 +54,24 @@ async fn run_decrypt_if_idle(
 ) {
     if !*decrypting.peek() {
         decrypting.set(true);
-        decrypt_previews_sequentially(previews).await;
+        let session_pubkey = auth_store::AUTH_STATE.peek().pubkey.clone();
+        decrypt_previews_sequentially(previews, session_pubkey).await;
         decrypting.set(false);
     }
 }
 /// Decrypt the last message preview for each conversation sequentially,
 /// so extension signers show at most one popup at a time.
-async fn decrypt_previews_sequentially(mut previews: Signal<HashMap<String, String>>) {
+async fn decrypt_previews_sequentially(
+    mut previews: Signal<HashMap<String, String>>,
+    session_pubkey: Option<String>,
+) {
     let conversations = dms::get_conversations_sorted();
     for conversation in &conversations {
+        // Abort if the auth session changed (e.g. user logged out)
+        if auth_store::AUTH_STATE.peek().pubkey != session_pubkey {
+            log::info!("Auth session changed, aborting DM preview decryption");
+            return;
+        }
         let pubkey = conversation.pubkey.clone();
         if let Some(last_msg) = conversation.messages.last() {
             match dms::decrypt_dm(last_msg).await {

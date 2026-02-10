@@ -168,7 +168,7 @@ pub fn CustomNipCard(
                         }
                         span { class: "text-xs text-muted-foreground", "{timestamp}" }
                     }
-                    span { class: "text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500",
+                    span { class: "text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary",
                         "custom"
                     }
                 }

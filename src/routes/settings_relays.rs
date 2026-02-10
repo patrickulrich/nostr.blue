@@ -392,7 +392,7 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                         div { class: "flex items-center gap-2",
-                            span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
                                 "kind 10002"
                             }
                             button {
@@ -497,7 +497,7 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                         div { class: "flex items-center gap-2",
-                            span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
                                 "kind 10050"
                             }
                             button {
@@ -579,7 +579,7 @@ pub fn SettingsRelays() -> Element {
                             }
                         }
                         div { class: "flex items-center gap-2",
-                            span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                            span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
                                 "kind 10007"
                             }
                             button {
@@ -659,7 +659,7 @@ pub fn SettingsRelays() -> Element {
                                 "NIP-51 • Relays to never connect to"
                             }
                         }
-                        span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                        span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
                             "kind 10006"
                         }
                     }
@@ -797,7 +797,7 @@ pub fn SettingsRelays() -> Element {
                             "Currently active connections with live statistics"
                         }
                     }
-                    span { class: "px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs",
+                    span { class: "px-2 py-1 bg-muted text-muted-foreground rounded text-xs",
                         "read-only"
                     }
                 }

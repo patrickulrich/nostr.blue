@@ -174,7 +174,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                 match github_nips::fetch_nip_content(&id).await {
                     Ok(content) => {
                         if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format!("NIP-{}: {}", id, title));
+                            nip_title.set(format_spec_title("NIP", &id, &title));
                         }
                         nip_content.set(Some(content));
                         loading.set(false);
@@ -452,7 +452,7 @@ pub fn NipDetail(nip_id: String) -> Element {
                             p { class: "font-medium", "{author_display}" }
                             p { class: "text-sm text-muted-foreground", "{timestamp}" }
                         }
-                        span { class: "px-3 py-1 rounded-full bg-blue-500/10 text-blue-500 text-sm font-medium",
+                        span { class: "px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium",
                             "Custom NIP"
                         }
                     }

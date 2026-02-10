@@ -562,6 +562,15 @@ fn Layout() -> Element {
     let notif_count = use_memo(notif_store::get_unread_count);
     let mut sidebar_open = use_signal(|| false);
     let mut sidebar_page = use_signal(|| 0usize);
+    // Clamp sidebar_page when total_pages decreases (e.g. auth state change)
+    use_effect(move || {
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        let total_pages = crate::stores::sidebar_store::get_total_pages(is_authenticated);
+        let max_page = total_pages.saturating_sub(1);
+        if *sidebar_page.peek() > max_page {
+            sidebar_page.set(max_page);
+        }
+    });
     let mut radial_menu_open = use_signal(|| false);
     let mut sidebar_customizer_open = use_signal(|| false);
     let mut mobile_search_open = use_signal(|| false);
@@ -756,7 +765,7 @@ fn Layout() -> Element {
                                                 navigator.push(Route::Home { list: String::new() });
                                             }
                                         },
-                                        div { class: "w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl transition",
+                                        div { class: "w-12 h-12 bg-primary hover:bg-primary/90 rounded-full flex items-center justify-center text-primary-foreground font-bold text-xl transition",
                                             "N"
                                         }
                                     }
@@ -877,7 +886,7 @@ fn Layout() -> Element {
                         if auth.is_authenticated {
                             div { class: "relative w-full mt-4",
                                 button {
-                                    class: "w-full py-6 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition text-lg flex items-center justify-center gap-2 relative z-50",
+                                    class: "w-full py-6 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-full transition text-lg flex items-center justify-center gap-2 relative z-50",
                                     onclick: move |_| {
                                         let is_open = *radial_menu_open.read();
                                         radial_menu_open.set(!is_open);
@@ -929,7 +938,7 @@ fn Layout() -> Element {
                             sidebar_page.set(0);
                         },
                         aside {
-                            class: "w-64 bg-white dark:bg-gray-900 h-full overflow-y-auto",
+                            class: "w-64 bg-background h-full overflow-y-auto",
                             onclick: move |e| e.stop_propagation(),
                             div { class: "p-4 space-y-6",
                                 {
@@ -940,7 +949,7 @@ fn Layout() -> Element {
                                     rsx! {
                                         if current_page == 0 {
                                             button {
-                                                class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800",
+                                                class: "mb-4 p-2 rounded-lg hover:bg-accent",
                                                 onclick: move |_| {
                                                     sidebar_open.set(false);
                                                     sidebar_page.set(0);
@@ -960,16 +969,16 @@ fn Layout() -> Element {
                                                         navigator.push(Route::Home { list: String::new() });
                                                     }
                                                 },
-                                                div { class: "w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl",
+                                                div { class: "w-10 h-10 bg-primary rounded-full flex items-center justify-center text-primary-foreground font-bold text-xl",
                                                     "N"
                                                 }
-                                                span { class: "text-2xl font-bold text-gray-900 dark:text-white",
+                                                span { class: "text-2xl font-bold text-foreground",
                                                     "nostr.blue"
                                                 }
                                             }
                                         } else {
                                             button {
-                                                class: "mb-4 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2",
+                                                class: "mb-4 p-2 rounded-lg hover:bg-accent flex items-center gap-2",
                                                 onclick: move |e| {
                                                     e.stop_propagation();
                                                     let prev = sidebar_page.read().saturating_sub(1);
@@ -1239,7 +1248,7 @@ fn NavLink(
             span { "{label}" }
             if let Some(count) = badge {
                 if count > 0 {
-                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-blue-500 text-white rounded-full text-sm font-bold flex items-center justify-center",
+                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-primary text-primary-foreground rounded-full text-sm font-bold flex items-center justify-center",
                         "{count}"
                     }
                 }

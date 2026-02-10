@@ -46,9 +46,9 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
         div { class: "relative",
             button {
                 class: if props.disabled {
-                    if props.icon_only { "p-2 rounded-full text-sm font-bold opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
+                    if props.icon_only { "p-2 rounded-full text-sm font-bold opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-muted text-foreground rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
                 } else {
-                    if props.icon_only { "p-2 rounded-full hover:bg-accent transition text-sm font-bold" } else { "px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition" }
+                    if props.icon_only { "p-2 rounded-full hover:bg-accent transition text-sm font-bold" } else { "px-3 py-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm font-medium transition" }
                 },
                 title: if props.icon_only { "Add GIF" } else { "" },
                 aria_label: if props.icon_only { "{props.aria_label}" } else { "" },
@@ -187,7 +187,7 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
                                                 rsx! {
                                                     button {
                                                         key: "gif-{idx}",
-                                                        class: "relative group aspect-square overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-700",
+                                                        class: "relative group aspect-square overflow-hidden rounded-lg bg-muted",
                                                         title: "{title_text}",
                                                         onclick: move |_| {
                                                             props.on_gif_selected.call(gif_url_for_click.clone());

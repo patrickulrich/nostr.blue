@@ -66,31 +66,31 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
             class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4",
             onclick: handle_backdrop_click,
             div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto",
+                class: "bg-card rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto",
                 onclick: |e| e.stop_propagation(),
                 div { class: "flex items-center justify-between mb-4",
                     div { class: "flex items-center gap-2",
-                        SettingsIcon { class: "w-5 h-5 text-gray-500" }
-                        h3 { class: "text-xl font-semibold text-gray-900 dark:text-white",
+                        SettingsIcon { class: "w-5 h-5 text-muted-foreground" }
+                        h3 { class: "text-xl font-semibold text-foreground",
                             "Customize Sidebar"
                         }
                     }
                     button {
-                        class: "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xl font-bold",
+                        class: "text-muted-foreground hover:text-foreground text-xl font-bold",
                         onclick: move |_| props.on_close.call(()),
                         disabled: *saving.read(),
                         "×"
                     }
                 }
-                p { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                p { class: "text-sm text-muted-foreground mb-2",
                     "Drag to reorder items. Adjust how many items appear per page."
                 }
-                div { class: "flex items-center gap-3 mb-4 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg",
-                    span { class: "text-sm text-gray-700 dark:text-gray-300", "Items per page:" }
+                div { class: "flex items-center gap-3 mb-4 p-2 bg-muted rounded-lg",
+                    span { class: "text-sm text-foreground", "Items per page:" }
                     div { class: "flex items-center gap-1",
                         button {
-                            class: "w-8 h-8 flex items-center justify-center rounded bg-gray-200 dark:bg-gray-600 \
-                                    hover:bg-gray-300 dark:hover:bg-gray-500 disabled:opacity-50 transition",
+                            class: "w-8 h-8 flex items-center justify-center rounded bg-muted \
+                                    hover:bg-accent disabled:opacity-50 transition",
                             disabled: *local_slot_count.read() <= 1,
                             onclick: move |_| {
                                 local_slot_count
@@ -102,12 +102,12 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                             },
                             "−"
                         }
-                        span { class: "w-8 text-center font-medium text-gray-800 dark:text-gray-200",
+                        span { class: "w-8 text-center font-medium text-foreground",
                             "{slot_count}"
                         }
                         button {
-                            class: "w-8 h-8 flex items-center justify-center rounded bg-gray-200 dark:bg-gray-600 \
-                                    hover:bg-gray-300 dark:hover:bg-gray-500 disabled:opacity-50 transition",
+                            class: "w-8 h-8 flex items-center justify-center rounded bg-muted \
+                                    hover:bg-accent disabled:opacity-50 transition",
                             disabled: *local_slot_count.read() >= MAX_MAIN_SIDEBAR_SLOTS,
                             onclick: move |_| {
                                 local_slot_count
@@ -120,27 +120,27 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                             "+"
                         }
                     }
-                    span { class: "text-xs text-gray-500 dark:text-gray-400",
+                    span { class: "text-xs text-muted-foreground",
                         "{total_count} items · {total_pages} pages"
                     }
                 }
                 div { class: "mb-6",
                     div { class: "flex items-center justify-between mb-2",
-                        h4 { class: "font-medium text-gray-700 dark:text-gray-300",
+                        h4 { class: "font-medium text-foreground",
                             "Item Order"
                         }
                     }
                     div {
-                        class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg min-h-[60px] transition-colors",
+                        class: "flex flex-wrap gap-2 p-3 bg-muted rounded-lg min-h-[60px] transition-colors",
                         for (index , item) in local_items.read().iter().cloned().enumerate() {
                             Fragment { key: "{item:?}",
                                 if index > 0 && index % slot_count == 0 {
                                     div { class: "w-full flex items-center gap-2 my-1",
-                                        div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
-                                        span { class: "text-xs text-gray-500 dark:text-gray-400 px-2",
+                                        div { class: "flex-1 border-t border-dashed border-border" }
+                                        span { class: "text-xs text-muted-foreground px-2",
                                             "Page {index / slot_count + 1}"
                                         }
-                                        div { class: "flex-1 border-t border-dashed border-gray-400 dark:border-gray-500" }
+                                        div { class: "flex-1 border-t border-dashed border-border" }
                                     }
                                 }
                                 div {
@@ -236,7 +236,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                     },
                                     div {
                                         class: format!(
-                                            "px-3 py-2 bg-white dark:bg-gray-600 rounded-lg cursor-move \
+                                            "px-3 py-2 bg-card rounded-lg cursor-move \
                                              transition-all flex items-center gap-2 {} {}",
                                             if dragging_from_index() == Some(index) || touch_dragging_index() == Some(index)
                                             {
@@ -249,13 +249,13 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                                 || (touch_over_index() == Some(index)
                                                     && touch_dragging_index() != Some(index) && *is_touch_dragging.read())
                                             {
-                                                "ring-2 ring-blue-500 ring-offset-2"
+                                                "ring-2 ring-primary ring-offset-2"
                                             } else {
                                                 ""
                                             },
                                         ),
                                         {render_sidebar_icon(&item, "w-5 h-5")}
-                                        span { class: "text-sm text-gray-700 dark:text-gray-200",
+                                        span { class: "text-sm text-foreground",
                                             "{item.label()}"
                                         }
                                     }
@@ -271,10 +271,9 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                     }
                 }
                 div { class: "flex justify-between items-center pt-2 border-t \
-                            border-gray-200 dark:border-gray-700",
+                            border-border",
                     button {
-                        class: "text-sm text-gray-500 hover:text-gray-700 \
-                                dark:hover:text-gray-300",
+                        class: "text-sm text-muted-foreground hover:text-foreground",
                         onclick: move |_| {
                             local_items.set(default_sidebar_items());
                             local_slot_count.set(DEFAULT_MAIN_SIDEBAR_SLOTS);
@@ -284,14 +283,14 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                     }
                     div { class: "flex gap-2",
                         button {
-                            class: "px-4 py-2 text-gray-600 dark:text-gray-400 \
-                                    hover:text-gray-800 dark:hover:text-gray-200",
+                            class: "px-4 py-2 text-muted-foreground \
+                                    hover:text-foreground",
                             onclick: move |_| props.on_close.call(()),
                             disabled: *saving.read(),
                             "Cancel"
                         }
                         button {
-                            class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white \
+                            class: "px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground \
                                     rounded font-medium disabled:opacity-50",
                             disabled: *saving.read() || local_items.read().is_empty(),
                             onclick: handle_save,
