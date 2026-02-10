@@ -11,7 +11,8 @@ pub async fn fetch_calendar_events(
             Duration::from_secs(15),
         )
         .await;
-    *LOADING_EVENTS.write() = LOADING_EVENTS.read().saturating_sub(1);
+    let count = *LOADING_EVENTS.read();
+    *LOADING_EVENTS.write() = count.saturating_sub(1);
     match result {
         Ok(events) => {
             cache_calendar_events(&events);
@@ -61,7 +62,8 @@ pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, Stri
         ::stores::nostr_client::fetch_events_aggregated(meetings_filter,
         Duration::from_secs(15))
     );
-    *LOADING_EVENTS.write() = LOADING_EVENTS.read().saturating_sub(1);
+    let count = *LOADING_EVENTS.read();
+    *LOADING_EVENTS.write() = count.saturating_sub(1);
     let mut all_events = Vec::new();
     if let Ok(events) = cal_result {
         cache_calendar_events(&events);
