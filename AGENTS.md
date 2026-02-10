@@ -75,11 +75,11 @@ SearchIcon { class: "w-5 h-5".to_string() }
 
 | Protocol | Location | Description |
 |----------|----------|-------------|
-| NIPs | `docs/nips/` | Nostr specs (01-99+) |
-| NUTs | `docs/nuts/` | Cashu specs (00-26) |
-| BUDs | `docs/blossom/buds/` | Blossom media (00-10) |
-| Market | `docs/market-spec/` | NIP-99 marketplace |
-| NKBIPs | `docs/NKBIPs/` | nostr.blue extensions |
+| NIPs | `public/docs/nips/` | Nostr specs (01-99+) |
+| NUTs | `public/docs/nuts/` | Cashu specs (00-26) |
+| BUDs | `public/docs/blossom/buds/` | Blossom media (00-10) |
+| Market | `public/docs/market-spec/` | NIP-99 marketplace |
+| NKBIPs | `public/docs/NKBIPs/` | nostr.blue extensions |
 
 MCP tool `mcp__nostrbook__read_nip` available for quick NIP lookups.
 

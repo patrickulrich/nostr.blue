@@ -125,7 +125,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
         });
     };
     rsx! {
-        div { class: "flex flex-col h-screen overflow-hidden",
+        div { class: "flex flex-col h-[calc(100vh-4.5rem)] lg:h-screen overflow-hidden",
             div { class: "shrink-0 bg-background/95 backdrop-blur-sm border-b border-border p-4",
                 div { class: "flex items-center gap-4",
                     Link {
@@ -200,7 +200,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                     }
                 } else if let Some(meta) = stream_meta.read().as_ref() {
                     div { class: "flex flex-col lg:flex-row h-full overflow-hidden",
-                        div { class: "flex-1 flex flex-col overflow-y-auto min-h-0",
+                        div { class: "lg:flex-1 flex flex-col overflow-hidden lg:overflow-y-auto min-h-0",
                             div { class: "p-4 space-y-4",
                                 if let Some(stream_url) = &meta.streaming_url {
                                     if !stream_url.is_empty() {
@@ -294,13 +294,13 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                     }
                                     if let Some(summary) = &meta.summary {
                                         if !summary.is_empty() {
-                                            div { class: "text-sm text-foreground",
+                                            div { class: "hidden lg:block text-sm text-foreground",
                                                 "{summary}"
                                             }
                                         }
                                     }
                                     if !meta.tags.is_empty() {
-                                        div { class: "flex flex-wrap gap-2",
+                                        div { class: "hidden lg:flex flex-wrap gap-2",
                                             for tag in meta.tags.iter() {
                                                 Link {
                                                     key: "{tag}",
@@ -316,7 +316,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
                                 }
                             }
                         }
-                        div { class: "lg:w-96 border-t lg:border-t-0 lg:border-l border-border h-full min-h-0",
+                        div { class: "lg:w-96 border-t lg:border-t-0 lg:border-l border-border flex-1 lg:flex-none min-h-0 flex flex-col overflow-hidden",
                             if let Some(_event) = stream_event.read().as_ref() {
                                 {
                                     let (author_pk, dtag) = parsed_naddr.peek().clone();

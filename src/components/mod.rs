@@ -119,7 +119,7 @@ pub use code::{
     CodePullRow, CodeRepoCard, CodeSnippetCard, CodeStatusBadge, FilePathBreadcrumb,
     FileTreeSkeleton,
 };
-pub use nip_card::{CustomNipCard, NipCardSkeleton, OfficialNipCard};
+pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
 pub use citation::{CitationPickerModal, CitationSelection};
 pub use book_picker_modal::{BookPickerModal, BookSelection};
 pub use profile_badges::ProfileBadgesSection;

@@ -149,7 +149,7 @@ pub fn Settings() -> Element {
                         "Login to customize and sync your reaction preferences across devices."
                     }
                 }
-                div { class: "flex flex-wrap gap-2 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg mb-4",
+                div { class: "flex flex-wrap gap-2 p-3 bg-muted rounded-lg mb-4",
                     for reaction in reactions_store::PREFERRED_REACTIONS.read().iter().take(10) {
                         match reaction {
                             reactions_store::PreferredReaction::Standard { emoji } => rsx! {
@@ -272,9 +272,9 @@ pub fn Settings() -> Element {
                                 }
                                 div { class: "flex gap-3",
                                     button {
-                                        class: "px-4 py-2 text-sm bg-gray-100 dark:bg-gray-700
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        text-gray-700 dark:text-gray-300 rounded-lg
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors",
+                                        class: "px-4 py-2 text-sm bg-muted
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        text-foreground rounded-lg
+                                                                                                                                                                                                                                                                                                                                                                                                                                                        hover:bg-accent transition-colors",
                                         onclick: move |_| {
                                             spawn(async move {
                                                 let _ = nwc_store::refresh_balance().await;
