@@ -103,6 +103,11 @@ impl SidebarItem {
             | SidebarItem::Blossom
         )
     }
+    /// Items temporarily hidden from sidebar and customizer.
+    /// Routes remain accessible via direct navigation.
+    pub fn is_hidden(&self) -> bool {
+        matches!(self, SidebarItem::Code | SidebarItem::Citations | SidebarItem::WebBookmarks)
+    }
     /// Human-readable display label
     pub fn label(&self) -> &'static str {
         match self {
@@ -225,12 +230,17 @@ impl SidebarPreferencesData {
         if self.version < 2 {
             self.version = 2;
         }
-        // Always ensure all variants present (handles new variants added post-v2)
+        // Always ensure all non-hidden variants present (handles new variants added post-v2)
         for variant in SidebarItem::iter() {
+            if variant.is_hidden() {
+                continue;
+            }
             if !self.items_order.contains(&variant) {
                 self.items_order.push(variant);
             }
         }
+        // Strip any hidden items from stored preferences
+        self.items_order.retain(|item| !item.is_hidden());
         // Always validate items_per_page regardless of version
         if self.items_per_page == 0 || self.items_per_page > MAX_MAIN_SIDEBAR_SLOTS {
             self.items_per_page = DEFAULT_MAIN_SIDEBAR_SLOTS;
@@ -275,14 +285,11 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Settings,
         SidebarItem::Live,
         SidebarItem::Bookmarks,
-        SidebarItem::WebBookmarks,
         SidebarItem::Wallet,
         SidebarItem::Calendar,
         SidebarItem::Trending,
         SidebarItem::Nips,
         SidebarItem::Badges,
-        SidebarItem::Citations,
-        SidebarItem::Code,
         SidebarItem::Dvm,
         SidebarItem::Publications,
         SidebarItem::Blossom,
@@ -307,7 +314,7 @@ pub fn get_sidebar_page_items(page: usize, is_authenticated: bool) -> Vec<Sideba
     let visible: Vec<SidebarItem> = SIDEBAR_ITEMS
         .read()
         .iter()
-        .filter(|item| !item.requires_auth() || is_authenticated)
+        .filter(|item| !item.is_hidden() && (!item.requires_auth() || is_authenticated))
         .cloned()
         .collect();
     visible
@@ -325,7 +332,7 @@ pub fn get_total_pages(is_authenticated: bool) -> usize {
     let visible_count = SIDEBAR_ITEMS
         .read()
         .iter()
-        .filter(|item| !item.requires_auth() || is_authenticated)
+        .filter(|item| !item.is_hidden() && (!item.requires_auth() || is_authenticated))
         .count();
     visible_count.div_ceil(slot_count).max(1)
 }
@@ -503,7 +510,7 @@ pub async fn save_sidebar_preferences(
     let items_per_page = items_per_page.clamp(1, MAX_MAIN_SIDEBAR_SLOTS);
     let mut items = items;
     for variant in SidebarItem::iter() {
-        if !items.contains(&variant) {
+        if !variant.is_hidden() && !items.contains(&variant) {
             items.push(variant);
         }
     }

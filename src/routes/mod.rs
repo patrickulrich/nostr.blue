@@ -765,7 +765,7 @@ fn Layout() -> Element {
                                                 navigator.push(Route::Home { list: String::new() });
                                             }
                                         },
-                                        div { class: "w-12 h-12 bg-primary hover:bg-primary/90 rounded-full flex items-center justify-center text-primary-foreground font-bold text-xl transition",
+                                        div { class: "w-12 h-12 bg-blue-500 hover:bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl transition",
                                             "N"
                                         }
                                     }
@@ -886,7 +886,7 @@ fn Layout() -> Element {
                         if auth.is_authenticated {
                             div { class: "relative w-full mt-4",
                                 button {
-                                    class: "w-full py-6 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-full transition text-lg flex items-center justify-center gap-2 relative z-50",
+                                    class: "w-full py-6 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition text-lg flex items-center justify-center gap-2 relative z-50",
                                     onclick: move |_| {
                                         let is_open = *radial_menu_open.read();
                                         radial_menu_open.set(!is_open);
@@ -969,7 +969,7 @@ fn Layout() -> Element {
                                                         navigator.push(Route::Home { list: String::new() });
                                                     }
                                                 },
-                                                div { class: "w-10 h-10 bg-primary rounded-full flex items-center justify-center text-primary-foreground font-bold text-xl",
+                                                div { class: "w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xl",
                                                     "N"
                                                 }
                                                 span { class: "text-2xl font-bold text-foreground",
@@ -1248,7 +1248,7 @@ fn NavLink(
             span { "{label}" }
             if let Some(count) = badge {
                 if count > 0 {
-                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-primary text-primary-foreground rounded-full text-sm font-bold flex items-center justify-center",
+                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-blue-500 text-white rounded-full text-sm font-bold flex items-center justify-center",
                         "{count}"
                     }
                 }
