@@ -60,7 +60,17 @@ pub(super) fn TwitchStreamRenderer(channel: String) -> Element {
             } else {
                 div {
                     class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "text-center",
                         div { class: "text-purple-500 text-4xl mb-2", "▶" }
                         div { class: "text-lg font-medium", "Watch {channel} on Twitch" }
@@ -97,7 +107,17 @@ pub(super) fn TwitchClipRenderer(clip_slug: String) -> Element {
             } else {
                 div {
                     class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "text-center",
                         div { class: "text-purple-500 text-4xl mb-2", "▶" }
                         div { class: "text-lg font-medium", "Watch Twitch Clip" }
@@ -134,7 +154,17 @@ pub(super) fn TwitchVodRenderer(vod_id: String) -> Element {
             } else {
                 div {
                     class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "text-center",
                         div { class: "text-purple-500 text-4xl mb-2", "▶" }
                         div { class: "text-lg font-medium", "Watch Twitch VOD" }
@@ -660,7 +690,17 @@ pub(super) fn YouTubeRenderer(video_id: String) -> Element {
             } else {
                 div {
                     class: "relative w-full aspect-video cursor-pointer group",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     img {
                         src: if *tried_fallback.read() { "{fallback_url}" } else { "{thumbnail_url}" },
                         alt: "YouTube video thumbnail",
@@ -722,7 +762,17 @@ pub(super) fn SpotifyRenderer(content_type: String, content_id: String) -> Eleme
             } else {
                 div {
                     class: "flex items-center gap-3 p-4 bg-[#1DB954]/10 border border-[#1DB954]/30 rounded-lg cursor-pointer hover:bg-[#1DB954]/20 transition",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "w-12 h-12 bg-[#1DB954] rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-black",
@@ -770,7 +820,17 @@ pub(super) fn SoundCloudRenderer(url: String) -> Element {
             } else {
                 div {
                     class: "flex items-center gap-3 p-4 bg-[#ff5500]/10 border border-[#ff5500]/30 rounded-lg cursor-pointer hover:bg-[#ff5500]/20 transition",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "w-12 h-12 bg-[#ff5500] rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-white",
@@ -824,7 +884,17 @@ pub(super) fn AppleMusicRenderer(embed_url: String, is_song: bool) -> Element {
             } else {
                 div {
                     class: "flex items-center gap-3 p-4 bg-gradient-to-r from-[#fc3c44]/10 to-[#fa57c1]/10 border border-[#fc3c44]/30 rounded-lg cursor-pointer hover:from-[#fc3c44]/20 hover:to-[#fa57c1]/20 transition",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "w-12 h-12 bg-gradient-to-br from-[#fc3c44] to-[#fa57c1] rounded-xl flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-white",
@@ -875,7 +945,17 @@ pub(super) fn MixCloudRenderer(username: String, mix_name: String) -> Element {
             } else {
                 div {
                     class: "flex items-center gap-3 p-4 bg-[#5000ff]/10 border border-[#5000ff]/30 rounded-lg cursor-pointer hover:bg-[#5000ff]/20 transition",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "w-12 h-12 bg-[#5000ff] rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-7 h-7 text-white",
@@ -935,7 +1015,17 @@ pub(super) fn RumbleRenderer(embed_url: String) -> Element {
             } else {
                 div {
                     class: "relative w-full aspect-video cursor-pointer group bg-[#85c742]/10",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "absolute inset-0 flex flex-col items-center justify-center gap-4",
                         div { class: "w-20 h-20 bg-[#85c742] rounded-full flex items-center justify-center shadow-lg group-hover:scale-110 transition",
                             svg {
@@ -989,7 +1079,17 @@ pub(super) fn TidalRenderer(embed_url: String) -> Element {
             } else {
                 div {
                     class: "flex items-center gap-3 p-4 bg-[#000000]/10 border border-[#000000]/30 dark:bg-white/10 dark:border-white/30 rounded-lg cursor-pointer hover:bg-[#000000]/20 dark:hover:bg-white/20 transition",
+                    role: "button",
+                    tabindex: "0",
                     onclick: move |_| is_visible.set(true),
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if activate {
+                            evt.prevent_default();
+                            is_visible.set(true);
+                        }
+                    },
                     div { class: "w-12 h-12 bg-black dark:bg-white rounded-full flex items-center justify-center shrink-0",
                         svg {
                             class: "w-6 h-6 text-white dark:text-black",
