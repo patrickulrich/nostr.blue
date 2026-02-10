@@ -1372,7 +1372,7 @@ pub(super) fn PodcastFeedRenderer(guid: String) -> Element {
             }
         }
         Some(Err(_)) => {
-            let podcast_index_url = format!("https://podcastindex.org/podcast/{}", guid);
+            let podcast_index_url = format!("https://podcastindex.org/podcast/{}", urlencoding::encode(&guid));
             rsx! {
                 a {
                     href: "{podcast_index_url}",
@@ -1468,7 +1468,7 @@ pub(super) fn PodcastEpisodeRenderer(guid: String) -> Element {
         Some(Err(_)) => {
             let podcast_index_url = format!(
                 "https://podcastindex.org/search?q={}",
-                guid,
+                urlencoding::encode(&guid),
             );
             rsx! {
                 a {
