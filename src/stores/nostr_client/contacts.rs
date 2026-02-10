@@ -379,3 +379,25 @@ pub async fn is_following(pubkey: String) -> std::result::Result<bool, String> {
     let contacts = fetch_contacts(current_pubkey).await?;
     Ok(contacts.contains(&normalized_pubkey))
 }
+/// Batch follow multiple users in a single contact list publish
+/// Returns the number of newly followed users (skips already-followed)
+pub async fn follow_users_batch(
+    pubkeys_to_follow: Vec<String>,
+) -> std::result::Result<usize, String> {
+    let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
+    invalidate_contacts_cache();
+    let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey).await?;
+    let mut new_count = 0;
+    for pk in pubkeys_to_follow {
+        let normalized = crate::utils::nip19::normalize_pubkey(&pk)?;
+        if !contacts.iter().any(|c| c.pubkey == normalized) {
+            contacts.push(EnrichedContact::new(normalized));
+            new_count += 1;
+        }
+    }
+    if new_count > 0 {
+        publish_enriched_contacts(contacts).await?;
+        invalidate_contacts_cache();
+    }
+    Ok(new_count)
+}

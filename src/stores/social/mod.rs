@@ -1,4 +1,5 @@
 pub mod community_store;
+pub mod packs_store;
 pub mod pinned_communities;
 pub mod pinned_notes;
 pub mod reactions_store;
