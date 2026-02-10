@@ -1,0 +1,12 @@
+pub mod nip34;
+pub mod nip48;
+pub mod nip49;
+pub mod nip52;
+pub mod nip53;
+pub mod nip54;
+pub mod nip58;
+pub mod nip69;
+pub mod nip73;
+pub mod nip84;
+pub mod nip98;
+pub mod nip99;
