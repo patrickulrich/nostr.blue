@@ -313,24 +313,6 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 DetailEventStatus::None => rsx! {},
                             }
                         }
-                        if evt.is_private() && evt.image().is_some() {
-                            div { class: "absolute top-4 right-4 px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-2",
-                                svg {
-                                    class: "w-4 h-4",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    fill: "none",
-                                    view_box: "0 0 24 24",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    path {
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
-                                    }
-                                }
-                                "Private Event"
-                            }
-                        }
                     }
                     div { class: "p-4",
                         h1 { class: "text-2xl font-bold mb-4", "{evt.title()}" }

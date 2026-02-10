@@ -91,7 +91,7 @@ pub(crate) struct CountsCache {
 impl CountsCache {
     fn new(capacity: usize, ttl: Duration) -> Self {
         Self {
-            cache: LruCache::new(NonZeroUsize::new(capacity).unwrap()),
+            cache: LruCache::new(NonZeroUsize::new(capacity.max(1)).unwrap()),
             ttl,
         }
     }

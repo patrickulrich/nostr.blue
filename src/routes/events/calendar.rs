@@ -24,19 +24,15 @@ pub fn Calendar() -> Element {
     let mut show_all_day = use_signal(|| true);
     let mut show_timed = use_signal(|| true);
     let mut show_livestreams = use_signal(|| true);
-    let mut show_private = use_signal(|| true);
     let filtered_events = use_memo(move || {
         let show_all_day = show_all_day();
         let show_timed = show_timed();
         let show_livestreams = show_livestreams();
-        let show_private = show_private();
         events
             .read()
             .iter()
             .filter(|e| {
-                if e.is_private() {
-                    show_private
-                } else if e.is_livestream() {
+                if e.is_livestream() {
                     show_livestreams
                 } else if e.is_all_day() {
                     show_all_day
@@ -48,20 +44,17 @@ pub fn Calendar() -> Element {
             .collect::<Vec<_>>()
     });
     let all_day_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_all_day() && !e.is_private()).count()
+        events.read().iter().filter(|e| e.is_all_day()).count()
     });
     let timed_count = use_memo(move || {
         events
             .read()
             .iter()
-            .filter(|e| !e.is_all_day() && !e.is_private() && !e.is_livestream())
+            .filter(|e| !e.is_all_day() && !e.is_livestream())
             .count()
     });
     let livestream_count = use_memo(move || {
         events.read().iter().filter(|e| e.is_livestream()).count()
-    });
-    let private_count = use_memo(move || {
-        events.read().iter().filter(|e| e.is_private()).count()
     });
     let filtered_event_dates = use_memo(move || {
         filtered_events.read().iter().map(get_event_date).collect::<HashSet<String>>()
@@ -157,13 +150,6 @@ pub fn Calendar() -> Element {
                                 checked: show_livestreams(),
                                 count: *livestream_count.read(),
                                 on_change: move |checked| show_livestreams.set(checked),
-                            }
-                            EventTypeFilterRow {
-                                label: "Private Events",
-                                color: "#a855f7",
-                                checked: show_private(),
-                                count: *private_count.read(),
-                                on_change: move |checked| show_private.set(checked),
                             }
                         }
                     }

@@ -18,6 +18,14 @@ pub struct InteractionStreamHandle {
     task: Option<dioxus::dioxus_core::Task>,
 }
 
+impl Drop for InteractionStreamHandle {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.as_ref() {
+            task.cancel();
+        }
+    }
+}
+
 impl InteractionStreamHandle {
     /// Cancel the background notification handler and unsubscribe
     /// nostr-sdk pattern: graceful shutdown via signal, then cleanup

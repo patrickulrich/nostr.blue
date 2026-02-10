@@ -58,14 +58,13 @@ impl EventTypeFilter {
     }
 }
 /// Filter state for events
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EventFilterState {
     pub search_term: String,
     pub time_filter: TimeFilter,
     pub location_filter: LocationFilter,
     pub event_type_filter: EventTypeFilter,
     pub hashtag: Option<String>,
-    pub include_private: bool,
     /// Hide events that have ended (default: true)
     pub hide_ended: bool,
 }
@@ -77,17 +76,13 @@ impl Default for EventFilterState {
             location_filter: LocationFilter::default(),
             event_type_filter: EventTypeFilter::default(),
             hashtag: None,
-            include_private: false,
             hide_ended: true,
         }
     }
 }
 impl EventFilterState {
     pub fn is_empty(&self) -> bool {
-        self.search_term.is_empty() && self.time_filter == TimeFilter::All
-            && self.location_filter == LocationFilter::All
-            && self.event_type_filter == EventTypeFilter::All && self.hashtag.is_none()
-            && !self.include_private && self.hide_ended
+        *self == Self::default()
     }
     pub fn clear(&mut self) {
         *self = Self::default();
@@ -203,15 +198,12 @@ pub fn filter_events_with_nip50(
                     return false;
                 }
             }
-            if !filters.include_private && event.is_private() {
-                return false;
-            }
             true
         })
         .cloned()
         .collect()
 }
-/// Sort events (events with images first, then by date)
+/// Sort events (events with images first, then by date, then by coordinate for stability)
 pub fn sort_events_for_display(events: &mut [UnifiedEvent]) {
     events
         .sort_by(|a, b| {
@@ -220,7 +212,8 @@ pub fn sort_events_for_display(events: &mut [UnifiedEvent]) {
             match (a_has_image, b_has_image) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => a.start_timestamp().cmp(&b.start_timestamp()),
+                _ => a.start_timestamp().cmp(&b.start_timestamp())
+                    .then_with(|| a.coordinate().cmp(b.coordinate())),
             }
         });
 }
@@ -276,10 +269,6 @@ pub fn rsvps_filter(event_coordinate: &str) -> Filter {
 /// Build filter for user's RSVPs
 pub fn my_rsvps_filter(pubkey: PublicKey) -> Filter {
     Filter::new().kind(Kind::Custom(KIND_CALENDAR_RSVP)).author(pubkey)
-}
-/// Build filter for private calendar events (gift wraps to user)
-pub fn private_events_filter(pubkey: PublicKey) -> Filter {
-    Filter::new().kind(Kind::GiftWrap).pubkey(pubkey)
 }
 /// Build filter for availability templates by author
 pub fn availability_templates_filter(pubkey: PublicKey) -> Filter {

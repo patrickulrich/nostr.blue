@@ -56,6 +56,8 @@ pub fn filter_products(products: &[Product], filters: &ShopFilterState) -> Vec<P
                         return false;
                     }
                 }
+            } else if filters.min_price_sats.is_some() || filters.max_price_sats.is_some() {
+                return false;
             }
             if let Some(category) = &filters.category {
                 if !product.categories.iter().any(|c| c.eq_ignore_ascii_case(category)) {
@@ -166,12 +168,9 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
         }
         ProductSortBy::Rating => {
             products
-                .sort_by(|a, b| {
-                    let rating_a = get_product_average_rating(&a.coordinate)
-                        .unwrap_or(0.0);
-                    let rating_b = get_product_average_rating(&b.coordinate)
-                        .unwrap_or(0.0);
-                    rating_b.partial_cmp(&rating_a).unwrap_or(std::cmp::Ordering::Equal)
+                .sort_by_cached_key(|p| {
+                    let rating = get_product_average_rating(&p.coordinate).unwrap_or(0.0);
+                    std::cmp::Reverse(rating.to_bits())
                 });
         }
         ProductSortBy::Title => {

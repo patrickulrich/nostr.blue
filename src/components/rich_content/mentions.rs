@@ -373,7 +373,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
             },
             class: "block my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            div { class: "border border-border rounded-lg p-3 hover:bg-accent/10 transition cursor-pointer",
+            div { class: "bg-card border border-border rounded-lg p-3 hover:bg-accent/10 transition cursor-pointer",
                 div { class: "flex items-center gap-2 mb-2",
                     if let Some(meta) = metadata {
                         if let Some(picture) = &meta.picture {

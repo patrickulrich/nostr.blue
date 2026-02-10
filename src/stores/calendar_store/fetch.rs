@@ -4,14 +4,14 @@ use super::*;
 pub async fn fetch_calendar_events(
     limit: usize,
 ) -> StdResult<Vec<CalendarEvent>, String> {
-    *LOADING_EVENTS.write() = true;
+    *LOADING_EVENTS.write() += 1;
     let filter = calendar_events_filter(limit);
     let result = crate::stores::nostr_client::fetch_events_aggregated(
             filter,
             Duration::from_secs(15),
         )
         .await;
-    *LOADING_EVENTS.write() = false;
+    *LOADING_EVENTS.write() = LOADING_EVENTS.read().saturating_sub(1);
     match result {
         Ok(events) => {
             cache_calendar_events(&events);
@@ -52,7 +52,7 @@ pub async fn fetch_meetings(limit: usize) -> StdResult<Vec<LiveActivityEvent>, S
 }
 /// Fetch all events (calendar + meetings) for the events page
 pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
-    *LOADING_EVENTS.write() = true;
+    *LOADING_EVENTS.write() += 1;
     let cal_filter = calendar_events_filter(limit);
     let meetings_filter = meetings_filter(limit);
     let (cal_result, meetings_result) = futures::join!(
@@ -61,7 +61,7 @@ pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, Stri
         ::stores::nostr_client::fetch_events_aggregated(meetings_filter,
         Duration::from_secs(15))
     );
-    *LOADING_EVENTS.write() = false;
+    *LOADING_EVENTS.write() = LOADING_EVENTS.read().saturating_sub(1);
     let mut all_events = Vec::new();
     if let Ok(events) = cal_result {
         cache_calendar_events(&events);
@@ -149,7 +149,6 @@ pub async fn fetch_all_events_paginated(
 /// - Events where user is invited (p tag)
 /// - Events user has RSVPed to (accepted)
 /// - User's availability blocks
-/// - Private events (gift wrapped to user)
 pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, String> {
     let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
@@ -176,8 +175,7 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         .kind(Kind::Custom(KIND_CALENDAR_RSVP))
         .author(pk)
         .limit(200);
-    let private_filter = Filter::new().kind(Kind::GiftWrap).pubkey(pk).limit(200);
-    let (authored_result, invited_result, blocks_result, rsvps_result, private_result) = futures::join!(
+    let (authored_result, invited_result, blocks_result, rsvps_result) = futures::join!(
         crate ::stores::nostr_client::fetch_events_aggregated(authored_filter,
         Duration::from_secs(15)), crate
         ::stores::nostr_client::fetch_events_aggregated(invited_filter,
@@ -185,8 +183,6 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
         ::stores::nostr_client::fetch_events_aggregated(blocks_filter,
         Duration::from_secs(15)), crate
         ::stores::nostr_client::fetch_events_aggregated(rsvps_filter,
-        Duration::from_secs(15)), crate
-        ::stores::nostr_client::fetch_events_aggregated(private_filter,
         Duration::from_secs(15))
     );
     use crate::utils::nip52::RsvpStatus;
@@ -240,47 +236,6 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
             }
         }
     }
-    if let Ok(wraps) = private_result {
-        log::info!("[calendar_store] Found {} gift wraps", wraps.len());
-        let client = match crate::stores::nostr_client::get_client() {
-            Some(c) => c,
-            None => {
-                log::warn!(
-                    "[calendar_store] Client not available for gift wrap decryption"
-                );
-                return Ok(all_events);
-            }
-        };
-        for wrap in wraps {
-            match client.unwrap_gift_wrap(&wrap).await {
-                Ok(unwrapped) => {
-                    let rumor = unwrapped.rumor;
-                    let kind = rumor.kind.as_u16();
-                    if kind == KIND_DATE_CALENDAR_EVENT
-                        || kind == KIND_TIME_CALENDAR_EVENT
-                    {
-                        let wrap_id = wrap.id.to_string();
-                        if let Ok(mut cal_event) = parse_calendar_rumor(
-                            &rumor,
-                            &wrap_id,
-                        ) {
-                            cal_event.pubkey = unwrapped.sender.to_string();
-                            cal_event.source = EventSource::Private {
-                                gift_wrap_id: wrap_id.clone(),
-                            };
-                            let coord = cal_event.coordinate.clone();
-                            if seen_coords.insert(coord) {
-                                all_events.push(UnifiedEvent::Calendar(cal_event));
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::debug!("[calendar_store] Failed to unwrap gift wrap: {}", e);
-                }
-            }
-        }
-    }
     log::info!("[calendar_store] Total personal calendar events: {}", all_events.len());
     Ok(all_events)
 }
@@ -312,45 +267,6 @@ async fn fetch_event_by_coordinate(
         }
     }
     Ok(None)
-}
-/// Fetch private calendar events (NIP-59 gift wraps)
-pub async fn fetch_private_calendar_events() -> StdResult<Vec<CalendarEvent>, String> {
-    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = Filter::new().kind(Kind::GiftWrap).pubkey(pk).limit(200);
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let events = client
-        .fetch_events(filter, Duration::from_secs(15))
-        .await
-        .map_err(|e| format!("Failed to fetch gift wraps: {}", e))?;
-    let mut private_events = Vec::new();
-    for gift_wrap in events.iter() {
-        match client.unwrap_gift_wrap(gift_wrap).await {
-            Ok(unwrapped) => {
-                let rumor = unwrapped.rumor;
-                let rumor_kind = rumor.kind.as_u16();
-                if rumor_kind == KIND_DATE_CALENDAR_EVENT
-                    || rumor_kind == KIND_TIME_CALENDAR_EVENT
-                {
-                    let gift_wrap_id = gift_wrap.id.to_string();
-                    if let Ok(mut cal_event) = parse_calendar_rumor(
-                        &rumor,
-                        &gift_wrap_id,
-                    ) {
-                        cal_event.pubkey = unwrapped.sender.to_string();
-                        private_events.push(cal_event);
-                    }
-                }
-            }
-            Err(e) => {
-                log::debug!("Failed to unwrap gift wrap: {}", e);
-                continue;
-            }
-        }
-    }
-    *PRIVATE_EVENTS_CACHE.write() = private_events.clone();
-    Ok(private_events)
 }
 /// Fetch RSVPs for a specific event
 pub async fn fetch_event_rsvps(
@@ -571,44 +487,6 @@ pub async fn fetch_my_rsvps(pubkey: &str) -> StdResult<Vec<CalendarRsvp>, String
         cache_my_rsvp(rsvp.clone());
     }
     Ok(rsvps)
-}
-/// Fetch private calendar events (NIP-59 gift wraps)
-pub async fn fetch_private_events() -> StdResult<Vec<CalendarEvent>, String> {
-    let client = crate::stores::nostr_client::get_client()
-        .ok_or("Client not initialized")?;
-    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
-    let pk = PublicKey::from_hex(&pubkey).map_err(|e| format!("Invalid pubkey: {}", e))?;
-    let filter = private_events_filter(pk);
-    let events = crate::stores::nostr_client::fetch_events_aggregated(
-            filter,
-            Duration::from_secs(15),
-        )
-        .await?;
-    let mut private_events = Vec::new();
-    for gift_wrap in events {
-        if gift_wrap.kind != Kind::GiftWrap {
-            continue;
-        }
-        match client.unwrap_gift_wrap(&gift_wrap).await {
-            Ok(unwrapped) => {
-                let rumor = unwrapped.rumor;
-                let kind = rumor.kind.as_u16();
-                if kind == KIND_DATE_CALENDAR_EVENT || kind == KIND_TIME_CALENDAR_EVENT {
-                    if let Ok(mut cal_event) = parse_unsigned_calendar_event(&rumor) {
-                        cal_event.source = EventSource::Private {
-                            gift_wrap_id: gift_wrap.id.to_hex(),
-                        };
-                        private_events.push(cal_event);
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to unwrap gift wrap: {}", e);
-            }
-        }
-    }
-    *PRIVATE_EVENTS_CACHE.write() = private_events.clone();
-    Ok(private_events)
 }
 /// Fetch specific event by naddr
 pub async fn fetch_event_by_naddr(

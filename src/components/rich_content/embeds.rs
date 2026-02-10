@@ -11,6 +11,7 @@ use crate::utils::recipe::{extract_metadata as extract_recipe_metadata, is_recip
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, FromBech32};
+use std::rc::Rc;
 
 use super::minicards::render_recipe_minicard;
 
@@ -36,7 +37,9 @@ pub(super) fn TwitterTweetRenderer(tweet_id: String) -> Element {
 #[component]
 pub(super) fn TwitchStreamRenderer(channel: String) -> Element {
     let mut is_visible = use_signal(|| false);
-    let parent_domain = if cfg!(debug_assertions) { "localhost" } else { "nostr.blue" };
+    let parent_domain = web_sys::window()
+        .and_then(|w| w.location().hostname().ok())
+        .unwrap_or_else(|| "localhost".to_string());
     let embed_url = format!(
         "https://player.twitch.tv/?channel={}&parent={}",
         channel,
@@ -71,7 +74,9 @@ pub(super) fn TwitchStreamRenderer(channel: String) -> Element {
 #[component]
 pub(super) fn TwitchClipRenderer(clip_slug: String) -> Element {
     let mut is_visible = use_signal(|| false);
-    let parent_domain = if cfg!(debug_assertions) { "localhost" } else { "nostr.blue" };
+    let parent_domain = web_sys::window()
+        .and_then(|w| w.location().hostname().ok())
+        .unwrap_or_else(|| "localhost".to_string());
     let embed_url = format!(
         "https://clips.twitch.tv/embed?clip={}&parent={}",
         clip_slug,
@@ -106,7 +111,9 @@ pub(super) fn TwitchClipRenderer(clip_slug: String) -> Element {
 #[component]
 pub(super) fn TwitchVodRenderer(vod_id: String) -> Element {
     let mut is_visible = use_signal(|| false);
-    let parent_domain = if cfg!(debug_assertions) { "localhost" } else { "nostr.blue" };
+    let parent_domain = web_sys::window()
+        .and_then(|w| w.location().hostname().ok())
+        .unwrap_or_else(|| "localhost".to_string());
     let embed_url = format!(
         "https://player.twitch.tv/?video={}&parent={}",
         vod_id,
@@ -338,11 +345,14 @@ pub(super) fn WavlakeAlbumRenderer(album_id: String) -> Element {
                             }
                         }
                     }
+                    {
+                        let tracks_rc = Rc::new(tracks);
+                        rsx! {
                     div { class: "divide-y divide-border",
                         for (index , track_data) in album.tracks.iter().enumerate() {
                             {
-                                let track_clone = tracks[index].clone();
-                                let playlist = tracks.clone();
+                                let track_clone = tracks_rc[index].clone();
+                                let playlist_rc = Rc::clone(&tracks_rc);
                                 let track_title = track_data.title.clone();
                                 let track_artist = track_data.artist.clone();
                                 let track_duration = track_data.duration;
@@ -353,7 +363,7 @@ pub(super) fn WavlakeAlbumRenderer(album_id: String) -> Element {
                                         onclick: move |_| {
                                             music_player::play_track(
                                                 track_clone.clone(),
-                                                Some(playlist.clone()),
+                                                Some((*playlist_rc).clone()),
                                                 Some(index),
                                             );
                                         },
@@ -378,6 +388,8 @@ pub(super) fn WavlakeAlbumRenderer(album_id: String) -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
                         }
                     }
                 }
@@ -558,11 +570,14 @@ pub(super) fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                             }
                         }
                     }
+                    {
+                        let tracks_rc = Rc::new(tracks);
+                        rsx! {
                     div { class: "divide-y divide-border max-h-96 overflow-y-auto",
                         for (index , track_data) in playlist.tracks.iter().enumerate() {
                             {
-                                let track_clone = tracks[index].clone();
-                                let playlist_clone = tracks.clone();
+                                let track_clone = tracks_rc[index].clone();
+                                let playlist_rc = Rc::clone(&tracks_rc);
                                 let track_title = track_data.title.clone();
                                 let track_artist = track_data.artist.clone();
                                 let track_duration = track_data.duration;
@@ -574,7 +589,7 @@ pub(super) fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                                         onclick: move |_| {
                                             music_player::play_track(
                                                 track_clone.clone(),
-                                                Some(playlist_clone.clone()),
+                                                Some((*playlist_rc).clone()),
                                                 Some(index),
                                             );
                                         },
@@ -603,6 +618,8 @@ pub(super) fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
                         }
                     }
                 }

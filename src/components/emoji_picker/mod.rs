@@ -128,19 +128,19 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             }
             if *show_picker.read() {
                 div {
-                    class: "fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[60]",
+                    class: "fixed bg-background border border-border rounded-lg shadow-xl z-[60]",
                     class: "w-[calc(100vw-2rem)] sm:w-80",
                     style: if *is_mobile.read() { "top: 1rem; left: 1rem; right: 1rem;".to_string() } else if *position_below.read() { format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read()) } else { format!("bottom: {}px; left: {}px;", *picker_bottom.read(), *picker_left.read()) },
                     onclick: move |e| e.stop_propagation(),
-                    div { class: "flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700",
+                    div { class: "flex items-center justify-between p-3 border-b border-border",
                         h3 { class: "text-sm font-semibold", "Select Emoji" }
                         button {
-                            class: "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
+                            class: "text-muted-foreground hover:text-foreground",
                             onclick: move |_| show_picker.set(false),
                             "✕"
                         }
                     }
-                    div { class: "p-2 border-b border-gray-200 dark:border-gray-700",
+                    div { class: "p-2 border-b border-border",
                         input {
                             r#type: "text",
                             class: "w-full px-3 py-2 text-sm bg-muted border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
@@ -150,10 +150,10 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         }
                     }
                     if !is_searching {
-                        div { class: "flex gap-1 p-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto",
+                        div { class: "flex gap-1 p-2 border-b border-border overflow-x-auto",
                             button {
                                 key: "recent",
-                                class: if *selected_category.read() == EmojiCategory::Recent { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap" },
+                                class: if *selected_category.read() == EmojiCategory::Recent { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
                                 onclick: move |_| selected_category.set(EmojiCategory::Recent),
                                 "🕐 Recent"
                             }
@@ -163,7 +163,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     rsx! {
                                         button {
                                             key: "{custom_key}",
-                                            class: if *selected_category.read() == EmojiCategory::Custom { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap" },
+                                            class: if *selected_category.read() == EmojiCategory::Custom { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
                                             onclick: move |_| selected_category.set(EmojiCategory::Custom),
                                             "⭐ Custom"
                                         }
@@ -180,7 +180,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     rsx! {
                                         button {
                                             key: "set-{identifier_for_key}",
-                                            class: if *selected_category.read() == EmojiCategory::Set(identifier_for_class) { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap" },
+                                            class: if *selected_category.read() == EmojiCategory::Set(identifier_for_class) { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
                                             onclick: move |_| selected_category.set(EmojiCategory::Set(identifier.clone())),
                                             "{display_name}"
                                         }
@@ -190,7 +190,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                             for (idx , (category_name , _)) in EMOJI_CATEGORIES.iter().enumerate() {
                                 button {
                                     key: "std-{idx}",
-                                    class: if *selected_category.read() == EmojiCategory::Standard(idx) { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-xs whitespace-nowrap" },
+                                    class: if *selected_category.read() == EmojiCategory::Standard(idx) { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
                                     onclick: move |_| selected_category.set(EmojiCategory::Standard(idx)),
                                     "{category_name}"
                                 }
@@ -207,7 +207,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                         rsx! {
                                             button {
                                                 key: "search-{emoji_idx}",
-                                                class: "text-2xl hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition",
+                                                class: "text-2xl hover:bg-accent rounded p-2 transition",
                                                 onclick: move |_| {
                                                     save_recent_emoji(emoji_for_click.clone());
                                                     props.on_emoji_selected.call(emoji_for_click.clone());
@@ -233,7 +233,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             rsx! {
                                                 button {
                                                     key: "search-custom-{emoji_idx}",
-                                                    class: "hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition flex items-center justify-center",
+                                                    class: "hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                     title: "{title_text}",
                                                     onclick: move |_| {
                                                         save_recent_emoji(url_for_click.clone());
@@ -242,7 +242,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                         search_query.set(String::new());
                                                     },
                                                     if has_error {
-                                                        span { class: "text-xs text-gray-500 truncate max-w-[4rem]", "{shortcode_display}" }
+                                                        span { class: "text-xs text-muted-foreground truncate max-w-[4rem]", "{shortcode_display}" }
                                                     } else {
                                                         img {
                                                             src: "{url}",
@@ -275,7 +275,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 rsx! {
                                                     button {
                                                         key: "recent-{emoji_idx}",
-                                                        class: "text-2xl hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition flex items-center justify-center",
+                                                        class: "text-2xl hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                         onclick: move |_| {
                                                             save_recent_emoji(emoji_for_click.clone());
                                                             if is_url {
@@ -287,7 +287,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                         },
                                                         if is_url {
                                                             if has_error {
-                                                                span { class: "text-xs text-gray-500", "🖼️" }
+                                                                span { class: "text-xs text-muted-foreground", "🖼️" }
                                                             } else {
                                                                 img {
                                                                     src: "{emoji_str}",
@@ -307,7 +307,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             }
                                         }
                                         if recent_emojis.is_empty() {
-                                            p { class: "col-span-full text-center text-gray-500 text-sm py-4",
+                                            p { class: "col-span-full text-center text-muted-foreground text-sm py-4",
                                                 "No recent emojis yet. Select some emojis to see them here!"
                                             }
                                         }
@@ -329,7 +329,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 rsx! {
                                                     button {
                                                         key: "custom-{emoji_idx}",
-                                                        class: "hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition flex items-center justify-center",
+                                                        class: "hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                         title: "{title_text}",
                                                         onclick: move |_| {
                                                             save_recent_emoji(url_for_save.clone());
@@ -337,7 +337,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                             show_picker.set(false);
                                                         },
                                                         if has_error {
-                                                            span { class: "text-xs text-gray-500 truncate max-w-[4rem]", "{shortcode_display}" }
+                                                            span { class: "text-xs text-muted-foreground truncate max-w-[4rem]", "{shortcode_display}" }
                                                         } else {
                                                             img {
                                                                 src: "{url}",
@@ -377,7 +377,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                         rsx! {
                                                             button {
                                                                 key: "set-{set_id}-{emoji_idx}",
-                                                                class: "hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition flex items-center justify-center",
+                                                                class: "hover:bg-accent rounded p-2 transition flex items-center justify-center",
                                                                 title: "{title_text}",
                                                                 onclick: move |_| {
                                                                     save_recent_emoji(url_for_save.clone());
@@ -385,7 +385,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                                     show_picker.set(false);
                                                                 },
                                                                 if has_error {
-                                                                    span { class: "text-xs text-gray-500 truncate max-w-[4rem]", "{shortcode_display}" }
+                                                                    span { class: "text-xs text-muted-foreground truncate max-w-[4rem]", "{shortcode_display}" }
                                                                 } else {
                                                                     img {
                                                                         src: "{url}",
@@ -402,7 +402,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                     }
                                                 }
                                             } else {
-                                                p { class: "col-span-full text-center text-gray-500 text-sm py-4", "Emoji set not found" }
+                                                p { class: "col-span-full text-center text-muted-foreground text-sm py-4", "Emoji set not found" }
                                             }
                                         }
                                     }
@@ -416,7 +416,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 rsx! {
                                                     button {
                                                         key: "std-{idx}-{emoji_idx}",
-                                                        class: "text-2xl hover:bg-gray-100 dark:hover:bg-gray-700 rounded p-2 transition",
+                                                        class: "text-2xl hover:bg-accent rounded p-2 transition",
                                                         onclick: move |_| {
                                                             save_recent_emoji(emoji_for_click.clone());
                                                             props.on_emoji_selected.call(emoji_for_click.clone());

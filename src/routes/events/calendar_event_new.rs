@@ -38,7 +38,6 @@ pub fn CalendarEventNew() -> Element {
     let mut image_url = use_signal(String::new);
     let mut hashtags_input = use_signal(String::new);
     let mut timezone = use_signal(get_local_timezone);
-    let mut is_private = use_signal(|| false);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
     let mut ics_events = use_signal(Vec::<IcsEvent>::new);
@@ -249,7 +248,6 @@ pub fn CalendarEventNew() -> Element {
         let image_val = image_url.read().clone();
         let hashtags_val = hashtags_input.read().clone();
         let timezone_val = timezone.read().clone();
-        let is_private_val = *is_private.read();
         let participants_val: Vec<(String, String)> = participants
             .read()
             .iter()
@@ -300,7 +298,6 @@ pub fn CalendarEventNew() -> Element {
                             &all_locations,
                             &hashtags,
                             &participants_val,
-                            is_private_val,
                         )
                         .await
                 }
@@ -336,7 +333,6 @@ pub fn CalendarEventNew() -> Element {
                             } else {
                                 Some(&timezone_val)
                             },
-                            is_private_val,
                         )
                         .await
                 }
@@ -708,22 +704,6 @@ pub fn CalendarEventNew() -> Element {
                             placeholder: "conference, meetup, bitcoin (comma or space separated)",
                             value: "{hashtags_input}",
                             oninput: move |e| hashtags_input.set(e.value()),
-                        }
-                    }
-                    div { class: "mb-6",
-                        label { class: "flex items-center gap-3 cursor-pointer",
-                            input {
-                                r#type: "checkbox",
-                                class: "w-5 h-5 rounded border-border",
-                                checked: *is_private.read(),
-                                oninput: move |e| is_private.set(e.checked()),
-                            }
-                            div {
-                                div { class: "font-medium", "Private Event" }
-                                div { class: "text-sm text-muted-foreground",
-                                    "Only visible to you and invited participants (NIP-59)"
-                                }
-                            }
                         }
                     }
                 }

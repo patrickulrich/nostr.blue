@@ -113,12 +113,11 @@ impl std::fmt::Display for FreeBusy {
         write!(f, "{}", self.as_str())
     }
 }
-/// Event source (public vs private)
+/// Event source (public vs calendar)
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EventSource {
     #[default]
     Public,
-    Private { gift_wrap_id: String },
     Calendar { calendar_id: String },
 }
 /// Participant in a calendar event
@@ -247,10 +246,6 @@ impl CalendarEvent {
     /// Get end timestamp
     pub fn end_timestamp(&self) -> Option<u64> {
         self.end.as_ref().and_then(|e| e.to_timestamp())
-    }
-    /// Check if this is a private event
-    pub fn is_private(&self) -> bool {
-        matches!(self.source, EventSource::Private { .. })
     }
 }
 /// Calendar RSVP parsed from Kind 31925 events

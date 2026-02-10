@@ -1,7 +1,6 @@
 //! Calendar Store
 //! Handles NIP-52 calendar events and NIP-53 meeting events
 //! - Caching, filtering, and state management
-//! - Private events via NIP-59 gift wraps
 //! - RSVPs and availability
 //!
 //! ## Submodules
@@ -29,7 +28,7 @@ use std::time::Duration;
 type StdResult<T, E> = std::result::Result<T, E>;
 use crate::utils::nip52::{
     parse_calendar_event, parse_calendar_rsvp, AvailabilityBlock, AvailabilityTemplate,
-    CalendarEvent, CalendarRsvp, EventSource, EventTime, KIND_AVAILABILITY_BLOCK,
+    CalendarEvent, CalendarRsvp, EventTime, KIND_AVAILABILITY_BLOCK,
     KIND_AVAILABILITY_TEMPLATE, KIND_CALENDAR_RSVP, KIND_DATE_CALENDAR_EVENT,
     KIND_TIME_CALENDAR_EVENT,
 };
@@ -40,8 +39,6 @@ use crate::utils::nip53::{
 };
 
 const EVENT_CACHE_SIZE: usize = 500;
-const RSVP_CACHE_SIZE: usize = 200;
-const PRIVATE_EVENT_CACHE_SIZE: usize = 100;
 
 /// Calendar events cache (keyed by coordinate string)
 pub static CALENDAR_EVENTS_CACHE: GlobalSignal<LruCache<String, CalendarEvent>> = GlobalSignal::new(||
@@ -49,10 +46,6 @@ LruCache::new(NonZeroUsize::new(EVENT_CACHE_SIZE).unwrap()));
 /// Live activity events cache (meetings, streams) - keyed by coordinate
 pub static LIVE_EVENTS_CACHE: GlobalSignal<LruCache<String, LiveActivityEvent>> = GlobalSignal::new(||
 LruCache::new(NonZeroUsize::new(EVENT_CACHE_SIZE).unwrap()));
-/// Private calendar events (NIP-59 gift wraps)
-pub static PRIVATE_EVENTS_CACHE: GlobalSignal<Vec<CalendarEvent>> = GlobalSignal::new(
-    Vec::new,
-);
 /// RSVPs cache (keyed by event coordinate)
 pub static RSVPS_CACHE: GlobalSignal<HashMap<String, Vec<CalendarRsvp>>> = GlobalSignal::new(
     HashMap::new,
@@ -75,8 +68,8 @@ pub static EVENTS_BY_DATE: GlobalSignal<BTreeMap<String, Vec<String>>> = GlobalS
 );
 /// Whether the calendar store has been initialized
 pub static CALENDAR_INITIALIZED: GlobalSignal<bool> = GlobalSignal::new(|| false);
-/// Currently loading events
-pub static LOADING_EVENTS: GlobalSignal<bool> = GlobalSignal::new(|| false);
+/// Currently loading events (counter: > 0 means loading)
+pub static LOADING_EVENTS: GlobalSignal<u32> = GlobalSignal::new(|| 0);
 /// All unique hashtags from events
 pub static ALL_EVENT_HASHTAGS: GlobalSignal<HashSet<String>> = GlobalSignal::new(
     HashSet::new,
@@ -197,10 +190,6 @@ pub fn get_all_events_combined() -> Vec<UnifiedEvent> {
     for (_, event) in calendar_cache.iter() {
         all.push(UnifiedEvent::Calendar(event.clone()));
     }
-    let private = PRIVATE_EVENTS_CACHE.read();
-    for event in private.iter() {
-        all.push(UnifiedEvent::Calendar(event.clone()));
-    }
     let live_cache = LIVE_EVENTS_CACHE.read();
     for (_, event) in live_cache.iter() {
         all.push(UnifiedEvent::Live(event.clone()));
@@ -294,12 +283,6 @@ impl UnifiedEvent {
         match self {
             UnifiedEvent::Calendar(e) => e.hashtags.iter().map(|s| s.as_str()).collect(),
             UnifiedEvent::Live(e) => e.hashtags().iter().map(|s| s.as_str()).collect(),
-        }
-    }
-    pub fn is_private(&self) -> bool {
-        match self {
-            UnifiedEvent::Calendar(e) => e.is_private(),
-            UnifiedEvent::Live(_) => false,
         }
     }
     pub fn is_all_day(&self) -> bool {
@@ -426,7 +409,6 @@ pub fn get_all_cached_calendars() -> Vec<crate::utils::nip52::Calendar> {
 pub fn clear_caches() {
     CALENDAR_EVENTS_CACHE.write().clear();
     LIVE_EVENTS_CACHE.write().clear();
-    PRIVATE_EVENTS_CACHE.write().clear();
     RSVPS_CACHE.write().clear();
     MY_RSVPS_CACHE.write().clear();
     AVAILABILITY_TEMPLATES_CACHE.write().clear();
@@ -442,7 +424,6 @@ pub struct CalendarStats {
     pub total_events: usize,
     pub calendar_events: usize,
     pub live_activities: usize,
-    pub private_events: usize,
     pub upcoming_events: usize,
     pub unique_hashtags: usize,
 }
@@ -451,7 +432,6 @@ pub fn get_calendar_stats() -> CalendarStats {
     let now_secs = (js_sys::Date::now() / 1000.0) as u64;
     let cal_cache = CALENDAR_EVENTS_CACHE.read();
     let live_cache = LIVE_EVENTS_CACHE.read();
-    let private = PRIVATE_EVENTS_CACHE.read();
     let hashtags = ALL_EVENT_HASHTAGS.read();
     let upcoming = cal_cache
         .iter()
@@ -459,10 +439,9 @@ pub fn get_calendar_stats() -> CalendarStats {
         .count()
         + live_cache.iter().filter(|(_, e)| e.start_timestamp() >= now_secs).count();
     CalendarStats {
-        total_events: cal_cache.len() + live_cache.len() + private.len(),
+        total_events: cal_cache.len() + live_cache.len(),
         calendar_events: cal_cache.len(),
         live_activities: live_cache.len(),
-        private_events: private.len(),
         upcoming_events: upcoming,
         unique_hashtags: hashtags.len(),
     }

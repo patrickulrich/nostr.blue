@@ -1,187 +1,5 @@
 use super::*;
 
-/// Parse a calendar event from an unsigned rumor (for NIP-59)
-pub(super) fn parse_calendar_rumor(
-    rumor: &UnsignedEvent,
-    gift_wrap_id: &str,
-) -> StdResult<CalendarEvent, String> {
-    use crate::utils::nip52::{CalendarEventType, EventTime};
-    let kind = rumor.kind.as_u16();
-    let mut d_tag = String::new();
-    let mut title = String::new();
-    let mut start = None;
-    let mut end = None;
-    let mut summary = None;
-    let mut image = None;
-    let mut locations = Vec::new();
-    let mut geohash = None;
-    let mut start_tzid = None;
-    let mut end_tzid = None;
-    let mut hashtags = Vec::new();
-    let mut participants = Vec::new();
-    let mut references = Vec::new();
-    let mut calendar_refs = Vec::new();
-    for tag in rumor.tags.iter() {
-        let values: Vec<&str> = tag.as_slice().iter().map(|s| s.as_str()).collect();
-        if values.is_empty() {
-            continue;
-        }
-        match values[0] {
-            "d" if values.len() > 1 => d_tag = values[1].to_string(),
-            "title" if values.len() > 1 => title = values[1].to_string(),
-            "start" if values.len() > 1 => {
-                if kind == KIND_DATE_CALENDAR_EVENT {
-                    start = Some(EventTime::Date(values[1].to_string()));
-                } else if let Ok(ts) = values[1].parse::<u64>() {
-                    start = Some(EventTime::Timestamp(ts));
-                }
-            }
-            "end" if values.len() > 1 => {
-                if kind == KIND_DATE_CALENDAR_EVENT {
-                    end = Some(EventTime::Date(values[1].to_string()));
-                } else if let Ok(ts) = values[1].parse::<u64>() {
-                    end = Some(EventTime::Timestamp(ts));
-                }
-            }
-            "summary" if values.len() > 1 => summary = Some(values[1].to_string()),
-            "image" if values.len() > 1 => image = Some(values[1].to_string()),
-            "location" if values.len() > 1 => locations.push(values[1].to_string()),
-            "g" if values.len() > 1 => geohash = Some(values[1].to_string()),
-            "start_tzid" if values.len() > 1 => start_tzid = Some(values[1].to_string()),
-            "end_tzid" if values.len() > 1 => end_tzid = Some(values[1].to_string()),
-            "t" if values.len() > 1 => hashtags.push(values[1].to_string()),
-            "r" if values.len() > 1 => references.push(values[1].to_string()),
-            "a" if values.len() > 1 && values[1].starts_with("31924:") => {
-                calendar_refs.push(values[1].to_string());
-            }
-            "p" if values.len() > 1 => {
-                participants
-                    .push(crate::utils::nip52::EventParticipant {
-                        pubkey: values[1].to_string(),
-                        relay_hint: values.get(2).map(|s| s.to_string()),
-                        role: values.get(3).map(|s| s.to_string()),
-                    });
-            }
-            _ => {}
-        }
-    }
-    if title.is_empty() {
-        return Err("Missing title".to_string());
-    }
-    let coordinate = format!("{}:{}:{}", kind, rumor.pubkey, d_tag);
-    let event_type = if kind == KIND_DATE_CALENDAR_EVENT {
-        CalendarEventType::DateBased
-    } else {
-        CalendarEventType::TimeBased
-    };
-    Ok(CalendarEvent {
-        event_id: String::new(),
-        pubkey: rumor.pubkey.to_string(),
-        d_tag,
-        coordinate: coordinate.clone(),
-        naddr: String::new(),
-        kind,
-        event_type,
-        title,
-        start: start.unwrap_or(EventTime::Timestamp(0)),
-        end,
-        summary,
-        content: rumor.content.clone(),
-        image,
-        locations,
-        geohash,
-        start_tzid,
-        end_tzid,
-        participants,
-        hashtags,
-        references,
-        calendar_refs,
-        color: None,
-        source: EventSource::Private {
-            gift_wrap_id: gift_wrap_id.to_string(),
-        },
-        created_at: rumor.created_at.as_secs(),
-    })
-}
-
-/// Parse calendar event from unsigned event (rumor)
-pub(super) fn parse_unsigned_calendar_event(
-    rumor: &UnsignedEvent,
-) -> StdResult<CalendarEvent, String> {
-    use crate::utils::nip52::{CalendarEventType, EventParticipant};
-    let kind = rumor.kind.as_u16();
-    let event_type = CalendarEventType::from_kind(kind)
-        .ok_or_else(|| format!("Expected kind 31922 or 31923, got {}", kind))?;
-    let pubkey = rumor.pubkey.to_hex();
-    let get_tag = |name: &str| -> Option<String> {
-        rumor
-            .tags
-            .iter()
-            .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some(name))
-            .and_then(|t| t.as_slice().get(1).map(|s| s.to_string()))
-    };
-    let get_all_tags = |name: &str| -> Vec<String> {
-        rumor
-            .tags
-            .iter()
-            .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some(name))
-            .filter_map(|t| t.as_slice().get(1).map(|s| s.to_string()))
-            .collect()
-    };
-    let d_tag = get_tag("d").ok_or("Missing required 'd' tag")?;
-    let coordinate = format!("{}:{}:{}", kind, pubkey, d_tag);
-    let naddr = "".to_string();
-    let title = get_tag("title")
-        .or_else(|| get_tag("name"))
-        .ok_or("Missing required 'title' tag")?;
-    let start_str = get_tag("start").ok_or("Missing required 'start' tag")?;
-    let start = EventTime::parse(&start_str, event_type)
-        .ok_or_else(|| format!("Invalid start time: {}", start_str))?;
-    let end = get_tag("end").and_then(|s| EventTime::parse(&s, event_type));
-    let participants: Vec<EventParticipant> = rumor
-        .tags
-        .iter()
-        .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
-        .filter_map(|t| {
-            let slice = t.as_slice();
-            let pk = slice.get(1)?.to_string();
-            let relay = slice.get(2).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
-            Some(EventParticipant {
-                pubkey: pk,
-                relay_hint: relay,
-                role,
-            })
-        })
-        .collect();
-    Ok(CalendarEvent {
-        d_tag,
-        event_id: "".to_string(),
-        pubkey,
-        naddr,
-        coordinate,
-        kind,
-        event_type,
-        created_at: rumor.created_at.as_secs(),
-        title,
-        start,
-        end,
-        start_tzid: get_tag("start_tzid").or_else(|| get_tag("timezone")),
-        end_tzid: get_tag("end_tzid"),
-        summary: get_tag("summary"),
-        content: rumor.content.clone(),
-        image: get_tag("image"),
-        locations: get_all_tags("location"),
-        geohash: get_tag("g"),
-        participants,
-        hashtags: get_all_tags("t"),
-        references: get_all_tags("r"),
-        calendar_refs: Vec::new(),
-        color: None,
-        source: EventSource::Public,
-    })
-}
-
 /// Helper to encode naddr (simplified)
 pub(super) fn encode_naddr(kind: u16, pubkey: &str, d_tag: &str) -> String {
     use nostr::nips::nip01::Coordinate;
@@ -276,11 +94,10 @@ pub async fn publish_date_event(
     locations: &[String],
     hashtags: &[String],
     participants: &[(String, String)],
-    is_private: bool,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let d_tag = format!("event-{}", js_sys::Date::now() as u64);
+    let d_tag = format!("event-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
     let mut builder = EventBuilder::new(
             Kind::Custom(KIND_DATE_CALENDAR_EVENT),
             content.unwrap_or(""),
@@ -307,6 +124,7 @@ pub async fn publish_date_event(
     for tag in hashtags {
         builder = builder.tag(Tag::hashtag(tag));
     }
+    let mut invalid_pubkeys = Vec::new();
     for (pubkey, role) in participants {
         match PublicKey::parse(pubkey) {
             Ok(pk) => {
@@ -318,13 +136,13 @@ pub async fn publish_date_event(
                         ),
                     );
             }
-            Err(e) => {
-                log::warn!("Invalid participant pubkey '{}': {}", pubkey, e);
+            Err(_) => {
+                invalid_pubkeys.push(pubkey.clone());
             }
         }
     }
-    if is_private {
-        return Err("Private events not yet implemented".to_string());
+    if !invalid_pubkeys.is_empty() {
+        return Err(format!("Invalid participant pubkeys: {}", invalid_pubkeys.join(", ")));
     }
     let _output = client
         .send_event_builder(builder)
@@ -351,11 +169,10 @@ pub async fn publish_time_event(
     hashtags: &[String],
     participants: &[(String, String)],
     timezone: Option<&str>,
-    is_private: bool,
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let d_tag = format!("event-{}", js_sys::Date::now() as u64);
+    let d_tag = format!("event-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
     let mut builder = EventBuilder::new(
             Kind::Custom(KIND_TIME_CALENDAR_EVENT),
             content.unwrap_or(""),
@@ -393,6 +210,7 @@ pub async fn publish_time_event(
     for tag in hashtags {
         builder = builder.tag(Tag::hashtag(tag));
     }
+    let mut invalid_pubkeys = Vec::new();
     for (pubkey, role) in participants {
         match PublicKey::parse(pubkey) {
             Ok(pk) => {
@@ -404,13 +222,13 @@ pub async fn publish_time_event(
                         ),
                     );
             }
-            Err(e) => {
-                log::warn!("Invalid participant pubkey '{}': {}", pubkey, e);
+            Err(_) => {
+                invalid_pubkeys.push(pubkey.clone());
             }
         }
     }
-    if is_private {
-        return Err("Private events not yet implemented".to_string());
+    if !invalid_pubkeys.is_empty() {
+        return Err(format!("Invalid participant pubkeys: {}", invalid_pubkeys.join(", ")));
     }
     let _output = client
         .send_event_builder(builder)

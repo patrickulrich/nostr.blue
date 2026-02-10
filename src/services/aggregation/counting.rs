@@ -634,6 +634,7 @@ pub(super) fn extract_zap_amount(event: &Event) -> Option<u64> {
 
 /// Parse amount from bolt11 invoice string
 /// This is a simplified parser - a full implementation would use a bolt11 crate
+// TODO: implement with lightning-invoice crate
 fn parse_bolt11_amount(_bolt11: &str) -> Option<u64> {
     None
 }

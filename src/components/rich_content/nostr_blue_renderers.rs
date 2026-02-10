@@ -612,7 +612,7 @@ fn render_note_minicard(event: &Event, note_id: &str) -> Element {
                 note_id: note_id.to_string(),
                 from_voice: None,
             },
-            class: "block p-3 border border-border rounded-lg hover:bg-accent/50 transition",
+            class: "block p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             div { class: "text-sm text-foreground line-clamp-3 whitespace-pre-wrap",
                 "{content_preview}"
             }
@@ -908,7 +908,7 @@ fn render_badge_card(event: &Event, naddr: &str) -> Element {
                 to: Route::BadgeDetail {
                     naddr: naddr.to_string(),
                 },
-                class: "flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition",
+                class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 if let Some(img_url) = image {
                     img {
                         src: "{img_url}",
