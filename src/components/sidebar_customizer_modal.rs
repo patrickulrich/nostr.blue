@@ -63,7 +63,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
     let total_pages = if slot_count > 0 { total_count.div_ceil(slot_count) } else { 1 };
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4",
+            class: "fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4",
             onclick: handle_backdrop_click,
             div {
                 class: "bg-card rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto",
