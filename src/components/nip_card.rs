@@ -54,6 +54,7 @@ pub fn DocSpecCard(
     let number = spec.number.clone();
     let title = spec.title.clone();
     let category = spec.category.clone();
+    let prefix = prefix.clone();
     rsx! {
         Link {
             to: Route::NipDetail {

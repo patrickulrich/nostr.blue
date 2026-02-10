@@ -76,6 +76,8 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     # BeforeUnload for unsaved changes warning
     "BeforeUnloadEvent",
+    # KeyboardEvent for document-level key listeners
+    "KeyboardEvent",
     # MediaRecorder API for voice messages
     "MediaStream",
     "MediaRecorder",

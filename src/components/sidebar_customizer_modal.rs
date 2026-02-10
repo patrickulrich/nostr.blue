@@ -40,7 +40,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
         saving.set(true);
         error_msg.set(None);
         let items = local_items.read().clone();
-        let items_per_page = *local_slot_count.read();
+        let items_per_page = (*local_slot_count.read()).clamp(1, MAX_MAIN_SIDEBAR_SLOTS);
         spawn(async move {
             match save_sidebar_preferences(items, items_per_page).await {
                 Ok(_) => {

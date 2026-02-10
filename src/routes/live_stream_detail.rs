@@ -125,7 +125,7 @@ pub fn LiveStreamDetail(note_id: String) -> Element {
         });
     };
     rsx! {
-        div { class: "flex flex-col h-[calc(100vh-4.5rem)] lg:h-screen overflow-hidden",
+        div { class: "flex flex-col h-[calc(100dvh-4.5rem)] lg:h-dvh overflow-hidden",
             div { class: "shrink-0 bg-background/95 backdrop-blur-sm border-b border-border p-4",
                 div { class: "flex items-center gap-4",
                     Link {

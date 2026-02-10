@@ -43,6 +43,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Generated assets
+/assets/tailwind.css
 /public/tailwind.css
 /public/git-worker.js
 

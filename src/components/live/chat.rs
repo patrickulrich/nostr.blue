@@ -226,6 +226,25 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             sending.set(false);
         });
     };
+    // Escape key closes expanded chat overlay
+    let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
+    use_effect(move || {
+        let Some(window) = web_sys::window() else { return };
+        let cb = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+            if e.key() == "Escape" && expanded() {
+                expanded.set(false);
+            }
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+        window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref()).ok();
+        escape_cb.set(Some(cb));
+    });
+    use_drop(move || {
+        if let Some(cb) = escape_cb.peek().as_ref() {
+            if let Some(window) = web_sys::window() {
+                let _ = window.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+            }
+        }
+    });
     rsx! {
         div {
             class: if expanded() {
@@ -237,6 +256,8 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                 h3 { class: "font-bold text-lg", "Live Chat" }
                 button {
                     class: "lg:hidden p-2 hover:bg-accent rounded-lg transition",
+                    aria_label: if expanded() { "Collapse chat" } else { "Expand chat" },
+                    aria_expanded: expanded(),
                     onclick: move |_| expanded.toggle(),
                     if expanded() {
                         XIcon { class: "w-5 h-5".to_string() }

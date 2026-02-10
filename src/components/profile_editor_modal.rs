@@ -199,7 +199,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             }
                         } else {
                             button {
-                                class: "px-4 py-2 bg-muted text-foreground rounded-lg text-sm hover:bg-accent transition",
+                                class: "p-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm transition",
                                 onclick: move |_| show_picture_uploader.set(true),
                                 "Change Picture"
                             }
@@ -234,7 +234,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                             }
                         } else {
                             button {
-                                class: "px-4 py-2 bg-muted text-foreground rounded-lg text-sm hover:bg-accent transition",
+                                class: "p-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm transition",
                                 onclick: move |_| show_banner_uploader.set(true),
                                 "Change Banner"
                             }
