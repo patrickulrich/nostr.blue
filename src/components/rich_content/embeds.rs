@@ -313,11 +313,15 @@ pub(super) fn WavlakeAlbumRenderer(album_id: String) -> Element {
                             div { class: "text-xs text-muted-foreground mb-1", "ALBUM" }
                             div { class: "font-bold text-lg truncate mb-1", "{album.title}" }
                             div { class: "text-sm text-muted-foreground truncate mb-2",
-                                a {
-                                    href: if let Some(first_track) = album.tracks.first() { format!("/music/artist/{}", first_track.artist_id) } else { "#".to_string() },
-                                    class: "hover:text-foreground hover:underline",
-                                    onclick: move |e| e.stop_propagation(),
-                                    "{album.artist}"
+                                if let Some(first_track) = album.tracks.first() {
+                                    Link {
+                                        to: Route::MusicArtist { artist_id: first_track.artist_id.clone() },
+                                        class: "hover:text-foreground hover:underline",
+                                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                                        "{album.artist}"
+                                    }
+                                } else {
+                                    span { class: "text-muted-foreground", "{album.artist}" }
                                 }
                             }
                             div { class: "flex items-center gap-3 text-xs text-muted-foreground",

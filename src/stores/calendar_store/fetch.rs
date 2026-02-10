@@ -222,19 +222,27 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
     }
     if let Ok(rsvp_events) = rsvps_result {
         log::info!("[calendar_store] Found {} RSVPs", rsvp_events.len());
-        for rsvp_event in rsvp_events {
-            if let Ok(rsvp) = parse_calendar_rsvp(&rsvp_event) {
-                if !matches!(rsvp.status, RsvpStatus::Accepted) {
-                    continue;
-                }
+        let rsvp_coords: Vec<String> = rsvp_events
+            .iter()
+            .filter_map(|e| parse_calendar_rsvp(e).ok())
+            .filter(|rsvp| matches!(rsvp.status, RsvpStatus::Accepted))
+            .filter_map(|rsvp| {
                 let coord = rsvp.event_coordinate.clone();
                 if !coord.is_empty() && seen_coords.insert(coord.clone()) {
-                    if let Ok(Some(referenced_event)) = fetch_event_by_coordinate(&coord)
-                        .await
-                    {
-                        all_events.push(referenced_event);
-                    }
+                    Some(coord)
+                } else {
+                    None
                 }
+            })
+            .collect();
+        let rsvp_futures: Vec<_> = rsvp_coords
+            .iter()
+            .map(|coord| fetch_event_by_coordinate(coord))
+            .collect();
+        let rsvp_results = futures::future::join_all(rsvp_futures).await;
+        for result in rsvp_results {
+            if let Ok(Some(event)) = result {
+                all_events.push(event);
             }
         }
     }

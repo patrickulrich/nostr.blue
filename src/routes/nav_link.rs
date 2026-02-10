@@ -15,6 +15,7 @@ pub(super) fn NavLink(
         (Route::Home { .. }, Route::Home { .. }) => true,
         (Route::Explore {}, Route::Explore {}) => true,
         (Route::Articles {}, Route::Articles {}) => true,
+        (Route::Articles {}, Route::ArticleDetail { .. }) => true,
         (Route::Notifications {}, Route::Notifications {}) => true,
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,

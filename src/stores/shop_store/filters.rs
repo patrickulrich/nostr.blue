@@ -170,7 +170,7 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
                 });
         }
         ProductSortBy::Title => {
-            products.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            products.sort_by_cached_key(|p| p.title.to_lowercase());
         }
     }
 }
