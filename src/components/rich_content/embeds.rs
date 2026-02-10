@@ -388,6 +388,8 @@ pub(super) fn WavlakeAlbumRenderer(album_id: String) -> Element {
                             {
                                 let track_clone = tracks_rc[index].clone();
                                 let playlist_rc = Rc::clone(&tracks_rc);
+                                let track_clone_kb = tracks_rc[index].clone();
+                                let playlist_rc_kb = Rc::clone(&tracks_rc);
                                 let track_title = track_data.title.clone();
                                 let track_artist = track_data.artist.clone();
                                 let track_duration = track_data.duration;
@@ -395,12 +397,26 @@ pub(super) fn WavlakeAlbumRenderer(album_id: String) -> Element {
                                     div {
                                         key: "{track_data.id}",
                                         class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
+                                        role: "button",
+                                        tabindex: "0",
                                         onclick: move |_| {
                                             music_player::play_track(
                                                 track_clone.clone(),
                                                 Some((*playlist_rc).clone()),
                                                 Some(index),
                                             );
+                                        },
+                                        onkeydown: move |evt: KeyboardEvent| {
+                                            let activate = matches!(evt.key(), Key::Enter)
+                                                || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                                            if activate {
+                                                evt.prevent_default();
+                                                music_player::play_track(
+                                                    track_clone_kb.clone(),
+                                                    Some((*playlist_rc_kb).clone()),
+                                                    Some(index),
+                                                );
+                                            }
                                         },
                                         div { class: "w-8 text-center text-sm text-muted-foreground shrink-0",
                                             span { class: "group-hover:hidden", "{index + 1}" }
@@ -613,6 +629,8 @@ pub(super) fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                             {
                                 let track_clone = tracks_rc[index].clone();
                                 let playlist_rc = Rc::clone(&tracks_rc);
+                                let track_clone_kb = tracks_rc[index].clone();
+                                let playlist_rc_kb = Rc::clone(&tracks_rc);
                                 let track_title = track_data.title.clone();
                                 let track_artist = track_data.artist.clone();
                                 let track_duration = track_data.duration;
@@ -621,12 +639,26 @@ pub(super) fn WavlakePlaylistRenderer(playlist_id: String) -> Element {
                                     div {
                                         key: "{track_data.id}",
                                         class: "flex items-center gap-3 p-3 hover:bg-accent/10 transition cursor-pointer group",
+                                        role: "button",
+                                        tabindex: "0",
                                         onclick: move |_| {
                                             music_player::play_track(
                                                 track_clone.clone(),
                                                 Some((*playlist_rc).clone()),
                                                 Some(index),
                                             );
+                                        },
+                                        onkeydown: move |evt: KeyboardEvent| {
+                                            let activate = matches!(evt.key(), Key::Enter)
+                                                || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                                            if activate {
+                                                evt.prevent_default();
+                                                music_player::play_track(
+                                                    track_clone_kb.clone(),
+                                                    Some((*playlist_rc_kb).clone()),
+                                                    Some(index),
+                                                );
+                                            }
                                         },
                                         div { class: "relative w-10 h-10 shrink-0 rounded overflow-hidden bg-muted group-hover:opacity-80",
                                             img {
