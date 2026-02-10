@@ -671,7 +671,7 @@ fn render_profile_minicard(
                 to: Route::Profile {
                     pubkey: pubkey.to_string(),
                 },
-                class: "flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition",
+                class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 if let Some(ref pic) = picture {
                     img {
                         src: "{pic}",
@@ -977,7 +977,7 @@ fn render_product_card(event: &Event, naddr: &str) -> Element {
                 to: Route::ShopProductDetail {
                     naddr: naddr.to_string(),
                 },
-                class: "flex items-center gap-3 p-3 border border-border rounded-lg hover:bg-accent/50 transition",
+                class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 if let Some(img_url) = image_url {
                     img {
                         src: "{img_url}",

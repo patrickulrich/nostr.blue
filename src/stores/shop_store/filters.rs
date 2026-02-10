@@ -149,22 +149,18 @@ pub fn sort_products(products: &mut [Product], sort_by: ProductSortBy) {
         ProductSortBy::Newest => products.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
         ProductSortBy::Oldest => products.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
         ProductSortBy::PriceLow => {
-            products
-                .sort_by(|a, b| {
-                    a.price
-                        .amount
-                        .partial_cmp(&b.price.amount)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+            products.sort_by(|a, b| {
+                let a_sats = a.price.to_sats().unwrap_or(u64::MAX);
+                let b_sats = b.price.to_sats().unwrap_or(u64::MAX);
+                a_sats.cmp(&b_sats)
+            })
         }
         ProductSortBy::PriceHigh => {
-            products
-                .sort_by(|a, b| {
-                    b.price
-                        .amount
-                        .partial_cmp(&a.price.amount)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+            products.sort_by(|a, b| {
+                let a_sats = a.price.to_sats().unwrap_or(0);
+                let b_sats = b.price.to_sats().unwrap_or(0);
+                b_sats.cmp(&a_sats)
+            })
         }
         ProductSortBy::Rating => {
             products

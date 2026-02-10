@@ -18,6 +18,7 @@ pub(super) fn NavLink(
         (Route::Notifications {}, Route::Notifications {}) => true,
         (Route::DMs {}, Route::DMs {}) => true,
         (Route::Photos {}, Route::Photos {}) => true,
+        (Route::Photos {}, Route::PhotoDetail { .. }) => true,
         (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => {
             p1 == p2
         }
@@ -34,6 +35,7 @@ pub(super) fn NavLink(
         | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
         (Route::Bookmarks {}, Route::Bookmarks {}) => true,
         (Route::Videos {}, Route::Videos {}) => true,
+        (Route::Videos {}, Route::VideoDetail { .. }) => true,
         (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => {
             v1 == v2
         }

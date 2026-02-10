@@ -12,12 +12,13 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, FromBech32};
 use std::rc::Rc;
+use url::Url;
 
 use super::minicards::render_recipe_minicard;
 
 #[component]
 pub(super) fn TwitterTweetRenderer(tweet_id: String) -> Element {
-    let tweet_url = format!("https://twitter.com/x/status/{}", tweet_id);
+    let tweet_url = format!("https://twitter.com/i/status/{}", tweet_id);
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden border border-border bg-card p-4",
@@ -799,12 +800,15 @@ pub(super) fn AppleMusicRenderer(embed_url: String, is_song: bool) -> Element {
     } else {
         embed_url.replace("music.apple.com", "embed.music.apple.com")
     };
+    let url_valid = Url::parse(&final_embed_url)
+        .map(|u| u.scheme() == "https" && u.host_str() == Some("embed.music.apple.com"))
+        .unwrap_or(false);
     let height = if is_song { "175" } else { "450" };
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *is_visible.read() {
+            if *is_visible.read() && url_valid {
                 iframe {
                     src: "{final_embed_url}",
                     width: "100%",
@@ -910,11 +914,14 @@ pub(super) fn RumbleRenderer(embed_url: String) -> Element {
     } else {
         embed_url.clone()
     };
+    let url_valid = Url::parse(&final_embed_url)
+        .map(|u| u.scheme() == "https" && u.host_str() == Some("rumble.com"))
+        .unwrap_or(false);
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden bg-black aspect-video max-w-full",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *is_visible.read() {
+            if *is_visible.read() && url_valid {
                 iframe {
                     src: "{final_embed_url}",
                     class: "w-full aspect-video",
@@ -960,11 +967,14 @@ pub(super) fn TidalRenderer(embed_url: String) -> Element {
     } else {
         embed_url.clone()
     };
+    let url_valid = Url::parse(&final_embed_url)
+        .map(|u| u.scheme() == "https" && u.host_str() == Some("embed.tidal.com"))
+        .unwrap_or(false);
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            if *is_visible.read() {
+            if *is_visible.read() && url_valid {
                 iframe {
                     src: "{final_embed_url}",
                     width: "100%",

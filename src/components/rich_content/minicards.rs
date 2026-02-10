@@ -109,7 +109,7 @@ pub(super) fn render_wiki_minicard(wiki: &crate::utils::nip54::WikiArticle, _nad
                 to: Route::WikiDetail {
                     identifier: identifier.clone(),
                 },
-                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                class: "flex items-center gap-2 p-2 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 div { class: "w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center shrink-0",
                     icons::BookOpenIcon { class: "w-4 h-4 text-purple-500".to_string() }
                 }
@@ -156,7 +156,7 @@ pub(super) fn render_product_minicard(product: &Product, naddr: &str, _event: &E
                 to: Route::ShopProductDetail {
                     naddr: naddr_owned.clone(),
                 },
-                class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
+                class: "flex items-center gap-2 p-2 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
                 div { class: "w-10 h-10 rounded bg-muted shrink-0 overflow-hidden",
                     if let Some(ref img) = image_url {
                         img {

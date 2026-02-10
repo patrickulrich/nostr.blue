@@ -744,10 +744,14 @@ pub async fn fetch_room_presence(
     let mut presence_by_user: std::collections::HashMap<String, RoomPresence> = std::collections::HashMap::new();
     for event in events.iter() {
         if let Ok(presence) = parse_room_presence(event) {
-            let existing = presence_by_user.get(&presence.pubkey);
-            if existing.is_none() || existing.unwrap().created_at < presence.created_at {
-                presence_by_user.insert(presence.pubkey.clone(), presence);
-            }
+            presence_by_user
+                .entry(presence.pubkey.clone())
+                .and_modify(|existing| {
+                    if presence.created_at > existing.created_at {
+                        *existing = presence.clone();
+                    }
+                })
+                .or_insert(presence);
         }
     }
     let mut result: Vec<RoomPresence> = presence_by_user.into_values().collect();

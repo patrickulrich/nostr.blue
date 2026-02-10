@@ -103,6 +103,8 @@ impl CountsCache {
                 return Some(cached.counts.clone());
             }
         }
+        // Pop expired entry outside the borrow
+        self.cache.pop(event_id);
         None
     }
 
@@ -279,5 +281,89 @@ mod tests {
         let desc = r#"{"amount":"5000","content":"Great post!"}"#;
         let amount = parse_amount_from_description(desc);
         assert_eq!(amount, Some(5));
+    }
+
+    #[test]
+    fn test_parse_amount_from_tags() {
+        let desc = r#"{"tags":[["amount","5000"]]}"#;
+        let amount = parse_amount_from_description(desc);
+        assert_eq!(amount, Some(5));
+    }
+
+    #[test]
+    fn test_parse_amount_from_numeric() {
+        let desc = r#"{"amount":3000}"#;
+        let amount = parse_amount_from_description(desc);
+        assert_eq!(amount, Some(3));
+    }
+
+    #[test]
+    fn test_parse_amount_invalid_json() {
+        let amount = parse_amount_from_description("not json");
+        assert_eq!(amount, None);
+    }
+
+    #[test]
+    fn test_parse_amount_missing_amount() {
+        let desc = r#"{"content":"hello"}"#;
+        let amount = parse_amount_from_description(desc);
+        assert_eq!(amount, None);
+    }
+
+    #[test]
+    fn test_cached_counts_is_valid() {
+        let cached = CachedCounts::new(InteractionCounts::default());
+        assert!(cached.is_valid(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn test_cached_counts_expired() {
+        let cached = CachedCounts::new(InteractionCounts::default());
+        assert!(!cached.is_valid(Duration::ZERO));
+    }
+
+    #[test]
+    fn test_cache_insert_and_get() {
+        let mut cache = CountsCache::new(10, Duration::from_secs(60));
+        let counts = InteractionCounts {
+            likes: 5,
+            reposts: 2,
+            ..Default::default()
+        };
+        cache.insert("abc".to_string(), counts.clone());
+        assert_eq!(cache.get("abc"), Some(counts));
+        assert_eq!(cache.get("missing"), None);
+    }
+
+    #[test]
+    fn test_cache_ttl_expiration() {
+        let mut cache = CountsCache::new(10, Duration::from_secs(300));
+        cache.insert("key".to_string(), InteractionCounts::default());
+        // Set cached_at to the past so the entry is expired
+        cache.cache.get_mut("key").unwrap().cached_at =
+            Instant::now() - Duration::from_secs(600);
+        assert!(cache.get("key").is_none());
+        // Verify the expired entry was removed from the cache
+        assert!(cache.cache.peek("key").is_none());
+    }
+
+    #[test]
+    fn test_cache_eviction() {
+        let mut cache = CountsCache::new(2, Duration::from_secs(60));
+        cache.insert("a".to_string(), InteractionCounts::default());
+        cache.insert("b".to_string(), InteractionCounts::default());
+        cache.insert("c".to_string(), InteractionCounts::default());
+        // "a" should be evicted as LRU
+        assert!(cache.get("a").is_none());
+        assert!(cache.get("b").is_some());
+        assert!(cache.get("c").is_some());
+    }
+
+    #[test]
+    fn test_cache_invalidate() {
+        let mut cache = CountsCache::new(10, Duration::from_secs(60));
+        cache.insert("key".to_string(), InteractionCounts::default());
+        cache.invalidate("key");
+        assert!(cache.get("key").is_none());
     }
 }
