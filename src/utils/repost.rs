@@ -57,6 +57,36 @@ impl FeedItem {
 /// Expand events to include original authors from reposts for metadata prefetching.
 /// For each repost, includes both the repost event and the original event so that
 /// metadata for both the reposter and original author can be prefetched.
+/// Convert raw events into sorted FeedItems (filters out replies, parses reposts).
+/// Reusable by any feed that needs to process a mix of kind-1 and kind-6 events.
+pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
+    let mut feed_items: Vec<FeedItem> = Vec::new();
+    for event in events.into_iter() {
+        if event.kind == Kind::Repost {
+            match extract_reposted_event(&event) {
+                Ok(original) => {
+                    feed_items.push(FeedItem::Repost {
+                        original,
+                        reposted_by: event.pubkey,
+                        repost_timestamp: event.created_at,
+                    });
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                }
+            }
+        } else if event.kind == Kind::TextNote {
+            // Posts with root/reply markers are thread replies - filter these out
+            // Mentions (e-tags without markers) are preserved in the feed
+            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            if !is_reply {
+                feed_items.push(FeedItem::OriginalPost(event));
+            }
+        }
+    }
+    feed_items
+}
+
 pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
     events
         .iter()

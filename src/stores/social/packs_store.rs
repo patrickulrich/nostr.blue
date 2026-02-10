@@ -384,6 +384,40 @@ pub async fn delete_starter_pack(pack: &StarterPack) -> StdResult<(), String> {
     Ok(())
 }
 
+/// Fetch recent posts from pack members (reusable for /news and /packs detail).
+/// Returns raw events — caller converts to FeedItems via `process_events_to_feed_items`.
+pub async fn fetch_pack_member_posts(
+    pack: &StarterPack,
+    limit: usize,
+    until: Option<u64>,
+) -> StdResult<Vec<nostr::Event>, String> {
+    let authors: Vec<PublicKey> = pack
+        .members
+        .iter()
+        .filter_map(|m| PublicKey::from_hex(&m.pubkey).ok())
+        .collect();
+
+    if authors.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut filter = Filter::new()
+        .kinds([Kind::TextNote, Kind::Repost])
+        .authors(authors)
+        .limit(limit);
+
+    if let Some(ts) = until {
+        filter = filter.until(Timestamp::from(ts.saturating_sub(1)));
+    }
+
+    let mut events =
+        crate::stores::nostr_client::fetch_events_from_connected_relays(filter, Duration::from_secs(10))
+            .await?;
+
+    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(events)
+}
+
 /// Follow all members of a pack that the user isn't already following.
 /// Returns the count of newly followed users.
 pub async fn follow_all_pack_members(pack: &StarterPack) -> StdResult<usize, String> {

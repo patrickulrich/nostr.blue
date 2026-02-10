@@ -5,12 +5,19 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 
-use crate::components::ClientInitializing;
+use crate::components::{ClientInitializing, NoteCard};
+use crate::hooks::use_mute_block_cache;
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::stores::packs_store::StarterPack;
 use crate::utils::time::format_relative_time;
-use crate::utils::truncate_pubkey;
+use crate::utils::{process_events_to_feed_items, truncate_pubkey, FeedItem};
+
+#[derive(Clone, Copy, PartialEq)]
+enum DetailTab {
+    People,
+    Posts,
+}
 
 /// Pack detail page
 #[component]
@@ -23,6 +30,10 @@ pub fn PackDetail(naddr: String) -> Element {
     let mut deleting = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
     let mut copied = use_signal(|| false);
+    let mut active_tab = use_signal(|| DetailTab::People);
+    let mut posts: Signal<Vec<FeedItem>> = use_signal(Vec::new);
+    let mut posts_loading = use_signal(|| false);
+    let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     let navigator = use_navigator();
     let is_authenticated = auth_store::is_authenticated();
@@ -65,6 +76,43 @@ pub fn PackDetail(naddr: String) -> Element {
         ),
     );
 
+    // Load posts when Posts tab is selected
+    {
+        let tab = *active_tab.read();
+        let pack_data_for_posts = pack.read().clone();
+        use_effect(move || {
+            let tab = tab;
+            let pack_data_for_posts = pack_data_for_posts.clone();
+            if tab != DetailTab::Posts {
+                return;
+            }
+            if let Some(p) = pack_data_for_posts {
+                posts_loading.set(true);
+                spawn(async move {
+                    match packs_store::fetch_pack_member_posts(&p, 50, None).await {
+                        Ok(events) => {
+                            let mut items = process_events_to_feed_items(events);
+                            items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+
+                            // Prefetch profiles for post authors
+                            let author_pks: Vec<String> = items
+                                .iter()
+                                .map(|item| item.event().pubkey.to_hex())
+                                .collect();
+                            profiles::prefetch_profiles(author_pks).await;
+
+                            posts.set(items);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch pack member posts: {}", e);
+                        }
+                    }
+                    posts_loading.set(false);
+                });
+            }
+        });
+    }
+
     let is_author = pack
         .read()
         .as_ref()
@@ -98,7 +146,7 @@ pub fn PackDetail(naddr: String) -> Element {
                             }
                         }
                     }
-                    h1 { class: "text-xl font-bold", "Starter Pack" }
+                    h1 { class: "text-xl font-bold", "Pack" }
                 }
             }
 
@@ -127,7 +175,7 @@ pub fn PackDetail(naddr: String) -> Element {
                     Link {
                         to: Route::PacksHome {},
                         class: "text-primary hover:underline mt-4 inline-block",
-                        "← Back to Starter Packs"
+                        "← Back to Packs"
                     }
                 }
             } else if let Some(p) = pack_data {
@@ -338,21 +386,85 @@ pub fn PackDetail(naddr: String) -> Element {
                         }
                     }
 
-                    // Members list
-                    div { class: "border-t border-border",
-                        div { class: "px-4 py-3",
-                            h3 { class: "font-semibold text-lg",
-                                "Members ({p.members.len()})"
-                            }
-                        }
-                        div { class: "divide-y divide-border",
-                            for member in &p.members {
-                                MemberRow {
-                                    key: "{member.pubkey}",
-                                    pubkey: member.pubkey.clone(),
+                    // Tabs
+                    {
+                        let people_tab_class = if *active_tab.read() == DetailTab::People {
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-blue-500 text-blue-500"
+                        } else {
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-transparent hover:bg-accent"
+                        };
+                        let posts_tab_class = if *active_tab.read() == DetailTab::Posts {
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-blue-500 text-blue-500"
+                        } else {
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-transparent hover:bg-accent"
+                        };
+                        rsx! {
+                            div { class: "border-t border-border",
+                                div { class: "flex",
+                                    button {
+                                        class: "{people_tab_class}",
+                                        onclick: move |_| active_tab.set(DetailTab::People),
+                                        "People ({p.members.len()})"
+                                    }
+                                    button {
+                                        class: "{posts_tab_class}",
+                                        onclick: move |_| active_tab.set(DetailTab::Posts),
+                                        "Posts"
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    // Tab content
+                    match *active_tab.read() {
+                        DetailTab::People => rsx! {
+                            div { class: "divide-y divide-border",
+                                for member in &p.members {
+                                    MemberRow {
+                                        key: "{member.pubkey}",
+                                        pubkey: member.pubkey.clone(),
+                                    }
+                                }
+                            }
+                        },
+                        DetailTab::Posts => rsx! {
+                            if *posts_loading.read() {
+                                div { class: "p-4 space-y-4",
+                                    for _ in 0..3 {
+                                        div { class: "animate-pulse space-y-3 py-4",
+                                            div { class: "flex items-center gap-3",
+                                                div { class: "w-10 h-10 rounded-full bg-muted" }
+                                                div { class: "flex-1 space-y-2",
+                                                    div { class: "h-4 bg-muted rounded w-1/4" }
+                                                    div { class: "h-3 bg-muted rounded w-1/6" }
+                                                }
+                                            }
+                                            div { class: "h-4 bg-muted rounded w-3/4" }
+                                            div { class: "h-4 bg-muted rounded w-1/2" }
+                                        }
+                                    }
+                                }
+                            } else if posts.read().is_empty() {
+                                div { class: "flex flex-col items-center justify-center py-16 text-center",
+                                    div { class: "text-4xl mb-3", "📝" }
+                                    p { class: "text-muted-foreground", "No recent posts from pack members" }
+                                }
+                            } else {
+                                div { class: "divide-y divide-border",
+                                    for feed_item in posts.read().iter() {
+                                        NoteCard {
+                                            key: "{feed_item.event().id}",
+                                            event: feed_item.event().clone(),
+                                            repost_info: feed_item.repost_info(),
+                                            collapsible: true,
+                                            cached_muted_posts: cached_muted_posts.read().clone(),
+                                            cached_blocked_users: cached_blocked_users.read().clone(),
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     }
                 }
             }

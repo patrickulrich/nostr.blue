@@ -139,7 +139,7 @@ pub fn PacksHome() -> Element {
             // Sticky header
             div { class: "sticky top-0 bg-background/95 backdrop-blur z-20 border-b border-border",
                 div { class: "flex items-center justify-between px-4 py-3",
-                    h1 { class: "text-xl font-bold", "Starter Packs" }
+                    h1 { class: "text-xl font-bold", "Packs" }
                     if is_authenticated {
                         Link {
                             to: Route::PackNew {},

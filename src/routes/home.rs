@@ -12,7 +12,7 @@ use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client, subscription_manager};
 use crate::utils::list_encryption::get_all_list_members;
 use crate::utils::list_kinds::NAMED_PEOPLE;
-use crate::utils::{extract_reposted_event, get_item_count, DataState, FeedItem};
+use crate::utils::{extract_reposted_event, get_item_count, process_events_to_feed_items, DataState, FeedItem};
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
@@ -1981,35 +1981,7 @@ async fn load_following_feed(
         }
     }
 }
-/// Process raw events into FeedItems (extracted for reuse in streaming)
-fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> {
-    let mut feed_items: Vec<FeedItem> = Vec::new();
-    for event in events.into_iter() {
-        if event.kind == Kind::Repost {
-            match extract_reposted_event(&event) {
-                Ok(original) => {
-                    feed_items
-                        .push(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        });
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                }
-            }
-        } else if event.kind == Kind::TextNote {
-            // Posts with root/reply markers are thread replies - filter these out
-            // Mentions (e-tags without markers) are preserved in the feed
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-            if !is_reply {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        }
-    }
-    feed_items
-}
+// process_events_to_feed_items is now in crate::utils::repost
 /// Load following feed with progressive streaming updates
 ///
 /// This function streams events as they arrive and calls the on_batch callback
