@@ -1,20 +1,20 @@
-[submodule "docs/NKBIPs"]
-	path = docs/NKBIPs
+[submodule "public/docs/NKBIPs"]
+	path = public/docs/NKBIPs
 	url = https://github.com/patrickulrich/NKBIPs.git
 	branch = main
-[submodule "docs/blossom"]
-	path = docs/blossom
+[submodule "public/docs/blossom"]
+	path = public/docs/blossom
 	url = https://github.com/hzrd149/blossom.git
 	branch = master
-[submodule "docs/market-spec"]
-	path = docs/market-spec
+[submodule "public/docs/market-spec"]
+	path = public/docs/market-spec
 	url = https://github.com/GammaMarkets/market-spec.git
 	branch = main
-[submodule "docs/nips"]
-	path = docs/nips
-	url = https://github.com/nostr-protocol/nips.git
+[submodule "public/docs/nips"]
+	path = public/docs/nips
+	url = https://github.com/patrickulrich/nips.git
 	branch = master
-[submodule "docs/nuts"]
-	path = docs/nuts
+[submodule "public/docs/nuts"]
+	path = public/docs/nuts
 	url = https://github.com/cashubtc/nuts.git
 	branch = main

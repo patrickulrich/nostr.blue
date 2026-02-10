@@ -346,7 +346,7 @@ pub fn PublicationDetail(naddr: String) -> Element {
         (None, None)
     });
     rsx! {
-        div { class: "h-[calc(100vh-4rem)] flex flex-col",
+        div { class: "h-[calc(100dvh-4rem)] flex flex-col",
             div { class: "shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-background",
                 button {
                     class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors",

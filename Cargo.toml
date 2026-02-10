@@ -1,6 +1,6 @@
 [package]
 name = "nostrblue"
-version = "0.7.11"
+version = "0.7.12"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Patrick Ulrich"]
@@ -76,6 +76,8 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     # BeforeUnload for unsaved changes warning
     "BeforeUnloadEvent",
+    # KeyboardEvent for document-level key listeners
+    "KeyboardEvent",
     # MediaRecorder API for voice messages
     "MediaStream",
     "MediaRecorder",

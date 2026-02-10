@@ -1642,7 +1642,7 @@ fn LoginSection() -> Element {
             }
             div { class: "border-t border-gray-200 dark:border-gray-700 pt-6",
                 button {
-                    class: "w-full flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition",
+                    class: "w-full flex items-center justify-between p-3 bg-muted hover:bg-accent rounded-lg transition",
                     onclick: move |_| {
                         let current = *show_advanced.read();
                         show_advanced.set(!current);

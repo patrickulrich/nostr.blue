@@ -1,3 +1,4 @@
+use crate::components::icons::{MaximizeIcon, XIcon};
 use crate::components::{EmojiPicker, RichContent};
 use crate::routes::Route;
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
@@ -39,6 +40,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut loading = use_signal(|| false);
     let mut message_input = use_signal(String::new);
     let mut sending = use_signal(|| false);
+    let mut expanded = use_signal(|| false);
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let chat_container_id = {
@@ -224,10 +226,45 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             sending.set(false);
         });
     };
+    // Escape key closes expanded chat overlay
+    let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
+    use_effect(move || {
+        let Some(window) = web_sys::window() else { return };
+        let cb = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+            if e.key() == "Escape" && expanded() {
+                expanded.set(false);
+            }
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+        window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref()).ok();
+        escape_cb.set(Some(cb));
+    });
+    use_drop(move || {
+        if let Some(cb) = escape_cb.peek().as_ref() {
+            if let Some(window) = web_sys::window() {
+                let _ = window.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+            }
+        }
+    });
     rsx! {
-        div { class: "h-full flex flex-col bg-background border-l border-border",
-            div { class: "px-4 py-3 border-b border-border",
+        div {
+            class: if expanded() {
+                "fixed inset-0 z-50 flex flex-col bg-background"
+            } else {
+                "flex-1 min-h-0 flex flex-col bg-background border-l border-border"
+            },
+            div { class: "shrink-0 px-4 py-3 border-b border-border flex items-center justify-between",
                 h3 { class: "font-bold text-lg", "Live Chat" }
+                button {
+                    class: "lg:hidden p-2 hover:bg-accent rounded-lg transition",
+                    aria_label: if expanded() { "Collapse chat" } else { "Expand chat" },
+                    aria_expanded: expanded(),
+                    onclick: move |_| expanded.toggle(),
+                    if expanded() {
+                        XIcon { class: "w-5 h-5".to_string() }
+                    } else {
+                        MaximizeIcon { class: "w-5 h-5".to_string() }
+                    }
+                }
             }
             div {
                 id: "{chat_container_id}",
@@ -251,7 +288,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
                 }
             }
             if *has_signer.read() {
-                div { class: "p-4 border-t border-border",
+                div { class: "shrink-0 p-4 border-t border-border",
                     div { class: "flex items-center gap-2",
                         EmojiPicker {
                             icon_only: true,
