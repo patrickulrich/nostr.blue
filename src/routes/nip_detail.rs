@@ -25,6 +25,38 @@ fn format_spec_title(prefix: &str, num: &str, extracted_title: &str) -> String {
     format!("{}-{}: {}", prefix, num, clean)
 }
 
+/// Load a protocol spec document and update the UI signals.
+#[allow(clippy::too_many_arguments)]
+fn load_spec(
+    prefix: &str,
+    num: Option<&str>,
+    result: std::result::Result<String, String>,
+    mut is_custom: Signal<bool>,
+    mut nip_title: Signal<String>,
+    mut nip_content: Signal<Option<String>>,
+    mut loading: Signal<bool>,
+    mut error: Signal<Option<String>>,
+) {
+    is_custom.set(false);
+    nip_title.set(match num {
+        Some(n) => format!("{}-{}", prefix, n),
+        None => prefix.to_string(),
+    });
+    match result {
+        Ok(content) => {
+            if let Some(title) = extract_title_from_content(&content) {
+                nip_title.set(match num {
+                    Some(n) => format_spec_title(prefix, n, &title),
+                    None => title,
+                });
+            }
+            nip_content.set(Some(content));
+        }
+        Err(e) => error.set(Some(e)),
+    }
+    loading.set(false);
+}
+
 /// NIP detail page - displays either an official NIP from GitHub or a custom NIP from Nostr
 #[component]
 pub fn NipDetail(nip_id: String) -> Element {
@@ -58,73 +90,17 @@ pub fn NipDetail(nip_id: String) -> Element {
             loading.set(true);
             error.set(None);
             if let Some(num) = id.strip_prefix("nut-") {
-                // Cashu NUT document
-                is_custom.set(false);
-                nip_title.set(format!("NUT-{}", num));
-                match github_nips::fetch_nut_content(num).await {
-                    Ok(content) => {
-                        if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format_spec_title("NUT", num, &title));
-                        }
-                        nip_content.set(Some(content));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
-                }
+                let result = github_nips::fetch_nut_content(num).await;
+                load_spec("NUT", Some(num), result, is_custom, nip_title, nip_content, loading, error);
             } else if let Some(num) = id.strip_prefix("bud-") {
-                // Blossom BUD document
-                is_custom.set(false);
-                nip_title.set(format!("BUD-{}", num));
-                match github_nips::fetch_bud_content(num).await {
-                    Ok(content) => {
-                        if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format_spec_title("BUD", num, &title));
-                        }
-                        nip_content.set(Some(content));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
-                }
+                let result = github_nips::fetch_bud_content(num).await;
+                load_spec("BUD", Some(num), result, is_custom, nip_title, nip_content, loading, error);
             } else if let Some(num) = id.strip_prefix("nkbip-") {
-                // NKBIP document
-                is_custom.set(false);
-                nip_title.set(format!("NKBIP-{}", num));
-                match github_nips::fetch_nkbip_content(num).await {
-                    Ok(content) => {
-                        if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(format_spec_title("NKBIP", num, &title));
-                        }
-                        nip_content.set(Some(content));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
-                }
+                let result = github_nips::fetch_nkbip_content(num).await;
+                load_spec("NKBIP", Some(num), result, is_custom, nip_title, nip_content, loading, error);
             } else if id == "market-spec" {
-                // Market specification document
-                is_custom.set(false);
-                nip_title.set("Market Specification".to_string());
-                match github_nips::fetch_market_spec().await {
-                    Ok(content) => {
-                        if let Some(title) = extract_title_from_content(&content) {
-                            nip_title.set(title);
-                        }
-                        nip_content.set(Some(content));
-                        loading.set(false);
-                    }
-                    Err(e) => {
-                        error.set(Some(e));
-                        loading.set(false);
-                    }
-                }
+                let result = github_nips::fetch_market_spec().await;
+                load_spec("Market Specification", None, result, is_custom, nip_title, nip_content, loading, error);
             } else if id.starts_with("naddr") {
                 is_custom.set(true);
                 if !client_initialized {

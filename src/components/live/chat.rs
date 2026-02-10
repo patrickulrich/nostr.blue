@@ -236,7 +236,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
             div { class: "shrink-0 px-4 py-3 border-b border-border flex items-center justify-between",
                 h3 { class: "font-bold text-lg", "Live Chat" }
                 button {
-                    class: "lg:hidden p-1 hover:bg-accent rounded transition",
+                    class: "lg:hidden p-2 hover:bg-accent rounded-lg transition",
                     onclick: move |_| expanded.toggle(),
                     if expanded() {
                         XIcon { class: "w-5 h-5".to_string() }
