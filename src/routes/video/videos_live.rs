@@ -455,9 +455,16 @@ async fn load_following_streams(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch streams: {}", e))?;
+    let mut events = Vec::new();
+    nostr_client::stream_events_immediate(
+        filter,
+        Duration::from_secs(10),
+        |event| {
+            events.push(event);
+        },
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch streams: {}", e))?;
     let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
     let hit_limit = events.len() >= 100;
     let following_events: Vec<Event> = events
@@ -491,12 +498,19 @@ async fn load_global_streams(
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
-    let events = nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10))
-        .await
-        .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-    let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
-    let hit_limit = events.len() >= 50;
-    let filtered_events = filter_by_status(events, status);
+    let mut all_events = Vec::new();
+    nostr_client::stream_events_immediate(
+        filter,
+        Duration::from_secs(10),
+        |event| {
+            all_events.push(event);
+        },
+    )
+    .await
+    .map_err(|e| format!("Failed to fetch streams: {}", e))?;
+    let next_until = all_events.iter().map(|e| e.created_at.as_secs()).min();
+    let hit_limit = all_events.len() >= 50;
+    let filtered_events = filter_by_status(all_events, status);
     Ok((filtered_events, next_until, hit_limit))
 }
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {

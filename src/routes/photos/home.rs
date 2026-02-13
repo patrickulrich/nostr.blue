@@ -373,21 +373,24 @@ async fn load_following_photos(
         "Fetching photo events from {} followed accounts", filter.authors.as_ref().map(|
         a | a.len()).unwrap_or(0)
     );
-    match nostr_client::fetch_events_from_connected_relays(
-            filter,
-            Duration::from_secs(10),
-        )
-        .await
-    {
-        Ok(events) => {
+    let mut events = Vec::new();
+    let stream_result = nostr_client::stream_events_immediate(
+        filter,
+        Duration::from_secs(10),
+        |event| {
+            events.push(event);
+        },
+    )
+    .await;
+    match stream_result {
+        Ok(_) => {
             log::info!("Loaded {} photo events from following", events.len());
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            if event_vec.is_empty() {
+            events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            if events.is_empty() {
                 log::info!("No photos from followed users");
                 return Ok((Vec::new(), false));
             }
-            Ok((event_vec, false))
+            Ok((events, false))
         }
         Err(e) => {
             log::error!(
@@ -408,16 +411,17 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
         filter = filter.since(since);
     }
     log::info!("Fetching global photo events with filter: {:?}", filter);
-    match nostr_client::fetch_events_aggregated(filter, Duration::from_secs(10)).await {
-        Ok(events) => {
-            log::info!("Loaded {} global photo events", events.len());
-            let mut event_vec: Vec<Event> = events.into_iter().collect();
-            event_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            Ok(event_vec)
-        }
-        Err(e) => {
-            log::error!("Failed to fetch global photo events: {}", e);
-            Err(format!("Failed to load photos: {}", e))
-        }
-    }
+    let mut events = Vec::new();
+    nostr_client::stream_events_immediate(
+        filter,
+        Duration::from_secs(10),
+        |event| {
+            events.push(event);
+        },
+    )
+    .await
+    .map_err(|e| format!("Failed to load photos: {}", e))?;
+    log::info!("Loaded {} global photo events", events.len());
+    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(events)
 }
