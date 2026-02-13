@@ -54,6 +54,7 @@ pub fn Chats() -> Element {
     use_effect(move || {
         let query = search_query.read().clone();
         if query.len() < 2 {
+            search_version.with_mut(|v| *v += 1);
             search_results.set(None);
             search_loading.set(false);
             return;
@@ -102,10 +103,20 @@ pub fn Chats() -> Element {
                     if new_channels.is_empty() {
                         has_more.set(false);
                     } else {
-                        if let Some(last) = new_channels.last() {
-                            oldest_timestamp.set(Some(last.created_at));
+                        let existing_ids: HashSet<String> =
+                            channels.read().iter().map(|c| c.id.clone()).collect();
+                        let filtered: Vec<Channel> = new_channels
+                            .into_iter()
+                            .filter(|c| !existing_ids.contains(&c.id))
+                            .collect();
+                        if filtered.is_empty() {
+                            has_more.set(false);
+                        } else {
+                            if let Some(last) = filtered.last() {
+                                oldest_timestamp.set(Some(last.created_at));
+                            }
+                            channels.write().extend(filtered);
                         }
-                        channels.write().extend(new_channels);
                     }
                     pagination_loading.set(false);
                 }
@@ -141,7 +152,7 @@ pub fn Chats() -> Element {
                         if *has_signer.read() {
                             Link {
                                 to: Route::ChatNew {},
-                                class: "px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition",
+                                class: "px-3 py-1.5 bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium rounded-lg transition",
                                 "+ New Channel"
                             }
                         }
@@ -168,7 +179,7 @@ pub fn Chats() -> Element {
                             }
                         }
                         input {
-                            class: "w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
+                            class: "w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Search channels...",
                             value: "{search_query}",
@@ -176,7 +187,7 @@ pub fn Chats() -> Element {
                         }
                         if *search_loading.read() {
                             div { class: "absolute right-3 top-1/2 -translate-y-1/2",
-                                span { class: "inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" }
+                                span { class: "inline-block w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" }
                             }
                         }
                     }
@@ -222,7 +233,7 @@ pub fn Chats() -> Element {
                     }
                     if *pagination_loading.read() {
                         div { class: "flex justify-center py-4",
-                            span { class: "inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" }
+                            span { class: "inline-block w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" }
                         }
                     }
                 }
@@ -265,7 +276,7 @@ fn ChannelCard(channel: Channel) -> Element {
                         loading: "lazy",
                     }
                 } else {
-                    div { class: "w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg",
+                    div { class: "w-12 h-12 rounded-full bg-accent flex items-center justify-center text-accent-foreground font-bold text-lg",
                         HashIcon { class: "w-6 h-6".to_string() }
                     }
                 }

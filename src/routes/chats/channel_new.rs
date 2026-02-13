@@ -57,7 +57,7 @@ pub fn ChatNew() -> Element {
 
             if !has_signer {
                 div { class: "p-4",
-                    div { class: "p-4 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-lg",
+                    div { class: "p-4 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg",
                         "You need to sign in to create a channel."
                     }
                 }
@@ -72,7 +72,7 @@ pub fn ChatNew() -> Element {
                             }
                             input {
                                 id: "channel-name",
-                                class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500",
+                                class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
                                 placeholder: "e.g. Nostr Dev Chat",
                                 value: "{name}",
@@ -88,7 +88,7 @@ pub fn ChatNew() -> Element {
                             }
                             textarea {
                                 id: "channel-about",
-                                class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-blue-500 resize-none",
+                                class: "w-full px-3 py-2 border border-border rounded-lg bg-background focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
                                 rows: "3",
                                 placeholder: "What is this channel about?",
                                 value: "{about}",
@@ -106,19 +106,19 @@ pub fn ChatNew() -> Element {
 
                         // Error
                         if let Some(ref err) = *error.read() {
-                            div { class: "p-3 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-sm",
+                            div { class: "p-3 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg text-sm",
                                 "{err}"
                             }
                         }
 
                         // Submit
                         button {
-                            class: "w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
+                            class: "w-full py-3 bg-primary text-primary-foreground hover:bg-primary/90 font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
                             disabled: *creating.read() || name.read().trim().is_empty(),
                             onclick: handle_submit,
                             if *creating.read() {
                                 span { class: "inline-flex items-center gap-2",
-                                    span { class: "inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" }
+                                    span { class: "inline-block w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" }
                                     "Creating Channel..."
                                 }
                             } else {

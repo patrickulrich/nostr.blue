@@ -13,6 +13,7 @@ use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
+use dioxus_core::Task;
 use nostr_sdk::{Event, RelayPoolNotification, RelayUrl, SubscriptionId};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
@@ -51,6 +52,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let mut sending = use_signal(|| false);
     let mut expanded = use_signal(|| false);
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let mut realtime_task: Signal<Option<Task>> = use_signal(|| None);
     let mut channel_info: Signal<Option<Channel>> = use_signal(|| None);
     let mut relay_url_for_send: Signal<Option<RelayUrl>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
@@ -59,13 +61,25 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let channel_id_for_send = channel_id.clone();
     let channel_id_for_send2 = channel_id.clone();
 
-    let chat_container_id = use_memo(move || {
-        format!("channel-chat-messages-{}", channel_id.chars().take(8).collect::<String>())
-    });
+    let chat_container_id = format!(
+        "channel-chat-messages-{}",
+        channel_id.chars().take(8).collect::<String>()
+    );
 
     // Load channel info + messages + set up realtime subscription
     use_effect(use_reactive(&channel_id_for_effect, move |cid| {
         spawn(async move {
+            // Cancel previous realtime listener
+            if let Some(old_task) = *realtime_task.peek() {
+                old_task.cancel();
+            }
+            // Unsubscribe previous subscription
+            if let Some(old_sub) = chat_sub_id.peek().clone() {
+                if let Some(client) = get_client() {
+                    client.unsubscribe(&old_sub).await;
+                }
+            }
+
             loading.set(true);
 
             let (event_id, relay_hints) = match decode_channel_id(&cid) {
@@ -149,7 +163,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                         chat_sub_id.set(Some(subscription_id.clone()));
                         log::debug!("Subscribed to channel chat {}", event_id.to_hex());
 
-                        spawn(async move {
+                        let task = spawn(async move {
                             let mut notifications = client.notifications();
                             while let Ok(notification) = notifications.recv().await {
                                 if let RelayPoolNotification::Event {
@@ -177,6 +191,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                                 }
                             }
                         });
+                        realtime_task.set(Some(task));
                     }
                     Err(e) => log::error!("Failed to subscribe to channel: {}", e),
                 }
@@ -185,11 +200,11 @@ pub fn ChannelChat(channel_id: String) -> Element {
     }));
 
     // Auto-scroll
-    let chat_id_for_scroll = chat_container_id;
+    let chat_container_id_for_scroll = chat_container_id.clone();
     let mut is_first_load = use_signal(|| true);
     use_effect(move || {
         let msg_count = messages.read().len();
-        let container_id = chat_id_for_scroll.read().clone();
+        let container_id = chat_container_id_for_scroll.clone();
         spawn(async move {
             gloo_timers::future::TimeoutFuture::new(50).await;
             if *is_first_load.peek() && msg_count > 0 {
@@ -203,6 +218,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
 
     // Cleanup subscription on unmount
     use_drop(move || {
+        if let Some(task) = *realtime_task.peek() {
+            task.cancel();
+        }
         if let Some(sub_id) = chat_sub_id.peek().clone() {
             spawn(async move {
                 if let Some(client) = get_client() {
@@ -354,7 +372,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                         }
                         input {
                             r#type: "text",
-                            class: "flex-1 px-3 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500",
+                            class: "flex-1 px-3 py-2 bg-input border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
                             placeholder: "Send a message...",
                             value: "{message_input.read()}",
                             disabled: *sending.read(),
@@ -372,7 +390,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                             },
                         }
                         button {
-                            class: "px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
+                            class: "px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
                             disabled: *sending.read() || message_input.read().trim().is_empty(),
                             onclick: move |_| {
                                 let content = message_input.read().clone();
@@ -437,7 +455,7 @@ fn ChannelChatMessage(event: Event) -> Element {
                         loading: "lazy",
                     }
                 } else {
-                    div { class: "w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold",
+                    div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold",
                         {
                             let name = author_name.read();
                             let first_char = name.chars().next().unwrap_or('?').to_uppercase().to_string();
