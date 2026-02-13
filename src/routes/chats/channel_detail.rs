@@ -16,6 +16,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
     let mut channel_info: Signal<Option<Channel>> = use_signal(|| None);
     let mut loading = use_signal(|| true);
     let client_ready = use_memo(move || *CLIENT_INITIALIZED.read());
+    let mut request_id = use_signal(|| 0u32);
 
     let channel_id_for_effect = channel_id.clone();
     let channel_id_for_chat = channel_id.clone();
@@ -24,7 +25,10 @@ pub fn ChatDetail(channel_id: String) -> Element {
         if !*client_ready.read() {
             return;
         }
+        let current_id = request_id.peek().wrapping_add(1);
+        request_id.set(current_id);
         spawn(async move {
+            let is_stale = || *request_id.peek() != current_id;
             loading.set(true);
 
             let (event_id, _relay_hints) = match decode_channel_id(&cid) {
@@ -50,6 +54,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
+                        if is_stale() { return; }
                         if let Some(event) = events.first() {
                             if let Some(ch) = parse_channel_creation(event) {
                                 cache_channel(ch.clone());
@@ -70,6 +75,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
+                        if is_stale() { return; }
                         if let Some(event) = events.first() {
                             if let Some(meta) = parse_channel_metadata(event, &ch.pubkey) {
                                 cache_channel_metadata(meta);
@@ -80,6 +86,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
                 }
             }
 
+            if is_stale() { return; }
             loading.set(false);
         });
     }));

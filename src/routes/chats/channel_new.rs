@@ -11,7 +11,7 @@ pub fn ChatNew() -> Element {
     let picture = use_signal(String::new);
     let mut creating = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    let has_signer = *HAS_SIGNER.read();
+    let has_signer = use_memo(move || *HAS_SIGNER.read());
     let nav = navigator();
 
     let handle_submit = move |_| {
@@ -55,7 +55,7 @@ pub fn ChatNew() -> Element {
                 }
             }
 
-            if !has_signer {
+            if !*has_signer.read() {
                 div { class: "p-4",
                     div { class: "p-4 bg-destructive/10 border border-destructive/20 text-destructive rounded-lg",
                         "You need to sign in to create a channel."

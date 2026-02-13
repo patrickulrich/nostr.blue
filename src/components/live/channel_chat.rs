@@ -56,6 +56,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
     let mut channel_info: Signal<Option<Channel>> = use_signal(|| None);
     let mut relay_url_for_send: Signal<Option<RelayUrl>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
+    let mut request_id = use_signal(|| 0u32);
 
     let channel_id_for_effect = channel_id.clone();
     let channel_id_for_send = channel_id.clone();
@@ -68,7 +69,11 @@ pub fn ChannelChat(channel_id: String) -> Element {
 
     // Load channel info + messages + set up realtime subscription
     use_effect(use_reactive(&channel_id_for_effect, move |cid| {
+        let current_id = request_id.peek().wrapping_add(1);
+        request_id.set(current_id);
         spawn(async move {
+            let is_stale = || *request_id.peek() != current_id;
+
             // Cancel previous realtime listener
             if let Some(old_task) = *realtime_task.peek() {
                 old_task.cancel();
@@ -93,6 +98,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
 
             // Resolve relay URL for sending
             let relay = get_channel_relay_url(&relay_hints).await;
+            if is_stale() { return; }
             relay_url_for_send.set(Some(relay));
 
             // Fetch channel creation event (kind 40)
@@ -106,6 +112,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
+                        if is_stale() { return; }
                         if let Some(event) = events.first() {
                             if let Some(ch) = parse_channel_creation(event) {
                                 cache_channel(ch.clone());
@@ -126,6 +133,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 .await
                 {
                     Ok(events) => {
+                        if is_stale() { return; }
                         if let Some(event) = events.first() {
                             if let Some(meta) = parse_channel_metadata(event, &ch.pubkey) {
                                 cache_channel_metadata(meta);
@@ -144,6 +152,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
             .await
             {
                 Ok(events) => {
+                    if is_stale() { return; }
                     let mut sorted = events;
                     sorted.sort_by(|a, b| a.created_at.cmp(&b.created_at));
                     messages.set(sorted);
@@ -152,6 +161,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 Err(e) => log::error!("Failed to fetch channel messages: {}", e),
             }
 
+            if is_stale() { return; }
             loading.set(false);
 
             // Set up real-time subscription
@@ -159,6 +169,7 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 let realtime_filter = channel_messages_realtime_filter(event_id);
                 match client.subscribe(realtime_filter, None).await {
                     Ok(output) => {
+                        if is_stale() { return; }
                         let subscription_id = output.val;
                         chat_sub_id.set(Some(subscription_id.clone()));
                         log::debug!("Subscribed to channel chat {}", event_id.to_hex());
