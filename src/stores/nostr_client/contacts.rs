@@ -384,6 +384,9 @@ pub async fn is_following(pubkey: String) -> std::result::Result<bool, String> {
 pub async fn follow_users_batch(
     pubkeys_to_follow: Vec<String>,
 ) -> std::result::Result<usize, String> {
+    if pubkeys_to_follow.is_empty() {
+        return Ok(0);
+    }
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     invalidate_contacts_cache();
     let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey).await?;

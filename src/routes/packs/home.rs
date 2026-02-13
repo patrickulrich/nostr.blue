@@ -43,82 +43,78 @@ pub fn PacksHome() -> Element {
     let mut request_id = use_signal(|| 0u32);
 
     let is_authenticated = auth_store::is_authenticated();
-    let user_pubkey = auth_store::get_pubkey();
 
-    // Load packs when tab or client changes
-    use_effect(
-        use_reactive(
-            (&*active_tab.read(), &*nostr_client::CLIENT_INITIALIZED.read()),
-            move |(tab, client_initialized)| {
-                if !client_initialized {
-                    return;
+    // Load packs when tab, client, or auth state changes
+    use_effect(move || {
+        let tab = *active_tab.read();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        let pubkey = auth_store::AUTH_STATE.read().pubkey.clone();
+
+        if !client_initialized {
+            return;
+        }
+        let current_id = request_id.peek().wrapping_add(1);
+        request_id.set(current_id);
+        loading.set(true);
+        error.set(None);
+        spawn(async move {
+            let result = match tab {
+                PacksTab::All => packs_store::fetch_starter_packs(50).await,
+                PacksTab::Following => {
+                    if let Some(pk) = &pubkey {
+                        match nostr_client::fetch_contacts(pk.clone()).await {
+                            Ok(contacts) => {
+                                packs_store::fetch_packs_from_following(&contacts, 50).await
+                            }
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        Ok(Vec::new())
+                    }
                 }
-                let current_id = request_id.peek().wrapping_add(1);
-                request_id.set(current_id);
-                loading.set(true);
-                error.set(None);
-                let pubkey = user_pubkey.clone();
-                spawn(async move {
-                    let result = match tab {
-                        PacksTab::All => packs_store::fetch_starter_packs(50).await,
-                        PacksTab::Following => {
-                            if let Some(pk) = &pubkey {
-                                match nostr_client::fetch_contacts(pk.clone()).await {
-                                    Ok(contacts) => {
-                                        packs_store::fetch_packs_from_following(&contacts, 50)
-                                            .await
-                                    }
-                                    Err(e) => Err(e),
-                                }
-                            } else {
-                                Ok(Vec::new())
-                            }
-                        }
-                        PacksTab::ImIn => {
-                            if let Some(pk) = &pubkey {
-                                packs_store::fetch_packs_containing_pubkey(pk, 50).await
-                            } else {
-                                Ok(Vec::new())
-                            }
-                        }
-                        PacksTab::Mine => {
-                            if let Some(pk) = &pubkey {
-                                packs_store::fetch_packs_by_author(pk, 50).await
-                            } else {
-                                Ok(Vec::new())
-                            }
-                        }
-                    };
-
-                    if *request_id.peek() != current_id {
-                        log::debug!("Discarding stale packs request");
-                        return;
+                PacksTab::ImIn => {
+                    if let Some(pk) = &pubkey {
+                        packs_store::fetch_packs_containing_pubkey(pk, 50).await
+                    } else {
+                        Ok(Vec::new())
                     }
+                }
+                PacksTab::Mine => {
+                    if let Some(pk) = &pubkey {
+                        packs_store::fetch_packs_by_author(pk, 50).await
+                    } else {
+                        Ok(Vec::new())
+                    }
+                }
+            };
 
-                    match result {
-                        Ok(fetched) => {
-                            // Prefetch author + first 5 member profiles per pack
-                            let mut pubkeys_to_prefetch = Vec::new();
-                            for pack in &fetched {
-                                pubkeys_to_prefetch.push(pack.author_pubkey.clone());
-                                for member in pack.members.iter().take(5) {
-                                    pubkeys_to_prefetch.push(member.pubkey.clone());
-                                }
-                            }
-                            profiles::prefetch_profiles(pubkeys_to_prefetch).await;
-                            packs.set(fetched);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to fetch packs: {}", e);
-                            error.set(Some(e));
-                            packs.set(Vec::new());
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale packs request");
+                return;
+            }
+
+            match result {
+                Ok(fetched) => {
+                    // Prefetch author + first 5 member profiles per pack (deduped)
+                    let mut pubkeys_to_prefetch = std::collections::HashSet::new();
+                    for pack in &fetched {
+                        pubkeys_to_prefetch.insert(pack.author_pubkey.clone());
+                        for member in pack.members.iter().take(5) {
+                            pubkeys_to_prefetch.insert(member.pubkey.clone());
                         }
                     }
-                    loading.set(false);
-                });
-            },
-        ),
-    );
+                    profiles::prefetch_profiles(pubkeys_to_prefetch.into_iter().collect()).await;
+                    packs.set(fetched);
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch packs: {}", e);
+                    error.set(Some(e));
+                    packs.set(Vec::new());
+                }
+            }
+            loading.set(false);
+        });
+    });
 
     let filter_packs = |items: &[StarterPack], query: &str| -> Vec<StarterPack> {
         if query.is_empty() {
@@ -284,7 +280,7 @@ fn PackCard(pack: StarterPack) -> Element {
     rsx! {
         Link {
             to: Route::PackDetail { naddr },
-            class: "group block bg-card border border-border rounded-xl overflow-hidden hover:border-primary/50 transition",
+            class: "group block bg-card border border-border rounded-lg overflow-hidden hover:border-primary/50 transition",
 
             // Cover image
             div { class: "h-36 bg-muted overflow-hidden",
@@ -379,7 +375,7 @@ fn MemberAvatar(pubkey: String) -> Element {
 #[component]
 fn PackCardSkeleton() -> Element {
     rsx! {
-        div { class: "bg-card border border-border rounded-xl overflow-hidden animate-pulse",
+        div { class: "bg-card border border-border rounded-lg overflow-hidden animate-pulse",
             div { class: "h-36 bg-muted" }
             div { class: "p-4 space-y-3",
                 div { class: "h-5 bg-muted rounded w-3/4" }

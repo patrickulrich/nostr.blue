@@ -31,6 +31,7 @@ pub fn PackNew() -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(Vec::<profile_search::ProfileSearchResult>::new);
     let mut searching = use_signal(|| false);
+    let mut search_request_id = use_signal(|| 0u32);
 
     // UI state
     let mut publishing = use_signal(|| false);
@@ -134,7 +135,7 @@ pub fn PackNew() -> Element {
                 div { class: "flex items-center justify-between px-4 py-3",
                     div { class: "flex items-center gap-4",
                         button {
-                            class: "p-2 rounded-full hover:bg-accent transition",
+                            class: "p-2 hover:bg-accent rounded-lg transition",
                             onclick: move |_| navigator.go_back(),
                             svg {
                                 class: "w-5 h-5",
@@ -301,9 +302,11 @@ pub fn PackNew() -> Element {
                                 show_remove_all_confirm.set(false);
 
                                 if val.len() >= 3 {
+                                    let current_search_id = search_request_id.peek().wrapping_add(1);
+                                    search_request_id.set(current_search_id);
                                     searching.set(true);
                                     spawn(async move {
-                                        // Check for npub/nprofile paste
+                                        // Check for npub/nprofile paste (synchronous — no staleness check needed)
                                         if val.starts_with("npub") || val.starts_with("nprofile") {
                                             let parsed = if val.starts_with("nprofile") {
                                                 // Parse nprofile first to get pubkey + relay hints
@@ -331,11 +334,18 @@ pub fn PackNew() -> Element {
                                             return;
                                         }
 
+                                        // Profile search — check for staleness after await
                                         match profile_search::search_profiles(&val, 10, true).await {
-                                            Ok(results) => search_results.set(results),
+                                            Ok(results) => {
+                                                if *search_request_id.peek() == current_search_id {
+                                                    search_results.set(results);
+                                                }
+                                            }
                                             Err(e) => log::warn!("Profile search error: {}", e),
                                         }
-                                        searching.set(false);
+                                        if *search_request_id.peek() == current_search_id {
+                                            searching.set(false);
+                                        }
                                     });
                                 } else {
                                     search_results.set(Vec::new());

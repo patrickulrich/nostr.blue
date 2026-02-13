@@ -33,6 +33,7 @@ pub fn PackDetail(naddr: String) -> Element {
     let mut active_tab = use_signal(|| DetailTab::People);
     let mut posts: Signal<Vec<FeedItem>> = use_signal(Vec::new);
     let mut posts_loading = use_signal(|| false);
+    let mut posts_request_id = use_signal(|| 0u32);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     let navigator = use_navigator();
@@ -84,10 +85,17 @@ pub fn PackDetail(naddr: String) -> Element {
             return;
         }
         if let Some(p) = pack_data_for_posts {
+            let current_id = posts_request_id.peek().wrapping_add(1);
+            posts_request_id.set(current_id);
             posts_loading.set(true);
             spawn(async move {
                 match packs_store::fetch_pack_member_posts(&p, 50, None).await {
                     Ok(events) => {
+                        if *posts_request_id.peek() != current_id {
+                            log::debug!("Discarding stale posts request");
+                            posts_loading.set(false);
+                            return;
+                        }
                         let items = process_events_to_feed_items(events);
 
                         // Prefetch profiles for post authors
