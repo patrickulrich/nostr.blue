@@ -92,7 +92,7 @@ pub use articles::{
     publish_article, publish_article_tracked,
 };
 pub use contacts::{
-    fetch_contacts, follow_user, is_following, publish_contacts,
+    fetch_contacts, follow_user, follow_users_batch, is_following, publish_contacts,
     publish_contacts_tracked, unfollow_user,
 };
 pub use muting::{

@@ -14,6 +14,7 @@ pub use audio::voice_messages_store;
 
 pub mod social;
 pub use social::community_store;
+pub use social::packs_store;
 pub use social::pinned_communities;
 pub use social::pinned_notes;
 pub use social::reactions_store;

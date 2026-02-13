@@ -158,6 +158,11 @@ pub(super) fn render_sidebar_icon(
                 crate::components::icons::ListIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Packs => {
+            rsx! {
+                crate::components::icons::UsersIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Dvm => {
             rsx! {
                 crate::components::icons::CpuIcon { class: class.to_string() }

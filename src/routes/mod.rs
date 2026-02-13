@@ -6,6 +6,7 @@ use sidebar_icons::render_sidebar_icon;
 pub mod articles;
 pub mod badges;
 pub mod code;
+pub mod packs;
 pub mod community;
 pub mod events;
 pub mod nips;
@@ -76,6 +77,7 @@ pub mod webbookmarks;
 use about::About;
 use articles::{ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch, PublicationsHome};
 use badges::{BadgeDetail, BadgeNew, BadgesHome};
+use packs::{PackDetail, PackNew, PacksHome};
 use bible::{BibleChapter, BibleHome, BibleSearch};
 use blossom::BlossomPage;
 use bookmarks::Bookmarks;
@@ -201,6 +203,12 @@ pub enum Route {
     BadgeNew {},
     #[route("/badges/:naddr")]
     BadgeDetail { naddr: String },
+    #[route("/packs")]
+    PacksHome {},
+    #[route("/packs/new")]
+    PackNew {},
+    #[route("/packs/:naddr")]
+    PackDetail { naddr: String },
     #[route("/citations")]
     CitationsHome {},
     #[route("/citations/:naddr")]
@@ -472,6 +480,10 @@ fn Layout() -> Element {
         current_route,
         Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {}
     );
+    let is_packs_page = matches!(
+        current_route,
+        Route::PacksHome {} | Route::PackDetail { .. } | Route::PackNew {}
+    );
     let is_code_page = matches!(
         current_route,
         Route::CodeHome {}
@@ -579,7 +591,7 @@ fn Layout() -> Element {
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
     let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page
         || is_podcast_page || is_radio_page || is_nips_page || is_badges_page
-        || is_code_page || is_p2p_page || is_community_page || is_events_page
+        || is_packs_page || is_code_page || is_p2p_page || is_community_page || is_events_page
         || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page
         || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
     let music_player_visible = {
