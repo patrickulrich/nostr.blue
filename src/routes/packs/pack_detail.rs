@@ -2,7 +2,10 @@
 //!
 //! Full view of a starter pack with follow-all, edit, delete, and share actions.
 
+use std::time::Duration;
+
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::*;
 
 use crate::components::{ClientInitializing, NoteCard};
@@ -29,6 +32,7 @@ pub fn PackDetail(naddr: String) -> Element {
     let mut following_all = use_signal(|| false);
     let mut deleting = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
+    let mut delete_error = use_signal(|| None::<String>);
     let mut copied = use_signal(|| false);
     let mut active_tab = use_signal(|| DetailTab::People);
     let mut posts: Signal<Vec<FeedItem>> = use_signal(Vec::new);
@@ -41,11 +45,11 @@ pub fn PackDetail(naddr: String) -> Element {
     let user_pubkey = auth_store::get_pubkey();
 
     // Load pack data
+    let client_init = *nostr_client::CLIENT_INITIALIZED.read();
     use_effect(
         use_reactive(
-            &naddr,
-            move |addr| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            (&naddr, &client_init),
+            move |(addr, client_initialized)| {
                 if !client_initialized {
                     return;
                 }
@@ -319,7 +323,10 @@ pub fn PackDetail(naddr: String) -> Element {
                                 // Delete
                                 button {
                                     class: "px-4 py-2 border border-destructive text-destructive rounded-lg hover:bg-destructive/10 transition text-sm",
-                                    onclick: move |_| show_delete_confirm.set(true),
+                                    onclick: move |_| {
+                                        delete_error.set(None);
+                                        show_delete_confirm.set(true);
+                                    },
                                     "Delete"
                                 }
                             }
@@ -360,6 +367,9 @@ pub fn PackDetail(naddr: String) -> Element {
                                 p { class: "font-medium text-destructive",
                                     "Are you sure you want to delete this pack?"
                                 }
+                                if let Some(ref err) = *delete_error.read() {
+                                    p { class: "text-sm text-destructive", "{err}" }
+                                }
                                 div { class: "flex gap-2",
                                     button {
                                         class: "px-4 py-2 rounded-lg border border-border hover:bg-accent transition text-sm",
@@ -381,7 +391,7 @@ pub fn PackDetail(naddr: String) -> Element {
                                                         }
                                                         Err(e) => {
                                                             log::error!("Failed to delete pack: {}", e);
-                                                            show_delete_confirm.set(false);
+                                                            delete_error.set(Some(format!("Failed to delete: {}", e)));
                                                         }
                                                     }
                                                     deleting.set(false);
@@ -505,6 +515,7 @@ fn MemberRow(pubkey: String) -> Element {
     let is_authenticated = auth_store::is_authenticated();
     let mut is_following = use_signal(|| false);
     let mut follow_loading = use_signal(|| false);
+    let toast = consume_toast();
 
     // Check follow status
     {
@@ -512,8 +523,9 @@ fn MemberRow(pubkey: String) -> Element {
         use_effect(move || {
             let pk = pk.clone();
             spawn(async move {
-                if let Ok(following) = nostr_client::is_following(pk).await {
-                    is_following.set(following);
+                match nostr_client::is_following(pk).await {
+                    Ok(following) => is_following.set(following),
+                    Err(e) => log::error!("Failed to check follow status: {}", e),
                 }
             });
         });
@@ -578,7 +590,13 @@ fn MemberRow(pubkey: String) -> Element {
                                     };
                                     match result {
                                         Ok(()) => is_following.set(!currently_following),
-                                        Err(e) => log::error!("Follow/unfollow error: {}", e),
+                                        Err(e) => {
+                                            log::error!("Follow/unfollow error: {}", e);
+                                            toast.error(
+                                                if currently_following { "Failed to unfollow" } else { "Failed to follow" }.to_string(),
+                                                ToastOptions::new().duration(Duration::from_secs(3)),
+                                            );
+                                        }
                                     }
                                     follow_loading.set(false);
                                 });
