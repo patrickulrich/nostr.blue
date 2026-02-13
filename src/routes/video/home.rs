@@ -167,7 +167,10 @@ pub fn Videos() -> Element {
                             return;
                         }
                         let mut current = feed_events.cloned();
-                        current.extend(batch);
+                        let filtered: Vec<_> = batch.into_iter()
+                            .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
+                            .collect();
+                        current.extend(filtered);
                         current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                         let deduped = dedupe_videos_by_url(current);
                         feed_events.set(deduped);
@@ -180,7 +183,10 @@ pub fn Videos() -> Element {
                             return;
                         }
                         let mut current = feed_events.cloned();
-                        current.extend(batch);
+                        let filtered: Vec<_> = batch.into_iter()
+                            .filter(|e| e.kind != Kind::Custom(30311) || is_live_stream(e))
+                            .collect();
+                        current.extend(filtered);
                         current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                         let deduped = dedupe_videos_by_url(current);
                         feed_events.set(deduped);
@@ -416,23 +422,7 @@ pub fn Videos() -> Element {
                             div { class: "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
                                 for event in feed_events.read().iter() {
                                     if event.kind == Kind::Custom(30311) {
-                                        {
-                                            let is_live = event
-                                                .tags
-                                                .iter()
-                                                .any(|tag| {
-                                                    let slice = tag.as_slice();
-                                                    slice.first().map(|s| s.as_str()) == Some("status")
-                                                        && slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
-                                                });
-                                            if is_live {
-                                                rsx! {
-                                                    MiniLiveStreamCard { key: "{event.id}", event: event.clone() }
-                                                }
-                                            } else {
-                                                rsx! {}
-                                            }
-                                        }
+                                        MiniLiveStreamCard { key: "{event.id}", event: event.clone() }
                                     } else if is_vertical_video(event.kind.as_u16()) {
                                         VertsVideoCard {
                                             key: "{event.id}",
@@ -508,32 +498,28 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
             },
         ),
     );
-    use_effect(
-        use_reactive(
-            &*is_hovering.read(),
-            move |hovering| {
-                let id = video_element_id_for_effect.clone();
-                spawn(async move {
-                    if let Some(window) = web_sys::window() {
-                        if let Some(document) = window.document() {
-                            if let Some(element) = document.get_element_by_id(&id) {
-                                if let Ok(video) = element
-                                    .dyn_into::<web_sys::HtmlVideoElement>()
-                                {
-                                    if hovering {
-                                        let _ = video.play();
-                                    } else {
-                                        let _ = video.pause();
-                                        video.set_current_time(0.0);
-                                    }
-                                }
+    use_effect(move || {
+        let hovering = *is_hovering.read();
+        let id = video_element_id_for_effect.clone();
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element
+                            .dyn_into::<web_sys::HtmlVideoElement>()
+                        {
+                            if hovering {
+                                let _ = video.play();
+                            } else {
+                                let _ = video.pause();
+                                video.set_current_time(0.0);
                             }
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            }
+        });
+    });
     let display_name = author_metadata
         .read()
         .as_ref()
@@ -561,19 +547,29 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
                         img {
                             src: "{thumbnail}",
                             alt: "{video_meta.title.as_deref().unwrap_or(\"Video\")}",
-                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
+                            class: if *is_hovering.read() && video_meta.url.is_some() {
+                                "w-full h-full object-cover absolute inset-0 opacity-0"
+                            } else {
+                                "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            },
                         }
-                    } else if let Some(url) = &video_meta.url {
+                    }
+                    if let Some(url) = &video_meta.url {
                         video {
                             id: "{video_element_id}",
-                            class: "w-full h-full object-cover",
+                            class: if video_meta.thumbnail.is_some() && !*is_hovering.read() {
+                                "w-full h-full object-cover absolute inset-0 opacity-0"
+                            } else {
+                                "w-full h-full object-cover"
+                            },
                             src: "{url}",
                             muted: true,
                             r#loop: true,
                             playsinline: true,
                             preload: "metadata",
                         }
-                    } else {
+                    }
+                    if video_meta.thumbnail.is_none() && video_meta.url.is_none() {
                         div { class: "w-full h-full flex items-center justify-center bg-muted",
                             crate::components::icons::VideoIcon { class: "w-12 h-12 text-muted-foreground" }
                         }
@@ -605,32 +601,28 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
     let mut is_hovering = use_signal(|| false);
     let video_element_id = format!("preview-vert-{}", &event.id.to_hex()[..12]);
     let video_element_id_for_effect = video_element_id.clone();
-    use_effect(
-        use_reactive(
-            &*is_hovering.read(),
-            move |hovering| {
-                let id = video_element_id_for_effect.clone();
-                spawn(async move {
-                    if let Some(window) = web_sys::window() {
-                        if let Some(document) = window.document() {
-                            if let Some(element) = document.get_element_by_id(&id) {
-                                if let Ok(video) = element
-                                    .dyn_into::<web_sys::HtmlVideoElement>()
-                                {
-                                    if hovering {
-                                        let _ = video.play();
-                                    } else {
-                                        let _ = video.pause();
-                                        video.set_current_time(0.0);
-                                    }
-                                }
+    use_effect(move || {
+        let hovering = *is_hovering.read();
+        let id = video_element_id_for_effect.clone();
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                if let Some(document) = window.document() {
+                    if let Some(element) = document.get_element_by_id(&id) {
+                        if let Ok(video) = element
+                            .dyn_into::<web_sys::HtmlVideoElement>()
+                        {
+                            if hovering {
+                                let _ = video.play();
+                            } else {
+                                let _ = video.pause();
+                                video.set_current_time(0.0);
                             }
                         }
                     }
-                });
-            },
-        ),
-    );
+                }
+            }
+        });
+    });
     let video_id = event.id.to_hex();
     let feed_param = match feed_type {
         FeedType::Following => "following",
@@ -650,19 +642,29 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
                         img {
                             src: "{thumbnail}",
                             alt: "{video_meta.title.as_deref().unwrap_or(\"Vert\")}",
-                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200",
+                            class: if *is_hovering.read() && video_meta.url.is_some() {
+                                "w-full h-full object-cover absolute inset-0 opacity-0"
+                            } else {
+                                "w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            },
                         }
-                    } else if let Some(url) = &video_meta.url {
+                    }
+                    if let Some(url) = &video_meta.url {
                         video {
                             id: "{video_element_id}",
-                            class: "w-full h-full object-cover",
+                            class: if video_meta.thumbnail.is_some() && !*is_hovering.read() {
+                                "w-full h-full object-cover absolute inset-0 opacity-0"
+                            } else {
+                                "w-full h-full object-cover"
+                            },
                             src: "{url}",
                             muted: true,
                             r#loop: true,
                             playsinline: true,
                             preload: "metadata",
                         }
-                    } else {
+                    }
+                    if video_meta.thumbnail.is_none() && video_meta.url.is_none() {
                         div { class: "w-full h-full flex items-center justify-center bg-muted",
                             crate::components::icons::VideoIcon { class: "w-8 h-8 text-muted-foreground" }
                         }
@@ -688,6 +690,14 @@ struct VideoMeta {
     title: Option<String>,
     duration: Option<String>,
     dimensions: Option<String>,
+}
+/// Check if a livestream event (kind 30311) has status "live"
+fn is_live_stream(event: &Event) -> bool {
+    event.tags.iter().any(|tag| {
+        let slice = tag.as_slice();
+        slice.first().map(|s| s.as_str()) == Some("status")
+            && slice.get(1).map(|s| s.eq_ignore_ascii_case("live")) == Some(true)
+    })
 }
 fn parse_video_meta(event: &Event) -> VideoMeta {
     let mut meta = VideoMeta {
@@ -883,6 +893,8 @@ where
         return Ok((Vec::new(), false, false));
     }
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    // Remove ended livestreams (only show live ones on the videos page)
+    events.retain(|e| e.kind != Kind::Custom(30311) || is_live_stream(e));
     let deduped = dedupe_videos_by_url(events);
     log::info!("Loaded {} video events from following (after dedup)", deduped.len());
     let has_more = count >= 50;
@@ -920,6 +932,8 @@ where
         return Err("Failed to load any content".to_string());
     }
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    // Remove ended livestreams (only show live ones on the videos page)
+    events.retain(|e| e.kind != Kind::Custom(30311) || is_live_stream(e));
     let deduped = dedupe_videos_by_url(events);
     log::info!("Loaded {} global video events (after dedup)", deduped.len());
     let has_more = count >= 50;

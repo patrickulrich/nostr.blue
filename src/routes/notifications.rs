@@ -570,7 +570,7 @@ fn ReactionNotification(
                         class: "font-semibold hover:underline",
                         "{display_name}"
                     }
-                    span { class: "text-muted-foreground", "reacted to " }
+                    span { class: "text-muted-foreground", "reacted to" }
                     if let Some(ref eid) = reacted_eid_for_link {
                         Link {
                             to: Route::Note { note_id: eid.clone(), from_voice: None },
@@ -692,7 +692,7 @@ fn RepostNotification(
                         class: "font-semibold hover:underline",
                         "{display_name}"
                     }
-                    span { class: "text-muted-foreground", "reposted " }
+                    span { class: "text-muted-foreground", "reposted" }
                     if let Some(ref eid) = reposted_eid_for_link {
                         Link {
                             to: Route::Note { note_id: eid.clone(), from_voice: None },
@@ -816,7 +816,7 @@ fn ZapNotification(
                         class: "font-semibold hover:underline",
                         "{display_name}"
                     }
-                    span { class: "text-muted-foreground", "zapped " }
+                    span { class: "text-muted-foreground", "zapped" }
                     if let Some(ref eid) = zapped_eid_for_link {
                         Link {
                             to: Route::Note { note_id: eid.clone(), from_voice: None },
