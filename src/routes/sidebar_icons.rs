@@ -163,6 +163,11 @@ pub(super) fn render_sidebar_icon(
                 crate::components::icons::UsersIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Chats => {
+            rsx! {
+                crate::components::icons::MessageCircleIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Dvm => {
             rsx! {
                 crate::components::icons::CpuIcon { class: class.to_string() }
