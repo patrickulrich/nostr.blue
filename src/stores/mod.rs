@@ -13,6 +13,8 @@ pub use audio::podcast_subscription;
 pub use audio::voice_messages_store;
 
 pub mod social;
+#[allow(unused_imports)]
+pub use social::channel_store;
 pub use social::community_store;
 pub use social::packs_store;
 pub use social::pinned_communities;

@@ -7,6 +7,7 @@ pub mod articles;
 pub mod badges;
 pub mod code;
 pub mod packs;
+pub mod chats;
 pub mod community;
 pub mod events;
 pub mod nips;
@@ -84,6 +85,7 @@ use bookmarks::Bookmarks;
 use cashu_wallet::CashuWallet;
 use citations::{CitationDetail, CitationsHome};
 use code::{CodeExplore, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlob, CodeRepoCommits, CodeRepoIssues, CodeRepoPulls, CodeRepoSettings, CodeRepoTree, CodeRepositories, CodeSearch, CodeSnippetDetail, CodeSnippetNew, CodeSnippets};
+use chats::{ChatDetail, ChatNew, Chats};
 use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
 use dms::DMs;
@@ -255,6 +257,12 @@ pub enum Route {
     P2PHome {},
     #[route("/p2p/order/:naddr")]
     P2POrderDetail { naddr: String },
+    #[route("/chats")]
+    Chats {},
+    #[route("/chats/new")]
+    ChatNew {},
+    #[route("/chats/:channel_id")]
+    ChatDetail { channel_id: String },
     #[route("/communities")]
     Communities {},
     #[route("/communities/new")]
@@ -510,6 +518,10 @@ fn Layout() -> Element {
         current_route,
         Route::P2PHome {} | Route::P2POrderDetail { .. }
     );
+    let is_chats_page = matches!(
+        current_route,
+        Route::Chats {} | Route::ChatNew {} | Route::ChatDetail { .. }
+    );
     let is_community_page = matches!(
         current_route,
         Route::Communities {} | Route::CommunityPage { .. }
@@ -591,9 +603,10 @@ fn Layout() -> Element {
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
     let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page
         || is_podcast_page || is_radio_page || is_nips_page || is_badges_page
-        || is_packs_page || is_code_page || is_p2p_page || is_community_page || is_events_page
-        || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page
-        || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
+        || is_packs_page || is_code_page || is_p2p_page || is_chats_page || is_community_page
+        || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page
+        || is_publications_page || is_shop_page || is_blossom_page || is_bible_page
+        || is_creation_page;
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
         state.is_visible && state.current_track.is_some()
