@@ -79,13 +79,12 @@ pub use signals::{
 pub use fetching::{
     fetch_events_aggregated, fetch_events_aggregated_outbox,
     fetch_events_from_connected_relays, fetch_events_from_relays,
-    fetch_profile_events_db, fetch_profile_events_from_relays, fetch_video_events,
-    fetch_video_events_from_connected_relays,
+    fetch_profile_events_db, fetch_profile_events_from_relays,
 };
 pub use streaming::{
     stream_events_batched, stream_events_collected,
     stream_events_from_connected_relays_batched, stream_events_immediate,
-    stream_events_with_callback,
+    stream_events_with_callback, stream_video_events_from_connected_relays_batched,
 };
 pub use articles::{
     fetch_articles, fetch_event_by_coordinate, fetch_event_by_coordinate_with_relays,
