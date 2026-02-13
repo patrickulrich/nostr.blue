@@ -77,41 +77,36 @@ pub fn PackDetail(naddr: String) -> Element {
     );
 
     // Load posts when Posts tab is selected
-    {
+    use_effect(move || {
         let tab = *active_tab.read();
         let pack_data_for_posts = pack.read().clone();
-        use_effect(move || {
-            let tab = tab;
-            let pack_data_for_posts = pack_data_for_posts.clone();
-            if tab != DetailTab::Posts {
-                return;
-            }
-            if let Some(p) = pack_data_for_posts {
-                posts_loading.set(true);
-                spawn(async move {
-                    match packs_store::fetch_pack_member_posts(&p, 50, None).await {
-                        Ok(events) => {
-                            let mut items = process_events_to_feed_items(events);
-                            items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+        if tab != DetailTab::Posts {
+            return;
+        }
+        if let Some(p) = pack_data_for_posts {
+            posts_loading.set(true);
+            spawn(async move {
+                match packs_store::fetch_pack_member_posts(&p, 50, None).await {
+                    Ok(events) => {
+                        let items = process_events_to_feed_items(events);
 
-                            // Prefetch profiles for post authors
-                            let author_pks: Vec<String> = items
-                                .iter()
-                                .map(|item| item.event().pubkey.to_hex())
-                                .collect();
-                            profiles::prefetch_profiles(author_pks).await;
+                        // Prefetch profiles for post authors
+                        let author_pks: Vec<String> = items
+                            .iter()
+                            .map(|item| item.event().pubkey.to_hex())
+                            .collect();
+                        profiles::prefetch_profiles(author_pks).await;
 
-                            posts.set(items);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch pack member posts: {}", e);
-                        }
+                        posts.set(items);
                     }
-                    posts_loading.set(false);
-                });
-            }
-        });
-    }
+                    Err(e) => {
+                        log::error!("Failed to fetch pack member posts: {}", e);
+                    }
+                }
+                posts_loading.set(false);
+            });
+        }
+    });
 
     let is_author = pack
         .read()
@@ -131,7 +126,7 @@ pub fn PackDetail(naddr: String) -> Element {
             div { class: "sticky top-0 bg-background/95 backdrop-blur z-20 border-b border-border",
                 div { class: "flex items-center gap-4 px-4 py-3",
                     button {
-                        class: "p-2 rounded-full hover:bg-accent transition",
+                        class: "p-2 hover:bg-accent rounded-lg transition",
                         onclick: move |_| navigator.go_back(),
                         svg {
                             class: "w-5 h-5",

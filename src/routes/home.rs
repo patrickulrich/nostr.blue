@@ -2241,8 +2241,7 @@ async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, crate::
     )
     .await?;
 
-    let mut feed_items = process_events_to_feed_items(events);
-    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    let feed_items = process_events_to_feed_items(events);
 
     log::info!("Got {} quick global posts", feed_items.len());
     Ok(feed_items)

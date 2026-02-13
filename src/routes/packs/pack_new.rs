@@ -305,21 +305,20 @@ pub fn PackNew() -> Element {
                                     spawn(async move {
                                         // Check for npub/nprofile paste
                                         if val.starts_with("npub") || val.starts_with("nprofile") {
-                                            if let Ok(pk) = PublicKey::parse(&val) {
-                                                let hex = pk.to_hex();
-                                                // Add directly if not already a member
+                                            let parsed = if val.starts_with("nprofile") {
+                                                // Parse nprofile first to get pubkey + relay hints
+                                                Nip19Profile::from_bech32(&val).ok().map(|profile| {
+                                                    let hex = profile.public_key.to_hex();
+                                                    let relay_hint = profile.relays.first().map(|r| r.to_string());
+                                                    (hex, relay_hint)
+                                                })
+                                            } else {
+                                                // npub
+                                                PublicKey::parse(&val).ok().map(|pk| (pk.to_hex(), None))
+                                            };
+                                            if let Some((hex, relay_hint)) = parsed {
                                                 let already_added = members.read().iter().any(|m| m.pubkey == hex);
                                                 if !already_added {
-                                                    let relay_hint = if val.starts_with("nprofile") {
-                                                        // Try to extract relay from nprofile
-                                                        if let Ok(profile) = Nip19Profile::from_bech32(&val) {
-                                                            profile.relays.first().map(|r| r.to_string())
-                                                        } else {
-                                                            None
-                                                        }
-                                                    } else {
-                                                        None
-                                                    };
                                                     members.write().push(PackMember {
                                                         pubkey: hex.clone(),
                                                         relay_hint,
@@ -485,13 +484,13 @@ fn SelectedMemberRow(
             // Reorder buttons
             div { class: "flex flex-col shrink-0",
                 button {
-                    class: "p-0.5 hover:bg-accent rounded text-muted-foreground disabled:opacity-30",
+                    class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground disabled:opacity-30",
                     disabled: index == 0,
                     onclick: on_move_up,
                     "▲"
                 }
                 button {
-                    class: "p-0.5 hover:bg-accent rounded text-muted-foreground disabled:opacity-30",
+                    class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground disabled:opacity-30",
                     disabled: index + 1 >= total,
                     onclick: on_move_down,
                     "▼"
@@ -523,7 +522,7 @@ fn SelectedMemberRow(
 
             // Remove button
             button {
-                class: "p-1.5 hover:bg-destructive/10 text-destructive rounded transition shrink-0",
+                class: "p-2 hover:bg-accent rounded-lg transition text-destructive shrink-0",
                 onclick: on_remove,
                 svg {
                     class: "w-4 h-4",

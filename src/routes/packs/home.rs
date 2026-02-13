@@ -40,6 +40,7 @@ pub fn PacksHome() -> Element {
     let mut packs = use_signal(Vec::<StarterPack>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut request_id = use_signal(|| 0u32);
 
     let is_authenticated = auth_store::is_authenticated();
     let user_pubkey = auth_store::get_pubkey();
@@ -52,6 +53,8 @@ pub fn PacksHome() -> Element {
                 if !client_initialized {
                     return;
                 }
+                let current_id = request_id.peek().wrapping_add(1);
+                request_id.set(current_id);
                 loading.set(true);
                 error.set(None);
                 let pubkey = user_pubkey.clone();
@@ -86,6 +89,11 @@ pub fn PacksHome() -> Element {
                             }
                         }
                     };
+
+                    if *request_id.peek() != current_id {
+                        log::debug!("Discarding stale packs request");
+                        return;
+                    }
 
                     match result {
                         Ok(fetched) => {

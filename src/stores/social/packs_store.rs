@@ -85,10 +85,10 @@ impl StarterPack {
             .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
             .filter_map(|t| {
                 let slice = t.as_slice();
-                let pubkey = slice.get(1)?.to_string();
-                if pubkey.len() != 64 {
-                    return None;
-                }
+                let pk_str = slice.get(1)?;
+                // Validate as proper hex public key
+                PublicKey::from_hex(pk_str).ok()?;
+                let pubkey = pk_str.to_string();
                 let relay_hint = slice
                     .get(2)
                     .map(|s| s.to_string())
@@ -331,7 +331,17 @@ pub async fn publish_starter_pack(
     for member in members {
         let pk = PublicKey::from_hex(&member.pubkey)
             .map_err(|e| format!("Invalid member pubkey {}: {}", member.pubkey, e))?;
-        tags.push(Tag::public_key(pk));
+        if let Some(ref hint) = member.relay_hint {
+            let relay_url = nostr::RelayUrl::parse(hint).ok();
+            tags.push(Tag::from_standardized_without_cell(TagStandard::PublicKey {
+                public_key: pk,
+                relay_url,
+                alias: None,
+                uppercase: false,
+            }));
+        } else {
+            tags.push(Tag::public_key(pk));
+        }
     }
 
     let builder = EventBuilder::new(Kind::Custom(STARTER_PACK_KIND), "").tags(tags);
@@ -402,7 +412,7 @@ pub async fn fetch_pack_member_posts(
     }
 
     let mut filter = Filter::new()
-        .kinds([Kind::TextNote, Kind::Repost])
+        .kinds([Kind::TextNote, Kind::Repost, Kind::GenericRepost])
         .authors(authors)
         .limit(limit);
 

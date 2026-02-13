@@ -387,12 +387,20 @@ pub async fn follow_users_batch(
     let current_pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not logged in")?;
     invalidate_contacts_cache();
     let mut contacts = fetch_enriched_contacts_from_relay(current_pubkey).await?;
+    let mut existing: std::collections::HashSet<String> =
+        contacts.iter().map(|c| c.pubkey.clone()).collect();
     let mut new_count = 0;
     for pk in pubkeys_to_follow {
-        let normalized = crate::utils::nip19::normalize_pubkey(&pk)?;
-        if !contacts.iter().any(|c| c.pubkey == normalized) {
-            contacts.push(EnrichedContact::new(normalized));
-            new_count += 1;
+        match crate::utils::nip19::normalize_pubkey(&pk) {
+            Ok(normalized) => {
+                if existing.insert(normalized.clone()) {
+                    contacts.push(EnrichedContact::new(normalized));
+                    new_count += 1;
+                }
+            }
+            Err(e) => {
+                log::warn!("Skipping invalid pubkey '{}': {}", pk, e);
+            }
         }
     }
     if new_count > 0 {
