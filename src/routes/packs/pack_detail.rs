@@ -331,10 +331,16 @@ pub fn PackDetail(naddr: String) -> Element {
                                     let naddr_str = p.naddr.clone();
                                     move |_| {
                                         let uri = format!("nostr:{}", naddr_str);
-                                        copied.set(true);
                                         spawn(async move {
-                                            if let Err(e) = crate::utils::clipboard::copy_to_clipboard(&uri).await {
-                                                log::error!("Failed to copy: {:?}", e);
+                                            match crate::utils::clipboard::copy_to_clipboard(&uri).await {
+                                                Ok(()) => {
+                                                    copied.set(true);
+                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    copied.set(false);
+                                                }
+                                                Err(e) => {
+                                                    log::error!("Failed to copy: {:?}", e);
+                                                }
                                             }
                                         });
                                     }
@@ -488,7 +494,13 @@ fn MemberRow(pubkey: String) -> Element {
     let about = profile
         .as_ref()
         .and_then(|p| p.about.clone())
-        .map(|a| if a.len() > 100 { format!("{}...", &a[..100]) } else { a });
+        .map(|a| {
+            if a.chars().count() > 100 {
+                format!("{}...", a.chars().take(100).collect::<String>())
+            } else {
+                a
+            }
+        });
 
     let is_authenticated = auth_store::is_authenticated();
     let mut is_following = use_signal(|| false);
