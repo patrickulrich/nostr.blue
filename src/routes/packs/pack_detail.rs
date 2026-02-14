@@ -39,6 +39,7 @@ pub fn PackDetail(naddr: String) -> Element {
     let mut posts: Signal<Vec<FeedItem>> = use_signal(Vec::new);
     let mut posts_loading = use_signal(|| false);
     let mut posts_request_id = use_signal(|| 0u32);
+    let mut pack_request_id = use_signal(|| 0u32);
     let (cached_muted_posts, cached_blocked_users) = use_mute_block_cache();
 
     let navigator = use_navigator();
@@ -54,29 +55,47 @@ pub fn PackDetail(naddr: String) -> Element {
                 if !client_initialized {
                     return;
                 }
+                let current_id = pack_request_id.peek().wrapping_add(1);
+                pack_request_id.set(current_id);
                 spawn(async move {
                     loading.set(true);
                     error.set(None);
 
                     match packs_store::fetch_pack_by_naddr(&addr).await {
                         Ok(Some(p)) => {
+                            if *pack_request_id.peek() != current_id {
+                                log::debug!("Discarding stale pack request");
+                                return;
+                            }
                             // Prefetch all member profiles
                             let member_pubkeys: Vec<String> =
                                 p.members.iter().map(|m| m.pubkey.clone()).collect();
                             let mut to_prefetch = vec![p.author_pubkey.clone()];
                             to_prefetch.extend(member_pubkeys);
                             profiles::prefetch_profiles(to_prefetch).await;
+                            if *pack_request_id.peek() != current_id {
+                                log::debug!("Discarding stale pack request after prefetch");
+                                return;
+                            }
                             pack.set(Some(p));
                         }
                         Ok(None) => {
+                            if *pack_request_id.peek() != current_id {
+                                return;
+                            }
                             error.set(Some("Pack not found".to_string()));
                         }
                         Err(e) => {
+                            if *pack_request_id.peek() != current_id {
+                                return;
+                            }
                             log::error!("Failed to fetch pack: {}", e);
                             error.set(Some(e));
                         }
                     }
-                    loading.set(false);
+                    if *pack_request_id.peek() == current_id {
+                        loading.set(false);
+                    }
                 });
             },
         ),
@@ -114,6 +133,7 @@ pub fn PackDetail(naddr: String) -> Element {
                     }
                     Err(e) => {
                         log::error!("Failed to fetch pack member posts: {}", e);
+                        posts.set(Vec::new());
                     }
                 }
                 if *posts_request_id.peek() == current_id {
@@ -411,14 +431,14 @@ pub fn PackDetail(naddr: String) -> Element {
                     // Tabs
                     {
                         let people_tab_class = if *active_tab.read() == DetailTab::People {
-                            "flex-1 py-3 text-center font-medium transition border-b-2 border-blue-500 text-blue-500"
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-primary text-primary"
                         } else {
-                            "flex-1 py-3 text-center font-medium transition border-b-2 border-transparent hover:bg-accent"
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-transparent text-muted-foreground hover:text-foreground hover:border-border"
                         };
                         let posts_tab_class = if *active_tab.read() == DetailTab::Posts {
-                            "flex-1 py-3 text-center font-medium transition border-b-2 border-blue-500 text-blue-500"
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-primary text-primary"
                         } else {
-                            "flex-1 py-3 text-center font-medium transition border-b-2 border-transparent hover:bg-accent"
+                            "flex-1 py-3 text-center font-medium transition border-b-2 border-transparent text-muted-foreground hover:text-foreground hover:border-border"
                         };
                         rsx! {
                             div { class: "border-t border-border",
@@ -524,6 +544,9 @@ fn MemberRow(pubkey: String) -> Element {
     {
         let pk = pubkey.clone();
         use_effect(move || {
+            if !auth_store::is_authenticated() {
+                return;
+            }
             let pk = pk.clone();
             spawn(async move {
                 match nostr_client::is_following(pk).await {

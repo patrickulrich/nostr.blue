@@ -591,10 +591,10 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                                 to: Route::PodcastNostrDetail {
                                     naddr: naddr_for_link.clone(),
                                 },
-                                class: "flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-accent/50 transition",
+                                class: "bg-card border border-border rounded-lg p-4 flex items-center gap-2 hover:bg-accent/50 transition",
                                 onclick: move |e: MouseEvent| e.stop_propagation(),
                                 svg {
-                                    class: "w-8 h-8 text-purple-500 shrink-0",
+                                    class: "w-8 h-8 text-muted-foreground shrink-0",
                                     xmlns: "http://www.w3.org/2000/svg",
                                     fill: "none",
                                     view_box: "0 0 24 24",
@@ -747,21 +747,101 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
             }
         } else if *loading.read() {
             rsx! {
-                div { class: "my-2 p-3 border border-border rounded-lg bg-accent/5 animate-pulse",
+                div { class: "my-2 bg-card border border-border rounded-lg p-4 animate-pulse",
                     div { class: "h-4 bg-muted rounded w-3/4 mb-2" }
                     div { class: "h-3 bg-muted rounded w-1/2" }
                 }
             }
         } else {
-            rsx! {
-                Link {
-                    to: Route::ArticleDetail {
-                        naddr: naddr_for_link.clone(),
-                    },
-                    class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
-                    onclick: move |e: MouseEvent| e.stop_propagation(),
-                    "📄 Article"
-                }
+            let fallback_class = "text-foreground hover:text-foreground/70 font-medium hover:underline";
+            match kind {
+                30023 => rsx! { // ARTICLE
+                    Link {
+                        to: Route::ArticleDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "📄 Article"
+                    }
+                },
+                30054 => rsx! { // PODCAST_EPISODE
+                    Link {
+                        to: Route::PodcastNostrDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "🎙️ Podcast Episode"
+                    }
+                },
+                34139 => rsx! { // PLAYLIST
+                    Link {
+                        to: Route::MusicPlaylistDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "🎵 Playlist"
+                    }
+                },
+                30617 => rsx! { // GIT_REPO
+                    Link {
+                        to: Route::CodeRepo { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "📦 Repository"
+                    }
+                },
+                38383 => rsx! { // P2P_ORDER
+                    Link {
+                        to: Route::P2POrderDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "🤝 P2P Order"
+                    }
+                },
+                30009 => rsx! { // BADGE_DEFINITION
+                    Link {
+                        to: Route::BadgeDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "🏅 Badge"
+                    }
+                },
+                30818 => { // WIKI_ARTICLE
+                    // WikiDetail uses identifier, not naddr
+                    let identifier = naddr_for_link.clone();
+                    rsx! {
+                        Link {
+                            to: Route::WikiDetail { identifier },
+                            class: fallback_class,
+                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                            "📖 Wiki Article"
+                        }
+                    }
+                },
+                30040 => rsx! { // PUBLICATION_INDEX
+                    Link {
+                        to: Route::PublicationDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "📰 Publication"
+                    }
+                },
+                30067 => rsx! { // PINBOARD
+                    Link {
+                        to: Route::PinBoardDetail { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "📌 Pin Board"
+                    }
+                },
+                30405 => rsx! { // COLLECTION
+                    Link {
+                        to: Route::ShopCollection { naddr: naddr_for_link.clone() },
+                        class: fallback_class,
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "🛍️ Collection"
+                    }
+                },
+                _ => rsx! {
+                    span { class: "text-muted-foreground font-medium", "📄 {mention}" }
+                },
             }
         }
     } else {
