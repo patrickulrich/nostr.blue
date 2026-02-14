@@ -130,6 +130,10 @@ pub fn PackDetail(naddr: String) -> Element {
                             .collect();
                         profiles::prefetch_profiles(author_pks).await;
 
+                        if *posts_request_id.peek() != current_id {
+                            log::debug!("Discarding stale posts after prefetch");
+                            return;
+                        }
                         posts.set(items);
                     }
                     Err(e) => {
