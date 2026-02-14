@@ -1,15 +1,19 @@
 //! Issue Detail Page
 //!
-//! View a single NIP-34 Git issue (Kind 1621) with comments.
+//! View a single NIP-34 Git issue (Kind 1621) with comments,
+//! bounty display, and permission-based status controls.
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
+use crate::services::git_hosting::bounties::fetch_bounties_for_issue;
 use crate::services::git_hosting::{
-    fetch_comments_by_id, fetch_issue, publish_comment_by_id, update_issue_status_by_id,
+    fetch_comments_by_id, fetch_issue, fetch_repository, publish_comment_by_id,
+    update_issue_status_by_id,
 };
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format_relative_time_or;
-use crate::utils::nip34::{GitComment, Issue, IssueStatus};
+use crate::utils::nip34::{Bounty, GitComment, Issue, IssueStatus, Repository};
+use crate::utils::permissions;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 /// Issue detail page component
@@ -107,7 +111,43 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| issue.pubkey_display());
-    let can_update_status = is_authenticated && user_pubkey == issue.pubkey;
+
+    // Fetch repository for permission checks
+    let mut repo = use_signal(|| None::<Repository>);
+    let repo_naddr = issue.repository_naddr.clone();
+    use_effect(move || {
+        let naddr = repo_naddr.clone();
+        if naddr.is_empty() {
+            return;
+        }
+        spawn(async move {
+            if let Ok(r) = fetch_repository(&naddr).await {
+                repo.set(Some(r));
+            }
+        });
+    });
+
+    // Fetch bounties for this issue
+    let mut bounties = use_signal(Vec::<Bounty>::new);
+    let issue_id_for_bounties = issue_id.clone();
+    use_effect(move || {
+        let id = issue_id_for_bounties.clone();
+        spawn(async move {
+            if let Ok(b) = fetch_bounties_for_issue(&id).await {
+                bounties.set(b);
+            }
+        });
+    });
+
+    // Permission checks: author OR maintainer/owner can update status
+    let can_update_status = is_authenticated
+        && (user_pubkey == issue.pubkey
+            || repo
+                .read()
+                .as_ref()
+                .map(|r| permissions::can_change_status(&user_pubkey, r, &issue.pubkey))
+                .unwrap_or(false));
+
     let mut new_comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
@@ -162,6 +202,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     };
     rsx! {
         div { class: "space-y-6",
+            // Header section
             div { class: "space-y-4",
                 div { class: "flex items-start justify-between gap-4",
                     h1 { class: "text-xl font-semibold",
@@ -197,18 +238,9 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                         {format_relative_time_or(issue.created_at, "Unknown")}
                     }
                 }
-                if !issue.labels.is_empty() {
-                    div { class: "flex flex-wrap gap-2",
-                        for label in issue.labels.iter() {
-                            span {
-                                key: "{label}",
-                                class: "px-2 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20",
-                                "{label}"
-                            }
-                        }
-                    }
-                }
             }
+
+            // Status actions
             if can_update_status {
                 div { class: "flex flex-wrap gap-2",
                     if issue_status != IssueStatus::Closed {
@@ -235,92 +267,160 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                     }
                 }
             }
-            div { class: "p-4 border border-border rounded-lg bg-card",
-                div { class: "prose prose-sm max-w-none dark:prose-invert",
-                    p { "{issue.content}" }
-                }
-            }
-            div { class: "space-y-4",
-                h3 { class: "font-semibold flex items-center gap-2",
-                    "Comments"
-                    span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{issue.comment_count}" }
-                }
-                match &*comments.read() {
-                    Some(Ok(comment_list)) => rsx! {
-                        div { class: "space-y-4",
-                            for comment in comment_list.iter() {
-                                CommentCard { key: "{comment.event_id}", comment: comment.clone() }
-                            }
-                            if comment_list.is_empty() {
-                                p { class: "text-sm text-muted-foreground text-center py-4",
-                                    "No comments yet. Be the first to comment!"
+
+            // Two-column layout
+            div { class: "grid grid-cols-1 lg:grid-cols-3 gap-6",
+                // Left column (2/3) - main content
+                div { class: "lg:col-span-2 space-y-6",
+                    // Issue content card
+                    div { class: "p-4 border border-border rounded-lg bg-card",
+                        div { class: "prose prose-sm max-w-none dark:prose-invert",
+                            p { "{issue.content}" }
+                        }
+                    }
+
+                    // Comments section
+                    div { class: "space-y-4",
+                        h3 { class: "font-semibold flex items-center gap-2",
+                            "Comments"
+                            span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{issue.comment_count}" }
+                        }
+                        match &*comments.read() {
+                            Some(Ok(comment_list)) => rsx! {
+                                div { class: "space-y-4",
+                                    for comment in comment_list.iter() {
+                                        CommentCard { key: "{comment.event_id}", comment: comment.clone() }
+                                    }
+                                    if comment_list.is_empty() {
+                                        p { class: "text-sm text-muted-foreground text-center py-4",
+                                            "No comments yet. Be the first to comment!"
+                                        }
+                                    }
+                                }
+                            },
+                            Some(Err(e)) => rsx! {
+                                p { class: "text-sm text-destructive", "Failed to load comments: {e}" }
+                            },
+                            None => rsx! {
+                                div { class: "space-y-3",
+                                    for i in 0..2 {
+                                        div {
+                                            key: "{i}",
+                                            class: "p-3 border border-border rounded-lg animate-pulse",
+                                            div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
+                                            div { class: "h-3 bg-muted rounded w-3/4" }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+
+                        // Comment form
+                        if is_authenticated {
+                            div { class: "border border-border rounded-lg overflow-hidden",
+                                textarea {
+                                    class: "w-full p-3 text-sm bg-background resize-none focus:outline-hidden",
+                                    placeholder: "Write a comment...",
+                                    rows: 3,
+                                    value: "{new_comment}",
+                                    oninput: move |e| new_comment.set(e.value()),
+                                }
+                                div { class: "px-3 py-2 bg-muted/50 border-t border-border flex items-center justify-between",
+                                    if let Some(error) = comment_error.read().as_ref() {
+                                        span { class: "text-xs text-destructive", "{error}" }
+                                    } else {
+                                        span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                                    }
+                                    button {
+                                        class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
+                                        disabled: *is_submitting.read() || new_comment.read().trim().is_empty(),
+                                        onclick: handle_submit_comment,
+                                        if *is_submitting.read() {
+                                            "Submitting..."
+                                        } else {
+                                            "Comment"
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    },
-                    Some(Err(e)) => rsx! {
-                        p { class: "text-sm text-destructive", "Failed to load comments: {e}" }
-                    },
-                    None => rsx! {
-                        div { class: "space-y-3",
-                            for i in 0..2 {
-                                div {
-                                    key: "{i}",
-                                    class: "p-3 border border-border rounded-lg animate-pulse",
-                                    div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
-                                    div { class: "h-3 bg-muted rounded w-3/4" }
-                                }
+                        } else {
+                            div { class: "p-4 bg-muted rounded-lg text-center",
+                                p { class: "text-sm text-muted-foreground", "Sign in to leave a comment" }
                             }
                         }
-                    },
+                    }
                 }
-                if is_authenticated {
-                    div { class: "border border-border rounded-lg overflow-hidden",
-                        textarea {
-                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-hidden",
-                            placeholder: "Write a comment...",
-                            rows: 3,
-                            value: "{new_comment}",
-                            oninput: move |e| new_comment.set(e.value()),
-                        }
-                        div { class: "px-3 py-2 bg-muted/50 border-t border-border flex items-center justify-between",
-                            if let Some(error) = comment_error.read().as_ref() {
-                                span { class: "text-xs text-destructive", "{error}" }
-                            } else {
-                                span { class: "text-xs text-muted-foreground", "Markdown supported" }
+
+                // Right column (1/3) - sidebar
+                div { class: "space-y-4",
+                    // Bounty section
+                    if !bounties.read().is_empty() {
+                        div { class: "border border-border rounded-lg",
+                            div { class: "px-4 py-3 border-b border-border bg-muted/30",
+                                h3 { class: "font-semibold text-sm", "Bounties" }
                             }
-                            button {
-                                class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
-                                disabled: *is_submitting.read() || new_comment.read().trim().is_empty(),
-                                onclick: handle_submit_comment,
-                                if *is_submitting.read() {
-                                    "Submitting..."
-                                } else {
-                                    "Comment"
+                            div { class: "p-4 space-y-2",
+                                for bounty in bounties.read().iter() {
+                                    div {
+                                        key: "{bounty.event_id}",
+                                        class: "flex items-center justify-between text-sm",
+                                        span { class: "inline-flex items-center gap-1",
+                                            span { class: "text-yellow-400", "\u{26A1}" }
+                                            span { class: "font-mono", "{bounty.amount_sats} sats" }
+                                        }
+                                        span {
+                                            class: match bounty.status {
+                                                crate::utils::nip34::BountyStatus::Pending => "text-xs px-2 py-0.5 rounded-full border border-yellow-500/30 bg-yellow-500/10 text-yellow-500",
+                                                crate::utils::nip34::BountyStatus::Claimed => "text-xs px-2 py-0.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-500",
+                                                crate::utils::nip34::BountyStatus::Paid => "text-xs px-2 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-500",
+                                            },
+                                            "{bounty.status.label()}"
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                } else {
-                    div { class: "p-4 bg-muted rounded-lg text-center",
-                        p { class: "text-sm text-muted-foreground", "Sign in to leave a comment" }
+
+                    // Labels section
+                    if !issue.labels.is_empty() {
+                        div { class: "border border-border rounded-lg",
+                            div { class: "px-4 py-3 border-b border-border bg-muted/30",
+                                h3 { class: "font-semibold text-sm", "Labels" }
+                            }
+                            div { class: "p-4",
+                                div { class: "flex flex-wrap gap-2",
+                                    for label in issue.labels.iter() {
+                                        span {
+                                            key: "{label}",
+                                            class: "px-2 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                                            "{label}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Repository link
+                    if !issue.repository_naddr.is_empty() {
+                        div { class: "border border-border rounded-lg p-3",
+                            h4 { class: "text-xs font-medium text-muted-foreground mb-2", "Repository" }
+                            Link {
+                                to: Route::CodeRepo {
+                                    naddr: issue.repository_naddr.clone(),
+                                },
+                                class: "text-sm text-primary hover:underline",
+                                "{issue.repository_naddr.chars().take(30).collect::<String>()}..."
+                            }
+                        }
                     }
                 }
             }
+
+            // Footer
             div { class: "pt-4 border-t border-border text-xs text-muted-foreground space-y-1",
                 p { "Event ID: {issue.event_id}" }
-                if !issue.repository_naddr.is_empty() {
-                    p {
-                        "Repository: "
-                        Link {
-                            to: Route::CodeRepo {
-                                naddr: issue.repository_naddr.clone(),
-                            },
-                            class: "text-primary hover:underline",
-                            "{issue.repository_naddr.chars().take(20).collect::<String>()}..."
-                        }
-                    }
-                }
             }
         }
     }

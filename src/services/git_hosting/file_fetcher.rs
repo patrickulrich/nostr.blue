@@ -383,6 +383,56 @@ async fn fetch_codeberg_tree(
             .collect(),
     )
 }
+/// Fetch all file paths in the repository (recursive).
+///
+/// Returns a flat list of all file paths (blobs only, no directories).
+/// Currently supports GitHub repositories; returns an error for other sources.
+pub async fn fetch_all_file_paths(
+    repo: &Repository,
+    git_ref: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let git_ref = git_ref.unwrap_or("main");
+    for url in &repo.clone {
+        if url.contains("github.com") {
+            if let Some((owner, repo_name)) = parse_github_url(url) {
+                return fetch_github_all_paths(&owner, &repo_name, git_ref).await;
+            }
+        }
+    }
+    Err("Recursive file listing is only supported for GitHub repositories".to_string())
+}
+
+/// Fetch all blob paths from GitHub's recursive tree API
+async fn fetch_github_all_paths(
+    owner: &str,
+    repo: &str,
+    git_ref: &str,
+) -> Result<Vec<String>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
+        owner, repo, git_ref,
+    );
+    let response = Request::get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.ok() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    let tree: GitHubTreeResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    Ok(tree
+        .tree
+        .into_iter()
+        .filter(|e| e.entry_type == "blob")
+        .map(|e| e.path)
+        .collect())
+}
+
 /// Fetch README content for a repository (tries common names)
 pub async fn fetch_readme(
     repo: &Repository,

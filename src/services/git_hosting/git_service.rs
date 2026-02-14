@@ -5,6 +5,7 @@
 //!
 //! This service wraps GitWorkerManager and provides Repository-aware methods
 //! that handle clone URL selection.
+#![allow(dead_code)]
 use crate::services::git_worker::{FileEntry, GitWorkerManager};
 use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
@@ -108,4 +109,40 @@ static GIT_SERVICE: std::sync::OnceLock<GitService> = std::sync::OnceLock::new()
 /// Get the global git service instance
 pub fn git_service() -> &'static GitService {
     GIT_SERVICE.get_or_init(GitService::new)
+}
+/// Compare two refs using GitHub API
+///
+/// Returns the diff content as a string. Only works for GitHub-hosted repositories.
+pub async fn compare_refs_github(
+    repo: &Repository,
+    base: &str,
+    head: &str,
+) -> Result<String, String> {
+    let (owner, repo_name) = extract_github_info(repo).ok_or("Not a GitHub repository")?;
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/compare/{}...{}",
+        owner, repo_name, base, head
+    );
+    let resp = gloo_net::http::Request::get(&url)
+        .header("Accept", "application/vnd.github.v3.diff")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if resp.status() != 200 {
+        return Err(format!("GitHub API returned status {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))
+}
+/// Extract owner and repo name from a Repository's GitHub URLs
+pub(crate) fn extract_github_info(repo: &Repository) -> Option<(String, String)> {
+    use super::github_import::parse_github_url;
+    for url in repo.web.iter().chain(repo.clone.iter()) {
+        if let Some(parts) = parse_github_url(url) {
+            return Some(parts);
+        }
+    }
+    None
 }

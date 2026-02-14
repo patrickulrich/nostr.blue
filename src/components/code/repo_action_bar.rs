@@ -6,17 +6,23 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use crate::components::icons;
+use crate::components::ZapModal;
+use crate::routes::Route;
 use crate::services::git_hosting::stars::{check_user_star, publish_star, remove_star};
 use crate::stores::code_store::is_repo_starred;
 use crate::stores::nostr_client::HAS_SIGNER;
+use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::nip34::Repository;
+use crate::utils::truncate_pubkey;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 /// Repository action bar with Watch, Star, Fork, Zap, Share buttons
 #[allow(clippy::clone_on_copy)]
 #[component]
 pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let toast = consume_toast();
+    let nav = use_navigator();
+    let mut show_zap_modal = use_signal(|| false);
     let mut is_starred = use_signal(|| false);
     let mut star_count = use_signal(|| repo.star_count);
     let mut is_watching = use_signal(|| false);
@@ -194,7 +200,12 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     };
     let handle_fork = move |_| {
-        toast.info("Fork coming soon".to_string(), ToastOptions::new());
+        if !*HAS_SIGNER.read() {
+            toast.warning("Sign in to fork repositories".to_string(), ToastOptions::new());
+            return;
+        }
+        // Navigate to new repo page — user creates their own copy
+        nav.push(Route::CodeNew {});
     };
     let handle_zap = move |_| {
         if !*HAS_SIGNER.read() {
@@ -202,7 +213,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 .warning("Sign in to zap repositories".to_string(), ToastOptions::new());
             return;
         }
-        toast.info("Zap modal coming soon".to_string(), ToastOptions::new());
+        show_zap_modal.set(true);
     };
     let star_text = if *is_starred.read() { "Starred" } else { "Star" };
     let watch_text = if *is_watching.read() { "Unwatch" } else { "Watch" };
@@ -308,6 +319,26 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             icon: icons::SHARE,
                             label: "Share",
                             onclick: handle_share,
+                        }
+                    }
+                }
+            }
+            if *show_zap_modal.read() {
+                {
+                    let profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
+                    let recipient_name = profile
+                        .as_ref()
+                        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+                        .unwrap_or_else(|| truncate_pubkey(&repo.pubkey));
+                    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+                    rsx! {
+                        ZapModal {
+                            recipient_pubkey: repo.pubkey.clone(),
+                            recipient_name: recipient_name,
+                            lud16: lud16,
+                            lud06: None::<String>,
+                            event_id: Some(repo.event_id.clone()),
+                            on_close: move |_| show_zap_modal.set(false),
                         }
                     }
                 }

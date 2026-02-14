@@ -78,6 +78,36 @@ pub async fn fetch_repository_prs(
     }
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
+/// Fetch PRs assigned to a user (tagged with #p)
+pub async fn fetch_prs_assigned_to(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<PullRequest>, String> {
+    let filter = Filter::new()
+        .kind(Kind::GitPatch)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
+        .limit(limit);
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch assigned PRs: {}", e))?;
+    cache_pr_events(&events);
+    Ok(events.iter().filter_map(PullRequest::from_event).collect())
+}
+/// Fetch PRs mentioning a user (tagged with #p)
+pub async fn fetch_prs_mentioning(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<PullRequest>, String> {
+    let filter = Filter::new()
+        .kind(Kind::GitPatch)
+        .pubkey(*pubkey)
+        .limit(limit);
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch mentioned PRs: {}", e))?;
+    cache_pr_events(&events);
+    Ok(events.iter().filter_map(PullRequest::from_event).collect())
+}
 /// Search PRs by text (NIP-50)
 pub async fn search_prs(query: &str, limit: usize) -> Result<Vec<PullRequest>, String> {
     let filter = Filter::new().kind(Kind::GitPatch).search(query).limit(limit);

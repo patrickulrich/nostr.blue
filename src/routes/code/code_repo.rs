@@ -2,15 +2,13 @@
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
-use crate::components::code::{ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
+use crate::components::code::{ContributorsList, ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_readme, fetch_repository};
 use crate::stores::nostr_client;
-use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::Repository;
-use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 /// Repository detail page component
 #[component]
@@ -114,122 +112,118 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
         async move { fetch_readme(&r, None).await }
     });
     rsx! {
-        div { class: "space-y-6",
-            div { class: "flex flex-col lg:flex-row gap-4",
-                if !repo.clone.is_empty() {
-                    div { class: "flex gap-3",
-                        Link {
-                            to: Route::CodeRepoTree {
-                                naddr: naddr.clone(),
-                                git_ref: "HEAD".to_string(),
-                                path: "".to_string(),
-                            },
-                            class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
-                            svg {
-                                class: "w-4 h-4",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                width: "24",
-                                height: "24",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }
+        div { class: "flex flex-col lg:flex-row gap-6",
+            // Main column
+            div { class: "flex-1 min-w-0 space-y-6",
+                div { class: "flex flex-col lg:flex-row gap-4",
+                    if !repo.clone.is_empty() {
+                        div { class: "flex gap-3",
+                            Link {
+                                to: Route::CodeRepoTree {
+                                    naddr: naddr.clone(),
+                                    git_ref: "HEAD".to_string(),
+                                    path: "".to_string(),
+                                },
+                                class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }
+                                }
+                                "Browse Files"
                             }
-                            "Browse Files"
+                        }
+                    }
+                    if !repo.clone.is_empty() {
+                        div { class: "flex-1 p-3 bg-muted rounded-lg",
+                            p { class: "text-xs text-muted-foreground mb-2", "Clone" }
+                            code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
+                                "{repo.clone.first().unwrap_or(&String::new())}"
+                            }
                         }
                     }
                 }
-                if !repo.clone.is_empty() {
-                    div { class: "flex-1 p-3 bg-muted rounded-lg",
-                        p { class: "text-xs text-muted-foreground mb-2", "Clone" }
-                        code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
-                            "{repo.clone.first().unwrap_or(&String::new())}"
-                        }
-                    }
+                match &*readme_resource.read() {
+                    Some(Ok(content)) => rsx! {
+                        ReadmeViewer { content: Some(content.clone()), loading: false }
+                    },
+                    Some(Err(_)) => rsx! {
+                        ReadmeViewer { content: None, loading: false }
+                    },
+                    None => rsx! {
+                        ReadmeViewer { loading: true }
+                    },
                 }
             }
-            match &*readme_resource.read() {
-                Some(Ok(content)) => rsx! {
-                    ReadmeViewer { content: Some(content.clone()), loading: false }
-                },
-                Some(Err(_)) => rsx! {
-                    ReadmeViewer { content: None, loading: false }
-                },
-                None => rsx! {
-                    ReadmeViewer { loading: true }
-                },
-            }
-            if !repo.maintainers.is_empty() {
-                div {
-                    h3 { class: "font-semibold mb-3", "Maintainers" }
-                    div { class: "flex flex-wrap gap-2",
-                        for pubkey in repo.maintainers.iter() {
-                            MaintainerBadge { key: "{pubkey}", pubkey: pubkey.clone() }
-                        }
+            // Sidebar
+            div { class: "lg:w-72 space-y-4",
+                // Contributors card
+                div { class: "bg-card border border-border rounded-lg p-4",
+                    ContributorsList {
+                        owner: repo.pubkey.clone(),
+                        maintainers: repo.maintainers.clone(),
+                        issue_count: Some(repo.issue_count),
+                        pr_count: Some(repo.pr_count),
                     }
                 }
-            }
-            if !repo.web.is_empty() {
-                div { class: "flex flex-wrap gap-2",
-                    for url in repo.web.iter() {
-                        a {
-                            key: "{url}",
-                            href: "{url}",
-                            target: "_blank",
-                            rel: "noopener noreferrer",
-                            class: "text-sm text-primary hover:underline flex items-center gap-1",
-                            svg {
-                                class: "w-3 h-3",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                width: "24",
-                                height: "24",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
-                                polyline { points: "15 3 21 3 21 9" }
-                                line {
-                                    x1: "10",
-                                    y1: "14",
-                                    x2: "21",
-                                    y2: "3",
+                // Web links card
+                if !repo.web.is_empty() {
+                    div { class: "bg-card border border-border rounded-lg p-4",
+                        h3 { class: "text-sm font-semibold text-foreground mb-3", "Links" }
+                        div { class: "space-y-2",
+                            for url in repo.web.iter() {
+                                a {
+                                    key: "{url}",
+                                    href: "{url}",
+                                    target: "_blank",
+                                    rel: "noopener noreferrer",
+                                    class: "text-sm text-primary hover:underline flex items-center gap-1",
+                                    svg {
+                                        class: "w-3 h-3",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        width: "24",
+                                        height: "24",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
+                                        polyline { points: "15 3 21 3 21 9" }
+                                        line {
+                                            x1: "10",
+                                            y1: "14",
+                                            x2: "21",
+                                            y2: "3",
+                                        }
+                                    }
+                                    "{url}"
                                 }
                             }
-                            "{url}"
+                        }
+                    }
+                }
+                // Metadata card
+                div { class: "bg-card border border-border rounded-lg p-4",
+                    h3 { class: "text-sm font-semibold text-foreground mb-3", "About" }
+                    div { class: "text-sm text-muted-foreground space-y-1",
+                        p { "Event ID: {repo.event_id}" }
+                        p {
+                            "Created: "
+                            {format_relative_time_or(repo.created_at, "Unknown")}
                         }
                     }
                 }
             }
-            div { class: "text-sm text-muted-foreground space-y-1",
-                p { "Event ID: {repo.event_id}" }
-                p {
-                    "Created: "
-                    {format_relative_time_or(repo.created_at, "Unknown")}
-                }
-            }
-        }
-    }
-}
-#[component]
-fn MaintainerBadge(pubkey: String) -> Element {
-    let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
-    let name = profile
-        .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-        .unwrap_or_else(|| truncate_pubkey(&pubkey));
-    rsx! {
-        Link {
-            to: Route::Profile {
-                pubkey: pubkey.clone(),
-            },
-            class: "px-3 py-1 bg-muted rounded-full text-sm hover:bg-accent transition",
-            "{name}"
         }
     }
 }

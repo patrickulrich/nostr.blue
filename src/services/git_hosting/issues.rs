@@ -92,6 +92,36 @@ pub async fn fetch_user_issues(
     cache_issue_events(&events);
     Ok(events.iter().filter_map(Issue::from_event).collect())
 }
+/// Fetch issues assigned to a user (tagged with #p)
+pub async fn fetch_issues_assigned_to(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<Issue>, String> {
+    let filter = Filter::new()
+        .kind(Kind::GitIssue)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
+        .limit(limit);
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch assigned issues: {}", e))?;
+    cache_issue_events(&events);
+    Ok(events.iter().filter_map(Issue::from_event).collect())
+}
+/// Fetch issues mentioning a user (tagged with #p)
+pub async fn fetch_issues_mentioning(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<Issue>, String> {
+    let filter = Filter::new()
+        .kind(Kind::GitIssue)
+        .pubkey(*pubkey)
+        .limit(limit);
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch mentioned issues: {}", e))?;
+    cache_issue_events(&events);
+    Ok(events.iter().filter_map(Issue::from_event).collect())
+}
 /// Search issues by text (NIP-50)
 pub async fn search_issues(query: &str, limit: usize) -> Result<Vec<Issue>, String> {
     let filter = Filter::new().kind(Kind::GitIssue).search(query).limit(limit);

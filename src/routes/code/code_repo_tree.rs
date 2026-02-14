@@ -1,11 +1,12 @@
 //! Code Repository Tree Page
 //!
 //! Displays the file tree for a repository at a specific path and ref.
+use crate::components::code::FuzzyFinder;
 use crate::components::{
     BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton,
 };
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, git_service};
+use crate::services::git_hosting::{fetch_repository, file_fetcher, git_service};
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
@@ -16,6 +17,69 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut files = use_signal(Vec::new);
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
+    let mut show_fuzzy_finder = use_signal(|| false);
+    let mut all_file_paths = use_signal(Vec::<String>::new);
+
+    // Keyboard shortcut: press 't' to open fuzzy finder
+    use_effect(move || {
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::prelude::*;
+            use wasm_bindgen::JsCast;
+
+            let window = web_sys::window().expect("no global window");
+            let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+                // Skip if typing in an input, textarea, or select
+                if let Some(target) = event.target() {
+                    if let Some(element) = target.dyn_ref::<web_sys::HtmlElement>() {
+                        let tag = element.tag_name().to_lowercase();
+                        if tag == "input" || tag == "textarea" || tag == "select" {
+                            return;
+                        }
+                        if element.is_content_editable() {
+                            return;
+                        }
+                    }
+                }
+                if event.key() == "t"
+                    && !event.ctrl_key()
+                    && !event.meta_key()
+                    && !event.alt_key()
+                {
+                    event.prevent_default();
+                    show_fuzzy_finder.set(true);
+                }
+            }) as Box<dyn FnMut(_)>);
+
+            let _ = window.add_event_listener_with_callback(
+                "keydown",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    });
+
+    // Fetch all file paths when the fuzzy finder is opened
+    {
+        let git_ref_for_finder = git_ref.clone();
+        use_effect(move || {
+            let is_open = *show_fuzzy_finder.read();
+            let paths_empty = all_file_paths.read().is_empty();
+            if is_open && paths_empty {
+                if let Some(repo) = repo_signal.read().clone() {
+                    let ref_str = git_ref_for_finder.clone();
+                    spawn(async move {
+                        if let Ok(paths) =
+                            file_fetcher::fetch_all_file_paths(&repo, Some(&ref_str)).await
+                        {
+                            all_file_paths.set(paths);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
     let load_key = use_memo({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
@@ -104,6 +168,28 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                         git_ref: git_ref.clone(),
                         path: path.clone(),
                     }
+                    div { class: "ml-auto",
+                        button {
+                            class: "px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-accent transition flex items-center gap-1.5",
+                            onclick: move |_| show_fuzzy_finder.set(true),
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                circle { cx: "11", cy: "11", r: "8" }
+                                line { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }
+                            }
+                            "Find file"
+                            span { class: "text-xs text-muted-foreground font-mono ml-1 border border-border rounded px-1", "t" }
+                        }
+                    }
                 }
             }
             div { class: "p-4",
@@ -156,6 +242,14 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                             current_path: path.clone(),
                         }
                     }
+                }
+            }
+            if *show_fuzzy_finder.read() {
+                FuzzyFinder {
+                    files: all_file_paths(),
+                    naddr: naddr.clone(),
+                    git_ref: git_ref.clone(),
+                    on_close: move |_| show_fuzzy_finder.set(false),
                 }
             }
         }

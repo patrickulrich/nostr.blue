@@ -1,18 +1,29 @@
 //! Pull Request Detail Page
 //!
-//! View a single NIP-34 Git patch/PR (Kind 1617) with comments.
+//! View a single NIP-34 Git patch/PR (Kind 1617) with comments,
+//! diff viewer, code reviews, and merge controls.
+use crate::components::code::{DiffViewer, PRReviewSection};
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
 use crate::services::git_hosting::{
-    fetch_pr_comments_by_id, fetch_pull_request, publish_pr_comment_by_id,
+    fetch_pr_comments_by_id, fetch_pull_request, fetch_repository, publish_pr_comment_by_id,
     update_pr_status_by_id,
 };
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{truncate_commit, truncate_pubkey};
 use crate::utils::format_relative_time_or;
-use crate::utils::nip34::{GitComment, IssueStatus, PullRequest};
+use crate::utils::nip34::{GitComment, IssueStatus, PullRequest, Repository};
+use crate::utils::permissions;
 use dioxus::prelude::*;
+
+/// PR detail tab
+#[derive(Clone, Copy, PartialEq)]
+enum PrTab {
+    Conversation,
+    FilesChanged,
+}
+
 /// Pull request detail page component
 #[component]
 pub fn CodePullDetail(note_id: String) -> Element {
@@ -94,6 +105,7 @@ pub fn CodePullDetail(note_id: String) -> Element {
         }
     }
 }
+
 #[component]
 fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> Element {
     let pr_id = pr.event_id.clone();
@@ -104,16 +116,62 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| pr.pubkey_display());
-    let can_update_status = is_authenticated && user_pubkey == pr.pubkey;
+
+    // Fetch repository for permission checks
+    let mut repo = use_signal(|| None::<Repository>);
+    let repo_naddr = pr.repository_naddr.clone();
+    use_effect(move || {
+        let naddr = repo_naddr.clone();
+        if naddr.is_empty() {
+            return;
+        }
+        spawn(async move {
+            if let Ok(r) = fetch_repository(&naddr).await {
+                repo.set(Some(r));
+            }
+        });
+    });
+
+    // Permission checks: author OR maintainer/owner can update status
+    let can_update_status = is_authenticated
+        && (user_pubkey == pr.pubkey
+            || repo
+                .read()
+                .as_ref()
+                .map(|r| permissions::can_change_status(&user_pubkey, r, &pr.pubkey))
+                .unwrap_or(false));
+    let can_merge = is_authenticated
+        && repo
+            .read()
+            .as_ref()
+            .map(|r| permissions::can_merge(&user_pubkey, r))
+            .unwrap_or(false);
+
+    let maintainers: Vec<String> = repo
+        .read()
+        .as_ref()
+        .map(|r| {
+            let mut m = r.maintainers.clone();
+            if !m.contains(&r.pubkey) {
+                m.push(r.pubkey.clone());
+            }
+            m
+        })
+        .unwrap_or_default();
+
+    let mut active_tab = use_signal(|| PrTab::Conversation);
     let mut new_comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
+    let mut show_merge_confirm = use_signal(|| false);
+
     let pr_id_for_comments = pr_id.clone();
     let comments = use_resource(move || {
         let id = pr_id_for_comments.clone();
         async move { fetch_pr_comments_by_id(&id).await }
     });
+
     let handle_status_change = {
         let pr_id = pr_id.clone();
         move |new_status: IssueStatus| {
@@ -132,6 +190,15 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             });
         }
     };
+
+    let handle_merge = {
+        let handler = handle_status_change.clone();
+        move |_| {
+            show_merge_confirm.set(false);
+            handler(IssueStatus::Applied);
+        }
+    };
+
     let handle_submit_comment = {
         let pr_id = pr_id.clone();
         let pr_pubkey = pr_pubkey.clone();
@@ -157,13 +224,18 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             });
         }
     };
+
     let title = if pr.is_cover_letter {
         pr.content.lines().next().map(|s| s.to_string())
     } else {
         None
     };
+
+    let current_tab = *active_tab.read();
+
     rsx! {
         div { class: "space-y-6",
+            // Header section
             div { class: "space-y-4",
                 div { class: "flex items-start justify-between gap-4",
                     h1 { class: "text-xl font-semibold",
@@ -185,6 +257,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     } else {
                         span { class: "px-2 py-0.5 text-xs rounded-full bg-green-500/10 text-green-500 border border-green-500/20",
                             "Patch"
+                        }
+                    }
+                    if pr_status == IssueStatus::Applied {
+                        span { class: "px-2 py-0.5 text-xs rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20",
+                            "Merged"
                         }
                     }
                 }
@@ -240,20 +317,33 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     }
                 }
             }
-            if can_update_status {
+
+            // Status actions
+            if can_update_status || can_merge {
                 div { class: "flex flex-wrap gap-2",
-                    if pr_status != IssueStatus::Applied {
+                    if can_merge && pr_status != IssueStatus::Applied {
                         button {
-                            class: "px-3 py-1.5 text-sm bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500/20 transition disabled:opacity-50",
+                            class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 flex items-center gap-2",
                             disabled: *is_updating_status.read(),
-                            onclick: {
-                                let handler = handle_status_change.clone();
-                                move |_| handler(IssueStatus::Applied)
-                            },
-                            "Mark as Merged"
+                            onclick: move |_| show_merge_confirm.set(true),
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                polyline { points: "16 18 22 12 16 6" }
+                                polyline { points: "8 6 2 12 8 18" }
+                            }
+                            "Merge Pull Request"
                         }
                     }
-                    if pr_status != IssueStatus::Closed {
+                    if can_update_status && pr_status != IssueStatus::Closed && pr_status != IssueStatus::Applied {
                         button {
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -264,7 +354,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "Close PR"
                         }
                     }
-                    if pr_status == IssueStatus::Closed {
+                    if can_update_status && pr_status == IssueStatus::Closed {
                         button {
                             class: "px-3 py-1.5 text-sm bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -277,105 +367,198 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     }
                 }
             }
-            div { class: "border border-border rounded-lg overflow-hidden",
-                div { class: "px-4 py-2 bg-muted/50 border-b border-border",
-                    span { class: "text-sm text-muted-foreground",
-                        if pr.is_cover_letter {
-                            "Cover Letter"
-                        } else {
-                            "Patch Content"
+
+            // Merge confirmation modal
+            if *show_merge_confirm.read() {
+                div { class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm flex items-center justify-center",
+                    onclick: move |_| show_merge_confirm.set(false),
+                    div {
+                        class: "bg-background border border-border rounded-xl p-6 max-w-md mx-4 shadow-lg",
+                        onclick: move |e| e.stop_propagation(),
+                        h3 { class: "text-lg font-semibold mb-2", "Merge Pull Request" }
+                        p { class: "text-sm text-muted-foreground mb-4",
+                            "This will mark the pull request as merged (Applied). This action publishes a status event to Nostr relays."
                         }
-                    }
-                }
-                pre { class: "p-4 overflow-x-auto text-sm font-mono bg-background whitespace-pre-wrap",
-                    "{pr.content}"
-                }
-            }
-            div { class: "space-y-4",
-                h3 { class: "font-semibold flex items-center gap-2",
-                    "Comments"
-                    span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{pr.comment_count}" }
-                }
-                match &*comments.read() {
-                    Some(Ok(comment_list)) => rsx! {
-                        div { class: "space-y-4",
-                            for comment in comment_list.iter() {
-                                CommentCard { key: "{comment.event_id}", comment: comment.clone() }
-                            }
-                            if comment_list.is_empty() {
-                                p { class: "text-sm text-muted-foreground text-center py-4",
-                                    "No comments yet. Be the first to comment!"
-                                }
-                            }
-                        }
-                    },
-                    Some(Err(e)) => rsx! {
-                        p { class: "text-sm text-destructive", "Failed to load comments: {e}" }
-                    },
-                    None => rsx! {
-                        div { class: "space-y-3",
-                            for i in 0..2 {
-                                div {
-                                    key: "{i}",
-                                    class: "p-3 border border-border rounded-lg animate-pulse",
-                                    div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
-                                    div { class: "h-3 bg-muted rounded w-3/4" }
-                                }
-                            }
-                        }
-                    },
-                }
-                if is_authenticated {
-                    div { class: "border border-border rounded-lg overflow-hidden",
-                        textarea {
-                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                            placeholder: "Write a comment...",
-                            rows: 3,
-                            value: "{new_comment}",
-                            oninput: move |e| new_comment.set(e.value()),
-                        }
-                        div { class: "px-3 py-2 bg-muted/50 border-t border-border flex items-center justify-between",
-                            if let Some(error) = comment_error.read().as_ref() {
-                                span { class: "text-xs text-destructive", "{error}" }
-                            } else {
-                                span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                        div { class: "flex justify-end gap-3",
+                            button {
+                                class: "px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition",
+                                onclick: move |_| show_merge_confirm.set(false),
+                                "Cancel"
                             }
                             button {
-                                class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
-                                disabled: *is_submitting.read() || new_comment.read().trim().is_empty(),
-                                onclick: handle_submit_comment,
-                                if *is_submitting.read() {
-                                    "Submitting..."
-                                } else {
-                                    "Comment"
+                                class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition",
+                                onclick: handle_merge,
+                                "Confirm Merge"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tab navigation
+            div { class: "flex items-center gap-1 border-b border-border",
+                button {
+                    class: if current_tab == PrTab::Conversation {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 border-primary text-foreground -mb-px"
+                    } else {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
+                    },
+                    onclick: move |_| active_tab.set(PrTab::Conversation),
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
+                    }
+                    "Conversation"
+                    span { class: "ml-1 px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground",
+                        "{pr.comment_count}"
+                    }
+                }
+                button {
+                    class: if current_tab == PrTab::FilesChanged {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 border-primary text-foreground -mb-px"
+                    } else {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
+                    },
+                    onclick: move |_| active_tab.set(PrTab::FilesChanged),
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
+                        polyline { points: "14 2 14 8 20 8" }
+                    }
+                    "Files Changed"
+                }
+            }
+
+            // Tab content
+            match current_tab {
+                PrTab::Conversation => rsx! {
+                    div { class: "grid grid-cols-1 lg:grid-cols-3 gap-6",
+                        // Main content: comments
+                        div { class: "lg:col-span-2 space-y-4",
+                            match &*comments.read() {
+                                Some(Ok(comment_list)) => rsx! {
+                                    div { class: "space-y-4",
+                                        for comment in comment_list.iter() {
+                                            CommentCard { key: "{comment.event_id}", comment: comment.clone() }
+                                        }
+                                        if comment_list.is_empty() {
+                                            p { class: "text-sm text-muted-foreground text-center py-4",
+                                                "No comments yet. Be the first to comment!"
+                                            }
+                                        }
+                                    }
+                                },
+                                Some(Err(e)) => rsx! {
+                                    p { class: "text-sm text-destructive", "Failed to load comments: {e}" }
+                                },
+                                None => rsx! {
+                                    div { class: "space-y-3",
+                                        for i in 0..2 {
+                                            div {
+                                                key: "{i}",
+                                                class: "p-3 border border-border rounded-lg animate-pulse",
+                                                div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
+                                                div { class: "h-3 bg-muted rounded w-3/4" }
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                            // Comment form
+                            if is_authenticated {
+                                div { class: "border border-border rounded-lg overflow-hidden",
+                                    textarea {
+                                        class: "w-full p-3 text-sm bg-background resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                                        placeholder: "Write a comment...",
+                                        rows: 3,
+                                        value: "{new_comment}",
+                                        oninput: move |e| new_comment.set(e.value()),
+                                    }
+                                    div { class: "px-3 py-2 bg-muted/50 border-t border-border flex items-center justify-between",
+                                        if let Some(error) = comment_error.read().as_ref() {
+                                            span { class: "text-xs text-destructive", "{error}" }
+                                        } else {
+                                            span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                                        }
+                                        button {
+                                            class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
+                                            disabled: *is_submitting.read() || new_comment.read().trim().is_empty(),
+                                            onclick: handle_submit_comment,
+                                            if *is_submitting.read() {
+                                                "Submitting..."
+                                            } else {
+                                                "Comment"
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div { class: "p-4 bg-muted rounded-lg text-center",
+                                    p { class: "text-sm text-muted-foreground", "Sign in to leave a comment" }
+                                }
+                            }
+                        }
+
+                        // Sidebar: reviews
+                        div { class: "space-y-4",
+                            PRReviewSection {
+                                pr_id: pr_id.clone(),
+                                pr_pubkey: pr_pubkey.clone(),
+                                maintainers: maintainers.clone(),
+                                user_pubkey: user_pubkey.clone(),
+                                is_authenticated: is_authenticated,
+                            }
+
+                            // Repository link
+                            if !pr.repository_naddr.is_empty() {
+                                div { class: "border border-border rounded-lg p-3",
+                                    h4 { class: "text-xs font-medium text-muted-foreground mb-2", "Repository" }
+                                    Link {
+                                        to: Route::CodeRepo {
+                                            naddr: pr.repository_naddr.clone(),
+                                        },
+                                        class: "text-sm text-primary hover:underline",
+                                        "{pr.repository_naddr.chars().take(30).collect::<String>()}..."
+                                    }
                                 }
                             }
                         }
                     }
-                } else {
-                    div { class: "p-4 bg-muted rounded-lg text-center",
-                        p { class: "text-sm text-muted-foreground", "Sign in to leave a comment" }
+                },
+                PrTab::FilesChanged => rsx! {
+                    DiffViewer {
+                        content: pr.content.clone(),
+                        is_cover_letter: pr.is_cover_letter,
                     }
-                }
+                },
             }
+
+            // Footer
             div { class: "pt-4 border-t border-border text-xs text-muted-foreground space-y-1",
                 p { "Event ID: {pr.event_id}" }
-                if !pr.repository_naddr.is_empty() {
-                    p {
-                        "Repository: "
-                        Link {
-                            to: Route::CodeRepo {
-                                naddr: pr.repository_naddr.clone(),
-                            },
-                            class: "text-primary hover:underline",
-                            "{pr.repository_naddr.chars().take(20).collect::<String>()}..."
-                        }
-                    }
-                }
             }
         }
     }
 }
+
 #[component]
 fn CommentCard(comment: GitComment) -> Element {
     let author_profile = PROFILE_CACHE.read().peek(&comment.pubkey).cloned();
@@ -412,6 +595,7 @@ fn CommentCard(comment: GitComment) -> Element {
         }
     }
 }
+
 #[component]
 fn ErrorState(message: String) -> Element {
     rsx! {
@@ -449,6 +633,7 @@ fn ErrorState(message: String) -> Element {
         }
     }
 }
+
 #[component]
 fn LoadingSkeleton() -> Element {
     rsx! {

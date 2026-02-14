@@ -3,8 +3,55 @@
 //! Displays repository README with markdown rendering.
 //! Uses pulldown-cmark for parsing and ammonia for sanitization.
 //! Styled to match gittr's readme-section.tsx pattern.
+//! Supports mermaid diagram rendering via mermaid.js CDN.
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(
+    inline_js = r#"
+export function initMermaidDiagrams() {
+    // Find mermaid divs; skip if none present
+    const mermaidDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
+    if (mermaidDivs.length === 0) return;
+
+    if (window.mermaid) {
+        try {
+            // Mark divs before rendering to avoid double-processing
+            mermaidDivs.forEach(el => el.setAttribute('data-processed', 'true'));
+            window.mermaid.run({ nodes: Array.from(mermaidDivs) });
+        } catch (e) {
+            console.warn('Mermaid render error:', e);
+        }
+        return;
+    }
+
+    // Load mermaid.js from CDN
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+    script.onload = () => {
+        try {
+            window.mermaid.initialize({
+                startOnLoad: false,
+                theme: 'dark',
+                securityLevel: 'strict',
+            });
+            mermaidDivs.forEach(el => el.setAttribute('data-processed', 'true'));
+            window.mermaid.run({ nodes: Array.from(mermaidDivs) });
+        } catch (e) {
+            console.warn('Mermaid init error:', e);
+        }
+    };
+    script.onerror = () => {
+        console.warn('Failed to load mermaid.js from CDN');
+    };
+    document.head.appendChild(script);
+}
+"#
+)]
+extern "C" {
+    fn initMermaidDiagrams();
+}
 /// README viewer with loading/error states
 #[component]
 pub fn ReadmeViewer(
@@ -17,6 +64,23 @@ pub fn ReadmeViewer(
     #[props(default = "README.md".to_string())]
     filename: String,
 ) -> Element {
+    // Check if content contains mermaid blocks to decide whether to load mermaid.js
+    let has_mermaid = content
+        .as_ref()
+        .map(|c| c.contains("```mermaid"))
+        .unwrap_or(false);
+
+    // Initialize mermaid.js after the README HTML is rendered into the DOM
+    use_effect(move || {
+        if has_mermaid {
+            // Small delay to ensure dangerous_inner_html has been applied to the DOM
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(100).await;
+                initMermaidDiagrams();
+            });
+        }
+    });
+
     rsx! {
         div { class: "border border-border rounded-lg overflow-hidden",
             div { class: "flex items-center gap-2 px-4 py-3 bg-muted/50 border-b border-border",

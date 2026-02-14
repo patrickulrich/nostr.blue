@@ -33,6 +33,7 @@ pub mod recipes;
 pub use recipes::recipe;
 pub use recipes::recipe_tags;
 
+pub mod permissions;
 pub mod bolt11;
 pub mod article_meta;
 pub mod clipboard;

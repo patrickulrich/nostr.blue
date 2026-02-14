@@ -4,9 +4,12 @@
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, publish_repository};
+use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
 /// Repository settings page component
 #[component]
 pub fn CodeRepoSettings(naddr: String) -> Element {
@@ -29,17 +32,30 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut repo_description = use_signal(String::new);
     let mut clone_url = use_signal(String::new);
     let mut web_url = use_signal(String::new);
+    let mut relay_list = use_signal(Vec::<String>::new);
+    let mut new_relay_url = use_signal(String::new);
+    let mut maintainer_list = use_signal(Vec::<String>::new);
+    let mut new_maintainer = use_signal(String::new);
     let mut form_initialized = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| None::<String>);
     let mut save_success = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
+    let mut zap_splits = use_signal(Vec::<(String, u32)>::new);
+    let mut new_split_pubkey = use_signal(String::new);
+    let mut new_split_weight = use_signal(|| 50u32);
     if let Some(Ok(r)) = repo_result.read().as_ref() {
         if !*form_initialized.read() {
             repo_name.set(r.name.clone().unwrap_or_default());
             repo_description.set(r.description.clone().unwrap_or_default());
             clone_url.set(r.clone.first().cloned().unwrap_or_default());
             web_url.set(r.web.first().cloned().unwrap_or_default());
+            relay_list.set(r.relays.clone());
+            maintainer_list.set(r.maintainers.clone());
+            // zap_splits init - default to repo owner at 100%
+            if zap_splits.read().is_empty() {
+                zap_splits.set(vec![(r.pubkey.clone(), 100)]);
+            }
             form_initialized.set(true);
         }
     }
@@ -83,10 +99,12 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 } else {
                     vec![web.as_str()]
                 };
-                let relays: Vec<&str> = repo_data
-                    .relays
+                let relay_snapshot: Vec<String> = relay_list.read().clone();
+                let relays: Vec<&str> = relay_snapshot.iter().map(|s| s.as_str()).collect();
+                let maintainer_snapshot: Vec<String> = maintainer_list.read().clone();
+                let maintainer_keys: Vec<PublicKey> = maintainer_snapshot
                     .iter()
-                    .map(|s| s.as_str())
+                    .filter_map(|s| PublicKey::parse(s).ok())
                     .collect();
                 let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };
                 let desc_opt = if description.is_empty() {
@@ -101,7 +119,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                         &clone_urls,
                         &web_urls,
                         &relays,
-                        &[],
+                        &maintainer_keys,
                     )
                     .await
                 {
@@ -273,6 +291,389 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                 }
                             }
                         }
+                        // Relays section
+                        div { class: "space-y-4 pt-6 border-t border-border",
+                            h2 { class: "font-semibold text-lg flex items-center gap-2",
+                                "Relays"
+                                span { class: "text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full",
+                                    "{relay_list.read().len()}"
+                                }
+                            }
+                            p { class: "text-sm text-muted-foreground",
+                                "Relays that index and serve events for this repository."
+                            }
+                            // Current relays list
+                            div { class: "space-y-2",
+                                for (index, relay) in relay_list.read().iter().enumerate() {
+                                    div {
+                                        key: "{relay}",
+                                        class: "flex items-center gap-2 p-2 bg-muted rounded-lg group",
+                                        svg {
+                                            class: "w-4 h-4 text-muted-foreground shrink-0",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            width: "24",
+                                            height: "24",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            circle { cx: "12", cy: "12", r: "10" }
+                                            line { x1: "2", y1: "12", x2: "22", y2: "12" }
+                                            path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" }
+                                        }
+                                        span { class: "flex-1 text-sm font-mono truncate", "{relay}" }
+                                        button {
+                                            class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                            onclick: move |_| {
+                                                let mut list = relay_list.write();
+                                                list.remove(index);
+                                            },
+                                            svg {
+                                                class: "w-4 h-4",
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                width: "24",
+                                                height: "24",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                                line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Add new relay
+                            div { class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "text",
+                                    placeholder: "wss://relay.example.com",
+                                    value: "{new_relay_url}",
+                                    oninput: move |e| new_relay_url.set(e.value()),
+                                    onkeypress: move |e: KeyboardEvent| {
+                                        if e.key() == Key::Enter {
+                                            let url = new_relay_url.read().trim().to_string();
+                                            if !url.is_empty() && url.starts_with("wss://") {
+                                                relay_list.write().push(url);
+                                                new_relay_url.set(String::new());
+                                            }
+                                        }
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:opacity-90 transition disabled:opacity-50",
+                                    disabled: new_relay_url.read().trim().is_empty() || !new_relay_url.read().starts_with("wss://"),
+                                    onclick: move |_| {
+                                        let url = new_relay_url.read().trim().to_string();
+                                        if !url.is_empty() && url.starts_with("wss://") {
+                                            relay_list.write().push(url);
+                                            new_relay_url.set(String::new());
+                                        }
+                                    },
+                                    "Add"
+                                }
+                            }
+                            if relay_list.read().is_empty() {
+                                p { class: "text-xs text-muted-foreground italic",
+                                    "No relays configured. Add relays to help others discover your repository."
+                                }
+                            }
+                        }
+                        // Maintainers section
+                        div { class: "space-y-4 pt-6 border-t border-border",
+                            h2 { class: "font-semibold text-lg flex items-center gap-2",
+                                "Maintainers"
+                                span { class: "text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full",
+                                    "{maintainer_list.read().len()}"
+                                }
+                            }
+                            p { class: "text-sm text-muted-foreground",
+                                "Users who can manage issues and pull requests for this repository."
+                            }
+                            // Current maintainers list
+                            div { class: "space-y-2",
+                                for (index, pubkey) in maintainer_list.read().iter().enumerate() {
+                                    {
+                                        let display_name = {
+                                            let cache = PROFILE_CACHE.read();
+                                            cache.peek(pubkey).and_then(|p| {
+                                                p.display_name.clone().or(p.name.clone())
+                                            }).unwrap_or_else(|| truncate_pubkey(pubkey))
+                                        };
+                                        rsx! {
+                                            div {
+                                                key: "{pubkey}",
+                                                class: "flex items-center gap-2 p-2 bg-muted rounded-lg group",
+                                                svg {
+                                                    class: "w-4 h-4 text-muted-foreground shrink-0",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                                                    circle { cx: "12", cy: "7", r: "4" }
+                                                }
+                                                div { class: "flex-1 min-w-0",
+                                                    span { class: "text-sm font-medium truncate block", "{display_name}" }
+                                                    span { class: "text-xs text-muted-foreground font-mono truncate block", "{truncate_pubkey(pubkey)}" }
+                                                }
+                                                button {
+                                                    class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                                    onclick: move |_| {
+                                                        let mut list = maintainer_list.write();
+                                                        list.remove(index);
+                                                    },
+                                                    svg {
+                                                        class: "w-4 h-4",
+                                                        xmlns: "http://www.w3.org/2000/svg",
+                                                        width: "24",
+                                                        height: "24",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                                        line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Add new maintainer
+                            div { class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "text",
+                                    placeholder: "npub or hex pubkey",
+                                    value: "{new_maintainer}",
+                                    oninput: move |e| new_maintainer.set(e.value()),
+                                    onkeypress: move |e: KeyboardEvent| {
+                                        if e.key() == Key::Enter {
+                                            let key = new_maintainer.read().trim().to_string();
+                                            if !key.is_empty() {
+                                                let hex_key = if key.starts_with("npub1") {
+                                                    PublicKey::parse(&key)
+                                                        .map(|pk| pk.to_hex())
+                                                        .unwrap_or(key.clone())
+                                                } else {
+                                                    key.clone()
+                                                };
+                                                if !maintainer_list.read().contains(&hex_key) {
+                                                    maintainer_list.write().push(hex_key);
+                                                    new_maintainer.set(String::new());
+                                                }
+                                            }
+                                        }
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:opacity-90 transition disabled:opacity-50",
+                                    disabled: new_maintainer.read().trim().is_empty(),
+                                    onclick: move |_| {
+                                        let key = new_maintainer.read().trim().to_string();
+                                        if !key.is_empty() {
+                                            let hex_key = if key.starts_with("npub1") {
+                                                PublicKey::parse(&key)
+                                                    .map(|pk| pk.to_hex())
+                                                    .unwrap_or(key.clone())
+                                            } else {
+                                                key.clone()
+                                            };
+                                            if !maintainer_list.read().contains(&hex_key) {
+                                                maintainer_list.write().push(hex_key);
+                                                new_maintainer.set(String::new());
+                                            }
+                                        }
+                                    },
+                                    "Add"
+                                }
+                            }
+                            if maintainer_list.read().is_empty() {
+                                p { class: "text-xs text-muted-foreground italic",
+                                    "No maintainers configured. Add maintainers to allow others to manage this repository."
+                                }
+                            }
+                        }
+                        // Zap Split Configuration
+                        div { class: "space-y-4 pt-6 border-t border-border",
+                            h2 { class: "font-semibold text-lg flex items-center gap-2",
+                                svg {
+                                    class: "w-5 h-5",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polygon { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }
+                                }
+                                "Zap Split"
+                            }
+                            p { class: "text-sm text-muted-foreground",
+                                "Configure how incoming zaps are distributed among contributors."
+                            }
+                            // Current splits display
+                            div { class: "space-y-2",
+                                for (idx, (pubkey, weight)) in zap_splits.read().iter().enumerate() {
+                                    {
+                                        let display_name = {
+                                            let cache = PROFILE_CACHE.read();
+                                            cache.peek(pubkey).and_then(|p| {
+                                                p.display_name.clone().or(p.name.clone())
+                                            }).unwrap_or_else(|| truncate_pubkey(pubkey))
+                                        };
+                                        let pk_short = truncate_pubkey(pubkey);
+                                        let w = *weight;
+                                        let can_remove = zap_splits.read().len() > 1;
+                                        rsx! {
+                                            div {
+                                                key: "{pubkey}_{idx}",
+                                                class: "flex items-center gap-3 p-3 bg-muted/50 rounded-lg group",
+                                                svg {
+                                                    class: "w-4 h-4 text-muted-foreground shrink-0",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                                                    circle { cx: "12", cy: "7", r: "4" }
+                                                }
+                                                div { class: "flex-1 min-w-0",
+                                                    span { class: "text-sm font-medium truncate block", "{display_name}" }
+                                                    span { class: "text-xs text-muted-foreground font-mono truncate block", "{pk_short}" }
+                                                }
+                                                span { class: "text-sm font-mono font-medium", "{w}%" }
+                                                if can_remove {
+                                                    button {
+                                                        class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                                        onclick: move |_| {
+                                                            let mut splits = zap_splits.write();
+                                                            splits.remove(idx);
+                                                        },
+                                                        svg {
+                                                            class: "w-4 h-4",
+                                                            xmlns: "http://www.w3.org/2000/svg",
+                                                            width: "24",
+                                                            height: "24",
+                                                            view_box: "0 0 24 24",
+                                                            fill: "none",
+                                                            stroke: "currentColor",
+                                                            stroke_width: "2",
+                                                            stroke_linecap: "round",
+                                                            stroke_linejoin: "round",
+                                                            line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                                            line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Add new split
+                            div { class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "text",
+                                    placeholder: "npub or hex pubkey",
+                                    value: "{new_split_pubkey}",
+                                    oninput: move |e| new_split_pubkey.set(e.value()),
+                                    onkeypress: move |e: KeyboardEvent| {
+                                        if e.key() == Key::Enter {
+                                            let pk = new_split_pubkey.read().trim().to_string();
+                                            let w = *new_split_weight.read();
+                                            if !pk.is_empty() {
+                                                let hex_key = if pk.starts_with("npub1") {
+                                                    PublicKey::parse(&pk)
+                                                        .map(|k| k.to_hex())
+                                                        .unwrap_or(pk.clone())
+                                                } else {
+                                                    pk.clone()
+                                                };
+                                                let mut splits = zap_splits.write();
+                                                splits.push((hex_key, w));
+                                                drop(splits);
+                                                new_split_pubkey.set(String::new());
+                                                new_split_weight.set(50);
+                                            }
+                                        }
+                                    },
+                                }
+                                input {
+                                    class: "w-20 px-3 py-2 bg-muted rounded-lg text-sm text-center font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "number",
+                                    min: "1",
+                                    max: "100",
+                                    value: "{new_split_weight}",
+                                    oninput: move |e| {
+                                        if let Ok(w) = e.value().parse::<u32>() {
+                                            new_split_weight.set(w.min(100));
+                                        }
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:opacity-90 transition disabled:opacity-50",
+                                    disabled: new_split_pubkey.read().trim().is_empty(),
+                                    onclick: move |_| {
+                                        let pk = new_split_pubkey.read().trim().to_string();
+                                        let w = *new_split_weight.read();
+                                        if !pk.is_empty() {
+                                            let hex_key = if pk.starts_with("npub1") {
+                                                PublicKey::parse(&pk)
+                                                    .map(|k| k.to_hex())
+                                                    .unwrap_or(pk.clone())
+                                            } else {
+                                                pk.clone()
+                                            };
+                                            let mut splits = zap_splits.write();
+                                            splits.push((hex_key, w));
+                                            drop(splits);
+                                            new_split_pubkey.set(String::new());
+                                            new_split_weight.set(50);
+                                        }
+                                    },
+                                    "Add"
+                                }
+                            }
+                            // Total weight indicator
+                            {
+                                let total: u32 = zap_splits.read().iter().map(|(_, w)| w).sum();
+                                let color = if total == 100 { "text-green-500" } else { "text-orange-500" };
+                                rsx! {
+                                    p { class: "text-xs {color}",
+                                        "Total: {total}% "
+                                        if total != 100 {
+                                            span { "(should equal 100%)" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Danger Zone
                         div { class: "space-y-4 pt-6 border-t border-border",
                             h2 { class: "font-semibold text-lg text-destructive", "Danger Zone" }
                             div { class: "p-4 border border-destructive/20 rounded-lg",

@@ -219,6 +219,95 @@ fn RepositoriesTab() -> Element {
                     }
                 }
                 Link {
+                    to: Route::CodeNew {},
+                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        line { x1: "12", y1: "5", x2: "12", y2: "19" }
+                        line { x1: "5", y1: "12", x2: "19", y2: "12" }
+                    }
+                    div {
+                        div { class: "font-medium", "New Repo" }
+                        div { class: "text-xs text-muted-foreground", "Create repository" }
+                    }
+                }
+                Link {
+                    to: Route::CodeGlobalIssues {},
+                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "12", r: "10" }
+                        circle { cx: "12", cy: "12", r: "1" }
+                    }
+                    div {
+                        div { class: "font-medium", "Issues" }
+                        div { class: "text-xs text-muted-foreground", "Your issues" }
+                    }
+                }
+                Link {
+                    to: Route::CodeGlobalPulls {},
+                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "18", cy: "18", r: "3" }
+                        circle { cx: "6", cy: "6", r: "3" }
+                        path { d: "M13 6h3a2 2 0 0 1 2 2v7" }
+                        line { x1: "6", y1: "9", x2: "6", y2: "21" }
+                    }
+                    div {
+                        div { class: "font-medium", "Pull Requests" }
+                        div { class: "text-xs text-muted-foreground", "Your PRs" }
+                    }
+                }
+                Link {
+                    to: Route::CodeStars {},
+                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        polygon { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" }
+                    }
+                    div {
+                        div { class: "font-medium", "Stars" }
+                        div { class: "text-xs text-muted-foreground", "Starred repos" }
+                    }
+                }
+                Link {
                     to: Route::CodeSnippetNew {},
                     class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
