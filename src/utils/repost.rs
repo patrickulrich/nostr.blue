@@ -57,6 +57,37 @@ impl FeedItem {
 /// Expand events to include original authors from reposts for metadata prefetching.
 /// For each repost, includes both the repost event and the original event so that
 /// metadata for both the reposter and original author can be prefetched.
+/// Convert raw events into sorted FeedItems (filters out replies, parses reposts).
+/// Reusable by any feed that needs to process a mix of kind-1, kind-6, and kind-16 events.
+pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
+    let mut feed_items: Vec<FeedItem> = Vec::new();
+    for event in events.into_iter() {
+        if is_repost(&event) {
+            match extract_reposted_event(&event) {
+                Ok(original) => {
+                    feed_items.push(FeedItem::Repost {
+                        original,
+                        reposted_by: event.pubkey,
+                        repost_timestamp: event.created_at,
+                    });
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
+                }
+            }
+        } else if event.kind == Kind::TextNote {
+            // Posts with root/reply markers are thread replies - filter these out
+            // Mentions (e-tags without markers) are preserved in the feed
+            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            if !is_reply {
+                feed_items.push(FeedItem::OriginalPost(event));
+            }
+        }
+    }
+    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    feed_items
+}
+
 pub fn expand_events_for_prefetch(events: &[Event]) -> Vec<Event> {
     events
         .iter()
@@ -144,6 +175,29 @@ mod tests {
         let (by, time) = item.repost_info().unwrap();
         assert_eq!(by, reposter);
         assert_eq!(time, repost_time);
+    }
+    #[test]
+    fn test_process_events_handles_generic_repost() {
+        let original = create_test_event(Kind::TextNote, "Original for generic repost");
+        let original_json = original.as_json();
+        let generic_repost = create_test_event(Kind::GenericRepost, &original_json);
+        let events = vec![generic_repost];
+        let items = process_events_to_feed_items(events);
+        assert_eq!(items.len(), 1);
+        assert!(items[0].repost_info().is_some());
+        assert_eq!(items[0].event().content, "Original for generic repost");
+    }
+    #[test]
+    fn test_process_events_sorts_by_timestamp_desc() {
+        let note1 = create_test_event(Kind::TextNote, "First");
+        let note2 = create_test_event(Kind::TextNote, "Second");
+        let note3 = create_test_event(Kind::TextNote, "Third");
+        let events = vec![note1, note2, note3];
+        let items = process_events_to_feed_items(events);
+        // Verify descending sort order
+        for w in items.windows(2) {
+            assert!(w[0].sort_timestamp() >= w[1].sort_timestamp());
+        }
     }
     #[test]
     fn test_expand_events_for_prefetch() {

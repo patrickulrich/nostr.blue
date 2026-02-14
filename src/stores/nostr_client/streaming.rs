@@ -131,8 +131,6 @@ where
 /// 3. Returns results much faster but may miss events from unconnected relays
 ///
 /// Use for initial feed load where speed is critical.
-// TODO: remove dead_code allow when fast initial feed load uses batch streaming
-#[allow(dead_code)]
 pub async fn stream_events_from_connected_relays_batched<F>(
     filter: Filter,
     timeout: std::time::Duration,
@@ -290,6 +288,23 @@ where
 
     log::info!("Immediate stream completed: {} events", count);
     Ok(count)
+}
+/// Stream video events from connected relays with divine relay awareness
+///
+/// Ensures the video relay (relay.divine.video) is connected first,
+/// then delegates to `stream_events_from_connected_relays_batched`.
+pub async fn stream_video_events_from_connected_relays_batched<F>(
+    filter: Filter,
+    timeout: std::time::Duration,
+    batch_size: usize,
+    on_batch: F,
+) -> std::result::Result<usize, String>
+where
+    F: FnMut(Vec<nostr::Event>),
+{
+    let client = get_client().ok_or("Client not initialized")?;
+    crate::stores::relay::ensure_video_relay_connected(&client).await;
+    stream_events_from_connected_relays_batched(filter, timeout, batch_size, on_batch).await
 }
 /// Stream events and collect them into a Vec
 ///

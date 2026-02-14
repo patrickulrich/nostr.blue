@@ -592,9 +592,7 @@ fn render_all_day_events(
 }
 /// Get event color based on type (matches Event Types filter)
 fn get_event_color(event: &UnifiedEvent) -> &'static str {
-    if event.is_private() {
-        "#a855f7"
-    } else if event.is_livestream() {
+    if event.is_livestream() {
         "#ef4444"
     } else if event.is_all_day() {
         "#4285f4"
