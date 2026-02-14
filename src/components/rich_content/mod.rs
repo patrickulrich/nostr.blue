@@ -105,7 +105,7 @@ pub fn RichContent(
                 if !*is_expanded.read() {
                     div { class: "absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-background via-background/95 to-transparent flex items-end justify-center pb-1",
                         button {
-                            class: "px-4 py-1.5 text-sm font-medium text-primary border border-border rounded-md bg-background hover:bg-accent transition-colors",
+                            class: "px-4 py-1.5 text-sm font-medium text-primary border border-border rounded-md bg-background hover:bg-accent transition",
                             onclick: move |e: MouseEvent| {
                                 e.stop_propagation();
                                 is_expanded.set(true);

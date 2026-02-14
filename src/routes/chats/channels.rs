@@ -29,16 +29,20 @@ pub fn Chats() -> Element {
     let mut search_results = use_signal(|| None::<Vec<Channel>>);
     let mut search_loading = use_signal(|| false);
     let mut search_version = use_signal(|| 0u64);
+    let mut load_request_id = use_signal(|| 0u64);
 
     // Initial load
     use_effect(move || {
         if !*client_ready.read() {
             return;
         }
+        let current_id = load_request_id.peek().wrapping_add(1);
+        load_request_id.set(current_id);
         spawn(async move {
             loading.set(true);
             match fetch_channels_page(PAGE_SIZE, None).await {
                 Ok(parsed) => {
+                    if *load_request_id.peek() != current_id { return; }
                     if let Some(last) = parsed.last() {
                         oldest_timestamp.set(Some(last.created_at));
                     }
@@ -46,7 +50,9 @@ pub fn Chats() -> Element {
                 }
                 Err(e) => log::error!("Failed to fetch channels: {}", e),
             }
-            loading.set(false);
+            if *load_request_id.peek() == current_id {
+                loading.set(false);
+            }
         });
     });
 

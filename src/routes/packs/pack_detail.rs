@@ -14,6 +14,7 @@ use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::stores::packs_store::StarterPack;
 use crate::utils::time::format_relative_time;
+use crate::utils::validation::is_valid_http_url;
 use crate::utils::{process_events_to_feed_items, truncate_pubkey, FeedItem};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -191,7 +192,7 @@ pub fn PackDetail(naddr: String) -> Element {
                 div { class: "space-y-0",
                     // Cover image hero
                     div { class: "h-60 bg-muted overflow-hidden",
-                        if let Some(ref img) = p.image_url {
+                        if let Some(ref img) = p.image_url.as_ref().filter(|u| is_valid_http_url(u)) {
                             img {
                                 src: "{img}",
                                 alt: "{p.name}",
@@ -227,7 +228,7 @@ pub fn PackDetail(naddr: String) -> Element {
                                     Link {
                                         to: Route::Profile { pubkey: p.author_pubkey.clone() },
                                         class: "flex items-center gap-2 hover:underline",
-                                        if let Some(ref pic) = author_picture {
+                                        if let Some(ref pic) = author_picture.as_ref().filter(|u| is_valid_http_url(u)) {
                                             img {
                                                 src: "{pic}",
                                                 alt: "{author_name}",
@@ -539,7 +540,7 @@ fn MemberRow(pubkey: String) -> Element {
                 to: Route::Profile { pubkey: pubkey.clone() },
                 class: "flex items-center gap-3 flex-1 min-w-0",
                 // Avatar
-                if let Some(ref pic) = picture {
+                if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         src: "{pic}",
                         alt: "{display_name}",

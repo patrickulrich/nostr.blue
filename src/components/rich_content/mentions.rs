@@ -94,14 +94,14 @@ pub(super) fn MentionRenderer(mention: String) -> Element {
                 to: Route::Profile {
                     pubkey: pubkey.to_hex(),
                 },
-                class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium hover:underline",
+                class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                 onclick: move |e: MouseEvent| e.stop_propagation(),
                 "{display}"
             }
         }
     } else {
         rsx! {
-            span { class: "text-blue-500 dark:text-blue-400 font-medium", "{mention}" }
+            span { class: "text-muted-foreground font-medium", "{mention}" }
         }
     }
 }
@@ -330,7 +330,7 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
                         note_id: event_id.to_hex(),
                         from_voice: None,
                     },
-                    class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium hover:underline",
+                    class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     "{short}"
                 }
@@ -338,7 +338,7 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
         }
     } else {
         rsx! {
-            span { class: "text-blue-500 dark:text-blue-400 font-medium", "{mention}" }
+            span { class: "text-muted-foreground font-medium", "{mention}" }
         }
     }
 }
@@ -385,12 +385,12 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
                                 alt: "Avatar",
                             }
                         } else {
-                            div { class: "w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold",
+                            div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-foreground text-xs font-bold",
                                 "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
                             }
                         }
                     } else {
-                        div { class: "w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs",
+                        div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs",
                             "?"
                         }
                     }
@@ -758,7 +758,7 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
                     to: Route::ArticleDetail {
                         naddr: naddr_for_link.clone(),
                     },
-                    class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium hover:underline",
+                    class: "text-foreground hover:text-foreground/70 font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     "📄 Article"
                 }
@@ -766,7 +766,7 @@ pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
         }
     } else {
         rsx! {
-            span { class: "text-blue-500 dark:text-blue-400 font-medium", "{mention}" }
+            span { class: "text-muted-foreground font-medium", "{mention}" }
         }
     }
 }

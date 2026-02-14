@@ -117,6 +117,14 @@ pub fn ChatDetail(channel_id: String) -> Element {
     let creator_pubkey = use_memo(move || {
         channel_info.read().as_ref().map(|ch| ch.pubkey.clone())
     });
+    let creator_display_name = use_memo(move || {
+        creator_pubkey.read().as_ref().map(|pk| {
+            let meta = profiles::get_profile(pk);
+            meta.as_ref()
+                .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
+                .unwrap_or_else(|| truncate_pubkey(pk))
+        })
+    });
 
     // Resolve hex channel_id for the ChannelChat component
     let hex_channel_id = decode_channel_id(&channel_id_for_chat)
@@ -146,19 +154,9 @@ pub fn ChatDetail(channel_id: String) -> Element {
                         if let Some(ref about) = *channel_about.read() {
                             p { class: "text-xs text-muted-foreground truncate", "{about}" }
                         }
-                        if let Some(ref pk) = *creator_pubkey.read() {
-                            {
-                                let pk_for_meta = pk.clone();
-                                let pk_for_name = pk.clone();
-                                let meta = profiles::get_profile(&pk_for_meta);
-                                let name = meta.as_ref().and_then(|m| {
-                                    m.display_name.clone().or_else(|| m.name.clone())
-                                }).unwrap_or_else(|| truncate_pubkey(&pk_for_name));
-                                rsx! {
-                                    p { class: "text-xs text-muted-foreground",
-                                        "Created by {name}"
-                                    }
-                                }
+                        if let Some(ref name) = *creator_display_name.read() {
+                            p { class: "text-xs text-muted-foreground",
+                                "Created by {name}"
                             }
                         }
                     }

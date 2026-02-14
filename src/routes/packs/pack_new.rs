@@ -12,6 +12,7 @@ use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::stores::packs_store::PackMember;
 use crate::services::search::profile_search;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 
 /// Pack create/edit page
 #[component]
@@ -169,7 +170,7 @@ pub fn PackNew() -> Element {
                             let img = if image_url.read().is_empty() {
                                 None
                             } else {
-                                Some(image_url.read().clone())
+                                Some(image_url.read().clone()).filter(|u| is_valid_http_url(u))
                             };
                             let m = members.read().clone();
                             let d_tag = edit_d_tag.read().clone();
@@ -250,7 +251,7 @@ pub fn PackNew() -> Element {
                         oninput: move |e| image_url.set(e.value()),
                     }
                     // Live preview
-                    if !image_url.read().is_empty() {
+                    if !image_url.read().is_empty() && is_valid_http_url(&image_url.read()) {
                         div { class: "mt-2 h-32 bg-muted rounded-lg overflow-hidden",
                             img {
                                 src: "{image_url}",
@@ -378,7 +379,7 @@ pub fn PackNew() -> Element {
                                             div {
                                                 key: "{hex}",
                                                 class: "flex items-center gap-3 px-3 py-2 hover:bg-accent transition",
-                                                if let Some(ref pic) = picture {
+                                                if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                                                     img {
                                                         src: "{pic}",
                                                         alt: "{display}",
@@ -511,7 +512,7 @@ fn SelectedMemberRow(
             }
 
             // Avatar
-            if let Some(ref pic) = picture {
+            if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                 img {
                     src: "{pic}",
                     alt: "{display_name}",
