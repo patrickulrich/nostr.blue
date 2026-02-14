@@ -113,6 +113,8 @@ pub async fn fetch_all_events_paginated(
         ::stores::nostr_client::fetch_events_aggregated(mtg_filter,
         Duration::from_secs(15))
     );
+    let cal_ok = cal_result.is_ok();
+    let mtg_ok = mtg_result.is_ok();
     let mut all_events = Vec::new();
     let mut oldest_ts: Option<u64> = None;
     if let Ok(events) = cal_result {
@@ -144,6 +146,9 @@ pub async fn fetch_all_events_paginated(
                 all_events.push(UnifiedEvent::Live(activity));
             }
         }
+    }
+    if !cal_ok && !mtg_ok {
+        return Err("Both calendar and meeting fetches failed".to_string());
     }
     Ok((all_events, oldest_ts))
 }
@@ -330,12 +335,16 @@ pub async fn fetch_event_comments(
                         && t.as_slice().get(1).map(|s| s.as_str()) == Some(expected)
                 })
         };
+        // Parse expected kind from coordinate (format: "kind:pubkey:dtag")
+        let expected_kind: Option<u32> = coordinate.split(':').next().and_then(|k| k.parse().ok());
+
         let has_valid_kind_tag = |tag_name: &str| -> bool {
             e.tags
                 .iter()
                 .any(|t| {
                     t.as_slice().first().map(|s| s.as_str()) == Some(tag_name)
-                        && t.as_slice().get(1).is_some_and(|s| s.parse::<u32>().is_ok())
+                        && t.as_slice().get(1).and_then(|s| s.parse::<u32>().ok())
+                            .is_some_and(|v| expected_kind.is_none_or(|ek| v == ek))
                 })
         };
         if !has_tag_value("A", coordinate) {

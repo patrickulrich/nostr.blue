@@ -8,6 +8,7 @@ use crate::stores::emoji_store::{
     save_recent_emoji, CustomEmojisStoreStoreExt, EmojiSetsStoreStoreExt, CUSTOM_EMOJIS,
     EMOJI_SETS, RECENT_EMOJIS,
 };
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use std::collections::HashSet;
 #[derive(Props, Clone, PartialEq)]
@@ -229,7 +230,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                             let title_text = format!(":{shortcode}:");
                                             let alt_text = format!(":{shortcode}:");
                                             let shortcode_display = format!(":{shortcode}:");
-                                            let has_error = failed_images.read().contains(&url);
+                                            let has_error = !is_valid_http_url(&url) || failed_images.read().contains(&url);
                                             rsx! {
                                                 button {
                                                     key: "search-custom-{emoji_idx}",
@@ -269,8 +270,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 let emoji_str = emoji.clone();
                                                 let emoji_for_click = emoji_str.clone();
                                                 let emoji_for_error = emoji_str.clone();
-                                                let is_url = emoji_str.starts_with("http://")
-                                                    || emoji_str.starts_with("https://");
+                                                let is_url = is_valid_http_url(&emoji_str);
                                                 let has_error = is_url && failed_images.read().contains(&emoji_str);
                                                 rsx! {
                                                     button {
@@ -325,7 +325,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                 let title_text = format!(":{shortcode}:");
                                                 let alt_text = format!(":{shortcode}:");
                                                 let shortcode_display = format!(":{shortcode}:");
-                                                let has_error = failed_images.read().contains(&url);
+                                                let has_error = !is_valid_http_url(&url) || failed_images.read().contains(&url);
                                                 rsx! {
                                                     button {
                                                         key: "custom-{emoji_idx}",
@@ -373,7 +373,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                                         let title_text = format!(":{shortcode}:");
                                                         let alt_text = format!(":{shortcode}:");
                                                         let shortcode_display = format!(":{shortcode}:");
-                                                        let has_error = failed_images.read().contains(&url);
+                                                        let has_error = !is_valid_http_url(&url) || failed_images.read().contains(&url);
                                                         rsx! {
                                                             button {
                                                                 key: "set-{set_id}-{emoji_idx}",

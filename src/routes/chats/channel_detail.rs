@@ -8,6 +8,7 @@ use crate::stores::social::channel_store::{
     parse_channel_creation, parse_channel_metadata, Channel,
 };
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use std::time::Duration;
 
@@ -141,7 +142,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
                         class: "p-2 hover:bg-accent rounded-lg transition",
                         "← Back"
                     }
-                    if let Some(ref pic) = *channel_picture.read() {
+                    if let Some(pic) = channel_picture.read().as_ref().filter(|u| is_valid_http_url(u)) {
                         img {
                             src: "{pic}",
                             class: "w-10 h-10 rounded-full object-cover",

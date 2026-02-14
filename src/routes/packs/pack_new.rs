@@ -330,9 +330,10 @@ pub fn PackNew() -> Element {
                                                     profiles::prefetch_profiles(vec![hex]).await;
                                                     search_query.set(String::new());
                                                 }
+                                                searching.set(false);
+                                                return;  // Only return on successful parse
                                             }
-                                            searching.set(false);
-                                            return;
+                                            // On parse failure: fall through to profile search below
                                         }
 
                                         // Profile search — check for staleness after await

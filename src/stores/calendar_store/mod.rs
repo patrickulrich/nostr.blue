@@ -99,9 +99,18 @@ pub fn cache_event(event: CalendarEvent) {
         }
     }
     {
-        let date_key = get_date_key(&event.start);
+        let new_date_key = get_date_key(&event.start);
         let mut by_date = EVENTS_BY_DATE.write();
-        let entry = by_date.entry(date_key).or_default();
+        // Remove from old date bucket if event moved dates
+        if let Some(existing) = CALENDAR_EVENTS_CACHE.read().peek(&event.coordinate) {
+            let old_date_key = get_date_key(&existing.start);
+            if old_date_key != new_date_key {
+                if let Some(old_vec) = by_date.get_mut(&old_date_key) {
+                    old_vec.retain(|c| c != &event.coordinate);
+                }
+            }
+        }
+        let entry = by_date.entry(new_date_key).or_default();
         if !entry.contains(&event.coordinate) {
             entry.push(event.coordinate.clone());
         }
@@ -136,17 +145,26 @@ pub fn cache_calendar_events(events: &[NostrEvent]) {
             for tag in &cal_event.hashtags {
                 hashtags.insert(tag.clone());
             }
-            let date_key = get_date_key(&cal_event.start);
+            let new_date_key = get_date_key(&cal_event.start);
+            // Remove from old date bucket if event moved dates
+            if let Some(existing_event) = cache.peek(&cal_event.coordinate) {
+                let old_date_key = get_date_key(&existing_event.start);
+                if old_date_key != new_date_key {
+                    if let Some(old_vec) = by_date.get_mut(&old_date_key) {
+                        old_vec.retain(|c| c != &cal_event.coordinate);
+                    }
+                }
+            }
             let existing = existing_by_date
-                .entry(date_key.clone())
+                .entry(new_date_key.clone())
                 .or_insert_with(|| {
                     by_date
-                        .get(&date_key)
+                        .get(&new_date_key)
                         .map(|v| v.iter().cloned().collect())
                         .unwrap_or_default()
                 });
             if existing.insert(cal_event.coordinate.clone()) {
-                by_date.entry(date_key).or_default().push(cal_event.coordinate.clone());
+                by_date.entry(new_date_key).or_default().push(cal_event.coordinate.clone());
             }
             cache.put(cal_event.coordinate.clone(), cal_event);
         }

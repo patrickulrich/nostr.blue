@@ -434,6 +434,8 @@ pub(super) fn WavlakeArtistRenderer(artist_id: String) -> Element {
             rsx! {
                 div {
                     class: "my-2 border border-border rounded-lg overflow-hidden hover:bg-accent/10 transition bg-card cursor-pointer",
+                    role: "button",
+                    tabindex: "0",
                     onclick: {
                         let artist_id_nav = artist.id.clone();
                         let navigator = nav;
@@ -443,6 +445,21 @@ pub(super) fn WavlakeArtistRenderer(artist_id: String) -> Element {
                                 .push(Route::MusicArtist {
                                     artist_id: artist_id_nav.clone(),
                                 });
+                        }
+                    },
+                    onkeydown: {
+                        let artist_id_key = artist.id.clone();
+                        let navigator_key = nav;
+                        move |evt: KeyboardEvent| {
+                            let activate = matches!(evt.key(), Key::Enter)
+                                || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                            if activate {
+                                evt.prevent_default();
+                                evt.stop_propagation();
+                                navigator_key.push(Route::MusicArtist {
+                                    artist_id: artist_id_key.clone(),
+                                });
+                            }
                         }
                     },
                     div { class: "flex items-center gap-4 p-4",
@@ -1361,7 +1378,7 @@ pub(super) fn PodcastFeedRenderer(guid: String) -> Element {
                 .unwrap_or_else(|| {
                     format!(
                         "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-                        podcast.title,
+                        urlencoding::encode(&podcast.title),
                     )
                 });
             let podcast_id = podcast.id;
@@ -1458,7 +1475,7 @@ pub(super) fn PodcastEpisodeRenderer(guid: String) -> Element {
                 .unwrap_or_else(|| {
                     format!(
                         "https://api.dicebear.com/7.x/shapes/svg?seed={}",
-                        episode.title,
+                        urlencoding::encode(&episode.title),
                     )
                 });
             let episode_clone = episode.clone();

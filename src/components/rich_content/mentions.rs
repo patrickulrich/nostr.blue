@@ -22,6 +22,7 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip19::Nip19;
 use nostr_sdk::{Event, EventId, Filter, FromBech32, Kind, Metadata};
 
+use crate::utils::validation::is_valid_http_url;
 use super::minicards::*;
 
 #[component]
@@ -378,7 +379,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
             div { class: "bg-card border border-border rounded-lg p-4 hover:bg-accent/10 transition cursor-pointer",
                 div { class: "flex items-center gap-2 mb-2",
                     if let Some(meta) = metadata {
-                        if let Some(picture) = &meta.picture {
+                        if let Some(picture) = meta.picture.as_ref().filter(|u| is_valid_http_url(u)) {
                             img {
                                 class: "w-8 h-8 rounded-full",
                                 src: "{picture}",

@@ -186,6 +186,9 @@ pub async fn publish_time_event(
             ),
         );
     if let Some(end) = end_timestamp {
+        if end < start_timestamp {
+            return Err("End timestamp must be >= start timestamp".to_string());
+        }
         builder = builder
             .tag(Tag::custom(TagKind::Custom("end".into()), vec![end.to_string()]));
     }
@@ -384,6 +387,9 @@ pub async fn publish_availability_block(
     end: u64,
     title: Option<&str>,
 ) -> StdResult<String, String> {
+    if end <= start {
+        return Err("End time must be after start time".to_string());
+    }
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
     let d_tag = format!("block-{}", js_sys::Date::now() as u64);

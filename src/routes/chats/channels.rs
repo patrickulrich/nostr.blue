@@ -7,6 +7,7 @@ use crate::stores::social::channel_store::{
     fetch_channels_page, get_channel_display_info, search_channels, Channel,
 };
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use std::collections::HashSet;
 
@@ -276,7 +277,7 @@ fn ChannelCard(channel: Channel) -> Element {
             },
             class: "bg-card border border-border rounded-lg p-4 hover:bg-accent/50 transition block",
             div { class: "flex items-center gap-3 mb-3",
-                if let Some(ref pic) = picture {
+                if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         src: "{pic}",
                         class: "w-12 h-12 rounded-full object-cover",

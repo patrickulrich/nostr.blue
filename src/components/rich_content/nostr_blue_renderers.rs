@@ -26,6 +26,7 @@ use crate::utils::nip99::parse_product;
 use crate::utils::podcast::{parse_podcast_episode, parse_podcast_metadata};
 use crate::utils::radio::RadioStation;
 use crate::utils::recipe::extract_metadata as extract_recipe_metadata;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{Event, Kind, PublicKey, ToBech32};
@@ -672,7 +673,7 @@ fn render_profile_minicard(
                     pubkey: pubkey.to_string(),
                 },
                 class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
-                if let Some(ref pic) = picture {
+                if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         src: "{pic}",
                         class: "w-12 h-12 rounded-full object-cover shrink-0",
@@ -693,7 +694,7 @@ fn render_profile_minicard(
     } else {
         rsx! {
             div { class: "flex items-center gap-3 p-3 border border-border rounded-lg bg-muted/50",
-                if let Some(ref pic) = picture {
+                if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         src: "{pic}",
                         class: "w-12 h-12 rounded-full object-cover shrink-0",
