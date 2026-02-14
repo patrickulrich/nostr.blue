@@ -457,6 +457,7 @@ pub async fn sync_interaction_counts(
                 .iter()
                 .map(|id| id.to_hex())
                 .collect();
+            let mut user_reactions_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             for event in new_events {
                 let referenced_event_id = match extract_referenced_event(
                     &event,
@@ -477,7 +478,8 @@ pub async fn sync_interaction_counts(
                         if content != "-" {
                             counts.likes += 1;
                         }
-                        if is_current_user {
+                        if is_current_user && !user_reactions_seen.contains(&event_key) {
+                            user_reactions_seen.insert(event_key.clone());
                             if content == "-" {
                                 counts.user_liked = Some(false);
                                 counts.user_reaction = None;

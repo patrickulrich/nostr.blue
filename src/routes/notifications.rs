@@ -496,6 +496,9 @@ fn ReactionNotification(
     let reactor_pubkey_for_avatar = reactor_pubkey.clone();
     let reactor_pubkey_for_link = reactor_pubkey.clone();
     let reacted_eid_for_link = reacted_event_id.clone();
+    let validated_reacted_eid = reacted_eid_for_link
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
     use_effect(move || {
         let pubkey = reactor_pubkey_for_effect.clone();
         let event_id = reacted_event_id.clone();
@@ -572,7 +575,7 @@ fn ReactionNotification(
                         "{display_name}"
                     }
                     span { class: "text-muted-foreground", "reacted to" }
-                    if let Some(ref eid) = reacted_eid_for_link {
+                    if let Some(eid) = validated_reacted_eid {
                         Link {
                             to: Route::Note { note_id: eid.clone(), from_voice: None },
                             class: "text-muted-foreground hover:underline",
@@ -626,6 +629,9 @@ fn RepostNotification(
     let reposter_pubkey_for_avatar = reposter_pubkey.clone();
     let reposter_pubkey_for_link = reposter_pubkey.clone();
     let reposted_eid_for_link = reposted_event_id.clone();
+    let validated_reposted_eid = reposted_eid_for_link
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
     use_effect(move || {
         let pubkey = reposter_pubkey_for_effect.clone();
         let event_id = reposted_event_id.clone();
@@ -694,7 +700,7 @@ fn RepostNotification(
                         "{display_name}"
                     }
                     span { class: "text-muted-foreground", "reposted" }
-                    if let Some(ref eid) = reposted_eid_for_link {
+                    if let Some(eid) = validated_reposted_eid {
                         Link {
                             to: Route::Note { note_id: eid.clone(), from_voice: None },
                             class: "text-muted-foreground hover:underline",
@@ -750,6 +756,9 @@ fn ZapNotification(
     let zapper_pubkey_for_avatar = zapper_pubkey.clone();
     let zapper_pubkey_for_link = zapper_pubkey.clone();
     let zapped_eid_for_link = zapped_event_id.clone();
+    let validated_zapped_eid = zapped_eid_for_link
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
     use_effect(move || {
         let pubkey = zapper_pubkey_for_effect.clone();
         let event_id = zapped_event_id.clone();
@@ -818,7 +827,7 @@ fn ZapNotification(
                         "{display_name}"
                     }
                     span { class: "text-muted-foreground", "zapped" }
-                    if let Some(ref eid) = zapped_eid_for_link {
+                    if let Some(eid) = validated_zapped_eid {
                         Link {
                             to: Route::Note { note_id: eid.clone(), from_voice: None },
                             class: "text-muted-foreground hover:underline",

@@ -117,6 +117,7 @@ pub fn PackDetail(naddr: String) -> Element {
                     Ok(events) => {
                         if *posts_request_id.peek() != current_id {
                             log::debug!("Discarding stale posts request");
+                            posts.set(Vec::new());
                             posts_loading.set(false);
                             return;
                         }
