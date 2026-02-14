@@ -1,109 +1,32 @@
 use dioxus::prelude::*;
-pub mod article_detail;
-pub mod article_new;
+mod nav_link;
+mod sidebar_icons;
+use nav_link::NavLink;
+use sidebar_icons::render_sidebar_icon;
 pub mod articles;
-pub mod bookmarks;
-pub mod dms;
-pub mod explore;
-pub mod hashtag;
-pub mod home;
-pub mod live_stream_detail;
-pub mod live_stream_new;
-pub mod music;
-pub mod nip19;
-pub mod note;
-pub mod note_new;
-pub mod notifications;
-pub mod photo_new;
-pub mod profile;
-pub mod search;
-pub mod settings;
-pub mod settings_blocklist;
-pub mod settings_muted;
-pub mod settings_relays;
-pub mod trending;
-pub mod video_detail;
-pub mod video_new_landscape;
-pub mod video_new_portrait;
-pub mod videos;
-pub mod videos_live;
-pub mod videos_live_tag;
-pub mod about;
-pub mod cashu_wallet;
-pub mod cookies;
-pub mod dvm;
-mod list_detail;
-mod lists;
-pub mod photo_detail;
-pub mod photos;
-pub mod podcast;
-pub mod podcast_episode_detail;
-pub mod podcast_nostr_detail;
-pub mod podcast_rss_detail;
-pub mod podcast_trending;
-pub mod poll_new;
-pub mod poll_view;
-pub mod polls;
-pub mod privacy;
-pub mod terms;
-pub mod voice_message_detail;
-pub mod voice_message_new;
-pub mod voicemessages;
-pub mod webbookmarks;
-pub mod radio;
-pub mod nip_detail;
-pub mod nips;
-pub mod badge_detail;
-pub mod badge_new;
 pub mod badges;
-pub mod citations;
 pub mod code;
-pub mod code_explore;
-pub mod p2p;
-pub mod p2p_order_detail;
-pub mod communities;
+pub mod packs;
+pub mod chats;
 pub mod community;
-pub mod community_new;
-pub mod recipe_chef;
-pub mod recipe_detail;
-pub mod recipe_fork;
-pub mod recipe_new;
-pub mod recipes;
-pub mod recipes_all;
-pub mod recipes_by_tag;
-pub mod pin_board_detail;
-pub mod pin_board_new;
-pub mod pin_boards;
-pub mod pin_new;
-pub mod user_pins;
-pub mod wiki;
-pub mod wiki_author;
-pub mod wiki_detail;
-pub mod wiki_new;
-pub mod publication_detail;
-pub mod publication_new;
-pub mod publication_search;
-pub mod publications;
-pub mod calendar;
-pub mod calendar_event_new;
-pub mod event_detail;
 pub mod events;
+pub mod nips;
+pub mod p2p;
+pub mod photos;
+pub mod pin;
+pub mod podcast;
+pub mod polls;
+pub mod recipes;
+pub mod settings;
 pub mod shop;
-pub mod shop_cart;
-pub mod shop_checkout;
-pub mod shop_collection;
-pub mod shop_collection_new;
-pub mod shop_merchant;
-pub mod shop_merchant_orders;
-pub mod shop_orders;
-pub mod shop_product;
-pub mod shop_product_edit;
-pub mod shop_product_new;
-pub mod shop_search;
+pub mod video;
+pub mod voice;
+pub mod wiki;
 pub mod blossom;
+pub mod music;
+pub mod radio;
 #[cfg(target_arch = "wasm32")]
 pub mod bible;
-pub mod highlights;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bible {
     use dioxus::prelude::*;
@@ -127,147 +50,79 @@ pub mod bible {
         }
     }
 }
-pub mod code_import;
-pub mod code_issue_detail;
-pub mod code_issue_new;
-pub mod code_pull_detail;
-pub mod code_pull_new;
-pub mod code_repo;
-pub mod code_repo_blob;
-pub mod code_repo_commits;
-pub mod code_repo_issues;
-pub mod code_repo_pulls;
-pub mod code_repo_settings;
-pub mod code_repo_tree;
-pub mod code_repositories;
-pub mod code_search;
-pub mod code_snippet_detail;
-pub mod code_snippet_new;
-pub mod code_snippets;
+pub mod about;
+pub mod bookmarks;
+pub mod cashu_wallet;
+pub mod citations;
+pub mod cookies;
+pub mod dms;
+pub mod dvm;
+pub mod explore;
+pub mod hashtag;
+pub mod highlights;
+pub mod home;
+mod list_detail;
+mod lists;
+pub mod note;
+pub mod note_new;
+pub mod notifications;
+pub mod photo_new;
+pub mod privacy;
+pub mod profile;
+pub mod search;
+pub mod terms;
+pub mod trending;
+pub mod video_new_landscape;
+pub mod video_new_portrait;
+pub mod webbookmarks;
 use about::About;
-use article_detail::ArticleDetail;
-use article_new::ArticleNew;
-use articles::Articles;
-use badge_detail::BadgeDetail;
-use badge_new::BadgeNew;
-use badges::BadgesHome;
+use articles::{ArticleDetail, ArticleNew, Articles, PublicationDetail, PublicationNew, PublicationSearch, PublicationsHome};
+use badges::{BadgeDetail, BadgeNew, BadgesHome};
+use packs::{PackDetail, PackNew, PacksHome};
 use bible::{BibleChapter, BibleHome, BibleSearch};
 use blossom::BlossomPage;
 use bookmarks::Bookmarks;
-use calendar::Calendar;
-use calendar_event_new::CalendarEventNew;
 use cashu_wallet::CashuWallet;
 use citations::{CitationDetail, CitationsHome};
-use code::CodeHome;
-use code_explore::CodeExplore;
-use code_import::CodeImport;
-use code_issue_detail::CodeIssueDetail;
-use code_issue_new::CodeIssueNew;
-use code_pull_detail::CodePullDetail;
-use code_pull_new::CodePullNew;
-use code_repo::CodeRepo;
-use code_repo_blob::CodeRepoBlob;
-use code_repo_commits::CodeRepoCommits;
-use code_repo_issues::CodeRepoIssues;
-use code_repo_pulls::CodeRepoPulls;
-use code_repo_settings::CodeRepoSettings;
-use code_repo_tree::CodeRepoTree;
-use code_repositories::CodeRepositories;
-use code_search::CodeSearch;
-use code_snippet_detail::CodeSnippetDetail;
-use code_snippet_new::CodeSnippetNew;
-use code_snippets::CodeSnippets;
-use communities::Communities;
-use community::CommunityPage;
-use community_new::CommunityNew;
+use code::{CodeExplore, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlob, CodeRepoCommits, CodeRepoIssues, CodeRepoPulls, CodeRepoSettings, CodeRepoTree, CodeRepositories, CodeSearch, CodeSnippetDetail, CodeSnippetNew, CodeSnippets};
+use chats::{ChatDetail, ChatNew, Chats};
+use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
 use dms::DMs;
 use dvm::DVM;
-use event_detail::CalendarEventDetail;
-use events::Events;
+use events::{Calendar, CalendarEventDetail, CalendarEventNew, Events};
 use explore::Explore;
 use hashtag::Hashtag;
 use highlights::Highlights;
 use home::Home;
 use list_detail::ListDetail;
 use lists::Lists;
-use live_stream_detail::LiveStreamDetail;
-use live_stream_new::LiveStreamNew;
-use music::{
-    MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail,
-    MusicPlaylistNew, MusicRadio, MusicRssAlbum, MusicSearch, MusicTrackDetail, MusicTrackNew,
-};
-use nip19::Nip19Handler;
-use nip_detail::NipDetail;
-use nips::{NipNew, NipsHome};
+use music::{MusicAlbum, MusicArtist, MusicHome, MusicLeaderboard, MusicPlaylistDetail, MusicPlaylistNew, MusicRadio, MusicRssAlbum, MusicSearch, MusicTrackDetail, MusicTrackNew};
+use nips::{Nip19Handler, NipDetail, NipNew, NipsHome};
 use note::Note;
 use note_new::NoteNew;
 use notifications::Notifications;
-use p2p::P2PHome;
-use p2p_order_detail::P2POrderDetail;
-use photo_detail::PhotoDetail;
+use p2p::{P2PHome, P2POrderDetail};
 use photo_new::PhotoNew;
-use photos::Photos;
-use pin_board_detail::PinBoardDetail;
-use pin_board_new::{PinBoardEdit, PinBoardNew};
-use pin_boards::PinBoardsHome;
-use pin_new::PinNew;
-use podcast::PodcastHome;
-use podcast_episode_detail::{PodcastNostrEpisodeDetail, PodcastRssEpisodeDetail};
-use podcast_nostr_detail::PodcastNostrDetail;
-use podcast_rss_detail::PodcastRssFeedDetail;
-use podcast_trending::PodcastTrending;
-use poll_new::PollNew;
-use poll_view::PollView;
-use polls::Polls;
+use photos::{PhotoDetail, Photos};
+use pin::{PinBoardDetail, PinBoardEdit, PinBoardNew, PinBoardsHome, PinNew, UserPins};
+use podcast::{PodcastHome, PodcastNostrDetail, PodcastNostrEpisodeDetail, PodcastRssFeedDetail, PodcastRssEpisodeDetail, PodcastTrending};
+use polls::{PollNew, PollView, Polls};
 use privacy::Privacy;
 use profile::Profile;
-use publication_detail::PublicationDetail;
-use publication_new::PublicationNew;
-use publication_search::PublicationSearch;
-use publications::PublicationsHome;
 use radio::{RadioHome, RadioStation, RadioStationNew};
-use recipe_chef::RecipeChef;
-use recipe_detail::RecipeDetail;
-use recipe_fork::RecipeFork;
-use recipe_new::RecipeNew;
-use recipes::RecipesHome;
-use recipes_all::RecipesAll;
-use recipes_by_tag::RecipesByTag;
+use recipes::{RecipeChef, RecipeDetail, RecipeFork, RecipeNew, RecipesAll, RecipesByTag, RecipesHome};
 use search::Search;
-use settings::Settings;
-use settings_blocklist::SettingsBlocklist;
-use settings_muted::SettingsMuted;
-use settings_relays::SettingsRelays;
-use shop::ShopHome;
-use shop_cart::ShopCart;
-use shop_checkout::ShopCheckout;
-use shop_collection::ShopCollection;
-use shop_collection_new::ShopCollectionNew;
-use shop_merchant::ShopMerchant;
-use shop_merchant_orders::ShopMerchantOrders;
-use shop_orders::ShopOrders;
-use shop_product::ShopProductDetail;
-use shop_product_edit::ShopProductEdit;
-use shop_product_new::ShopProductNew;
-use shop_search::ShopSearch;
+use settings::{Settings, SettingsBlocklist, SettingsMuted, SettingsRelays};
+use shop::{ShopCart, ShopCheckout, ShopCollection, ShopCollectionNew, ShopHome, ShopMerchant, ShopMerchantOrders, ShopOrders, ShopProductDetail, ShopProductEdit, ShopProductNew, ShopSearch};
 use terms::Terms;
 use trending::Trending;
-use user_pins::UserPins;
-use video_detail::VideoDetail;
+use video::{LiveStreamDetail, LiveStreamNew, VideoDetail, Videos, VideosLive, VideosLiveTag};
 use video_new_landscape::VideoNewLandscape;
 use video_new_portrait::VideoNewPortrait;
-use videos::Videos;
-use videos_live::VideosLive;
-use videos_live_tag::VideosLiveTag;
-use voice_message_detail::VoiceMessageDetail;
-use voice_message_new::VoiceMessageNew;
-use voicemessages::VoiceMessages;
+use voice::{VoiceMessageDetail, VoiceMessageNew, VoiceMessages};
 use webbookmarks::WebBookmarks;
-use wiki::WikiHome;
-use wiki_author::WikiAuthor;
-use wiki_detail::WikiDetail;
-use wiki_new::WikiNew;
+use wiki::{WikiAuthor, WikiDetail, WikiHome, WikiNew};
 /// App routes
 #[derive(Clone, Routable, Debug, PartialEq)]
 #[rustfmt::skip]
@@ -350,6 +205,12 @@ pub enum Route {
     BadgeNew {},
     #[route("/badges/:naddr")]
     BadgeDetail { naddr: String },
+    #[route("/packs")]
+    PacksHome {},
+    #[route("/packs/new")]
+    PackNew {},
+    #[route("/packs/:naddr")]
+    PackDetail { naddr: String },
     #[route("/citations")]
     CitationsHome {},
     #[route("/citations/:naddr")]
@@ -396,6 +257,12 @@ pub enum Route {
     P2PHome {},
     #[route("/p2p/order/:naddr")]
     P2POrderDetail { naddr: String },
+    #[route("/chats")]
+    Chats {},
+    #[route("/chats/new")]
+    ChatNew {},
+    #[route("/chats/:channel_id")]
+    ChatDetail { channel_id: String },
     #[route("/communities")]
     Communities {},
     #[route("/communities/new")]
@@ -621,6 +488,10 @@ fn Layout() -> Element {
         current_route,
         Route::BadgesHome {} | Route::BadgeDetail { .. } | Route::BadgeNew {}
     );
+    let is_packs_page = matches!(
+        current_route,
+        Route::PacksHome {} | Route::PackDetail { .. } | Route::PackNew {}
+    );
     let is_code_page = matches!(
         current_route,
         Route::CodeHome {}
@@ -646,6 +517,10 @@ fn Layout() -> Element {
     let is_p2p_page = matches!(
         current_route,
         Route::P2PHome {} | Route::P2POrderDetail { .. }
+    );
+    let is_chats_page = matches!(
+        current_route,
+        Route::Chats {} | Route::ChatNew {} | Route::ChatDetail { .. }
     );
     let is_community_page = matches!(
         current_route,
@@ -728,9 +603,10 @@ fn Layout() -> Element {
     let home_font_weight = if is_home_page { "font-bold" } else { "" };
     let is_wide_page = is_dms_page || is_videos_page || is_wallet_page || is_music_page
         || is_podcast_page || is_radio_page || is_nips_page || is_badges_page
-        || is_code_page || is_p2p_page || is_community_page || is_events_page
-        || is_recipes_page || is_pin_boards_page || is_wiki_page || is_publications_page
-        || is_shop_page || is_blossom_page || is_bible_page || is_creation_page;
+        || is_packs_page || is_code_page || is_p2p_page || is_chats_page || is_community_page
+        || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page
+        || is_publications_page || is_shop_page || is_blossom_page || is_bible_page
+        || is_creation_page;
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
         state.is_visible && state.current_track.is_some()
@@ -1181,766 +1057,6 @@ fn Layout() -> Element {
             crate::components::PwaUpdateBanner {}
             if *sidebar_customizer_open.read() {
                 crate::components::SidebarCustomizerModal { on_close: move |_| sidebar_customizer_open.set(false) }
-            }
-        }
-    }
-}
-#[component]
-fn NavLink(
-    to: Route,
-    icon: Element,
-    label: &'static str,
-    #[props(default = None)]
-    badge: Option<usize>,
-) -> Element {
-    let current_route = use_route::<Route>();
-    let is_active = match (&to, &current_route) {
-        (Route::Home { .. }, Route::Home { .. }) => true,
-        (Route::Explore {}, Route::Explore {}) => true,
-        (Route::Articles {}, Route::Articles {}) => true,
-        (Route::Notifications {}, Route::Notifications {}) => true,
-        (Route::DMs {}, Route::DMs {}) => true,
-        (Route::Photos {}, Route::Photos {}) => true,
-        (Route::PhotoDetail { photo_id: p1 }, Route::PhotoDetail { photo_id: p2 }) => {
-            p1 == p2
-        }
-        (Route::MusicHome {}, Route::MusicHome {})
-        | (Route::MusicHome {}, Route::MusicRadio {})
-        | (Route::MusicHome {}, Route::MusicLeaderboard {})
-        | (Route::MusicHome {}, Route::MusicSearch { .. })
-        | (Route::MusicHome {}, Route::MusicArtist { .. })
-        | (Route::MusicHome {}, Route::MusicAlbum { .. })
-        | (Route::MusicHome {}, Route::MusicRssAlbum { .. })
-        | (Route::MusicHome {}, Route::MusicTrackNew {})
-        | (Route::MusicHome {}, Route::MusicTrackDetail { .. })
-        | (Route::MusicHome {}, Route::MusicPlaylistNew {})
-        | (Route::MusicHome {}, Route::MusicPlaylistDetail { .. }) => true,
-        (Route::Bookmarks {}, Route::Bookmarks {}) => true,
-        (Route::Videos {}, Route::Videos {}) => true,
-        (Route::VideoDetail { video_id: v1 }, Route::VideoDetail { video_id: v2 }) => {
-            v1 == v2
-        }
-        (Route::VideosLive {}, Route::VideosLive {})
-        | (Route::VideosLive {}, Route::VideosLiveTag { .. })
-        | (Route::VideosLive {}, Route::LiveStreamDetail { .. }) => true,
-        (Route::VideosLiveTag { tag: t1 }, Route::VideosLiveTag { tag: t2 }) => t1 == t2,
-        (
-            Route::LiveStreamDetail { note_id: n1 },
-            Route::LiveStreamDetail { note_id: n2 },
-        ) => n1 == n2,
-        (Route::LiveStreamNew {}, Route::LiveStreamNew {}) => true,
-        (Route::CashuWallet {}, Route::CashuWallet {}) => true,
-        (Route::Settings {}, Route::Settings {}) => true,
-        (Route::BlossomPage {}, Route::BlossomPage {}) => true,
-        (Route::Profile { pubkey: p1 }, Route::Profile { pubkey: p2 }) => p1 == p2,
-        (Route::BibleHome {}, Route::BibleHome {})
-        | (Route::BibleHome {}, Route::BibleChapter { .. })
-        | (Route::BibleHome {}, Route::BibleSearch {}) => true,
-        (Route::Highlights {}, Route::Highlights {}) => true,
-        _ => false,
-    };
-    let font_class = if is_active { "font-bold" } else { "" };
-    rsx! {
-        Link {
-            to,
-            class: "flex items-center justify-start gap-4 px-4 py-2 rounded-full hover:bg-accent transition text-xl w-full {font_class}",
-            {icon}
-            span { "{label}" }
-            if let Some(count) = badge {
-                if count > 0 {
-                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-blue-500 text-white rounded-full text-sm font-bold flex items-center justify-center",
-                        "{count}"
-                    }
-                }
-            }
-        }
-    }
-}
-/// Helper function to render sidebar icons for dynamic sidebar
-fn render_sidebar_icon(
-    item: &crate::stores::sidebar_store::SidebarItem,
-    class: &str,
-) -> Element {
-    use crate::stores::sidebar_store::SidebarItem;
-    match item {
-        SidebarItem::Home => {
-            rsx! {
-                crate::components::icons::HomeIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Explore => {
-            rsx! {
-                crate::components::icons::CompassIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Articles => {
-            rsx! {
-                crate::components::icons::BookOpenIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Music => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M9 18V5l12-2v13" }
-                    circle { cx: "6", cy: "18", r: "3" }
-                    circle { cx: "18", cy: "16", r: "3" }
-                }
-            }
-        }
-        SidebarItem::Photos => {
-            rsx! {
-                crate::components::icons::CameraIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Videos => {
-            rsx! {
-                crate::components::icons::VideoIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Live => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    fill: "none",
-                    view_box: "0 0 24 24",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" }
-                }
-            }
-        }
-        SidebarItem::Notifications => {
-            rsx! {
-                crate::components::icons::BellIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Messages => {
-            rsx! {
-                crate::components::icons::MailIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Bookmarks => {
-            rsx! {
-                crate::components::icons::BookmarkIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Profile => {
-            rsx! {
-                crate::components::icons::UserIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Settings => {
-            rsx! {
-                crate::components::icons::SettingsIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::VoiceMessages => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
-                    path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
-                    line {
-                        x1: "12",
-                        x2: "12",
-                        y1: "19",
-                        y2: "22",
-                    }
-                }
-            }
-        }
-        SidebarItem::Polls => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    rect {
-                        x: "3",
-                        y: "3",
-                        width: "18",
-                        height: "18",
-                        rx: "2",
-                    }
-                    line {
-                        x1: "3",
-                        y1: "9",
-                        x2: "21",
-                        y2: "9",
-                    }
-                    line {
-                        x1: "9",
-                        y1: "21",
-                        x2: "9",
-                        y2: "9",
-                    }
-                }
-            }
-        }
-        SidebarItem::WebBookmarks => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
-                }
-            }
-        }
-        SidebarItem::Podcasts => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" }
-                    path { d: "M19 10v2a7 7 0 0 1-14 0v-2" }
-                    line {
-                        x1: "12",
-                        x2: "12",
-                        y1: "19",
-                        y2: "22",
-                    }
-                }
-            }
-        }
-        SidebarItem::Radio => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M4.9 19.1C1 15.2 1 8.8 4.9 4.9" }
-                    path { d: "M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" }
-                    circle { cx: "12", cy: "12", r: "2" }
-                    path { d: "M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" }
-                    path { d: "M19.1 4.9C23 8.8 23 15.1 19.1 19" }
-                }
-            }
-        }
-        SidebarItem::Wallet => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M21 12V7H5a2 2 0 0 1 0-4h14v4" }
-                    path { d: "M3 5v14a2 2 0 0 0 2 2h16v-5" }
-                    path { d: "M18 12a2 2 0 0 0 0 4h4v-4Z" }
-                }
-            }
-        }
-        SidebarItem::P2PTrading => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M16 3l4 4-4 4" }
-                    path { d: "M20 7H4" }
-                    path { d: "M8 21l-4-4 4-4" }
-                    path { d: "M4 17h16" }
-                }
-            }
-        }
-        SidebarItem::Communities => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }
-                    circle { cx: "9", cy: "7", r: "4" }
-                    path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
-                    path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
-                }
-            }
-        }
-        SidebarItem::Events => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" }
-                    circle { cx: "12", cy: "10", r: "3" }
-                }
-            }
-        }
-        SidebarItem::Calendar => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    rect {
-                        x: "3",
-                        y: "4",
-                        width: "18",
-                        height: "18",
-                        rx: "2",
-                        ry: "2",
-                    }
-                    line {
-                        x1: "16",
-                        y1: "2",
-                        x2: "16",
-                        y2: "6",
-                    }
-                    line {
-                        x1: "8",
-                        y1: "2",
-                        x2: "8",
-                        y2: "6",
-                    }
-                    line {
-                        x1: "3",
-                        y1: "10",
-                        x2: "21",
-                        y2: "10",
-                    }
-                }
-            }
-        }
-        SidebarItem::Recipes => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z" }
-                    line {
-                        x1: "6",
-                        y1: "17",
-                        x2: "18",
-                        y2: "17",
-                    }
-                }
-            }
-        }
-        SidebarItem::PinBoards => {
-            rsx! {
-                crate::components::icons::PinIcon { class: class.to_string(), filled: false }
-            }
-        }
-        SidebarItem::Trending => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    polyline { points: "23 6 13.5 15.5 8.5 10.5 1 18" }
-                    polyline { points: "17 6 23 6 23 12" }
-                }
-            }
-        }
-        SidebarItem::Nips => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
-                    polyline { points: "14 2 14 8 20 8" }
-                    line {
-                        x1: "16",
-                        y1: "13",
-                        x2: "8",
-                        y2: "13",
-                    }
-                    line {
-                        x1: "16",
-                        y1: "17",
-                        x2: "8",
-                        y2: "17",
-                    }
-                    polyline { points: "10 9 9 9 8 9" }
-                }
-            }
-        }
-        SidebarItem::Badges => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    circle { cx: "12", cy: "8", r: "6" }
-                    path { d: "M15.477 12.89 17 22l-5-3-5 3 1.523-9.11" }
-                }
-            }
-        }
-        SidebarItem::Citations => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21" }
-                    path { d: "M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3" }
-                }
-            }
-        }
-        SidebarItem::Code => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    polyline { points: "16 18 22 12 16 6" }
-                    polyline { points: "8 6 2 12 8 18" }
-                }
-            }
-        }
-        SidebarItem::Lists => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    line {
-                        x1: "8",
-                        y1: "6",
-                        x2: "21",
-                        y2: "6",
-                    }
-                    line {
-                        x1: "8",
-                        y1: "12",
-                        x2: "21",
-                        y2: "12",
-                    }
-                    line {
-                        x1: "8",
-                        y1: "18",
-                        x2: "21",
-                        y2: "18",
-                    }
-                    line {
-                        x1: "3",
-                        y1: "6",
-                        x2: "3.01",
-                        y2: "6",
-                    }
-                    line {
-                        x1: "3",
-                        y1: "12",
-                        x2: "3.01",
-                        y2: "12",
-                    }
-                    line {
-                        x1: "3",
-                        y1: "18",
-                        x2: "3.01",
-                        y2: "18",
-                    }
-                }
-            }
-        }
-        SidebarItem::Dvm => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    rect {
-                        x: "4",
-                        y: "4",
-                        width: "16",
-                        height: "16",
-                        rx: "2",
-                    }
-                    rect {
-                        x: "9",
-                        y: "9",
-                        width: "6",
-                        height: "6",
-                    }
-                    line {
-                        x1: "9",
-                        y1: "1",
-                        x2: "9",
-                        y2: "4",
-                    }
-                    line {
-                        x1: "15",
-                        y1: "1",
-                        x2: "15",
-                        y2: "4",
-                    }
-                    line {
-                        x1: "9",
-                        y1: "20",
-                        x2: "9",
-                        y2: "23",
-                    }
-                    line {
-                        x1: "15",
-                        y1: "20",
-                        x2: "15",
-                        y2: "23",
-                    }
-                    line {
-                        x1: "20",
-                        y1: "9",
-                        x2: "23",
-                        y2: "9",
-                    }
-                    line {
-                        x1: "20",
-                        y1: "14",
-                        x2: "23",
-                        y2: "14",
-                    }
-                    line {
-                        x1: "1",
-                        y1: "9",
-                        x2: "4",
-                        y2: "9",
-                    }
-                    line {
-                        x1: "1",
-                        y1: "14",
-                        x2: "4",
-                        y2: "14",
-                    }
-                }
-            }
-        }
-        SidebarItem::Wiki => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
-                    path { d: "M8 7h6" }
-                    path { d: "M8 11h8" }
-                }
-            }
-        }
-        SidebarItem::Publications => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" }
-                    path { d: "M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" }
-                }
-            }
-        }
-        SidebarItem::Shop => {
-            rsx! {
-                crate::components::icons::ShoppingBagIcon { class: class.to_string() }
-            }
-        }
-        SidebarItem::Blossom => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" }
-                }
-            }
-        }
-        SidebarItem::Bible => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" }
-                    path { d: "M12 7v6" }
-                    path { d: "M9 10h6" }
-                }
-            }
-        }
-        SidebarItem::Highlights => {
-            rsx! {
-                svg {
-                    class: "{class}",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "m9 11-6 6v3h9l3-3" }
-                    path { d: "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" }
-                }
             }
         }
     }

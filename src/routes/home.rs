@@ -12,7 +12,7 @@ use crate::stores::feed_cache::FeedCacheKey;
 use crate::stores::{auth_store, feed_cache, nostr_client, subscription_manager};
 use crate::utils::list_encryption::get_all_list_members;
 use crate::utils::list_kinds::NAMED_PEOPLE;
-use crate::utils::{extract_reposted_event, get_item_count, DataState, FeedItem};
+use crate::utils::{extract_reposted_event, get_item_count, process_events_to_feed_items, DataState, FeedItem};
 use dioxus::prelude::*;
 use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
@@ -979,7 +979,7 @@ pub fn Home(list: String) -> Element {
                                                 !event
                                                     .tags
                                                     .iter()
-                                                    .any(|tag| { tag.kind() == nostr_sdk::TagKind::e() })
+                                                    .any(|tag| tag.is_reply() || tag.is_root())
                                             }
                                             FeedType::FollowingWithReplies
                                             | FeedType::Global
@@ -1248,7 +1248,7 @@ pub fn Home(list: String) -> Element {
                     }
                     if auth.is_authenticated {
                         button {
-                            class: "p-2 hover:bg-accent rounded-full transition disabled:opacity-50",
+                            class: "p-2 hover:bg-accent rounded-lg transition disabled:opacity-50",
                             disabled: feed_state.read().is_loading(),
                             onclick: move |_| refresh_and_scroll_to_top(),
                             title: "Refresh feed",
@@ -1368,41 +1368,41 @@ pub fn Home(list: String) -> Element {
 fn HelpModal(on_close: EventHandler<()>) -> Element {
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50",
+            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
             onclick: move |_| on_close.call(()),
             div {
-                class: "bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto",
+                class: "bg-card rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto",
                 onclick: move |e| e.stop_propagation(),
-                div { class: "sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between",
-                    h3 { class: "text-xl font-bold text-gray-900 dark:text-white",
+                div { class: "sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between",
+                    h3 { class: "text-xl font-bold text-foreground",
                         "About Nostr Sign-In Methods"
                     }
                     button {
-                        class: "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-2xl",
+                        class: "text-muted-foreground hover:text-foreground text-2xl",
                         onclick: move |_| on_close.call(()),
                         "×"
                     }
                 }
                 div { class: "px-6 py-4 space-y-6",
                     div {
-                        h4 { class: "font-semibold text-gray-900 dark:text-white mb-2",
+                        h4 { class: "font-semibold text-foreground mb-2",
                             "What is Nostr?"
                         }
-                        p { class: "text-sm text-gray-600 dark:text-gray-400",
+                        p { class: "text-sm text-muted-foreground",
                             "Nostr is a decentralized social protocol where you own your identity and data. Instead of relying on a company, your identity is based on cryptographic keys that only you control."
                         }
                     }
                     div {
-                        h4 { class: "font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2",
+                        h4 { class: "font-semibold text-foreground mb-2 flex items-center gap-2",
                             "🔌 Browser Extension (NIP-07)"
-                            span { class: "px-2 py-0.5 text-xs bg-green-600 text-white rounded-full",
+                            span { class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
                                 "RECOMMENDED"
                             }
                         }
-                        p { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                        p { class: "text-sm text-muted-foreground mb-2",
                             "Browser extensions like Alby, nos2x, and Flamingo store your keys securely and sign events on your behalf. Your private key never leaves the extension."
                         }
-                        ul { class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                        ul { class: "text-sm text-muted-foreground list-disc list-inside space-y-1",
                             li { "Keys stored securely in the extension" }
                             li { "Websites can't access your private key" }
                             li { "Works across all Nostr apps" }
@@ -1410,36 +1410,36 @@ fn HelpModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                     div {
-                        h4 { class: "font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2",
+                        h4 { class: "font-semibold text-foreground mb-2 flex items-center gap-2",
                             "🔐 Remote Signer (NIP-46)"
-                            span { class: "px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full",
+                            span { class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
                                 "RECOMMENDED"
                             }
                         }
-                        p { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                        p { class: "text-sm text-muted-foreground mb-2",
                             "Remote signers let you keep your keys on a separate device (like your phone with Amber) or a dedicated service (like nsecBunker). This app connects to your signer and requests signatures remotely."
                         }
-                        ul { class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                        ul { class: "text-sm text-muted-foreground list-disc list-inside space-y-1",
                             li { "Keys stay on your signing device" }
                             li { "Approve each action on your phone" }
                             li { "Compatible signers: Amber (Android), nsecBunker" }
                             li { "Most secure for untrusted devices" }
                         }
-                        p { class: "text-xs text-blue-600 dark:text-blue-400 mt-2",
+                        p { class: "text-xs text-primary mt-2",
                             "To use: Get a bunker:// URI from your signing app and paste it above."
                         }
                     }
                     div {
-                        h4 { class: "font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2",
+                        h4 { class: "font-semibold text-foreground mb-2 flex items-center gap-2",
                             "🔑 Private Key (nsec)"
-                            span { class: "px-2 py-0.5 text-xs bg-yellow-600 text-white rounded-full",
+                            span { class: "px-2 py-0.5 text-xs bg-accent text-accent-foreground rounded-full",
                                 "USE WITH CAUTION"
                             }
                         }
-                        p { class: "text-sm text-gray-600 dark:text-gray-400 mb-2",
+                        p { class: "text-sm text-muted-foreground mb-2",
                             "Entering your private key (nsec) directly gives this app full access to your account. Your key is stored in browser localStorage."
                         }
-                        ul { class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                        ul { class: "text-sm text-muted-foreground list-disc list-inside space-y-1",
                             li { "⚠️ Only use on devices you fully trust" }
                             li { "⚠️ Never share your nsec with anyone" }
                             li { "⚠️ Stored in browser (cleared if you clear data)" }
@@ -1447,18 +1447,18 @@ fn HelpModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                     div {
-                        h4 { class: "font-semibold text-gray-900 dark:text-white mb-2",
+                        h4 { class: "font-semibold text-foreground mb-2",
                             "👁️ Public Key (npub) - Read Only"
                         }
-                        p { class: "text-sm text-gray-600 dark:text-gray-400",
+                        p { class: "text-sm text-muted-foreground",
                             "Using just your public key (npub) lets you browse and view content, but you cannot post, react, or send messages. Perfect for exploring Nostr without committing."
                         }
                     }
                     div {
-                        h4 { class: "font-semibold text-gray-900 dark:text-white mb-2",
+                        h4 { class: "font-semibold text-foreground mb-2",
                             "🛡️ Security Best Practices"
                         }
-                        ul { class: "text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1",
+                        ul { class: "text-sm text-muted-foreground list-disc list-inside space-y-1",
                             li { "Always prefer browser extensions or remote signers" }
                             li { "Never enter your nsec on untrusted websites" }
                             li { "Backup your keys securely (offline)" }
@@ -1466,9 +1466,9 @@ fn HelpModal(on_close: EventHandler<()>) -> Element {
                         }
                     }
                 }
-                div { class: "sticky bottom-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 px-6 py-4",
+                div { class: "sticky bottom-0 bg-muted border-t border-border px-6 py-4",
                     button {
-                        class: "w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition",
+                        class: "w-full px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition",
                         onclick: move |_| on_close.call(()),
                         "Got it!"
                     }
@@ -1550,71 +1550,71 @@ fn LoginSection() -> Element {
     rsx! {
         div { class: "p-6 max-w-lg mx-auto",
             div { class: "flex items-center justify-between mb-6",
-                h3 { class: "text-2xl font-bold text-gray-900 dark:text-white", "Welcome to Nostr" }
+                h3 { class: "text-2xl font-bold text-foreground", "Welcome to Nostr" }
                 button {
-                    class: "px-3 py-1.5 text-sm bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 rounded-lg transition",
+                    class: "px-3 py-1.5 text-sm bg-accent text-accent-foreground hover:bg-accent/80 rounded-lg transition",
                     onclick: move |_| show_help_modal.set(true),
                     "Learn More"
                 }
             }
-            p { class: "text-gray-600 dark:text-gray-400 mb-6",
+            p { class: "text-muted-foreground mb-6",
                 "Choose a secure sign-in method to get started with the decentralized social network."
             }
             if let Some(err) = error.read().as_ref() {
-                div { class: "mb-4 p-3 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-sm",
+                div { class: "mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm",
                     "❌ {err}"
                 }
             }
             div { class: "mb-6",
-                h4 { class: "text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3",
+                h4 { class: "text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3",
                     "Recommended (Secure)"
                 }
                 div { class: "space-y-3",
                     if has_extension {
-                        div { class: "p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-lg border-2 border-green-300 dark:border-green-700",
+                        div { class: "p-4 bg-accent/50 rounded-lg border-2 border-primary/50",
                             div { class: "flex items-start gap-3 mb-3",
                                 div { class: "text-2xl", "🔌" }
                                 div { class: "flex-1",
                                     div { class: "flex items-center gap-2 mb-1",
-                                        span { class: "font-semibold text-gray-900 dark:text-white",
+                                        span { class: "font-semibold text-foreground",
                                             "Browser Extension"
                                         }
-                                        span { class: "px-2 py-0.5 text-xs bg-green-600 text-white rounded-full",
+                                        span { class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
                                             "RECOMMENDED"
                                         }
                                     }
-                                    p { class: "text-sm text-gray-600 dark:text-gray-400",
+                                    p { class: "text-sm text-muted-foreground",
                                         "Your keys stay in the extension, never exposed to websites."
                                     }
                                 }
                             }
                             button {
-                                class: "w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition shadow-xs",
+                                class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs",
                                 onclick: login_with_extension,
                                 "Connect Extension"
                             }
                         }
                     }
-                    div { class: "p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg border-2 border-blue-300 dark:border-blue-700",
+                    div { class: "p-4 bg-accent/50 rounded-lg border-2 border-primary/50",
                         div { class: "flex items-start gap-3 mb-3",
                             div { class: "text-2xl", "🔐" }
                             div { class: "flex-1",
                                 div { class: "flex items-center gap-2 mb-1",
-                                    span { class: "font-semibold text-gray-900 dark:text-white",
+                                    span { class: "font-semibold text-foreground",
                                         "Remote Signer"
                                     }
-                                    span { class: "px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full",
+                                    span { class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
                                         "RECOMMENDED"
                                     }
                                 }
-                                p { class: "text-sm text-gray-600 dark:text-gray-400",
+                                p { class: "text-sm text-muted-foreground",
                                     "Use Amber, nsecBunker, or other NIP-46 signers. Keys never leave your device."
                                 }
                             }
                         }
                         div { class: "space-y-2",
                             input {
-                                class: "w-full px-3 py-2 text-sm border border-blue-300 dark:border-blue-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                                class: "w-full px-3 py-2 text-sm border border-primary/50 rounded-lg bg-card text-foreground focus:ring-2 focus:ring-primary focus:border-transparent",
                                 r#type: "text",
                                 placeholder: "bunker://...",
                                 value: "{bunker_uri_input}",
@@ -1622,7 +1622,7 @@ fn LoginSection() -> Element {
                                 disabled: *connecting_bunker.read(),
                             }
                             button {
-                                class: "w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed",
+                                class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed",
                                 onclick: login_with_bunker,
                                 disabled: bunker_uri_input.read().is_empty() || *connecting_bunker.read(),
                                 if *connecting_bunker.read() {
@@ -1632,7 +1632,7 @@ fn LoginSection() -> Element {
                                 }
                             }
                             if *connecting_bunker.read() {
-                                p { class: "text-xs text-blue-700 dark:text-blue-400 text-center",
+                                p { class: "text-xs text-primary text-center",
                                     "Waiting for approval on your signing device (up to 2 minutes)..."
                                 }
                             }
@@ -1640,7 +1640,7 @@ fn LoginSection() -> Element {
                     }
                 }
             }
-            div { class: "border-t border-gray-200 dark:border-gray-700 pt-6",
+            div { class: "border-t border-border pt-6",
                 button {
                     class: "w-full flex items-center justify-between p-3 bg-muted hover:bg-accent rounded-lg transition",
                     onclick: move |_| {
@@ -1648,10 +1648,10 @@ fn LoginSection() -> Element {
                         show_advanced.set(!current);
                     },
                     div { class: "flex items-center gap-2",
-                        span { class: "text-yellow-600 dark:text-yellow-400", "⚠️" }
-                        span { class: "font-medium text-gray-900 dark:text-white", "Advanced Options" }
+                        span { class: "text-muted-foreground", "⚠️" }
+                        span { class: "font-medium text-foreground", "Advanced Options" }
                     }
-                    span { class: "text-gray-500",
+                    span { class: "text-muted-foreground",
                         if *show_advanced.read() {
                             "▼"
                         } else {
@@ -1660,22 +1660,22 @@ fn LoginSection() -> Element {
                     }
                 }
                 if *show_advanced.read() {
-                    div { class: "mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg space-y-4",
-                        div { class: "p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg",
-                            p { class: "text-sm text-yellow-800 dark:text-yellow-300 font-medium",
+                    div { class: "mt-4 p-4 bg-accent/30 border border-border rounded-lg space-y-4",
+                        div { class: "p-3 bg-accent/50 rounded-lg",
+                            p { class: "text-sm text-foreground font-medium",
                                 "⚠️ Security Warning"
                             }
-                            p { class: "text-xs text-yellow-700 dark:text-yellow-400 mt-1",
+                            p { class: "text-xs text-muted-foreground mt-1",
                                 "These methods store keys in your browser. Only use on devices you fully trust."
                             }
                         }
                         div {
-                            h5 { class: "font-medium text-gray-900 dark:text-white mb-2 text-sm",
+                            h5 { class: "font-medium text-foreground mb-2 text-sm",
                                 "🔑 Private Key (nsec)"
                             }
                             div { class: "space-y-2",
                                 input {
-                                    class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white",
+                                    class: "w-full px-3 py-2 text-sm border border-border rounded-lg bg-card text-foreground",
                                     r#type: "password",
                                     placeholder: "nsec1...",
                                     value: "{nsec_input}",
@@ -1683,14 +1683,14 @@ fn LoginSection() -> Element {
                                 }
                                 div { class: "relative",
                                     input {
-                                        class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white pr-10",
+                                        class: "w-full px-3 py-2 text-sm border border-border rounded-lg bg-card text-foreground pr-10",
                                         r#type: if *show_nsec_password.read() { "text" } else { "password" },
                                         placeholder: "Set encryption password",
                                         value: "{nsec_password}",
                                         oninput: move |evt| nsec_password.set(evt.value()),
                                     }
                                     button {
-                                        class: "absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
+                                        class: "absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground",
                                         r#type: "button",
                                         onclick: move |_| {
                                             let current = *show_nsec_password.read();
@@ -1704,25 +1704,25 @@ fn LoginSection() -> Element {
                                     }
                                 }
                                 input {
-                                    class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white",
+                                    class: "w-full px-3 py-2 text-sm border border-border rounded-lg bg-card text-foreground",
                                     r#type: if *show_nsec_password.read() { "text" } else { "password" },
                                     placeholder: "Confirm password",
                                     value: "{nsec_confirm_password}",
                                     oninput: move |evt| nsec_confirm_password.set(evt.value()),
                                 }
-                                p { class: "text-xs text-amber-600 dark:text-amber-400",
+                                p { class: "text-xs text-muted-foreground",
                                     "🔐 Your key will be encrypted with this password"
                                 }
                                 div { class: "flex gap-2",
                                     button {
-                                        class: "flex-1 px-3 py-2 text-sm bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
+                                        class: "flex-1 px-3 py-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed",
                                         onclick: login_with_nsec,
                                         disabled: nsec_input.read().is_empty() || nsec_password.read().is_empty()
                                             || nsec_confirm_password.read().is_empty(),
                                         "Login"
                                     }
                                     button {
-                                        class: "px-3 py-2 text-sm bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition",
+                                        class: "px-3 py-2 text-sm bg-accent hover:bg-accent/80 text-accent-foreground rounded-lg transition",
                                         onclick: generate_new,
                                         "Generate"
                                     }
@@ -1730,23 +1730,23 @@ fn LoginSection() -> Element {
                             }
                         }
                         div {
-                            h5 { class: "font-medium text-gray-900 dark:text-white mb-2 text-sm",
+                            h5 { class: "font-medium text-foreground mb-2 text-sm",
                                 "👁️ Public Key (npub) - Read Only"
                             }
                             div { class: "space-y-2",
                                 input {
-                                    class: "w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white",
+                                    class: "w-full px-3 py-2 text-sm border border-border rounded-lg bg-card text-foreground",
                                     r#type: "text",
                                     placeholder: "npub1...",
                                     value: "{npub_input}",
                                     oninput: move |evt| npub_input.set(evt.value()),
                                 }
                                 button {
-                                    class: "w-full px-3 py-2 text-sm bg-gray-700 hover:bg-gray-800 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg transition",
+                                    class: "w-full px-3 py-2 text-sm bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition",
                                     onclick: login_with_npub,
                                     "View Profile (Read-Only)"
                                 }
-                                p { class: "text-xs text-gray-600 dark:text-gray-400",
+                                p { class: "text-xs text-muted-foreground",
                                     "ℹ️ You can browse but cannot post or interact."
                                 }
                             }
@@ -1981,35 +1981,7 @@ async fn load_following_feed(
         }
     }
 }
-/// Process raw events into FeedItems (extracted for reuse in streaming)
-fn process_events_to_feed_items(events: Vec<nostr_sdk::Event>) -> Vec<FeedItem> {
-    let mut feed_items: Vec<FeedItem> = Vec::new();
-    for event in events.into_iter() {
-        if event.kind == Kind::Repost {
-            match extract_reposted_event(&event) {
-                Ok(original) => {
-                    feed_items
-                        .push(FeedItem::Repost {
-                            original,
-                            reposted_by: event.pubkey,
-                            repost_timestamp: event.created_at,
-                        });
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse repost event {}: {}", event.id, e);
-                }
-            }
-        } else if event.kind == Kind::TextNote {
-            // Posts with root/reply markers are thread replies - filter these out
-            // Mentions (e-tags without markers) are preserved in the feed
-            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
-            if !is_reply {
-                feed_items.push(FeedItem::OriginalPost(event));
-            }
-        }
-    }
-    feed_items
-}
+// process_events_to_feed_items is now in crate::utils::repost
 /// Load following feed with progressive streaming updates
 ///
 /// This function streams events as they arrive and calls the on_batch callback
@@ -2269,8 +2241,7 @@ async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, crate::
     )
     .await?;
 
-    let mut feed_items = process_events_to_feed_items(events);
-    feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
+    let feed_items = process_events_to_feed_items(events);
 
     log::info!("Got {} quick global posts", feed_items.len());
     Ok(feed_items)

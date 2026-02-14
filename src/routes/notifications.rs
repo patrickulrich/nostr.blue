@@ -8,6 +8,7 @@ use crate::error::NostrBlueError;
 use crate::hooks::{use_infinite_scroll, use_mute_block_cache};
 use crate::routes::Route;
 use crate::stores::{auth_store, nostr_client, notifications as notif_store, profiles};
+use crate::utils::bolt11::parse_bolt11_amount;
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
 enum NotificationType {
@@ -494,6 +495,10 @@ fn ReactionNotification(
     let reactor_pubkey_for_display = reactor_pubkey.clone();
     let reactor_pubkey_for_avatar = reactor_pubkey.clone();
     let reactor_pubkey_for_link = reactor_pubkey.clone();
+    let reacted_eid_for_link = reacted_event_id.clone();
+    let validated_reacted_eid = reacted_eid_for_link
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
     use_effect(move || {
         let pubkey = reactor_pubkey_for_effect.clone();
         let event_id = reacted_event_id.clone();
@@ -502,22 +507,20 @@ fn ReactionNotification(
                 profile.set(Some(p));
             }
             if let Some(eid) = event_id {
-                if let Ok(client) = nostr_client::NOSTR_CLIENT
-                    .read()
-                    .as_ref()
-                    .ok_or("Client not initialized")
-                {
-                    let filter = Filter::new()
-                        .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
-                        .limit(1);
-                    if let Ok(events) = client
-                        .fetch_events(filter, Duration::from_secs(5))
-                        .await
-                        .map(|e| e.into_iter().collect::<Vec<_>>())
+                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    let filter = Filter::new().id(event_id).limit(1);
+                    match nostr_client::fetch_events_aggregated(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
                     {
-                        if let Some(original_event) = events.into_iter().next() {
-                            reacted_post.set(Some(original_event));
+                        Ok(events) => {
+                            if let Some(original_event) = events.into_iter().next() {
+                                reacted_post.set(Some(original_event));
+                            }
                         }
+                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
             }
@@ -571,7 +574,16 @@ fn ReactionNotification(
                         class: "font-semibold hover:underline",
                         "{display_name}"
                     }
-                    span { class: "text-muted-foreground", "reacted to your post" }
+                    span { class: "text-muted-foreground", "reacted to" }
+                    if let Some(eid) = validated_reacted_eid {
+                        Link {
+                            to: Route::Note { note_id: eid.clone(), from_voice: None },
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else {
+                        span { class: "text-muted-foreground", "your post" }
+                    }
                 }
             }
             if let Some(post) = reacted_post.read().as_ref() {
@@ -616,6 +628,10 @@ fn RepostNotification(
     let reposter_pubkey_for_display = reposter_pubkey.clone();
     let reposter_pubkey_for_avatar = reposter_pubkey.clone();
     let reposter_pubkey_for_link = reposter_pubkey.clone();
+    let reposted_eid_for_link = reposted_event_id.clone();
+    let validated_reposted_eid = reposted_eid_for_link
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
     use_effect(move || {
         let pubkey = reposter_pubkey_for_effect.clone();
         let event_id = reposted_event_id.clone();
@@ -624,22 +640,20 @@ fn RepostNotification(
                 profile.set(Some(p));
             }
             if let Some(eid) = event_id {
-                if let Ok(client) = nostr_client::NOSTR_CLIENT
-                    .read()
-                    .as_ref()
-                    .ok_or("Client not initialized")
-                {
-                    let filter = Filter::new()
-                        .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
-                        .limit(1);
-                    if let Ok(events) = client
-                        .fetch_events(filter, Duration::from_secs(5))
-                        .await
-                        .map(|e| e.into_iter().collect::<Vec<_>>())
+                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    let filter = Filter::new().id(event_id).limit(1);
+                    match nostr_client::fetch_events_aggregated(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
                     {
-                        if let Some(original_event) = events.into_iter().next() {
-                            reposted_post.set(Some(original_event));
+                        Ok(events) => {
+                            if let Some(original_event) = events.into_iter().next() {
+                                reposted_post.set(Some(original_event));
+                            }
                         }
+                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
             }
@@ -685,7 +699,16 @@ fn RepostNotification(
                         class: "font-semibold hover:underline",
                         "{display_name}"
                     }
-                    span { class: "text-muted-foreground", "reposted your post" }
+                    span { class: "text-muted-foreground", "reposted" }
+                    if let Some(eid) = validated_reposted_eid {
+                        Link {
+                            to: Route::Note { note_id: eid.clone(), from_voice: None },
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else {
+                        span { class: "text-muted-foreground", "your post" }
+                    }
                 }
             }
             if let Some(post) = reposted_post.read().as_ref() {
@@ -732,6 +755,10 @@ fn ZapNotification(
     let zapper_pubkey_for_display = zapper_pubkey.clone();
     let zapper_pubkey_for_avatar = zapper_pubkey.clone();
     let zapper_pubkey_for_link = zapper_pubkey.clone();
+    let zapped_eid_for_link = zapped_event_id.clone();
+    let validated_zapped_eid = zapped_eid_for_link
+        .as_ref()
+        .filter(|eid| nostr_sdk::EventId::from_hex(eid).is_ok());
     use_effect(move || {
         let pubkey = zapper_pubkey_for_effect.clone();
         let event_id = zapped_event_id.clone();
@@ -740,22 +767,20 @@ fn ZapNotification(
                 profile.set(Some(p));
             }
             if let Some(eid) = event_id {
-                if let Ok(client) = nostr_client::NOSTR_CLIENT
-                    .read()
-                    .as_ref()
-                    .ok_or("Client not initialized")
-                {
-                    let filter = Filter::new()
-                        .id(nostr_sdk::EventId::from_hex(&eid).unwrap())
-                        .limit(1);
-                    if let Ok(events) = client
-                        .fetch_events(filter, Duration::from_secs(5))
-                        .await
-                        .map(|e| e.into_iter().collect::<Vec<_>>())
+                if let Ok(event_id) = nostr_sdk::EventId::from_hex(&eid) {
+                    let filter = Filter::new().id(event_id).limit(1);
+                    match nostr_client::fetch_events_aggregated(
+                        filter,
+                        Duration::from_secs(10),
+                    )
+                    .await
                     {
-                        if let Some(original_event) = events.into_iter().next() {
-                            zapped_post.set(Some(original_event));
+                        Ok(events) => {
+                            if let Some(original_event) = events.into_iter().next() {
+                                zapped_post.set(Some(original_event));
+                            }
                         }
+                        Err(e) => log::error!("Failed to fetch referenced event: {}", e),
                     }
                 }
             }
@@ -801,7 +826,16 @@ fn ZapNotification(
                         class: "font-semibold hover:underline",
                         "{display_name}"
                     }
-                    span { class: "text-muted-foreground", "zapped your post" }
+                    span { class: "text-muted-foreground", "zapped" }
+                    if let Some(eid) = validated_zapped_eid {
+                        Link {
+                            to: Route::Note { note_id: eid.clone(), from_voice: None },
+                            class: "text-muted-foreground hover:underline",
+                            "your post"
+                        }
+                    } else {
+                        span { class: "text-muted-foreground", "your post" }
+                    }
                     if let Some(amount) = zap_amount_sats {
                         span { class: "text-yellow-600 dark:text-yellow-400 font-bold",
                             "{amount} sats"
@@ -881,40 +915,6 @@ fn extract_zap_amount(event: &NostrEvent) -> Option<u64> {
         }
     }
     None
-}
-/// Parse amount from bolt11 invoice string
-fn parse_bolt11_amount(bolt11: &str) -> Option<u64> {
-    let lower = bolt11.to_lowercase();
-    let prefix_end = if lower.starts_with("lnbcrt") {
-        6
-    } else if lower.starts_with("lnbc") || lower.starts_with("lntb") {
-        4
-    } else {
-        return None;
-    };
-    let amount_part = &lower[prefix_end..];
-    let mut amount_str = String::new();
-    let mut multiplier_char = None;
-    for c in amount_part.chars() {
-        if c.is_ascii_digit() {
-            amount_str.push(c);
-        } else if c == 'p' || c == 'n' || c == 'u' || c == 'm' {
-            multiplier_char = Some(c);
-            break;
-        } else {
-            break;
-        }
-    }
-    let amount: u64 = amount_str.parse().ok()?;
-    let sats = match multiplier_char {
-        Some('m') => amount * 100_000,
-        Some('u') => amount * 100,
-        Some('n') => amount / 10,
-        Some('p') => amount / 10_000,
-        None => amount * 100_000_000,
-        _ => return None,
-    };
-    Some(sats)
 }
 /// Helper to get timestamp from notification
 fn get_timestamp(notification: &NotificationType) -> u64 {

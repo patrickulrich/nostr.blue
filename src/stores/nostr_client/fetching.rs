@@ -20,6 +20,7 @@ pub(crate) async fn ensure_relays_ready(client: &Client) {
     relay::connection::ensure_relays_ready(client).await;
 }
 /// Ensure the video relay is connected
+#[allow(dead_code)]
 pub(crate) async fn ensure_video_relay_connected(client: &Client) {
     relay::connection::ensure_video_relay_connected(client).await;
 }
@@ -81,6 +82,7 @@ async fn fetch_events_aggregated_with_client(
 /// This function adds the video-specific relay to the pool before fetching,
 /// ensuring video content is discovered from the Divine relay in addition
 /// to relays selected via the outbox model.
+#[allow(dead_code)]
 pub async fn fetch_video_events(
     filter: Filter,
     timeout: Duration,
@@ -267,6 +269,7 @@ async fn fetch_events_from_connected_relays_with_client(
 ///
 /// Ensures video relay (relay.divine.video) is connected first,
 /// then uses fast fetch (bypasses gossip) for the query.
+#[allow(dead_code)]
 pub async fn fetch_video_events_from_connected_relays(
     filter: Filter,
     timeout: std::time::Duration,

@@ -62,8 +62,9 @@ pub use threaded_comment::ThreadedComment;
 pub use trending_notes::TrendingNotes;
 pub use video_card::VideoCard;
 pub use client_initializing::ClientInitializing;
+#[allow(unused_imports)]
 pub use live::{
-    LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
+    ChannelChat, LiveChat, LiveStreamPlayer, LiveStreamShareModal, MiniLiveStreamCard, StreamStatus,
 };
 pub use media_uploader::MediaUploader;
 pub use webbookmark_card::{WebBookmarkCard, WebBookmarkCardSkeleton};
