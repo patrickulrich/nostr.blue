@@ -237,11 +237,12 @@ pub async fn fetch_personal_calendar_events() -> StdResult<Vec<UnifiedEvent>, St
                 }
             })
             .collect();
-        let rsvp_futures: Vec<_> = rsvp_coords
-            .iter()
+        use futures::stream::{self, StreamExt};
+        let rsvp_results: Vec<_> = stream::iter(rsvp_coords.iter())
             .map(|coord| fetch_event_by_coordinate(coord))
-            .collect();
-        let rsvp_results = futures::future::join_all(rsvp_futures).await;
+            .buffer_unordered(3)
+            .collect()
+            .await;
         for result in rsvp_results {
             if let Ok(Some(event)) = result {
                 all_events.push(event);

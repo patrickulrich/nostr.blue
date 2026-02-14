@@ -11,6 +11,7 @@ use crate::stores::social::channel_store::{
 };
 use crate::utils::profile_prefetch;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use dioxus_core::Task;
@@ -219,6 +220,9 @@ pub fn ChannelChat(channel_id: String) -> Element {
     // Auto-scroll
     let chat_container_id_for_scroll = chat_container_id.clone();
     let mut is_first_load = use_signal(|| true);
+    use_effect(use_reactive(&channel_id, move |_| {
+        is_first_load.set(true);
+    }));
     use_effect(move || {
         let msg_count = messages.read().len();
         let container_id = chat_container_id_for_scroll.clone();
@@ -464,7 +468,7 @@ fn ChannelChatMessage(event: Event) -> Element {
                     pubkey: author_pk_for_display.clone(),
                 },
                 class: "shrink-0",
-                if let Some(pic_url) = author_picture.read().as_ref() {
+                if let Some(pic_url) = author_picture.read().as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         src: "{pic_url}",
                         class: "w-8 h-8 rounded-full object-cover",

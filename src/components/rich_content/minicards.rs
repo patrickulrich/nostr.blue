@@ -85,7 +85,7 @@ pub(super) fn render_embedded_article(
                                 }
                             }
                         } else {
-                            div { class: "w-6 h-6 rounded-full bg-muted-foreground flex items-center justify-center text-accent-foreground text-xs",
+                            div { class: "w-6 h-6 rounded-full bg-muted flex items-center justify-center text-accent-foreground text-xs",
                                 "?"
                             }
                         }
@@ -222,7 +222,7 @@ pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Ele
                     naddr: naddr_owned.clone(),
                 },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
-                div { class: "w-8 h-8 rounded-full bg-amber-500/10 shrink-0 overflow-hidden flex items-center justify-center",
+                div { class: "w-8 h-8 rounded-full bg-accent/10 shrink-0 overflow-hidden flex items-center justify-center",
                     if let Some(ref img) = image_url {
                         img {
                             src: "{img}",
@@ -230,7 +230,7 @@ pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Ele
                             class: "w-full h-full object-cover",
                         }
                     } else {
-                        icons::DiscIcon { class: "w-4 h-4 text-amber-500".to_string() }
+                        icons::DiscIcon { class: "w-4 h-4 text-accent".to_string() }
                     }
                 }
                 div { class: "flex-1 min-w-0",
@@ -356,8 +356,8 @@ pub(super) fn render_playlist_minicard(playlist: &NostrPlaylist, naddr: &str) ->
                             loading: "lazy",
                         }
                     } else {
-                        div { class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-500/20 to-pink-500/20",
-                            icons::MusicIcon { class: "w-5 h-5 text-purple-500".to_string() }
+                        div { class: "w-full h-full flex items-center justify-center bg-accent/20",
+                            icons::MusicIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                         }
                     }
                 }
@@ -423,7 +423,7 @@ pub(super) fn render_recipe_minicard(
                             loading: "lazy",
                         }
                     } else {
-                        div { class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-amber-500/20",
+                        div { class: "w-full h-full flex items-center justify-center bg-accent/20",
                             span { class: "text-lg", "🍳" }
                         }
                     }
@@ -497,7 +497,7 @@ pub(super) fn render_publication_minicard(pub_index: &PublicationIndex, naddr: &
                             loading: "lazy",
                         }
                     } else {
-                        div { class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-purple-500/20",
+                        div { class: "w-full h-full flex items-center justify-center bg-accent/20",
                             icons::BookOpenIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                         }
                     }
@@ -558,7 +558,7 @@ pub(super) fn render_pinboard_minicard(board: &Pinboard, naddr: &str) -> Element
                             loading: "lazy",
                         }
                     } else {
-                        div { class: "w-full h-full flex items-center justify-center bg-gradient-to-br from-pink-500/20 to-red-500/20",
+                        div { class: "w-full h-full flex items-center justify-center bg-accent/20",
                             icons::GridIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                         }
                     }
@@ -613,7 +613,7 @@ pub(super) fn render_collection_minicard(collection: &ProductCollection, naddr: 
                     naddr: naddr_owned.clone(),
                 },
                 class: "flex items-center gap-2 p-2 border border-border rounded-lg hover:bg-accent/50 transition",
-                div { class: "w-10 h-10 rounded bg-muted shrink-0 flex items-center justify-center bg-gradient-to-br from-green-500/20 to-emerald-500/20",
+                div { class: "w-10 h-10 rounded bg-accent/20 shrink-0 flex items-center justify-center",
                     icons::ShoppingBagIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                 }
                 div { class: "flex-1 min-w-0",
