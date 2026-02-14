@@ -129,10 +129,13 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             }
             if *show_picker.read() {
                 div {
-                    class: "fixed bg-background border border-border rounded-lg shadow-xl z-[60]",
-                    class: "w-[calc(100vw-2rem)] sm:w-80",
-                    style: if *is_mobile.read() { "top: 1rem; left: 1rem; right: 1rem;".to_string() } else if *position_below.read() { format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read()) } else { format!("bottom: {}px; left: {}px;", *picker_bottom.read(), *picker_left.read()) },
-                    onclick: move |e| e.stop_propagation(),
+                    class: "fixed inset-0 z-[60]",
+                    onclick: move |_| show_picker.set(false),
+                    div {
+                        class: "fixed bg-background border border-border rounded-lg shadow-xl",
+                        class: "w-[calc(100vw-2rem)] sm:w-80",
+                        style: if *is_mobile.read() { "top: 1rem; left: 1rem; right: 1rem;".to_string() } else if *position_below.read() { format!("top: {}px; left: {}px;", *picker_top.read(), *picker_left.read()) } else { format!("bottom: {}px; left: {}px;", *picker_bottom.read(), *picker_left.read()) },
+                        onclick: move |e| e.stop_propagation(),
                     div { class: "flex items-center justify-between p-3 border-b border-border",
                         h3 { class: "text-sm font-semibold", "Select Emoji" }
                         button {
@@ -431,6 +434,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                 },
                             }
                         }
+                    }
                     }
                 }
             }

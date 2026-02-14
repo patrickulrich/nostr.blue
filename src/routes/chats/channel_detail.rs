@@ -130,7 +130,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
     // Resolve hex channel_id for the ChannelChat component
     let hex_channel_id = decode_channel_id(&channel_id_for_chat)
         .map(|(eid, _)| eid.to_hex())
-        .unwrap_or_else(|_| channel_id_for_chat.clone());
+        .ok();
 
     rsx! {
         div { class: "flex flex-col h-[calc(100vh-57px)] lg:h-screen",
@@ -165,7 +165,13 @@ pub fn ChatDetail(channel_id: String) -> Element {
             }
 
             // Chat takes remaining space
-            ChannelChat { channel_id: hex_channel_id.clone() }
+            if let Some(ref hex_id) = hex_channel_id {
+                ChannelChat { channel_id: hex_id.clone() }
+            } else {
+                div { class: "flex-1 flex items-center justify-center text-muted-foreground",
+                    p { "Invalid channel ID" }
+                }
+            }
         }
     }
 }

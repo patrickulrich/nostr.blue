@@ -95,6 +95,17 @@ pub async fn publish_date_event(
     hashtags: &[String],
     participants: &[(String, String)],
 ) -> StdResult<String, String> {
+    // Validate date formats (NIP-52: YYYY-MM-DD)
+    let parsed_start = chrono::NaiveDate::parse_from_str(start_date, "%Y-%m-%d")
+        .map_err(|_| format!("Invalid start date format '{}', expected YYYY-MM-DD", start_date))?;
+    if let Some(end) = end_date {
+        let parsed_end = chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
+            .map_err(|_| format!("Invalid end date format '{}', expected YYYY-MM-DD", end))?;
+        if parsed_end < parsed_start {
+            return Err("End date must be on or after start date".to_string());
+        }
+    }
+
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
     let d_tag = format!("event-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
@@ -366,12 +377,27 @@ pub async fn publish_availability_template(
                 Tag::custom(TagKind::Custom("amount".into()), vec![amount.to_string()]),
             );
     }
+    const VALID_DAYS: &[&str] = &["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
     for (day, start, end) in schedule {
+        let day_lower = day.to_lowercase();
+        if !VALID_DAYS.contains(&day_lower.as_str()) {
+            return Err(format!("Invalid day name: {}", day));
+        }
+        if chrono::NaiveTime::parse_from_str(start, "%H:%M").is_err()
+            && chrono::NaiveTime::parse_from_str(start, "%H:%M:%S").is_err()
+        {
+            return Err(format!("Invalid start time format: {}", start));
+        }
+        if chrono::NaiveTime::parse_from_str(end, "%H:%M").is_err()
+            && chrono::NaiveTime::parse_from_str(end, "%H:%M:%S").is_err()
+        {
+            return Err(format!("Invalid end time format: {}", end));
+        }
         builder = builder
             .tag(
                 Tag::custom(
                     TagKind::Custom("sch".into()),
-                    vec![day.clone(), start.clone(), end.clone()],
+                    vec![day_lower, start.clone(), end.clone()],
                 ),
             );
     }

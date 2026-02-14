@@ -137,6 +137,7 @@ pub fn PackNew() -> Element {
                     div { class: "flex items-center gap-4",
                         button {
                             class: "p-2 hover:bg-accent rounded-lg transition",
+                            aria_label: "Go back",
                             onclick: move |_| navigator.go_back(),
                             svg {
                                 class: "w-5 h-5",
@@ -328,9 +329,13 @@ pub fn PackNew() -> Element {
                                                         relay_hint,
                                                     });
                                                     profiles::prefetch_profiles(vec![hex]).await;
-                                                    search_query.set(String::new());
+                                                    if *search_request_id.peek() == current_search_id {
+                                                        search_query.set(String::new());
+                                                    }
                                                 }
-                                                searching.set(false);
+                                                if *search_request_id.peek() == current_search_id {
+                                                    searching.set(false);
+                                                }
                                                 return;  // Only return on successful parse
                                             }
                                             // On parse failure: fall through to profile search below
@@ -538,6 +543,7 @@ fn SelectedMemberRow(
             // Remove button
             button {
                 class: "p-2 hover:bg-accent rounded-lg transition text-destructive shrink-0",
+                aria_label: "Remove member",
                 onclick: on_remove,
                 svg {
                     class: "w-4 h-4",
