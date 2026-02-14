@@ -31,6 +31,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
         spawn(async move {
             let is_stale = || *request_id.peek() != current_id;
             loading.set(true);
+            channel_info.set(None);
 
             let (event_id, _relay_hints) = match decode_channel_id(&cid) {
                 Ok(v) => v,
