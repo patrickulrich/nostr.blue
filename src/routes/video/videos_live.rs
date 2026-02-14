@@ -469,6 +469,7 @@ async fn load_following_streams(
     events.retain(|e| seen.insert(e.id));
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     let next_until = events.last().map(|e| e.created_at.as_secs());
+    let hit_limit = events.len() >= 50;
     let following_events: Vec<Event> = events
         .into_iter()
         .filter(|event| {
@@ -490,7 +491,6 @@ async fn load_following_streams(
         })
         .collect();
     let filtered_events = filter_by_status(following_events, status);
-    let hit_limit = filtered_events.len() >= 50;
     Ok((filtered_events, next_until, hit_limit, false, Some(followed_pubkeys)))
 }
 async fn load_global_streams(
@@ -515,8 +515,8 @@ async fn load_global_streams(
     all_events.retain(|e| seen.insert(e.id));
     all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     let next_until = all_events.last().map(|e| e.created_at.as_secs());
+    let hit_limit = all_events.len() >= 50;
     let filtered_events = filter_by_status(all_events, status);
-    let hit_limit = filtered_events.len() >= 50;
     Ok((filtered_events, next_until, hit_limit))
 }
 fn filter_by_status(events: Vec<Event>, status: StatusFilter) -> Vec<Event> {

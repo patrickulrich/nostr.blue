@@ -10,6 +10,7 @@ use crate::utils::nip58::BadgeDefinition;
 use crate::utils::nip99::{Product, ProductCollection, ProductReview};
 use crate::utils::nkbip03::Citation;
 use crate::utils::recipe::RecipeMetadata;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::hover_card::{HoverCard, HoverCardContent, HoverCardTrigger};
 use dioxus_primitives::ContentSide;
@@ -22,7 +23,7 @@ pub(super) fn render_embedded_article(
 ) -> Element {
     let title = get_title(event);
     let summary = get_summary(event);
-    let image_url = get_image(event);
+    let image_url = get_image(event).filter(|u| is_valid_http_url(u));
     let pubkey_str = event.pubkey.to_hex();
     let display_name = if let Some(meta) = metadata {
         meta.display_name
@@ -72,7 +73,7 @@ pub(super) fn render_embedded_article(
                     }
                     div { class: "flex items-center gap-2",
                         if let Some(meta) = metadata {
-                            if let Some(picture) = &meta.picture {
+                            if let Some(picture) = meta.picture.as_ref().filter(|u| is_valid_http_url(u)) {
                                 img {
                                     class: "w-6 h-6 rounded-full",
                                     src: "{picture}",
@@ -146,7 +147,7 @@ pub(super) fn render_product_minicard(product: &Product, naddr: &str, _event: &E
     } else {
         None
     };
-    let image_url = product.images.first().map(|i| i.url.clone());
+    let image_url = product.images.first().map(|i| i.url.clone()).filter(|u| is_valid_http_url(u));
     let naddr_owned = naddr.to_string();
     rsx! {
         div {
@@ -210,7 +211,7 @@ pub(super) fn render_product_minicard(product: &Product, naddr: &str, _event: &E
 /// Render a badge definition minicard with HoverCard preview
 pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Element {
     let name = badge.name.clone().unwrap_or_else(|| "Badge".to_string());
-    let image_url = badge.image.clone();
+    let image_url = badge.image.clone().filter(|u| is_valid_http_url(u));
     let naddr_owned = naddr.to_string();
     rsx! {
         div {
@@ -268,7 +269,7 @@ pub(super) fn render_badge_minicard(badge: &BadgeDefinition, naddr: &str) -> Ele
 /// Render a music track minicard with HoverCard preview
 pub(super) fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element {
     let title = track.title.clone();
-    let image = track.image.clone();
+    let image = track.image.clone().filter(|u| is_valid_http_url(u));
     let duration = track
         .duration
         .map(|d| {
@@ -335,7 +336,7 @@ pub(super) fn render_track_minicard(track: &NostrTrack, _naddr: &str) -> Element
 pub(super) fn render_playlist_minicard(playlist: &NostrPlaylist, naddr: &str) -> Element {
     let title = playlist.title.clone();
     let track_count = playlist.track_refs.len();
-    let image = playlist.image.clone();
+    let image = playlist.image.clone().filter(|u| is_valid_http_url(u));
     let naddr_owned = naddr.to_string();
     rsx! {
         div {
@@ -399,7 +400,7 @@ pub(super) fn render_recipe_minicard(
     _event: &Event,
 ) -> Element {
     let title = meta.title.clone();
-    let image_url = meta.primary_image().cloned();
+    let image_url = meta.primary_image().cloned().filter(|u| is_valid_http_url(u));
     let summary = meta.summary.clone();
     let tags = meta.tags.clone();
     let naddr_owned = naddr.to_string();
@@ -475,7 +476,7 @@ pub(super) fn render_recipe_minicard(
 pub(super) fn render_publication_minicard(pub_index: &PublicationIndex, naddr: &str) -> Element {
     let title = pub_index.title.clone();
     let summary = pub_index.summary.clone();
-    let cover_image = pub_index.cover_image.clone();
+    let cover_image = pub_index.cover_image.clone().filter(|u| is_valid_http_url(u));
     let section_count = pub_index.section_addresses.len();
     let naddr_owned = naddr.to_string();
     rsx! {
@@ -537,7 +538,7 @@ pub(super) fn render_publication_minicard(pub_index: &PublicationIndex, naddr: &
 pub(super) fn render_pinboard_minicard(board: &Pinboard, naddr: &str) -> Element {
     let title = board.title.clone();
     let description = board.description.clone();
-    let image = board.image.clone();
+    let image = board.image.clone().filter(|u| is_valid_http_url(u));
     let naddr_owned = naddr.to_string();
     rsx! {
         div {

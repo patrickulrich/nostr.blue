@@ -14,7 +14,7 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
 use dioxus_core::Task;
-use nostr_sdk::{Event, RelayPoolNotification, RelayUrl, SubscriptionId};
+use nostr_sdk::{Event, PublicKey, RelayPoolNotification, RelayUrl, SubscriptionId};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
@@ -255,8 +255,8 @@ pub fn ChannelChat(channel_id: String) -> Element {
             if msg_count == 0 {
                 return;
             }
-            let current_messages = messages.peek().clone();
-            profile_prefetch::prefetch_event_authors(&current_messages).await;
+            let pubkeys: Vec<PublicKey> = messages.peek().iter().map(|e| e.pubkey).collect();
+            profile_prefetch::prefetch_pubkeys(pubkeys).await;
         });
     });
 

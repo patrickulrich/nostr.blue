@@ -636,13 +636,18 @@ pub async fn init_calendar_store() -> StdResult<(), String> {
     if *CALENDAR_INITIALIZED.read() {
         return Ok(());
     }
-    fetch_all_events(200).await?;
+    // Set immediately to prevent concurrent callers from entering
+    *CALENDAR_INITIALIZED.write() = true;
+    if let Err(e) = fetch_all_events(200).await {
+        // Reset on failure so retry is possible
+        *CALENDAR_INITIALIZED.write() = false;
+        return Err(e);
+    }
     if let Some(pubkey) = crate::stores::auth_store::get_pubkey() {
         if let Err(e) = fetch_my_rsvps(&pubkey).await {
             log::warn!("Failed to fetch user RSVPs: {}", e);
         }
     }
-    *CALENDAR_INITIALIZED.write() = true;
     Ok(())
 }
 /// Fetch availability templates for a user (kind 31926)
