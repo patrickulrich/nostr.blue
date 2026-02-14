@@ -348,6 +348,9 @@ pub fn PackNew() -> Element {
                                         }
                                     });
                                 } else {
+                                    let next_id = search_request_id.peek().wrapping_add(1);
+                                    search_request_id.set(next_id);
+                                    searching.set(false);
                                     search_results.set(Vec::new());
                                 }
                             },

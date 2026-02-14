@@ -315,14 +315,21 @@ fn render_token(token: &ContentToken) -> Element {
             }
         }
         ContentToken::Link(url) => {
-            rsx! {
-                a {
-                    href: "{url}",
-                    target: "_blank",
-                    rel: "noopener noreferrer",
-                    class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline",
-                    onclick: move |e: MouseEvent| e.stop_propagation(),
-                    "{url}"
+            let is_safe = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("nostr:");
+            if is_safe {
+                rsx! {
+                    a {
+                        href: "{url}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        class: "text-foreground hover:text-muted-foreground underline",
+                        onclick: move |e: MouseEvent| e.stop_propagation(),
+                        "{url}"
+                    }
+                }
+            } else {
+                rsx! {
+                    span { class: "text-muted-foreground break-all", "{url}" }
                 }
             }
         }
@@ -372,7 +379,7 @@ fn render_token(token: &ContentToken) -> Element {
             rsx! {
                 Link {
                     to: Route::Hashtag { tag: tag.clone() },
-                    class: "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium hover:underline",
+                    class: "text-foreground hover:text-muted-foreground font-medium hover:underline",
                     onclick: move |e: MouseEvent| e.stop_propagation(),
                     "#{tag}"
                 }

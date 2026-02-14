@@ -144,11 +144,11 @@ pub async fn publish_date_event(
     if !invalid_pubkeys.is_empty() {
         return Err(format!("Invalid participant pubkeys: {}", invalid_pubkeys.join(", ")));
     }
+    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _output = client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
-    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let naddr = format!(
         "nostr:{}",
         encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag),
@@ -230,11 +230,11 @@ pub async fn publish_time_event(
     if !invalid_pubkeys.is_empty() {
         return Err(format!("Invalid participant pubkeys: {}", invalid_pubkeys.join(", ")));
     }
+    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _output = client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
-    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let naddr = format!(
         "nostr:{}",
         encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag),
@@ -418,11 +418,11 @@ pub async fn publish_calendar(
     for coord in event_coordinates {
         builder = builder.tag(Tag::custom(TagKind::a(), vec![coord.clone()]));
     }
+    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
     let _output = client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish calendar: {}", e))?;
-    let pubkey = crate::stores::auth_store::get_pubkey().ok_or("Not authenticated")?;
-    let naddr = encode_naddr(KIND_CALENDAR, &pubkey, &d_tag);
+    let naddr = format!("nostr:{}", encode_naddr(KIND_CALENDAR, &pubkey, &d_tag));
     Ok(naddr)
 }

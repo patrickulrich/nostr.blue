@@ -153,7 +153,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                         div { class: "flex gap-1 p-2 border-b border-border overflow-x-auto",
                             button {
                                 key: "recent",
-                                class: if *selected_category.read() == EmojiCategory::Recent { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                class: if *selected_category.read() == EmojiCategory::Recent { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
                                 onclick: move |_| selected_category.set(EmojiCategory::Recent),
                                 "🕐 Recent"
                             }
@@ -163,7 +163,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     rsx! {
                                         button {
                                             key: "{custom_key}",
-                                            class: if *selected_category.read() == EmojiCategory::Custom { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                            class: if *selected_category.read() == EmojiCategory::Custom { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
                                             onclick: move |_| selected_category.set(EmojiCategory::Custom),
                                             "⭐ Custom"
                                         }
@@ -180,7 +180,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                                     rsx! {
                                         button {
                                             key: "set-{identifier_for_key}",
-                                            class: if *selected_category.read() == EmojiCategory::Set(identifier_for_class) { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                            class: if *selected_category.read() == EmojiCategory::Set(identifier_for_class) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
                                             onclick: move |_| selected_category.set(EmojiCategory::Set(identifier.clone())),
                                             "{display_name}"
                                         }
@@ -190,7 +190,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                             for (idx , (category_name , _)) in EMOJI_CATEGORIES.iter().enumerate() {
                                 button {
                                     key: "std-{idx}",
-                                    class: if *selected_category.read() == EmojiCategory::Standard(idx) { "px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 hover:bg-accent rounded text-xs whitespace-nowrap" },
+                                    class: if *selected_category.read() == EmojiCategory::Standard(idx) { "px-2 py-1 bg-accent text-foreground rounded text-xs font-medium whitespace-nowrap" } else { "px-2 py-1 text-muted-foreground hover:bg-accent rounded text-xs whitespace-nowrap" },
                                     onclick: move |_| selected_category.set(EmojiCategory::Standard(idx)),
                                     "{category_name}"
                                 }

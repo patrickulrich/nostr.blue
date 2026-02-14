@@ -21,8 +21,8 @@ pub fn ChatDetail(channel_id: String) -> Element {
     let channel_id_for_effect = channel_id.clone();
     let channel_id_for_chat = channel_id.clone();
 
-    use_effect(use_reactive(&channel_id_for_effect, move |cid| {
-        if !*client_ready.read() {
+    use_effect(use_reactive((&channel_id_for_effect, &*client_ready.read()), move |(cid, ready)| {
+        if !ready {
             return;
         }
         let current_id = request_id.peek().wrapping_add(1);
@@ -35,7 +35,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
                 Ok(v) => v,
                 Err(e) => {
                     log::error!("Failed to decode channel ID: {}", e);
-                    loading.set(false);
+                    if !is_stale() { loading.set(false); }
                     return;
                 }
             };
@@ -44,7 +44,7 @@ pub fn ChatDetail(channel_id: String) -> Element {
 
             // Try cache first
             if let Some(cached) = get_cached_channel(&hex_id) {
-                channel_info.set(Some(cached));
+                if !is_stale() { channel_info.set(Some(cached)); }
             } else {
                 // Fetch kind 40
                 match fetch_events_aggregated(

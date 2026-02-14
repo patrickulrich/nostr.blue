@@ -140,7 +140,9 @@ pub fn filter_events_with_nip50(
             let end_ts = event.effective_end_timestamp();
             match filters.time_filter {
                 TimeFilter::All => {
-                    if end_ts < now_secs.saturating_sub(86400) {
+                    if filters.hide_ended
+                        && end_ts < now_secs.saturating_sub(86400)
+                    {
                         return false;
                     }
                 }

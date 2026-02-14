@@ -26,7 +26,8 @@ use super::minicards::*;
 
 #[component]
 pub(super) fn MentionRenderer(mention: String) -> Element {
-    let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
+    let lower = mention.to_lowercase();
+    let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let pubkey_result: Option<nostr_sdk::PublicKey> = Nip19::from_bech32(identifier)
         .ok()
         .and_then(|nip19| match nip19 {
@@ -135,7 +136,8 @@ fn try_extract_event_id_from_nevent(identifier: &str) -> Option<EventId> {
 
 #[component]
 pub(super) fn EventMentionRenderer(mention: String) -> Element {
-    let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
+    let lower = mention.to_lowercase();
+    let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let nip19_result = Nip19::from_bech32(identifier).ok();
     if matches!(&nip19_result, Some(Nip19::Coordinate(_))) {
         return rsx! {
@@ -373,7 +375,7 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
             },
             class: "block my-2",
             onclick: move |e: MouseEvent| e.stop_propagation(),
-            div { class: "bg-card border border-border rounded-lg p-3 hover:bg-accent/10 transition cursor-pointer",
+            div { class: "bg-card border border-border rounded-lg p-4 hover:bg-accent/10 transition cursor-pointer",
                 div { class: "flex items-center gap-2 mb-2",
                     if let Some(meta) = metadata {
                         if let Some(picture) = &meta.picture {
@@ -404,7 +406,8 @@ pub(super) fn render_embedded_note(event: &Event, metadata: Option<&Metadata>) -
 
 #[component]
 pub(super) fn NaddrMentionRenderer(mention: String) -> Element {
-    let identifier = mention.strip_prefix("nostr:").unwrap_or(&mention);
+    let lower = mention.to_lowercase();
+    let identifier = lower.strip_prefix("nostr:").unwrap_or(&lower);
     let coord_data = nostr_sdk::nips::nip19::Nip19Coordinate::from_bech32(identifier)
         .ok()
         .map(|coord| {

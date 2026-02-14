@@ -2,6 +2,7 @@ use super::*;
 
 use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
+use crate::utils::bolt11::parse_bolt11_amount;
 use dioxus::prelude::ReadableExt;
 use futures::join;
 use instant::{Duration, Instant};
@@ -629,13 +630,6 @@ pub(super) fn extract_zap_amount(event: &Event) -> Option<u64> {
             return parse_amount_from_description(desc.as_str());
         }
     }
-    None
-}
-
-/// Parse amount from bolt11 invoice string
-/// This is a simplified parser - a full implementation would use a bolt11 crate
-// TODO: implement with lightning-invoice crate
-fn parse_bolt11_amount(_bolt11: &str) -> Option<u64> {
     None
 }
 

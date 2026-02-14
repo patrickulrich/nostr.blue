@@ -4,7 +4,8 @@ use super::*;
 pub async fn fetch_calendar_events(
     limit: usize,
 ) -> StdResult<Vec<CalendarEvent>, String> {
-    *LOADING_EVENTS.write() += 1;
+    let count = *LOADING_EVENTS.read();
+    *LOADING_EVENTS.write() = count + 1;
     let filter = calendar_events_filter(limit);
     let result = crate::stores::nostr_client::fetch_events_aggregated(
             filter,
@@ -53,7 +54,8 @@ pub async fn fetch_meetings(limit: usize) -> StdResult<Vec<LiveActivityEvent>, S
 }
 /// Fetch all events (calendar + meetings) for the events page
 pub async fn fetch_all_events(limit: usize) -> StdResult<Vec<UnifiedEvent>, String> {
-    *LOADING_EVENTS.write() += 1;
+    let count = *LOADING_EVENTS.read();
+    *LOADING_EVENTS.write() = count + 1;
     let cal_filter = calendar_events_filter(limit);
     let meetings_filter = meetings_filter(limit);
     let (cal_result, meetings_result) = futures::join!(

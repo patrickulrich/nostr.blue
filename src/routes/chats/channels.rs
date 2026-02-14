@@ -95,6 +95,8 @@ pub fn Chats() -> Element {
         if search_results.peek().is_some() {
             return;
         }
+        if *search_loading.peek() { return; }
+        if !search_query.peek().is_empty() { return; }
         pagination_loading.set(true);
         let until = *oldest_timestamp.peek();
         spawn(async move {

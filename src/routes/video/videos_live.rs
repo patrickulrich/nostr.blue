@@ -465,7 +465,10 @@ async fn load_following_streams(
     )
     .await
     .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-    let next_until = events.iter().map(|e| e.created_at.as_secs()).min();
+    let mut seen = std::collections::HashSet::new();
+    events.retain(|e| seen.insert(e.id));
+    events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let next_until = events.last().map(|e| e.created_at.as_secs());
     let hit_limit = events.len() >= 100;
     let following_events: Vec<Event> = events
         .into_iter()
@@ -508,7 +511,10 @@ async fn load_global_streams(
     )
     .await
     .map_err(|e| format!("Failed to fetch streams: {}", e))?;
-    let next_until = all_events.iter().map(|e| e.created_at.as_secs()).min();
+    let mut seen = std::collections::HashSet::new();
+    all_events.retain(|e| seen.insert(e.id));
+    all_events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let next_until = all_events.last().map(|e| e.created_at.as_secs());
     let hit_limit = all_events.len() >= 50;
     let filtered_events = filter_by_status(all_events, status);
     Ok((filtered_events, next_until, hit_limit))

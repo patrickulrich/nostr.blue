@@ -3,7 +3,7 @@ use super::*;
 use crate::stores::nostr_client::get_client;
 use crate::stores::signer::SIGNER_INFO;
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
-use instant::Duration;
+use instant::{Duration, Instant};
 use nostr_sdk::{
     Event, EventId, Filter, Kind, RelayPoolNotification, SubscriptionId, TagStandard,
     Timestamp,

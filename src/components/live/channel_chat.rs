@@ -169,7 +169,11 @@ pub fn ChannelChat(channel_id: String) -> Element {
                 let realtime_filter = channel_messages_realtime_filter(event_id);
                 match client.subscribe(realtime_filter, None).await {
                     Ok(output) => {
-                        if is_stale() { return; }
+                        if is_stale() {
+                            let sub_id = output.val;
+                            let _ = client.unsubscribe(&sub_id).await;
+                            return;
+                        }
                         let subscription_id = output.val;
                         chat_sub_id.set(Some(subscription_id.clone()));
                         log::debug!("Subscribed to channel chat {}", event_id.to_hex());

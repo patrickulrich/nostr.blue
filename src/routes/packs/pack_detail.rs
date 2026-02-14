@@ -115,7 +115,9 @@ pub fn PackDetail(naddr: String) -> Element {
                         log::error!("Failed to fetch pack member posts: {}", e);
                     }
                 }
-                posts_loading.set(false);
+                if *posts_request_id.peek() == current_id {
+                    posts_loading.set(false);
+                }
             });
         }
     });

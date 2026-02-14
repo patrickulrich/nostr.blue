@@ -15,6 +15,7 @@ pub fn ChatNew() -> Element {
     let nav = navigator();
 
     let handle_submit = move |_| {
+        if *creating.peek() { return; }
         let n = name.read().trim().to_string();
         let a = about.read().trim().to_string();
         let p = picture.read().trim().to_string();

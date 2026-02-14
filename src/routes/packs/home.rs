@@ -11,6 +11,7 @@ use crate::stores::{auth_store, nostr_client, packs_store, profiles};
 use crate::stores::packs_store::StarterPack;
 use crate::utils::time::format_relative_time;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 
 /// Tab selection
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -103,8 +104,11 @@ pub fn PacksHome() -> Element {
                             pubkeys_to_prefetch.insert(member.pubkey.clone());
                         }
                     }
-                    profiles::prefetch_profiles(pubkeys_to_prefetch.into_iter().collect()).await;
+                    let pubkeys_vec: Vec<String> = pubkeys_to_prefetch.into_iter().collect();
                     packs.set(fetched);
+                    spawn(async move {
+                        profiles::prefetch_profiles(pubkeys_vec).await;
+                    });
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch packs: {}", e);
@@ -284,7 +288,7 @@ fn PackCard(pack: StarterPack) -> Element {
 
             // Cover image
             div { class: "h-36 bg-muted overflow-hidden",
-                if let Some(ref img) = pack.image_url {
+                if let Some(ref img) = pack.image_url.as_ref().filter(|u| is_valid_http_url(u)) {
                     img {
                         src: "{img}",
                         alt: "{pack.name}",
@@ -303,7 +307,7 @@ fn PackCard(pack: StarterPack) -> Element {
 
                 // Author
                 div { class: "flex items-center gap-2",
-                    if let Some(ref pic) = author_picture {
+                    if let Some(ref pic) = author_picture.as_ref().filter(|u| is_valid_http_url(u)) {
                         img {
                             src: "{pic}",
                             alt: "{author_name}",
@@ -348,7 +352,7 @@ fn PackCard(pack: StarterPack) -> Element {
 #[component]
 fn MemberAvatar(pubkey: String) -> Element {
     let profile = profiles::get_profile(&pubkey);
-    let picture = profile.as_ref().and_then(|p| p.picture.clone());
+    let picture = profile.as_ref().and_then(|p| p.picture.clone()).filter(|u| is_valid_http_url(u));
     let name = profile
         .as_ref()
         .and_then(|p| p.display_name.clone().or(p.name.clone()))

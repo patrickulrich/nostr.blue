@@ -385,7 +385,10 @@ async fn load_following_photos(
     match stream_result {
         Ok(_) => {
             log::info!("Loaded {} photo events from following", events.len());
+            let mut seen = std::collections::HashSet::new();
+            events.retain(|e| seen.insert(e.id));
             events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            events.truncate(50);
             if events.is_empty() {
                 log::info!("No photos from followed users");
                 return Ok((Vec::new(), false));
@@ -422,6 +425,9 @@ async fn load_global_photos(until: Option<u64>) -> Result<Vec<Event>, String> {
     .await
     .map_err(|e| format!("Failed to load photos: {}", e))?;
     log::info!("Loaded {} global photo events", events.len());
+    let mut seen = std::collections::HashSet::new();
+    events.retain(|e| seen.insert(e.id));
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    events.truncate(50);
     Ok(events)
 }

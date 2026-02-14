@@ -39,6 +39,8 @@ use crate::utils::nip53::{
 };
 
 const EVENT_CACHE_SIZE: usize = 500;
+const DEFAULT_CALENDAR_DURATION_SECS: u64 = 86_400;
+const DEFAULT_LIVE_DURATION_SECS: u64 = 7_200;
 
 /// Calendar events cache (keyed by coordinate string)
 pub static CALENDAR_EVENTS_CACHE: GlobalSignal<LruCache<String, CalendarEvent>> = GlobalSignal::new(||
@@ -268,8 +270,8 @@ impl UnifiedEvent {
         self.end_timestamp()
             .unwrap_or_else(|| {
                 match self {
-                    UnifiedEvent::Calendar(_) => self.start_timestamp() + 86400,
-                    UnifiedEvent::Live(_) => self.start_timestamp() + 7200,
+                    UnifiedEvent::Calendar(_) => self.start_timestamp() + DEFAULT_CALENDAR_DURATION_SECS,
+                    UnifiedEvent::Live(_) => self.start_timestamp() + DEFAULT_LIVE_DURATION_SECS,
                 }
             })
     }
