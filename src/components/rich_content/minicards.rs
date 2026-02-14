@@ -79,12 +79,12 @@ pub(super) fn render_embedded_article(
                                     alt: "Avatar",
                                 }
                             } else {
-                                div { class: "w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold",
+                                div { class: "w-6 h-6 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold",
                                     "{display_name.chars().next().unwrap_or('?').to_uppercase()}"
                                 }
                             }
                         } else {
-                            div { class: "w-6 h-6 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs",
+                            div { class: "w-6 h-6 rounded-full bg-muted-foreground flex items-center justify-center text-accent-foreground text-xs",
                                 "?"
                             }
                         }
@@ -110,8 +110,8 @@ pub(super) fn render_wiki_minicard(wiki: &crate::utils::nip54::WikiArticle, _nad
                     identifier: identifier.clone(),
                 },
                 class: "flex items-center gap-2 p-2 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
-                div { class: "w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center shrink-0",
-                    icons::BookOpenIcon { class: "w-4 h-4 text-purple-500".to_string() }
+                div { class: "w-8 h-8 rounded bg-accent/10 flex items-center justify-center shrink-0",
+                    icons::BookOpenIcon { class: "w-4 h-4 text-accent".to_string() }
                 }
                 div { class: "flex-1 min-w-0",
                     p { class: "font-medium text-sm truncate", "{title}" }

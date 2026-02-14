@@ -35,17 +35,38 @@ pub(super) fn TwitterTweetRenderer(tweet_id: String) -> Element {
     }
 }
 
+#[derive(Clone, PartialEq)]
+enum TwitchEmbedType {
+    Stream { channel: String },
+    Clip { clip_slug: String },
+    Vod { vod_id: String },
+}
+
 #[component]
-pub(super) fn TwitchStreamRenderer(channel: String) -> Element {
+fn TwitchEmbedRenderer(embed_type: TwitchEmbedType) -> Element {
     let mut is_visible = use_signal(|| false);
     let parent_domain = web_sys::window()
         .and_then(|w| w.location().hostname().ok())
         .unwrap_or_else(|| "localhost".to_string());
-    let embed_url = format!(
-        "https://player.twitch.tv/?channel={}&parent={}",
-        channel,
-        parent_domain,
-    );
+
+    let (embed_url, title, subtitle) = match &embed_type {
+        TwitchEmbedType::Stream { channel } => (
+            format!("https://player.twitch.tv/?channel={channel}&parent={parent_domain}"),
+            format!("Watch {channel} on Twitch"),
+            "Click to load stream",
+        ),
+        TwitchEmbedType::Clip { clip_slug } => (
+            format!("https://clips.twitch.tv/embed?clip={clip_slug}&parent={parent_domain}"),
+            "Watch Twitch Clip".to_string(),
+            "Click to load clip",
+        ),
+        TwitchEmbedType::Vod { vod_id } => (
+            format!("https://player.twitch.tv/?video={vod_id}&parent={parent_domain}"),
+            "Watch Twitch VOD".to_string(),
+            "Click to load video",
+        ),
+    };
+
     rsx! {
         div {
             class: "my-2 rounded-lg overflow-hidden border border-border",
@@ -73,107 +94,28 @@ pub(super) fn TwitchStreamRenderer(channel: String) -> Element {
                     },
                     div { class: "text-center",
                         div { class: "text-purple-500 text-4xl mb-2", "▶" }
-                        div { class: "text-lg font-medium", "Watch {channel} on Twitch" }
-                        div { class: "text-sm text-muted-foreground mt-1", "Click to load stream" }
+                        div { class: "text-lg font-medium", "{title}" }
+                        div { class: "text-sm text-muted-foreground mt-1", "{subtitle}" }
                     }
                 }
             }
         }
     }
+}
+
+#[component]
+pub(super) fn TwitchStreamRenderer(channel: String) -> Element {
+    rsx! { TwitchEmbedRenderer { embed_type: TwitchEmbedType::Stream { channel } } }
 }
 
 #[component]
 pub(super) fn TwitchClipRenderer(clip_slug: String) -> Element {
-    let mut is_visible = use_signal(|| false);
-    let parent_domain = web_sys::window()
-        .and_then(|w| w.location().hostname().ok())
-        .unwrap_or_else(|| "localhost".to_string());
-    let embed_url = format!(
-        "https://clips.twitch.tv/embed?clip={}&parent={}",
-        clip_slug,
-        parent_domain,
-    );
-    rsx! {
-        div {
-            class: "my-2 rounded-lg overflow-hidden border border-border",
-            onclick: move |e: MouseEvent| e.stop_propagation(),
-            "data-twitch-visible": "{is_visible}",
-            if *is_visible.read() {
-                iframe {
-                    src: "{embed_url}",
-                    class: "w-full aspect-video",
-                    allowfullscreen: true,
-                }
-            } else {
-                div {
-                    class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
-                    role: "button",
-                    tabindex: "0",
-                    onclick: move |_| is_visible.set(true),
-                    onkeydown: move |evt: KeyboardEvent| {
-                        let activate = matches!(evt.key(), Key::Enter)
-                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
-                        if activate {
-                            evt.prevent_default();
-                            is_visible.set(true);
-                        }
-                    },
-                    div { class: "text-center",
-                        div { class: "text-purple-500 text-4xl mb-2", "▶" }
-                        div { class: "text-lg font-medium", "Watch Twitch Clip" }
-                        div { class: "text-sm text-muted-foreground mt-1", "Click to load clip" }
-                    }
-                }
-            }
-        }
-    }
+    rsx! { TwitchEmbedRenderer { embed_type: TwitchEmbedType::Clip { clip_slug } } }
 }
 
 #[component]
 pub(super) fn TwitchVodRenderer(vod_id: String) -> Element {
-    let mut is_visible = use_signal(|| false);
-    let parent_domain = web_sys::window()
-        .and_then(|w| w.location().hostname().ok())
-        .unwrap_or_else(|| "localhost".to_string());
-    let embed_url = format!(
-        "https://player.twitch.tv/?video={}&parent={}",
-        vod_id,
-        parent_domain,
-    );
-    rsx! {
-        div {
-            class: "my-2 rounded-lg overflow-hidden border border-border",
-            onclick: move |e: MouseEvent| e.stop_propagation(),
-            "data-twitch-visible": "{is_visible}",
-            if *is_visible.read() {
-                iframe {
-                    src: "{embed_url}",
-                    class: "w-full aspect-video",
-                    allowfullscreen: true,
-                }
-            } else {
-                div {
-                    class: "w-full aspect-video bg-card flex items-center justify-center cursor-pointer",
-                    role: "button",
-                    tabindex: "0",
-                    onclick: move |_| is_visible.set(true),
-                    onkeydown: move |evt: KeyboardEvent| {
-                        let activate = matches!(evt.key(), Key::Enter)
-                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
-                        if activate {
-                            evt.prevent_default();
-                            is_visible.set(true);
-                        }
-                    },
-                    div { class: "text-center",
-                        div { class: "text-purple-500 text-4xl mb-2", "▶" }
-                        div { class: "text-lg font-medium", "Watch Twitch VOD" }
-                        div { class: "text-sm text-muted-foreground mt-1", "Click to load video" }
-                    }
-                }
-            }
-        }
-    }
+    rsx! { TwitchEmbedRenderer { embed_type: TwitchEmbedType::Vod { vod_id } } }
 }
 
 #[component]
@@ -232,6 +174,7 @@ pub(super) fn WavlakeTrackRenderer(track_id: String) -> Element {
                             }
                             button {
                                 class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                                aria_label: "Play track",
                                 onclick: handle_play,
                                 dangerous_inner_html: icons::PLAY,
                             }
@@ -918,11 +861,9 @@ pub(super) fn AppleMusicRenderer(embed_url: String, is_song: bool) -> Element {
                     class: "flex items-center gap-3 p-4 bg-gradient-to-r from-[#fc3c44]/10 to-[#fa57c1]/10 border border-[#fc3c44]/30 rounded-lg cursor-pointer hover:from-[#fc3c44]/20 hover:to-[#fa57c1]/20 transition",
                     role: "button",
                     tabindex: "0",
-                    onclick: move |_| is_visible.set(true),
+                    onclick: move |_| { if url_valid { is_visible.set(true); } },
                     onkeydown: move |evt: KeyboardEvent| {
-                        let activate = matches!(evt.key(), Key::Enter)
-                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
-                        if activate {
+                        if (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) && url_valid {
                             evt.prevent_default();
                             is_visible.set(true);
                         }
@@ -1049,11 +990,9 @@ pub(super) fn RumbleRenderer(embed_url: String) -> Element {
                     class: "relative w-full aspect-video cursor-pointer group bg-[#85c742]/10",
                     role: "button",
                     tabindex: "0",
-                    onclick: move |_| is_visible.set(true),
+                    onclick: move |_| { if url_valid { is_visible.set(true); } },
                     onkeydown: move |evt: KeyboardEvent| {
-                        let activate = matches!(evt.key(), Key::Enter)
-                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
-                        if activate {
+                        if (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) && url_valid {
                             evt.prevent_default();
                             is_visible.set(true);
                         }
@@ -1113,11 +1052,9 @@ pub(super) fn TidalRenderer(embed_url: String) -> Element {
                     class: "flex items-center gap-3 p-4 bg-[#000000]/10 border border-[#000000]/30 dark:bg-white/10 dark:border-white/30 rounded-lg cursor-pointer hover:bg-[#000000]/20 dark:hover:bg-white/20 transition",
                     role: "button",
                     tabindex: "0",
-                    onclick: move |_| is_visible.set(true),
+                    onclick: move |_| { if url_valid { is_visible.set(true); } },
                     onkeydown: move |evt: KeyboardEvent| {
-                        let activate = matches!(evt.key(), Key::Enter)
-                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
-                        if activate {
+                        if (evt.key() == Key::Enter || evt.key() == Key::Character(" ".to_string())) && url_valid {
                             evt.prevent_default();
                             is_visible.set(true);
                         }
@@ -1598,6 +1535,7 @@ pub(super) fn PodcastEpisodeRenderer(guid: String) -> Element {
                             }
                             button {
                                 class: "absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition",
+                                aria_label: "Play episode",
                                 onclick: handle_play,
                                 dangerous_inner_html: icons::PLAY,
                             }

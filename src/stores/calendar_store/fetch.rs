@@ -266,8 +266,7 @@ async fn fetch_event_by_coordinate(
     let filter = Filter::new()
         .kind(Kind::Custom(kind))
         .author(pk)
-        .identifier(&d_tag)
-        .limit(1);
+        .identifier(&d_tag);
     let events = crate::stores::nostr_client::fetch_events_aggregated(
             filter,
             Duration::from_secs(10),

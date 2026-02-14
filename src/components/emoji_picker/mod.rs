@@ -67,9 +67,9 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
             button {
                 id: "{button_id}",
                 class: if props.disabled {
-                    if props.icon_only { "p-2 rounded-full opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-muted text-foreground rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
+                    if props.icon_only { "p-2 rounded-lg opacity-50 cursor-not-allowed" } else { "px-3 py-2 bg-muted text-foreground rounded-lg text-sm font-medium opacity-50 cursor-not-allowed" }
                 } else {
-                    if props.icon_only { "p-2 rounded-full hover:bg-accent transition" } else { "px-3 py-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm font-medium transition" }
+                    if props.icon_only { "p-2 hover:bg-accent rounded-lg transition" } else { "px-3 py-2 bg-muted text-foreground hover:bg-accent rounded-lg text-sm font-medium transition" }
                 },
                 title: if props.icon_only { "Add emoji" } else { "" },
                 aria_label: if props.icon_only { "{props.aria_label}" } else { "" },

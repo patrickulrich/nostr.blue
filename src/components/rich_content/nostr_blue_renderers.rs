@@ -35,11 +35,11 @@ use super::minicards::render_playlist_minicard;
 /// Generic loading skeleton for nostr.blue content cards
 pub(super) fn nostr_blue_loading_skeleton() -> Element {
     rsx! {
-        div { class: "flex items-center gap-3 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg animate-pulse",
-            div { class: "w-12 h-12 bg-blue-500/30 rounded-lg shrink-0" }
+        div { class: "flex items-center gap-3 p-4 bg-muted border border-border rounded-lg animate-pulse",
+            div { class: "w-12 h-12 bg-muted-foreground/30 rounded-lg shrink-0" }
             div { class: "flex-1 min-w-0",
-                div { class: "h-4 bg-blue-500/30 rounded w-3/4 mb-2" }
-                div { class: "h-3 bg-blue-500/20 rounded w-1/2" }
+                div { class: "h-4 bg-muted-foreground/30 rounded w-3/4 mb-2" }
+                div { class: "h-3 bg-muted-foreground/20 rounded w-1/2" }
             }
         }
     }
@@ -48,7 +48,7 @@ pub(super) fn nostr_blue_loading_skeleton() -> Element {
 /// Generic error display for nostr.blue content
 pub(super) fn nostr_blue_error(message: &str) -> Element {
     rsx! {
-        div { class: "p-4 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 rounded-lg text-sm",
+        div { class: "p-4 bg-destructive/10 text-destructive rounded-lg text-sm",
             "{message}"
         }
     }

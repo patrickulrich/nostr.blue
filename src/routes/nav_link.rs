@@ -57,6 +57,14 @@ pub(super) fn NavLink(
         | (Route::BibleHome {}, Route::BibleChapter { .. })
         | (Route::BibleHome {}, Route::BibleSearch {}) => true,
         (Route::Highlights {}, Route::Highlights {}) => true,
+        // Packs group
+        (Route::PacksHome {}, Route::PacksHome {})
+        | (Route::PacksHome {}, Route::PackNew {})
+        | (Route::PacksHome {}, Route::PackDetail { .. }) => true,
+        // Chats group
+        (Route::Chats {}, Route::Chats {})
+        | (Route::Chats {}, Route::ChatNew {})
+        | (Route::Chats {}, Route::ChatDetail { .. }) => true,
         _ => false,
     };
     let font_class = if is_active { "font-bold" } else { "" };
@@ -68,7 +76,7 @@ pub(super) fn NavLink(
             span { "{label}" }
             if let Some(count) = badge {
                 if count > 0 {
-                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-blue-500 text-white rounded-full text-sm font-bold flex items-center justify-center",
+                    span { class: "ml-auto min-w-[24px] h-6 px-2 bg-primary text-primary-foreground rounded-full text-sm font-bold flex items-center justify-center",
                         "{count}"
                     }
                 }

@@ -176,11 +176,19 @@ impl CountsCache {
                         }
                     }
                 }
-                Kind::Repost => cached.counts.reposts += 1,
+                Kind::Repost => {
+                    cached.counts.reposts += 1;
+                    if is_current_user {
+                        cached.counts.user_reposted = Some(true);
+                    }
+                }
                 Kind::ZapReceipt => {
                     cached.counts.zaps += 1;
                     if let Some(amount) = zap_amount {
                         cached.counts.zap_amount_sats += amount;
+                    }
+                    if is_current_user {
+                        cached.counts.user_zapped = Some(true);
                     }
                 }
                 _ => {}
