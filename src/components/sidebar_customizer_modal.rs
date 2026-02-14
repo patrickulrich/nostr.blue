@@ -2,7 +2,7 @@
 //! Supports drag-to-reorder with visual page boundary dividers
 use crate::components::icons::{
     self as icons, BellIcon, BookOpenIcon, BookmarkIcon, CameraIcon, CompassIcon,
-    HomeIcon, MailIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, VideoIcon,
+    HomeIcon, MailIcon, MessageCircleIcon, PinIcon, SettingsIcon, ShoppingBagIcon, UserIcon, UsersIcon, VideoIcon,
 };
 use crate::stores::sidebar_store::{
     default_sidebar_items, save_sidebar_preferences, SidebarItem,
@@ -801,6 +801,16 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                         y2: "18",
                     }
                 }
+            }
+        }
+        SidebarItem::Packs => {
+            rsx! {
+                UsersIcon { class: class.to_string() }
+            }
+        }
+        SidebarItem::Chats => {
+            rsx! {
+                MessageCircleIcon { class: class.to_string() }
             }
         }
         SidebarItem::Dvm => {

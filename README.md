@@ -2,7 +2,7 @@
 
 A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
-![Version](https://img.shields.io/badge/version-0.7.12-blue)
+![Version](https://img.shields.io/badge/version-0.7.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
 ![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
@@ -371,7 +371,7 @@ Production builds are optimized with:
 | [NIP-24](https://github.com/nostr-protocol/nips/blob/master/24.md) | Extra metadata fields | ✅ |
 | [NIP-25](https://github.com/nostr-protocol/nips/blob/master/25.md) | Reactions | ✅ |
 | [NIP-27](https://github.com/nostr-protocol/nips/blob/master/27.md) | Text Note References | ✅ |
-| [NIP-28](https://github.com/nostr-protocol/nips/blob/master/28.md) | Public Chat | ❌ |
+| [NIP-28](https://github.com/nostr-protocol/nips/blob/master/28.md) | Public Chat | ✅ |
 | [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) | Relay-based Groups | ❌ |
 | [NIP-30](https://github.com/nostr-protocol/nips/blob/master/30.md) | Custom Emoji | ✅ |
 | [NIP-31](https://github.com/nostr-protocol/nips/blob/master/31.md) | Unknown Events | ❌ |
@@ -401,7 +401,7 @@ Production builds are optimized with:
 | [NIP-58](https://github.com/nostr-protocol/nips/blob/master/58.md) | Badges | ✅ |
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | ✅ |
 | [NIP-60](https://github.com/nostr-protocol/nips/blob/master/60.md) | Cashu Wallet | ✅ |
-| [NIP-61](https://github.com/nostr-protocol/nips/blob/master/61.md) | Nutzaps | ❌ |
+| [NIP-61](https://github.com/nostr-protocol/nips/blob/master/61.md) | Nutzaps | ✅ |
 | [NIP-62](https://github.com/nostr-protocol/nips/blob/master/62.md) | Request to Vanish | ❌ |
 | [NIP-64](https://github.com/nostr-protocol/nips/blob/master/64.md) | Chess (PGN) | ❌ |
 | [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata | ✅ |

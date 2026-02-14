@@ -39,7 +39,7 @@ fn get_event_detail_route(event: &UnifiedEvent, from: Option<String>) -> Route {
         }
     }
 }
-/// Render status and private badges for event cards
+/// Render status badges for event cards
 fn render_badges(event: &UnifiedEvent) -> Element {
     let status = get_event_status(event);
     rsx! {
@@ -65,24 +65,6 @@ fn render_badges(event: &UnifiedEvent) -> Element {
                 }
             },
             EventStatus::None => rsx! {},
-        }
-        if event.is_private() {
-            div { class: "absolute top-2 right-2 px-2 py-1 bg-purple-600 text-white text-xs rounded flex items-center gap-1",
-                svg {
-                    class: "w-3 h-3",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    fill: "none",
-                    view_box: "0 0 24 24",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    path {
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        d: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
-                    }
-                }
-                "Private"
-            }
         }
     }
 }
