@@ -84,7 +84,7 @@ use blossom::BlossomPage;
 use bookmarks::Bookmarks;
 use cashu_wallet::CashuWallet;
 use citations::{CitationDetail, CitationsHome};
-use code::{CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore, CodeGlobalIssues, CodeGlobalPulls, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodeNew, CodeNotifications, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlame, CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare, CodeRepoDiscussions, CodeRepoInsights, CodeRepoIssues, CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings, CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile};
+use code::{CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore, CodeGlobalIssues, CodeGlobalPulls, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodeNew, CodeNotifications, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlame, CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare, CodeRepoDiscussions, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile, CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings, CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile};
 use chats::{ChatDetail, ChatNew, Chats};
 use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
@@ -271,6 +271,8 @@ pub enum Route {
     CodeRepoCompare { naddr: String },
     #[route("/code/repo/:naddr/upload")]
     CodeRepoUpload { naddr: String },
+    #[route("/code/repo/:naddr/new-file")]
+    CodeRepoNewFile { naddr: String },
     #[route("/code/repo/:naddr/releases")]
     CodeRepoReleases { naddr: String },
     #[route("/code/repo/:naddr/discussions")]
@@ -557,6 +559,7 @@ fn Layout() -> Element {
         | Route::CodeRepoBlame { .. }
         | Route::CodeRepoCompare { .. }
         | Route::CodeRepoUpload { .. }
+        | Route::CodeRepoNewFile { .. }
         | Route::CodeRepoReleases { .. }
         | Route::CodeRepoDiscussions { .. }
         | Route::CodeDiscussionNew { .. }
