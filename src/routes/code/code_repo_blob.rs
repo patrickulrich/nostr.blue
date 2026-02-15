@@ -24,7 +24,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             web_sys::window()
-                .and_then(|w| w.location().ok())
+                .map(|w| w.location())
                 .and_then(|l| l.hash().ok())
                 .and_then(|h| parse_line_hash(&h))
         }

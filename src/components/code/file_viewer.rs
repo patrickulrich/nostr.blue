@@ -114,9 +114,8 @@ fn set_url_hash(hash: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(window) = web_sys::window() {
-            if let Ok(location) = window.location() {
-                let _ = location.set_hash(hash);
-            }
+            let location = window.location();
+            let _ = location.set_hash(hash);
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
