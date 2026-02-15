@@ -108,7 +108,7 @@ impl SidebarItem {
     /// Items temporarily hidden from sidebar and customizer.
     /// Routes remain accessible via direct navigation.
     pub fn is_hidden(&self) -> bool {
-        matches!(self, SidebarItem::Code | SidebarItem::Citations | SidebarItem::WebBookmarks)
+        matches!(self, SidebarItem::Citations | SidebarItem::WebBookmarks)
     }
     /// Human-readable display label
     pub fn label(&self) -> &'static str {
@@ -299,6 +299,7 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Nips,
         SidebarItem::Badges,
         SidebarItem::Dvm,
+        SidebarItem::Code,
         SidebarItem::Publications,
         SidebarItem::Blossom,
         SidebarItem::Bible,

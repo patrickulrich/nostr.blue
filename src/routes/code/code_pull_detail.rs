@@ -21,6 +21,39 @@ use crate::utils::nip34::{GitComment, IssueStatus, PullRequest, Repository, Revi
 use crate::utils::permissions;
 use dioxus::prelude::*;
 
+/// Count additions and deletions from a unified diff/patch content.
+fn count_diff_stats(content: &str) -> (usize, usize) {
+    let mut additions = 0;
+    let mut deletions = 0;
+    for line in content.lines() {
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+        if line.starts_with('+') {
+            additions += 1;
+        } else if line.starts_with('-') {
+            deletions += 1;
+        }
+    }
+    (additions, deletions)
+}
+
+/// Returns (label, bg_class, text_class) for a PR size badge based on total changed lines.
+fn pr_size_badge(additions: usize, deletions: usize) -> (&'static str, &'static str, &'static str) {
+    let total = additions + deletions;
+    if total < 10 {
+        ("XS", "bg-green-500/10", "text-green-500")
+    } else if total < 30 {
+        ("S", "bg-blue-500/10", "text-blue-500")
+    } else if total < 100 {
+        ("M", "bg-yellow-500/10", "text-yellow-500")
+    } else if total < 500 {
+        ("L", "bg-orange-500/10", "text-orange-500")
+    } else {
+        ("XL", "bg-red-500/10", "text-red-500")
+    }
+}
+
 /// PR detail tab
 #[derive(Clone, Copy, PartialEq)]
 enum PrTab {
@@ -201,6 +234,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let mut is_updating_status = use_signal(|| false);
     let mut show_merge_confirm = use_signal(|| false);
     let mut merge_strategy = use_signal(|| "merge".to_string());
+    let mut show_update_warning = use_signal(|| true);
     let mut show_update_form = use_signal(|| false);
     let mut update_content = use_signal(String::new);
     let mut update_commit = use_signal(String::new);
@@ -357,7 +391,25 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "PR #{pr.event_id.chars().take(8).collect::<String>()}"
                         }
                     }
-                    CodeStatusBadge { status: pr_status }
+                    div { class: "flex items-center gap-2",
+                        {
+                            let (adds, dels) = count_diff_stats(&pr.content);
+                            let total = adds + dels;
+                            if total > 0 {
+                                let (label, bg, text) = pr_size_badge(adds, dels);
+                                rsx! {
+                                    span {
+                                        class: "px-2 py-0.5 text-xs font-medium rounded-full border {bg} {text}",
+                                        title: "+{adds} -{dels} ({total} lines)",
+                                        "{label}"
+                                    }
+                                }
+                            } else {
+                                rsx! {}
+                            }
+                        }
+                        CodeStatusBadge { status: pr_status }
+                    }
                 }
                 div { class: "flex flex-wrap gap-2",
                     if pr.is_cover_letter {
@@ -498,6 +550,59 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                                 "Approval requirement met ({current_approvals}/{required_approvals})"
                             } else {
                                 "Requires {required_approvals} approval(s) to merge ({current_approvals}/{required_approvals})"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Auto-update detection banner
+            if *show_update_warning.read()
+                && (pr_status == IssueStatus::Open || pr_status == IssueStatus::Draft)
+                && pr.parent_commit.is_some()
+            {
+                if let Some(r) = repo.read().as_ref() {
+                    if r.created_at > pr.created_at {
+                        div { class: "p-3 rounded-lg border bg-yellow-500/10 border-yellow-500/20 text-sm",
+                            div { class: "flex items-start justify-between gap-2",
+                                div { class: "flex items-start gap-2",
+                                    svg {
+                                        class: "w-4 h-4 text-yellow-500 shrink-0 mt-0.5",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        width: "24",
+                                        height: "24",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" }
+                                        line { x1: "12", y1: "9", x2: "12", y2: "13" }
+                                        line { x1: "12", y1: "17", x2: "12.01", y2: "17" }
+                                    }
+                                    p { class: "text-yellow-700 dark:text-yellow-400",
+                                        "This branch may be out of date with the base branch. The repository has been updated since this PR was created."
+                                    }
+                                }
+                                button {
+                                    class: "text-yellow-500 hover:text-yellow-700 dark:hover:text-yellow-300 shrink-0",
+                                    onclick: move |_| show_update_warning.set(false),
+                                    svg {
+                                        class: "w-4 h-4",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        width: "24",
+                                        height: "24",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                        line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                    }
+                                }
                             }
                         }
                     }

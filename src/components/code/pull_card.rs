@@ -5,11 +5,13 @@ use super::status_badge::{status_color_class, BadgeSize, CodeStatusBadge};
 use crate::routes::Route;
 use crate::utils::format::truncate_commit;
 use crate::utils::nip34::PullRequest;
+use crate::utils::parse_task_progress;
 use dioxus::prelude::*;
 /// Pull request card component for lists
 #[component]
 pub fn CodePullCard(pr: PullRequest) -> Element {
     let title = pr.display_title();
+    let task_progress = parse_task_progress(&pr.content);
     rsx! {
         Link {
             to: Route::CodePullDetail {
@@ -27,6 +29,26 @@ pub fn CodePullCard(pr: PullRequest) -> Element {
                         if let Some(ref commit) = pr.commit {
                             span { "·" }
                             span { class: "font-mono text-xs", "{truncate_commit(commit)}" }
+                        }
+                        if let Some((checked, total)) = task_progress {
+                            span { "·" }
+                            span { class: "flex items-center gap-1 text-xs",
+                                svg {
+                                    class: "w-3 h-3",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polyline { points: "9 11 12 14 22 4" }
+                                    path { d: "M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" }
+                                }
+                                "{checked}/{total}"
+                            }
                         }
                     }
                 }

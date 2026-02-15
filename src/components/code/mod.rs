@@ -21,6 +21,7 @@ pub mod readme_viewer;
 pub mod repo_action_bar;
 pub mod repo_card;
 pub mod repo_header;
+pub mod repo_search;
 pub mod repo_tab_nav;
 pub mod review_section;
 pub mod snippet_card;
@@ -54,6 +55,8 @@ pub use repo_card::CodeRepoCard;
 #[allow(unused_imports)]
 pub use repo_card::CodeRepoCardCompact;
 pub use repo_header::RepoHeader;
+#[allow(unused_imports)]
+pub use repo_search::RepoSearchModal;
 pub use repo_tab_nav::RepoTabNav;
 pub use snippet_card::CodeSnippetCard;
 #[allow(unused_imports)]

@@ -2,7 +2,7 @@
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
-use crate::components::code::{ContributorsList, ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
+use crate::components::code::{ContributorsList, ReadmeViewer, RepoActionBar, RepoHeader, RepoSearchModal, RepoTabNav};
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_readme, fetch_repository};
@@ -83,8 +83,31 @@ pub fn CodeRepo(naddr: String) -> Element {
 }
 #[component]
 fn RepoContent(repo: Repository, naddr: String) -> Element {
+    let mut show_search = use_signal(|| false);
+    let naddr_search = naddr.clone();
+    let repo_search = repo.clone();
+
     rsx! {
-        div { class: "space-y-4",
+        div {
+            class: "space-y-4",
+            tabindex: 0,
+            onkeydown: move |evt: Event<KeyboardData>| {
+                if (evt.modifiers().meta() || evt.modifiers().ctrl()) && evt.modifiers().shift() && evt.key() == Key::Character("f".into()) {
+                    evt.prevent_default();
+                    show_search.set(true);
+                }
+            },
+
+            // Search modal
+            if show_search() {
+                RepoSearchModal {
+                    repo: repo_search.clone(),
+                    naddr: naddr_search.clone(),
+                    git_ref: "HEAD".to_string(),
+                    on_close: move |_| show_search.set(false),
+                }
+            }
+
             div { class: "flex flex-col lg:flex-row lg:items-center justify-between gap-4",
                 RepoHeader { repo: repo.clone() }
                 RepoActionBar { repo: repo.clone(), naddr: naddr.clone() }

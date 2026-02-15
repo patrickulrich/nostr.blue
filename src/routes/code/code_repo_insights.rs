@@ -2,9 +2,11 @@
 //!
 //! Shows repository statistics, activity timeline, and contributor overview.
 //! Fetches issues, PRs, and (for GitHub repos) commits to build a dashboard.
+use crate::components::code::dependency_viewer::{parse_dependencies, Dependency, DepType};
 use crate::components::code::RepoTabNav;
 use crate::components::icons;
 use crate::routes::Route;
+use crate::services::git_hosting::file_fetcher;
 use crate::services::git_hosting::git_service::extract_github_info;
 use crate::services::git_hosting::{fetch_repo_issues, fetch_repo_prs, fetch_repository, github_import};
 use crate::stores::nostr_client;
@@ -94,6 +96,8 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let mut issues = use_signal(Vec::<Issue>::new);
     let mut prs = use_signal(Vec::<PullRequest>::new);
     let mut commit_count = use_signal(|| None::<usize>);
+    let mut languages = use_signal(|| None::<Vec<(String, f64)>>);
+    let mut dependencies = use_signal(|| None::<Vec<(String, Vec<Dependency>)>>);
     let mut data_loading = use_signal(|| true);
 
     let naddr_for_fetch = naddr.clone();
@@ -116,11 +120,37 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 prs.set(fetched);
             }
 
-            // For GitHub repos, fetch commit count
+            // For GitHub repos, fetch commit count and languages
             if let Some((owner, repo_name)) = extract_github_info(&r) {
                 if let Ok(commits) = github_import::fetch_commits(&owner, &repo_name, 100).await {
                     commit_count.set(Some(commits.len()));
                 }
+                if let Ok(lang_map) = github_import::fetch_languages(&owner, &repo_name).await {
+                    let total: u64 = lang_map.values().sum();
+                    if total > 0 {
+                        let mut sorted: Vec<(String, f64)> = lang_map
+                            .into_iter()
+                            .map(|(name, bytes)| (name, (bytes as f64 / total as f64) * 100.0))
+                            .collect();
+                        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                        languages.set(Some(sorted));
+                    }
+                }
+            }
+
+            // Fetch dependency manifest files
+            let manifest_files = ["Cargo.toml", "package.json", "requirements.txt"];
+            let mut dep_results: Vec<(String, Vec<Dependency>)> = Vec::new();
+            for filename in manifest_files {
+                if let Ok(content) = file_fetcher::fetch_file(&r, filename, None).await {
+                    let parsed = parse_dependencies(filename, &content);
+                    if !parsed.is_empty() {
+                        dep_results.push((filename.to_string(), parsed));
+                    }
+                }
+            }
+            if !dep_results.is_empty() {
+                dependencies.set(Some(dep_results));
             }
 
             data_loading.set(false);
@@ -207,6 +237,16 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                         icon_svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>"#,
                         color: "text-yellow-500",
                     }
+                }
+
+                // Language Breakdown
+                if let Some(langs) = languages.read().as_ref() {
+                    LanguageBreakdown { languages: langs.clone() }
+                }
+
+                // Dependencies
+                if let Some(dep_data) = dependencies.read().as_ref() {
+                    DependencySection { dep_files: dep_data.clone() }
                 }
 
                 // Recent Activity Timeline
@@ -467,6 +507,197 @@ fn ContributorCard(pubkey: String, is_owner: bool) -> Element {
                     p { class: "text-xs text-muted-foreground truncate", "{nip05_val}" }
                 } else {
                     p { class: "text-xs text-muted-foreground truncate", "{truncate_pubkey(&pubkey)}" }
+                }
+            }
+        }
+    }
+}
+
+/// Get a color for a programming language
+fn language_color(lang: &str) -> &'static str {
+    match lang {
+        "Rust" => "#DEA584",
+        "JavaScript" => "#F1E05A",
+        "TypeScript" => "#3178C6",
+        "Python" => "#3572A5",
+        "Go" => "#00ADD8",
+        "Java" => "#B07219",
+        "C" => "#555555",
+        "C++" => "#F34B7D",
+        "Ruby" => "#701516",
+        "PHP" => "#4F5D95",
+        "Swift" => "#FFAC45",
+        "Kotlin" => "#A97BFF",
+        "HTML" => "#E34C26",
+        "CSS" => "#563D7C",
+        "Shell" => "#89E051",
+        "Nix" => "#7E7EFF",
+        "Lua" => "#000080",
+        "Dart" => "#00B4AB",
+        "Scala" => "#C22D40",
+        "Haskell" => "#5E5086",
+        _ => "#8B8B8B",
+    }
+}
+
+/// Horizontal stacked language bar chart
+#[component]
+fn LanguageBreakdown(languages: Vec<(String, f64)>) -> Element {
+    if languages.is_empty() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "pt-6",
+            h2 { class: "text-lg font-semibold mb-4 flex items-center gap-2",
+                svg {
+                    class: "w-5 h-5 text-muted-foreground",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M16 18l6-6-6-6" }
+                    path { d: "M8 6l-6 6 6 6" }
+                }
+                "Languages"
+            }
+            // Stacked bar
+            div { class: "flex h-3 rounded-full overflow-hidden bg-muted",
+                for (name , pct) in languages.iter() {
+                    div {
+                        key: "{name}",
+                        class: "h-full",
+                        style: "width: {pct:.1}%; background-color: {language_color(name)};",
+                        title: "{name}: {pct:.1}%",
+                    }
+                }
+            }
+            // Legend
+            div { class: "flex flex-wrap gap-x-4 gap-y-1 mt-3",
+                for (name , pct) in languages.iter() {
+                    div {
+                        key: "{name}",
+                        class: "flex items-center gap-1.5 text-sm",
+                        span {
+                            class: "w-3 h-3 rounded-full shrink-0",
+                            style: "background-color: {language_color(name)};",
+                        }
+                        span { class: "text-foreground", "{name}" }
+                        span { class: "text-muted-foreground", "{pct:.1}%" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Dependency section with collapsible groups
+#[component]
+fn DependencySection(dep_files: Vec<(String, Vec<Dependency>)>) -> Element {
+    if dep_files.is_empty() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "pt-6",
+            h2 { class: "text-lg font-semibold mb-4 flex items-center gap-2",
+                svg {
+                    class: "w-5 h-5 text-muted-foreground",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    rect { x: "3", y: "3", width: "7", height: "7" }
+                    rect { x: "14", y: "3", width: "7", height: "7" }
+                    rect { x: "14", y: "14", width: "7", height: "7" }
+                    rect { x: "3", y: "14", width: "7", height: "7" }
+                }
+                "Dependencies"
+            }
+            div { class: "space-y-3",
+                for (filename , deps) in dep_files.iter() {
+                    DependencyFileGroup {
+                        key: "{filename}",
+                        filename: filename.clone(),
+                        deps: deps.clone(),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A collapsible group of dependencies from a single manifest file
+#[component]
+fn DependencyFileGroup(filename: String, deps: Vec<Dependency>) -> Element {
+    let runtime: Vec<&Dependency> = deps.iter().filter(|d| d.dep_type == DepType::Runtime).collect();
+    let dev: Vec<&Dependency> = deps.iter().filter(|d| d.dep_type == DepType::Dev).collect();
+    let build: Vec<&Dependency> = deps.iter().filter(|d| d.dep_type == DepType::Build).collect();
+
+    rsx! {
+        div { class: "bg-card border border-border rounded-lg overflow-hidden",
+            // File header
+            div { class: "flex items-center justify-between p-3 bg-muted/50",
+                span { class: "text-sm font-medium text-foreground font-mono", "{filename}" }
+                span { class: "text-xs text-muted-foreground", "{deps.len()} dependencies" }
+            }
+            if !runtime.is_empty() {
+                details { class: "group",
+                    open: true,
+                    summary { class: "flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition border-t border-border",
+                        span { class: "text-sm font-medium text-blue-500", "Dependencies" }
+                        span { class: "text-xs text-muted-foreground", "{runtime.len()}" }
+                    }
+                    div { class: "divide-y divide-border",
+                        for dep in runtime.iter() {
+                            div { class: "flex items-center justify-between px-3 py-2 hover:bg-accent/20 transition",
+                                span { class: "text-sm text-foreground", "{dep.name}" }
+                                code { class: "text-xs text-muted-foreground font-mono", "{dep.version}" }
+                            }
+                        }
+                    }
+                }
+            }
+            if !dev.is_empty() {
+                details { class: "group",
+                    summary { class: "flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition border-t border-border",
+                        span { class: "text-sm font-medium text-purple-500", "Dev Dependencies" }
+                        span { class: "text-xs text-muted-foreground", "{dev.len()}" }
+                    }
+                    div { class: "divide-y divide-border",
+                        for dep in dev.iter() {
+                            div { class: "flex items-center justify-between px-3 py-2 hover:bg-accent/20 transition",
+                                span { class: "text-sm text-foreground", "{dep.name}" }
+                                code { class: "text-xs text-muted-foreground font-mono", "{dep.version}" }
+                            }
+                        }
+                    }
+                }
+            }
+            if !build.is_empty() {
+                details { class: "group",
+                    summary { class: "flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition border-t border-border",
+                        span { class: "text-sm font-medium text-orange-500", "Build Dependencies" }
+                        span { class: "text-xs text-muted-foreground", "{build.len()}" }
+                    }
+                    div { class: "divide-y divide-border",
+                        for dep in build.iter() {
+                            div { class: "flex items-center justify-between px-3 py-2 hover:bg-accent/20 transition",
+                                span { class: "text-sm text-foreground", "{dep.name}" }
+                                code { class: "text-xs text-muted-foreground font-mono", "{dep.version}" }
+                            }
+                        }
+                    }
                 }
             }
         }

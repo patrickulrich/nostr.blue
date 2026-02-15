@@ -151,6 +151,32 @@ pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, 
         .map_err(|e| format!("Failed to parse response: {}", e))?;
     Ok(search.items)
 }
+/// Fetch repository language breakdown
+///
+/// Returns a map of language name -> bytes of code
+pub async fn fetch_languages(
+    owner: &str,
+    repo: &str,
+) -> Result<std::collections::HashMap<String, u64>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/languages",
+        owner, repo,
+    );
+    let response = Request::get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.ok() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
 /// GitHub commit info
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GitHubCommit {
@@ -242,6 +268,55 @@ pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, Stri
         .map_err(|e| format!("Failed to parse response: {}", e))?;
     Ok(branches.into_iter().map(|b| b.name).collect())
 }
+/// A single code search result from GitHub
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct CodeSearchResult {
+    pub name: String,
+    pub path: String,
+    pub html_url: String,
+    #[serde(default)]
+    pub text_matches: Vec<TextMatch>,
+}
+
+/// Text match fragment from GitHub code search
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct TextMatch {
+    pub fragment: String,
+}
+
+/// Search code within a specific GitHub repository
+pub async fn search_code(
+    owner: &str,
+    repo: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<CodeSearchResult>, String> {
+    let raw_query = format!("{} repo:{}/{}", query, owner, repo);
+    let encoded_query = urlencoding::encode(&raw_query);
+    let url = format!(
+        "https://api.github.com/search/code?q={}&per_page={}",
+        encoded_query, limit,
+    );
+    let response = Request::get(&url)
+        .header("Accept", "application/vnd.github.text-match+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.ok() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    #[derive(Deserialize)]
+    struct SearchResponse {
+        items: Vec<CodeSearchResult>,
+    }
+    let search: SearchResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    Ok(search.items)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

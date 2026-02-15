@@ -5,11 +5,13 @@ use super::status_badge::{BadgeSize, CodeStatusBadge};
 use crate::components::icons::CommentIcon;
 use crate::routes::Route;
 use crate::utils::nip34::Issue;
+use crate::utils::parse_task_progress;
 use dioxus::prelude::*;
 /// Issue card component for lists
 #[component]
 pub fn CodeIssueCard(issue: Issue) -> Element {
     let title = issue.display_title();
+    let task_progress = parse_task_progress(&issue.content);
     rsx! {
         Link {
             to: Route::CodeIssueDetail {
@@ -29,6 +31,26 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                             div { class: "flex items-center gap-1",
                                 CommentIcon { class: "w-3.5 h-3.5".to_string() }
                                 span { "{issue.comment_count}" }
+                            }
+                        }
+                        if let Some((checked, total)) = task_progress {
+                            span { "·" }
+                            span { class: "flex items-center gap-1 text-xs",
+                                svg {
+                                    class: "w-3 h-3",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polyline { points: "9 11 12 14 22 4" }
+                                    path { d: "M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" }
+                                }
+                                "{checked}/{total}"
                             }
                         }
                     }

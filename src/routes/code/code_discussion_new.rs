@@ -177,6 +177,7 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
                         option { value: "ideas", "Ideas" }
                         option { value: "q-a", "Q&A" }
                         option { value: "show-and-tell", "Show & Tell" }
+                        option { value: "announcements", "Announcements" }
                     }
                 }
                 div {

@@ -25,7 +25,7 @@ pub use audio::ics;
 pub mod parsing;
 pub use parsing::content_parser;
 pub use parsing::asciidoc;
-pub use parsing::markdown;
+pub use parsing::markdown::{self, parse_task_progress};
 pub use parsing::mention_extractor;
 pub use parsing::thread_tree;
 

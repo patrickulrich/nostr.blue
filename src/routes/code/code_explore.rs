@@ -7,6 +7,7 @@ use crate::services::git_hosting::{fetch_recent_repositories, fetch_recent_snipp
 use crate::stores::nostr_client;
 use crate::utils::nip34::{DisplaySnippet, Repository};
 use dioxus::prelude::*;
+use std::collections::HashMap;
 /// Code explore page component
 #[component]
 pub fn CodeExplore() -> Element {
@@ -39,6 +40,11 @@ pub fn CodeExplore() -> Element {
                         active: *filter.read() == ExploreFilter::Snippets,
                         onclick: move |_| filter.set(ExploreFilter::Snippets),
                     }
+                    FilterChip {
+                        label: "Topics",
+                        active: *filter.read() == ExploreFilter::Topics,
+                        onclick: move |_| filter.set(ExploreFilter::Topics),
+                    }
                 }
                 div { class: "px-4 pb-3 flex items-center gap-2 text-sm",
                     span { class: "text-muted-foreground", "Sort by:" }
@@ -65,6 +71,9 @@ pub fn CodeExplore() -> Element {
                     ExploreFilter::Snippets => rsx! {
                         SnippetsContent {}
                     },
+                    ExploreFilter::Topics => rsx! {
+                        TopicsContent {}
+                    },
                 }
             }
         }
@@ -75,6 +84,7 @@ enum ExploreFilter {
     All,
     Repositories,
     Snippets,
+    Topics,
 }
 #[derive(Clone, Copy, PartialEq)]
 enum SortBy {
@@ -394,6 +404,127 @@ fn SnippetsContent() -> Element {
         }
     }
 }
+/// Topics browse - shows tag cloud of repo topics and filter by topic
+#[component]
+fn TopicsContent() -> Element {
+    let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut selected_topic = use_signal(|| None::<String>);
+
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        spawn(async move {
+            let result = fetch_recent_repositories(200, None).await;
+            repos.set(Some(result));
+        });
+    });
+
+    // Derive topic counts
+    let topic_counts: HashMap<String, usize> = repos
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|list| {
+            let mut counts = HashMap::new();
+            for repo in list {
+                for topic in &repo.topics {
+                    *counts.entry(topic.to_lowercase()).or_insert(0) += 1;
+                }
+            }
+            counts
+        })
+        .unwrap_or_default();
+
+    let mut sorted_topics: Vec<(String, usize)> = topic_counts.into_iter().collect();
+    sorted_topics.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Filter repos by selected topic
+    let filtered_repos: Vec<Repository> = repos
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(|list| {
+            if let Some(ref topic) = *selected_topic.read() {
+                list.iter()
+                    .filter(|r| r.topics.iter().any(|t| t.to_lowercase() == *topic))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        })
+        .unwrap_or_default();
+
+    rsx! {
+        div { class: "space-y-6",
+            // Topic tag cloud
+            if repos.read().is_none() {
+                div { class: "flex flex-wrap gap-2 animate-pulse",
+                    for i in 0..12 {
+                        div { key: "{i}", class: "h-8 bg-muted rounded-full w-20" }
+                    }
+                }
+            } else if sorted_topics.is_empty() {
+                div { class: "text-center py-8 text-muted-foreground",
+                    "No topics found. Repositories can add topics via their settings."
+                }
+            } else {
+                div {
+                    h3 { class: "font-semibold mb-3", "Browse by Topic" }
+                    div { class: "flex flex-wrap gap-2",
+                        for (topic , count) in sorted_topics.iter() {
+                            {
+                                let is_selected = selected_topic.read().as_deref() == Some(topic.as_str());
+                                let topic_clone = topic.clone();
+                                rsx! {
+                                    button {
+                                        key: "{topic}",
+                                        class: if is_selected {
+                                            "px-3 py-1.5 text-sm rounded-full bg-primary text-primary-foreground flex items-center gap-1.5 transition"
+                                        } else {
+                                            "px-3 py-1.5 text-sm rounded-full bg-muted text-muted-foreground hover:bg-accent flex items-center gap-1.5 transition"
+                                        },
+                                        onclick: move |_| {
+                                            let tc = topic_clone.clone();
+                                            if selected_topic.read().as_deref() == Some(&tc) {
+                                                selected_topic.set(None);
+                                            } else {
+                                                selected_topic.set(Some(tc));
+                                            }
+                                        },
+                                        "#{topic}"
+                                        span { class: "text-xs opacity-70", "{count}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filtered results
+                if let Some(ref topic) = *selected_topic.read() {
+                    div {
+                        h3 { class: "font-semibold mb-3",
+                            "Repositories tagged \"{topic}\" ({filtered_repos.len()})"
+                        }
+                        if filtered_repos.is_empty() {
+                            EmptySection { message: "No repositories with this topic" }
+                        } else {
+                            div { class: "space-y-3",
+                                for repo in filtered_repos.iter() {
+                                    CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 fn EmptySection(message: &'static str) -> Element {
     rsx! {

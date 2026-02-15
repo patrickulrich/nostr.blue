@@ -19,6 +19,7 @@ enum CategoryFilter {
     Ideas,
     QAndA,
     ShowAndTell,
+    Announcements,
 }
 impl CategoryFilter {
     fn label(&self) -> &'static str {
@@ -28,6 +29,7 @@ impl CategoryFilter {
             Self::Ideas => "Ideas",
             Self::QAndA => "Q&A",
             Self::ShowAndTell => "Show & Tell",
+            Self::Announcements => "Announcements",
         }
     }
     fn matches(&self, discussion: &Discussion) -> bool {
@@ -37,6 +39,7 @@ impl CategoryFilter {
             Self::Ideas => discussion.category.as_deref() == Some("ideas"),
             Self::QAndA => discussion.category.as_deref() == Some("q-a"),
             Self::ShowAndTell => discussion.category.as_deref() == Some("show-and-tell"),
+            Self::Announcements => discussion.category.as_deref() == Some("announcements"),
         }
     }
 }
@@ -80,6 +83,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
         CategoryFilter::Ideas,
         CategoryFilter::QAndA,
         CategoryFilter::ShowAndTell,
+        CategoryFilter::Announcements,
     ];
     rsx! {
         div { class: "min-h-screen",
@@ -206,6 +210,7 @@ fn DiscussionRow(discussion: Discussion) -> Element {
         "ideas" => "Ideas",
         "q-a" => "Q&A",
         "show-and-tell" => "Show & Tell",
+        "announcements" => "Announcements",
         other => other,
     });
     rsx! {

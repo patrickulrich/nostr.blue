@@ -5,6 +5,7 @@
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
 use crate::services::git_hosting::bounties::{claim_bounty, fetch_bounties_for_issue, release_bounty};
+use crate::services::git_hosting::discussions::publish_discussion_by_naddr;
 use crate::services::git_hosting::{
     fetch_comments_by_id, fetch_issue, fetch_repository, publish_comment_by_id,
     update_issue_status_by_id,
@@ -209,6 +210,53 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
             });
         }
     };
+
+    // Convert to Discussion
+    let nav = use_navigator();
+    let mut is_converting = use_signal(|| false);
+    let mut convert_error = use_signal(|| None::<String>);
+    let handle_convert_to_discussion = {
+        let issue_id = issue_id.clone();
+        let repo_naddr = issue.repository_naddr.clone();
+        let subject = issue.subject.clone();
+        let content = issue.content.clone();
+        let labels: Vec<String> = issue.labels.clone();
+        move |_| {
+            let id = issue_id.clone();
+            let naddr = repo_naddr.clone();
+            let subj = subject.clone();
+            let cont = content.clone();
+            let labs = labels.clone();
+            spawn(async move {
+                is_converting.set(true);
+                convert_error.set(None);
+                let label_refs: Vec<&str> = labs.iter().map(|s| s.as_str()).collect();
+                match publish_discussion_by_naddr(
+                    &naddr,
+                    subj.as_deref(),
+                    &cont,
+                    Some("general"),
+                    &label_refs,
+                )
+                .await
+                {
+                    Ok(discussion_id) => {
+                        // Close the original issue
+                        let _ = update_issue_status_by_id(&id, IssueStatus::Closed).await;
+                        // Navigate to the new discussion
+                        nav.push(Route::CodeDiscussionDetail {
+                            note_id: discussion_id,
+                        });
+                    }
+                    Err(e) => {
+                        convert_error.set(Some(e));
+                        is_converting.set(false);
+                    }
+                }
+            });
+        }
+    };
+
     rsx! {
         div { class: "space-y-6",
             // Header section
@@ -274,6 +322,34 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             "Reopen Issue"
                         }
                     }
+                    if issue_status != IssueStatus::Closed {
+                        button {
+                            class: "px-3 py-1.5 text-sm bg-blue-500/10 text-blue-500 rounded-lg hover:bg-blue-500/20 transition disabled:opacity-50 flex items-center gap-1",
+                            disabled: *is_converting.read(),
+                            onclick: handle_convert_to_discussion,
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
+                            }
+                            if *is_converting.read() {
+                                "Converting..."
+                            } else {
+                                "Convert to Discussion"
+                            }
+                        }
+                    }
+                }
+                if let Some(err) = convert_error.read().as_ref() {
+                    div { class: "text-xs text-destructive", "{err}" }
                 }
             }
 

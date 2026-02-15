@@ -136,6 +136,23 @@ pub fn markdown_to_text(markdown: &str) -> String {
     }
     text.trim().to_string()
 }
+/// Parse task checklist progress from markdown content.
+/// Returns Some((checked, total)) if any `- [ ]` or `- [x]` patterns are found.
+pub fn parse_task_progress(content: &str) -> Option<(usize, usize)> {
+    let mut checked = 0usize;
+    let mut total = 0usize;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") || trimmed.starts_with("* [x]") || trimmed.starts_with("* [X]") {
+            checked += 1;
+            total += 1;
+        } else if trimmed.starts_with("- [ ]") || trimmed.starts_with("* [ ]") {
+            total += 1;
+        }
+    }
+    if total > 0 { Some((checked, total)) } else { None }
+}
+
 /// Wrap rendered HTML in a styled container
 /// Returns HTML with prose styling classes
 #[allow(dead_code)]
@@ -260,6 +277,16 @@ mod tests {
         let html = render_markdown(md);
         assert!(html.contains("<pre><code"));
         assert!(!html.contains("<div class=\"mermaid\">"));
+    }
+    #[test]
+    fn test_parse_task_progress() {
+        let md = "## Tasks\n- [x] Done item\n- [ ] Todo item\n- [x] Another done\n- [ ] Another todo\n";
+        assert_eq!(parse_task_progress(md), Some((2, 4)));
+    }
+    #[test]
+    fn test_parse_task_progress_none() {
+        let md = "Just a regular paragraph with no tasks.";
+        assert_eq!(parse_task_progress(md), None);
     }
     #[test]
     fn test_multiple_mermaid_blocks() {

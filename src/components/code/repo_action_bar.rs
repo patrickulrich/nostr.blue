@@ -400,21 +400,30 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 }
             }
             if *show_zap_modal.read() {
-                {
-                    let profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
-                    let recipient_name = profile
-                        .as_ref()
-                        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-                        .unwrap_or_else(|| truncate_pubkey(&repo.pubkey));
-                    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
-                    rsx! {
-                        ZapModal {
-                            recipient_pubkey: repo.pubkey.clone(),
-                            recipient_name: recipient_name,
-                            lud16: lud16,
-                            lud06: None::<String>,
-                            event_id: Some(repo.event_id.clone()),
-                            on_close: move |_| show_zap_modal.set(false),
+                if repo.zap_splits.len() > 1 {
+                    ZapSplitModal {
+                        splits: repo.zap_splits.clone(),
+                        repo_name: repo.name.clone().unwrap_or_else(|| repo.id.clone()),
+                        event_id: repo.event_id.clone(),
+                        on_close: move |_| show_zap_modal.set(false),
+                    }
+                } else {
+                    {
+                        let profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
+                        let recipient_name = profile
+                            .as_ref()
+                            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+                            .unwrap_or_else(|| truncate_pubkey(&repo.pubkey));
+                        let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+                        rsx! {
+                            ZapModal {
+                                recipient_pubkey: repo.pubkey.clone(),
+                                recipient_name: recipient_name,
+                                lud16: lud16,
+                                lud06: None::<String>,
+                                event_id: Some(repo.event_id.clone()),
+                                on_close: move |_| show_zap_modal.set(false),
+                            }
                         }
                     }
                 }
@@ -637,6 +646,292 @@ fn ActionButton(
         }
     }
 }
+/// Zap split distribution modal
+///
+/// Shows a breakdown of how zaps will be split among recipients,
+/// then sends individual payments to each recipient proportionally.
+#[component]
+fn ZapSplitModal(
+    splits: Vec<(String, String, u32)>,
+    repo_name: String,
+    event_id: String,
+    on_close: EventHandler<()>,
+) -> Element {
+    let mut zap_amount = use_signal(|| 100u64);
+    let mut custom_amount = use_signal(String::new);
+    let mut loading = use_signal(|| false);
+    let mut error_msg = use_signal(|| None::<String>);
+    let mut progress_msg = use_signal(|| None::<String>);
+    let toast = consume_toast();
+
+    let preset_amounts = [100, 500, 1000, 5000, 10000];
+    let total_weight: u32 = splits.iter().map(|(_, _, w)| w).sum();
+
+    let handle_split_zap = {
+        let splits = splits.clone();
+        move |_| {
+            let splits = splits.clone();
+            let amount = *zap_amount.read();
+            let total_w = total_weight;
+
+            if total_w == 0 {
+                error_msg.set(Some("Invalid split configuration (zero total weight)".to_string()));
+                return;
+            }
+
+            loading.set(true);
+            error_msg.set(None);
+            progress_msg.set(Some("Starting split payments...".to_string()));
+
+            spawn(async move {
+                let mut success_count = 0u32;
+                let mut fail_count = 0u32;
+                let nwc_available = crate::stores::nwc_store::is_connected();
+
+                if !nwc_available {
+                    error_msg.set(Some("NWC wallet not connected. Connect a wallet in Settings to use zap splits.".to_string()));
+                    loading.set(false);
+                    progress_msg.set(None);
+                    return;
+                }
+
+                for (i, (pubkey, _relay, weight)) in splits.iter().enumerate() {
+                    let recipient_amount = (amount as u64 * *weight as u64) / total_w as u64;
+                    if recipient_amount == 0 {
+                        continue;
+                    }
+
+                    let display_name = {
+                        let cache = PROFILE_CACHE.read();
+                        cache.peek(pubkey).and_then(|p| {
+                            p.display_name.clone().or(p.name.clone())
+                        }).unwrap_or_else(|| truncate_pubkey(pubkey))
+                    };
+                    progress_msg.set(Some(format!(
+                        "Paying {} ({} sats)... ({}/{})",
+                        display_name, recipient_amount, i + 1, splits.len()
+                    )));
+
+                    // Look up Lightning address
+                    let lud16 = {
+                        let cache = PROFILE_CACHE.read();
+                        cache.peek(pubkey).and_then(|p| p.lud16.clone())
+                    };
+
+                    let lud16 = match lud16 {
+                        Some(l) => l,
+                        None => {
+                            log::warn!("No lud16 for split recipient {}", truncate_pubkey(pubkey));
+                            fail_count += 1;
+                            continue;
+                        }
+                    };
+
+                    // Get invoice from LNURL
+                    let invoice = match crate::services::payments::lnurl::get_invoice_from_lud16(
+                        &lud16,
+                        recipient_amount,
+                        Some("Zap split"),
+                    ).await {
+                        Ok(inv) => inv,
+                        Err(e) => {
+                            log::warn!("Failed to get invoice for {}: {}", truncate_pubkey(pubkey), e);
+                            fail_count += 1;
+                            continue;
+                        }
+                    };
+
+                    // Pay via NWC
+                    match crate::stores::nwc_store::pay_invoice(invoice).await {
+                        Ok(_) => {
+                            success_count += 1;
+                        }
+                        Err(e) => {
+                            log::warn!("Payment failed for {}: {}", truncate_pubkey(pubkey), e);
+                            fail_count += 1;
+                        }
+                    }
+                }
+
+                loading.set(false);
+                progress_msg.set(None);
+
+                if fail_count == 0 {
+                    toast.success(
+                        format!("Split zap sent to {} recipients!", success_count),
+                        ToastOptions::new(),
+                    );
+                    on_close.call(());
+                } else if success_count > 0 {
+                    toast.warning(
+                        format!("{} of {} payments succeeded", success_count, success_count + fail_count),
+                        ToastOptions::new(),
+                    );
+                    on_close.call(());
+                } else {
+                    error_msg.set(Some("All payments failed. Check that recipients have Lightning addresses.".to_string()));
+                }
+            });
+        }
+    };
+
+    rsx! {
+        div {
+            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
+            onclick: move |_| {
+                if !*loading.read() {
+                    on_close.call(());
+                }
+            },
+            div {
+                class: "bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+
+                // Header
+                div { class: "flex items-center justify-between p-4 border-b border-border",
+                    h2 { class: "text-lg font-bold flex items-center gap-2",
+                        span { class: "w-5 h-5", dangerous_inner_html: "{icons::ZAP}" }
+                        "Zap {repo_name}"
+                    }
+                    button {
+                        class: "text-muted-foreground hover:text-foreground disabled:opacity-50",
+                        disabled: *loading.read(),
+                        onclick: move |_| {
+                            if !*loading.read() {
+                                on_close.call(());
+                            }
+                        },
+                        "✕"
+                    }
+                }
+
+                div { class: "p-4 space-y-4",
+                    // Split breakdown
+                    div { class: "space-y-2",
+                        h3 { class: "text-sm font-medium text-muted-foreground", "Split Distribution" }
+                        div { class: "space-y-1.5",
+                            for (pubkey , _relay , weight) in splits.iter() {
+                                {
+                                    let display_name = {
+                                        let cache = PROFILE_CACHE.read();
+                                        cache.peek(pubkey).and_then(|p| {
+                                            p.display_name.clone().or(p.name.clone())
+                                        }).unwrap_or_else(|| truncate_pubkey(pubkey))
+                                    };
+                                    let pct = if total_weight > 0 {
+                                        (*weight as f64 / total_weight as f64 * 100.0) as u32
+                                    } else { 0 };
+                                    let split_amount = if total_weight > 0 {
+                                        (*zap_amount.read() as u64 * *weight as u64) / total_weight as u64
+                                    } else { 0 };
+                                    rsx! {
+                                        div {
+                                            key: "{pubkey}",
+                                            class: "flex items-center gap-2 p-2 bg-muted/50 rounded-lg",
+                                            svg {
+                                                class: "w-4 h-4 text-muted-foreground shrink-0",
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                width: "24",
+                                                height: "24",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                                                circle { cx: "12", cy: "7", r: "4" }
+                                            }
+                                            span { class: "flex-1 text-sm font-medium truncate", "{display_name}" }
+                                            span { class: "text-xs text-muted-foreground", "{pct}%" }
+                                            span { class: "text-sm font-mono font-medium", "{split_amount} sats" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Amount selection
+                    div { class: "space-y-2",
+                        label { class: "block text-sm font-medium", "Total Amount (sats)" }
+                        div { class: "grid grid-cols-3 gap-2",
+                            for amount in preset_amounts.iter() {
+                                {
+                                    let amt = *amount;
+                                    rsx! {
+                                        button {
+                                            key: "{amt}",
+                                            class: if *zap_amount.read() == amt {
+                                                "px-4 py-2 rounded bg-primary text-primary-foreground font-medium"
+                                            } else {
+                                                "px-4 py-2 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                                            },
+                                            onclick: move |_| zap_amount.set(amt),
+                                            "{amt}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "flex items-center gap-2 mt-2",
+                            input {
+                                class: "flex-1 px-3 py-2 bg-background border border-border rounded",
+                                r#type: "number",
+                                placeholder: "Custom amount",
+                                value: "{custom_amount}",
+                                oninput: move |e| {
+                                    custom_amount.set(e.value());
+                                    if let Ok(amt) = e.value().parse::<u64>() {
+                                        zap_amount.set(amt);
+                                    }
+                                },
+                            }
+                            span { class: "text-sm text-muted-foreground", "sats" }
+                        }
+                    }
+
+                    // Progress / error
+                    if let Some(ref msg) = *progress_msg.read() {
+                        div { class: "bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 p-3 rounded text-sm",
+                            "{msg}"
+                        }
+                    }
+                    if let Some(ref err) = *error_msg.read() {
+                        div { class: "bg-red-500/10 border border-red-500/20 text-red-500 p-3 rounded text-sm",
+                            "{err}"
+                        }
+                    }
+
+                    // Actions
+                    div { class: "flex gap-2 pt-2",
+                        button {
+                            class: "flex-1 bg-secondary text-secondary-foreground px-4 py-2 rounded hover:bg-secondary/90 transition",
+                            disabled: *loading.read(),
+                            onclick: move |_| {
+                                if !*loading.read() {
+                                    on_close.call(());
+                                }
+                            },
+                            "Cancel"
+                        }
+                        button {
+                            class: "flex-1 bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition font-medium disabled:opacity-50",
+                            disabled: *loading.read(),
+                            onclick: handle_split_zap,
+                            if *loading.read() {
+                                "Sending..."
+                            } else {
+                                "Zap {zap_amount} sats (split)"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Mobile menu item
 #[component]
 fn MobileMenuItem(
