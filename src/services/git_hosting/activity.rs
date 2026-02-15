@@ -5,11 +5,13 @@
 //! across repos created, issues filed, PRs submitted, reviews given, etc.
 #![allow(dead_code)]
 use nostr_sdk::prelude::*;
+use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
 
 use crate::stores::auth_store;
 use crate::stores::nostr_client::fetch_events_aggregated;
+use crate::utils::nip34::Repository;
 
 /// Default timeout for fetching activity events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
@@ -46,6 +48,7 @@ pub struct Activity {
     pub activity_type: ActivityType,
     pub title: String,
     pub event_id: String,
+    pub author: String,
     pub repository_naddr: Option<String>,
     pub created_at: u64,
 }
@@ -138,6 +141,7 @@ impl Activity {
             activity_type,
             title,
             event_id: event.id.to_hex(),
+            author: event.pubkey.to_hex(),
             repository_naddr: repo_naddr,
             created_at: event.created_at.as_secs(),
         })
@@ -255,4 +259,156 @@ pub async fn fetch_my_activity(limit: usize) -> Result<Vec<Activity>, String> {
     let pubkey =
         PublicKey::from_hex(&pubkey_hex).map_err(|e| format!("Invalid public key: {e}"))?;
     fetch_user_activity(&pubkey, limit).await
+}
+
+/// A developer's contribution summary for ranking
+#[derive(Debug, Clone, PartialEq)]
+pub struct TopDeveloper {
+    pub pubkey: String,
+    pub contribution_count: usize,
+}
+
+/// Platform-wide stats
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlatformStats {
+    pub total_repos: usize,
+    pub open_issues: usize,
+    pub open_prs: usize,
+    pub total_snippets: usize,
+}
+
+/// Fetch trending repositories (most starred in last 7 days)
+///
+/// Fetches recent repository announcements from the last 7 days and
+/// sorts them by star_count descending to surface popular repos.
+pub async fn fetch_trending_repositories(limit: usize) -> Result<Vec<Repository>, String> {
+    let now = Timestamp::now().as_secs();
+    let seven_days_ago = now.saturating_sub(7 * 24 * 60 * 60);
+
+    let filter = Filter::new()
+        .kind(Kind::GitRepoAnnouncement)
+        .since(Timestamp::from(seven_days_ago))
+        .limit(200);
+
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch trending repositories: {e}"))?;
+
+    let mut repos: Vec<Repository> = events.iter().filter_map(Repository::from_event).collect();
+
+    // Sort by star count descending, then by creation time descending as tiebreaker
+    repos.sort_by(|a, b| {
+        b.star_count
+            .cmp(&a.star_count)
+            .then_with(|| b.created_at.cmp(&a.created_at))
+    });
+    repos.truncate(limit);
+    Ok(repos)
+}
+
+/// Fetch top developers by contribution count (last 30 days)
+///
+/// Groups all code-related events by author and ranks developers by
+/// total event count across repos, issues, PRs, reviews, and snippets.
+pub async fn fetch_top_developers(limit: usize) -> Result<Vec<TopDeveloper>, String> {
+    let now = Timestamp::now().as_secs();
+    let thirty_days_ago = now.saturating_sub(30 * 24 * 60 * 60);
+
+    let filter = Filter::new()
+        .kinds(vec![
+            Kind::GitRepoAnnouncement,
+            Kind::GitIssue,
+            Kind::GitPatch,
+            Kind::Custom(1985),
+            Kind::Comment,
+            Kind::GitStatusOpen,
+            Kind::GitStatusApplied,
+            Kind::GitStatusClosed,
+            Kind::GitStatusDraft,
+            Kind::CodeSnippet,
+        ])
+        .since(Timestamp::from(thirty_days_ago))
+        .limit(500);
+
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch developer activity: {e}"))?;
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for event in &events {
+        *counts.entry(event.pubkey.to_hex()).or_insert(0) += 1;
+    }
+
+    let mut developers: Vec<TopDeveloper> = counts
+        .into_iter()
+        .map(|(pubkey, contribution_count)| TopDeveloper {
+            pubkey,
+            contribution_count,
+        })
+        .collect();
+
+    developers.sort_by(|a, b| b.contribution_count.cmp(&a.contribution_count));
+    developers.truncate(limit);
+    Ok(developers)
+}
+
+/// Fetch recent global activity (all users)
+///
+/// Same as `fetch_user_activity` but without an author filter, returning
+/// code activity from all users across the network.
+pub async fn fetch_recent_global_activity(limit: usize) -> Result<Vec<Activity>, String> {
+    let filter = Filter::new()
+        .kinds(vec![
+            Kind::GitRepoAnnouncement,
+            Kind::GitIssue,
+            Kind::GitPatch,
+            Kind::Custom(1985),
+            Kind::Comment,
+            Kind::GitStatusOpen,
+            Kind::GitStatusApplied,
+            Kind::GitStatusClosed,
+            Kind::GitStatusDraft,
+            Kind::CodeSnippet,
+        ])
+        .limit(limit);
+
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch global activity: {e}"))?;
+
+    let mut activities: Vec<Activity> = events.iter().filter_map(Activity::from_event).collect();
+
+    activities.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    activities.truncate(limit);
+    Ok(activities)
+}
+
+/// Fetch platform-wide stats
+///
+/// Counts total repositories, open issues, open PRs, and snippets
+/// across the entire network.
+pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
+    // Fetch counts for each category with small limits to be efficient
+    let repo_filter = Filter::new()
+        .kind(Kind::GitRepoAnnouncement)
+        .limit(1000);
+    let issue_filter = Filter::new().kind(Kind::GitIssue).limit(1000);
+    let pr_filter = Filter::new().kind(Kind::GitPatch).limit(1000);
+    let snippet_filter = Filter::new().kind(Kind::CodeSnippet).limit(1000);
+
+    let timeout = Duration::from_secs(10);
+
+    let (repos, issues, prs, snippets) = futures::join!(
+        fetch_events_aggregated(repo_filter, timeout),
+        fetch_events_aggregated(issue_filter, timeout),
+        fetch_events_aggregated(pr_filter, timeout),
+        fetch_events_aggregated(snippet_filter, timeout),
+    );
+
+    Ok(PlatformStats {
+        total_repos: repos.map(|e| e.len()).unwrap_or(0),
+        open_issues: issues.map(|e| e.len()).unwrap_or(0),
+        open_prs: prs.map(|e| e.len()).unwrap_or(0),
+        total_snippets: snippets.map(|e| e.len()).unwrap_or(0),
+    })
 }

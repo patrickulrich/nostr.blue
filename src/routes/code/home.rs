@@ -8,10 +8,17 @@
 use crate::components::{icons, CodeRepoCard, CodeSnippetCard};
 use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 use crate::routes::Route;
+use crate::services::git_hosting::activity::{
+    fetch_platform_stats, fetch_recent_global_activity, fetch_top_developers,
+    fetch_trending_repositories, Activity, PlatformStats, TopDeveloper,
+};
 use crate::services::git_hosting::{
     fetch_recent_repositories, fetch_recent_snippets, fetch_user_repositories,
 };
 use crate::stores::nostr_client;
+use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::format::format_relative_time_or;
+use crate::utils::format::truncate_pubkey;
 use crate::utils::nip34::{DisplaySnippet, Repository};
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
@@ -128,6 +135,11 @@ pub fn CodeHome() -> Element {
                         active: *active_tab.read() == CodeTab::MyRepos,
                         onclick: move |_| active_tab.set(CodeTab::MyRepos),
                     }
+                    TabButton {
+                        label: "Discover",
+                        active: *active_tab.read() == CodeTab::Discover,
+                        onclick: move |_| active_tab.set(CodeTab::Discover),
+                    }
                 }
             }
             div { class: "p-4",
@@ -141,6 +153,9 @@ pub fn CodeHome() -> Element {
                     CodeTab::MyRepos => rsx! {
                         MyReposTab {}
                     },
+                    CodeTab::Discover => rsx! {
+                        DiscoverTab {}
+                    },
                 }
             }
         }
@@ -151,6 +166,7 @@ enum CodeTab {
     Repositories,
     Snippets,
     MyRepos,
+    Discover,
 }
 #[derive(Props, Clone, PartialEq)]
 struct TabButtonProps {
@@ -643,6 +659,498 @@ fn MyReposTab() -> Element {
         }
     }
 }
+/// Discover tab - trending repos, top developers, global activity, platform stats
+#[component]
+fn DiscoverTab() -> Element {
+    let mut trending_repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut top_devs = use_signal(|| None::<Result<Vec<TopDeveloper>, String>>);
+    let mut global_activity = use_signal(|| None::<Result<Vec<Activity>, String>>);
+    let mut stats = use_signal(|| None::<Result<PlatformStats, String>>);
+
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        spawn(async move {
+            let (trending_res, devs_res, activity_res, stats_res) = futures::join!(
+                fetch_trending_repositories(10),
+                fetch_top_developers(5),
+                fetch_recent_global_activity(20),
+                fetch_platform_stats(),
+            );
+            trending_repos.set(Some(trending_res));
+            top_devs.set(Some(devs_res));
+            global_activity.set(Some(activity_res));
+            stats.set(Some(stats_res));
+        });
+    });
+
+    rsx! {
+        div { class: "space-y-6",
+            // Section 1: Platform Stats
+            div {
+                h3 { class: "font-semibold mb-3 flex items-center gap-2",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" }
+                        path { d: "M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" }
+                        path { d: "M21 5c0 1.66-4 3-9 3S3 6.66 3 5s4-3 9-3 9 1.34 9 3" }
+                    }
+                    "Platform Stats"
+                }
+                match &*stats.read() {
+                    Some(Ok(s)) => rsx! {
+                        div { class: "grid grid-cols-2 gap-3",
+                            StatCard { label: "Repositories", value: s.total_repos, icon_type: StatIcon::Repo }
+                            StatCard { label: "Open Issues", value: s.open_issues, icon_type: StatIcon::Issue }
+                            StatCard { label: "Pull Requests", value: s.open_prs, icon_type: StatIcon::PullRequest }
+                            StatCard { label: "Snippets", value: s.total_snippets, icon_type: StatIcon::Snippet }
+                        }
+                    },
+                    Some(Err(e)) => rsx! {
+                        div { class: "text-center py-4 text-muted-foreground text-sm", "Failed to load stats: {e}" }
+                    },
+                    None => rsx! {
+                        div { class: "grid grid-cols-2 gap-3",
+                            for _ in 0..4 {
+                                div { class: "p-4 border border-border rounded-lg animate-pulse",
+                                    div { class: "h-4 bg-muted rounded w-1/2 mb-2" }
+                                    div { class: "h-6 bg-muted rounded w-1/3" }
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+
+            // Section 2: Trending Repositories
+            div {
+                h3 { class: "font-semibold mb-3 flex items-center gap-2",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        polyline { points: "23 6 13.5 15.5 8.5 10.5 1 18" }
+                        polyline { points: "17 6 23 6 23 12" }
+                    }
+                    "Trending Repositories"
+                    span { class: "text-xs text-muted-foreground font-normal", "(last 7 days)" }
+                }
+                match &*trending_repos.read() {
+                    Some(Ok(repos)) if !repos.is_empty() => rsx! {
+                        div { class: "space-y-3",
+                            for repo in repos.iter() {
+                                CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
+                            }
+                        }
+                    },
+                    Some(Ok(_)) => rsx! {
+                        EmptyState {
+                            title: "No trending repos yet",
+                            description: "Repositories will appear here as they gain stars.",
+                        }
+                    },
+                    Some(Err(e)) => rsx! {
+                        div { class: "text-center py-4 text-muted-foreground text-sm", "Failed to load trending repos: {e}" }
+                    },
+                    None => rsx! {
+                        div { class: "space-y-3",
+                            for _ in 0..3 {
+                                RepoCardSkeleton {}
+                            }
+                        }
+                    },
+                }
+            }
+
+            // Section 3: Top Developers
+            div {
+                h3 { class: "font-semibold mb-3 flex items-center gap-2",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }
+                        circle { cx: "9", cy: "7", r: "4" }
+                        path { d: "M23 21v-2a4 4 0 0 0-3-3.87" }
+                        path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+                    }
+                    "Top Developers"
+                    span { class: "text-xs text-muted-foreground font-normal", "(last 30 days)" }
+                }
+                match &*top_devs.read() {
+                    Some(Ok(devs)) if !devs.is_empty() => rsx! {
+                        div { class: "space-y-2",
+                            for (i, dev) in devs.iter().enumerate() {
+                                DeveloperCard { key: "{dev.pubkey}", rank: i + 1, developer: dev.clone() }
+                            }
+                        }
+                    },
+                    Some(Ok(_)) => rsx! {
+                        EmptyState {
+                            title: "No developer activity yet",
+                            description: "Developers will appear here as they contribute.",
+                        }
+                    },
+                    Some(Err(e)) => rsx! {
+                        div { class: "text-center py-4 text-muted-foreground text-sm", "Failed to load developers: {e}" }
+                    },
+                    None => rsx! {
+                        div { class: "space-y-2",
+                            for _ in 0..3 {
+                                div { class: "p-3 border border-border rounded-lg animate-pulse flex items-center gap-3",
+                                    div { class: "w-10 h-10 rounded-full bg-muted" }
+                                    div { class: "flex-1",
+                                        div { class: "h-4 bg-muted rounded w-1/3 mb-1" }
+                                        div { class: "h-3 bg-muted rounded w-1/4" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+
+            // Section 4: Recent Global Activity
+            div {
+                h3 { class: "font-semibold mb-3 flex items-center gap-2",
+                    svg {
+                        class: "w-5 h-5 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "12", r: "10" }
+                        polyline { points: "12 6 12 12 16 14" }
+                    }
+                    "Recent Activity"
+                }
+                match &*global_activity.read() {
+                    Some(Ok(activities)) if !activities.is_empty() => rsx! {
+                        div { class: "space-y-1",
+                            for activity in activities.iter() {
+                                ActivityRow { key: "{activity.event_id}", activity: activity.clone() }
+                            }
+                        }
+                    },
+                    Some(Ok(_)) => rsx! {
+                        EmptyState {
+                            title: "No activity yet",
+                            description: "Code activity from all developers will appear here.",
+                        }
+                    },
+                    Some(Err(e)) => rsx! {
+                        div { class: "text-center py-4 text-muted-foreground text-sm", "Failed to load activity: {e}" }
+                    },
+                    None => rsx! {
+                        div { class: "space-y-2",
+                            for _ in 0..5 {
+                                div { class: "p-3 animate-pulse flex items-center gap-3",
+                                    div { class: "w-5 h-5 rounded bg-muted" }
+                                    div { class: "flex-1",
+                                        div { class: "h-3 bg-muted rounded w-2/3" }
+                                    }
+                                    div { class: "h-3 bg-muted rounded w-16" }
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// Icon type for stat cards
+#[derive(Clone, Copy, PartialEq)]
+enum StatIcon {
+    Repo,
+    Issue,
+    PullRequest,
+    Snippet,
+}
+
+/// Stat card component for platform stats grid
+#[component]
+fn StatCard(label: &'static str, value: usize, icon_type: StatIcon) -> Element {
+    rsx! {
+        div { class: "p-4 border border-border rounded-lg bg-card",
+            div { class: "flex items-center gap-2 mb-2",
+                match icon_type {
+                    StatIcon::Repo => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-blue-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            line { x1: "6", y1: "3", x2: "6", y2: "15" }
+                            circle { cx: "18", cy: "6", r: "3" }
+                            circle { cx: "6", cy: "18", r: "3" }
+                            path { d: "M18 9a9 9 0 0 1-9 9" }
+                        }
+                    },
+                    StatIcon::Issue => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-green-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "12", cy: "12", r: "10" }
+                            circle { cx: "12", cy: "12", r: "1" }
+                        }
+                    },
+                    StatIcon::PullRequest => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-purple-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "18", cy: "18", r: "3" }
+                            circle { cx: "6", cy: "6", r: "3" }
+                            path { d: "M13 6h3a2 2 0 0 1 2 2v7" }
+                            line { x1: "6", y1: "9", x2: "6", y2: "21" }
+                        }
+                    },
+                    StatIcon::Snippet => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-orange-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            polyline { points: "16 18 22 12 16 6" }
+                            polyline { points: "8 6 2 12 8 18" }
+                        }
+                    },
+                }
+                span { class: "text-xs text-muted-foreground", "{label}" }
+            }
+            div { class: "text-2xl font-bold", "{value}" }
+        }
+    }
+}
+
+/// Developer card for top developers section
+#[component]
+fn DeveloperCard(rank: usize, developer: TopDeveloper) -> Element {
+    let pubkey = developer.pubkey.clone();
+    let display_name = {
+        let cache = PROFILE_CACHE.read();
+        cache
+            .peek(&pubkey)
+            .and_then(|p| {
+                p.display_name
+                    .clone()
+                    .or_else(|| p.name.clone())
+            })
+            .unwrap_or_else(|| truncate_pubkey(&pubkey))
+    };
+    let avatar_url = {
+        let cache = PROFILE_CACHE.read();
+        cache
+            .peek(&pubkey)
+            .and_then(|p| p.picture.clone())
+            .unwrap_or_else(|| {
+                format!(
+                    "https://api.dicebear.com/7.x/identicon/svg?seed={}",
+                    pubkey
+                )
+            })
+    };
+
+    let suffix = if developer.contribution_count == 1 { "" } else { "s" };
+
+    rsx! {
+        Link {
+            to: Route::CodeUserProfile { pubkey: pubkey.clone() },
+            class: "p-3 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+            div { class: "text-sm font-bold text-muted-foreground w-6 text-center", "#{rank}" }
+            img {
+                class: "w-10 h-10 rounded-full bg-muted",
+                src: "{avatar_url}",
+                alt: "Developer avatar",
+            }
+            div { class: "flex-1 min-w-0",
+                div { class: "font-medium truncate", "{display_name}" }
+                div { class: "text-xs text-muted-foreground",
+                    "{developer.contribution_count} contribution{suffix}"
+                }
+            }
+        }
+    }
+}
+
+/// Activity row for global activity feed
+#[component]
+fn ActivityRow(activity: Activity) -> Element {
+    let time_str = format_relative_time_or(activity.created_at, "Unknown");
+    let author_name = {
+        let cache = PROFILE_CACHE.read();
+        cache
+            .peek(&activity.author)
+            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+            .unwrap_or_else(|| truncate_pubkey(&activity.author))
+    };
+
+    rsx! {
+        div { class: "p-2 rounded-lg hover:bg-accent/30 transition flex items-center gap-3",
+            // Activity type icon
+            div { class: "shrink-0",
+                match activity.activity_type {
+                    crate::services::git_hosting::activity::ActivityType::RepoCreated => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-blue-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            line { x1: "6", y1: "3", x2: "6", y2: "15" }
+                            circle { cx: "18", cy: "6", r: "3" }
+                            circle { cx: "6", cy: "18", r: "3" }
+                            path { d: "M18 9a9 9 0 0 1-9 9" }
+                        }
+                    },
+                    crate::services::git_hosting::activity::ActivityType::IssueOpened => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-green-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "12", cy: "12", r: "10" }
+                            circle { cx: "12", cy: "12", r: "1" }
+                        }
+                    },
+                    crate::services::git_hosting::activity::ActivityType::PullRequestOpened => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-purple-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "18", cy: "18", r: "3" }
+                            circle { cx: "6", cy: "6", r: "3" }
+                            path { d: "M13 6h3a2 2 0 0 1 2 2v7" }
+                            line { x1: "6", y1: "9", x2: "6", y2: "21" }
+                        }
+                    },
+                    crate::services::git_hosting::activity::ActivityType::SnippetCreated => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-orange-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            polyline { points: "16 18 22 12 16 6" }
+                            polyline { points: "8 6 2 12 8 18" }
+                        }
+                    },
+                    _ => rsx! {
+                        svg {
+                            class: "w-4 h-4 text-muted-foreground",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "12", cy: "12", r: "10" }
+                            polyline { points: "12 6 12 12 16 14" }
+                        }
+                    },
+                }
+            }
+            // Activity text
+            div { class: "flex-1 min-w-0",
+                span { class: "text-sm",
+                    span { class: "font-medium", "{author_name}" }
+                    " "
+                    span { class: "text-muted-foreground", "{activity.activity_type}" }
+                    " "
+                    span { class: "font-medium truncate", "{activity.title}" }
+                }
+            }
+            // Timestamp
+            span { class: "text-xs text-muted-foreground whitespace-nowrap shrink-0", "{time_str}" }
+        }
+    }
+}
+
 /// Empty state component
 #[component]
 fn EmptyState(title: &'static str, description: &'static str) -> Element {
