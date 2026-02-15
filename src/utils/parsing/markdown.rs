@@ -1,8 +1,10 @@
 /// Markdown rendering utilities for NIP-23 long-form content
 use pulldown_cmark::{html, Options, Parser};
+use regex::Regex;
 /// Render markdown to safe HTML
 /// Uses pulldown-cmark for parsing and ammonia for sanitization.
 /// Mermaid code blocks are converted to `<div class="mermaid">` for client-side rendering.
+/// Headings get anchor links for deep linking.
 pub fn render_markdown(markdown: &str) -> String {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -14,7 +16,41 @@ pub fn render_markdown(markdown: &str) -> String {
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     let sanitized = sanitize_html(&html_output);
-    convert_mermaid_blocks(&sanitized)
+    let with_anchors = add_heading_anchors(&sanitized);
+    convert_mermaid_blocks(&with_anchors)
+}
+
+/// Generate a URL-safe slug from heading text
+fn slugify(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Strip HTML tags from a string to get plain text for slug generation
+fn strip_tags(html: &str) -> String {
+    let tag_re = Regex::new(r"<[^>]+>").unwrap();
+    tag_re.replace_all(html, "").to_string()
+}
+
+/// Add id attributes and anchor links to h1-h6 elements
+fn add_heading_anchors(html: &str) -> String {
+    let heading_re = Regex::new(r"<(h[1-6])>(.*?)</h[1-6]>").unwrap();
+    heading_re
+        .replace_all(html, |caps: &regex::Captures| {
+            let tag = &caps[1];
+            let content = &caps[2];
+            let plain_text = strip_tags(content);
+            let slug = slugify(&plain_text);
+            format!(
+                "<{tag} id=\"{slug}\"><a href=\"#{slug}\" class=\"heading-anchor\">#</a>{content}</{tag}>",
+            )
+        })
+        .to_string()
 }
 
 /// Convert mermaid code blocks from `<pre><code class="language-mermaid">...</code></pre>`
@@ -116,9 +152,41 @@ mod tests {
     fn test_render_basic_markdown() {
         let md = "# Hello\n\nThis is **bold** and this is *italic*.";
         let html = render_markdown(md);
-        assert!(html.contains("<h1>"));
+        assert!(html.contains("<h1"));
         assert!(html.contains("<strong>"));
         assert!(html.contains("<em>"));
+    }
+    #[test]
+    fn test_heading_anchors() {
+        let md = "# Hello World\n\n## Getting Started\n\n### API Reference";
+        let html = render_markdown(md);
+        assert!(
+            html.contains("<h1 id=\"hello-world\">"),
+            "h1 should have id, got: {}",
+            html
+        );
+        assert!(
+            html.contains("<a href=\"#hello-world\" class=\"heading-anchor\">#</a>"),
+            "h1 should have anchor link, got: {}",
+            html
+        );
+        assert!(
+            html.contains("<h2 id=\"getting-started\">"),
+            "h2 should have id, got: {}",
+            html
+        );
+        assert!(
+            html.contains("<h3 id=\"api-reference\">"),
+            "h3 should have id, got: {}",
+            html
+        );
+    }
+    #[test]
+    fn test_slugify() {
+        assert_eq!(slugify("Hello World"), "hello-world");
+        assert_eq!(slugify("API Reference (v2)"), "api-reference-v2");
+        assert_eq!(slugify("hello---world"), "hello---world");
+        assert_eq!(slugify("  spaced  out  "), "spaced-out");
     }
     #[test]
     fn test_sanitize_script_tags() {

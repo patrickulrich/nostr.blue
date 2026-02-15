@@ -18,6 +18,7 @@ pub mod reviews;
 pub mod snippets;
 pub mod ssh_keys;
 pub mod stars;
+pub mod watches;
 pub use file_fetcher::fetch_readme;
 pub use git_service::git_service;
 pub use issues::*;

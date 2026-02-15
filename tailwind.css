@@ -267,3 +267,24 @@
   @apply opacity-60 animate-pulse;
 }
 
+/* ============================================================================
+   Markdown Heading Anchors
+   ============================================================================ */
+
+.heading-anchor {
+  @apply text-muted-foreground no-underline opacity-0 mr-2 transition-opacity;
+}
+
+h1:hover .heading-anchor,
+h2:hover .heading-anchor,
+h3:hover .heading-anchor,
+h4:hover .heading-anchor,
+h5:hover .heading-anchor,
+h6:hover .heading-anchor {
+  @apply opacity-100;
+}
+
+.heading-anchor:hover {
+  @apply text-primary;
+}
+

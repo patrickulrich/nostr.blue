@@ -261,13 +261,22 @@ pub async fn publish_pr_update_by_id(
 pub async fn update_pr_status(
     pr_id: EventId,
     status: IssueStatus,
+    merge_strategy: Option<&str>,
 ) -> Result<EventId, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
     let kind = status.to_kind();
-    let builder = EventBuilder::new(kind, "").tag(Tag::event(pr_id));
+    let mut builder = EventBuilder::new(kind, "").tag(Tag::event(pr_id));
+    if let Some(strategy) = merge_strategy {
+        if strategy != "merge" {
+            builder = builder.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("merge-strategy")),
+                [strategy],
+            ));
+        }
+    }
     let output = client
         .send_event_builder(builder)
         .await
@@ -341,10 +350,11 @@ pub async fn publish_patch_by_naddr(
 pub async fn update_pr_status_by_id(
     event_ref: &str,
     status: IssueStatus,
+    merge_strategy: Option<&str>,
 ) -> Result<String, String> {
     let event_id = decode_event_id(event_ref)
         .map_err(|e| format!("Invalid event reference: {}", e))?;
-    let result = update_pr_status(event_id, status).await?;
+    let result = update_pr_status(event_id, status, merge_strategy).await?;
     Ok(result.to_hex())
 }
 /// Publish comment on PR by event ID string

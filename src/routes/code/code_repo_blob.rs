@@ -4,6 +4,7 @@
 use crate::components::{
     BranchSelector, CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb,
 };
+use crate::components::code::file_viewer::parse_line_hash;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
@@ -17,6 +18,20 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut is_directory = use_signal(|| false);
+    // Read URL hash for line selection (e.g., #L5 or #L5-L10)
+    let selected_lines = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            web_sys::window()
+                .and_then(|w| w.location().ok())
+                .and_then(|l| l.hash().ok())
+                .and_then(|h| parse_line_hash(&h))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            None::<(usize, usize)>
+        }
+    };
     let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
     let load_key = use_memo({
         let naddr = naddr.clone();
@@ -205,6 +220,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                         content: content(),
                         filename: filename.clone(),
                         git_ref: git_ref.clone(),
+                        selected_lines,
                     }
                 }
             }

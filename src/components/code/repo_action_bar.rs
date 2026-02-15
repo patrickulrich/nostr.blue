@@ -9,6 +9,7 @@ use crate::components::icons;
 use crate::components::ZapModal;
 use crate::services::git_hosting::repository::publish_fork;
 use crate::services::git_hosting::stars::{check_user_star, publish_star, remove_star};
+use crate::services::git_hosting::watches;
 use crate::stores::code_store::is_repo_starred;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::PROFILE_CACHE;
@@ -28,6 +29,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let mut is_watching = use_signal(|| false);
     let mut star_loading = use_signal(|| false);
     let mut show_actions_menu = use_signal(|| false);
+    let mut show_qr_modal = use_signal(|| false);
     let mut repo_pubkey_signal = use_signal(|| repo.pubkey.clone());
     let mut repo_id_signal = use_signal(|| repo.id.clone());
     {
@@ -75,25 +77,24 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     });
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let pubkey = repo_pubkey_signal.read().clone();
-            let id = repo_id_signal.read().clone();
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(watched_json)) = storage
-                        .get_item("nostr_blue_watched_repos")
-                    {
-                        if let Ok(watched) = serde_json::from_str::<
-                            Vec<String>,
-                        >(&watched_json) {
-                            let coord_str = format!("{}:{}", pubkey, id);
-                            is_watching.set(watched.contains(&coord_str));
-                            return;
-                        }
+        let coord = coordinate.read().clone();
+        if let Some(coord) = coord {
+            let coord_str = format!(
+                "{}:{}:{}",
+                coord.kind.as_u16(),
+                coord.public_key.to_hex(),
+                coord.identifier,
+            );
+            spawn(async move {
+                match watches::fetch_watched_repos().await {
+                    Ok(watched) => is_watching.set(watched.contains(&coord_str)),
+                    Err(e) => {
+                        log::debug!("Failed to check watch status: {}", e);
+                        is_watching.set(false);
                     }
                 }
-            }
+            });
+        } else {
             is_watching.set(false);
         }
     });
@@ -151,37 +152,32 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     };
     let handle_watch = {
         move |_| {
+            if !*HAS_SIGNER.read() {
+                toast.warning("Sign in to watch repositories".to_string(), ToastOptions::new());
+                return;
+            }
+            let coord = match coordinate.read().clone() {
+                Some(c) => c,
+                None => return,
+            };
             let currently_watching = *is_watching.read();
-            #[cfg(target_arch = "wasm32")]
-            {
-                let repo_coord = format!(
-                    "{}:{}",
-                    repo_pubkey_signal.read(),
-                    repo_id_signal.read(),
-                );
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        let mut watched: Vec<String> = storage
-                            .get_item("nostr_blue_watched_repos")
-                            .ok()
-                            .flatten()
-                            .and_then(|s| serde_json::from_str(&s).ok())
-                            .unwrap_or_default();
-                        if currently_watching {
-                            watched.retain(|x| x != &repo_coord);
-                        } else if !watched.contains(&repo_coord) {
-                            watched.push(repo_coord.clone());
-                        }
-                        if let Ok(json) = serde_json::to_string(&watched) {
-                            let _ = storage.set_item("nostr_blue_watched_repos", &json);
+            // Optimistic update
+            is_watching.set(!currently_watching);
+            spawn(async move {
+                match watches::toggle_watch_repo(&coord, currently_watching).await {
+                    Ok(_) => {
+                        if !currently_watching {
+                            toast.success("Watching repository".to_string(), ToastOptions::new());
                         }
                     }
+                    Err(e) => {
+                        // Revert on failure
+                        is_watching.set(currently_watching);
+                        log::error!("Watch toggle failed: {}", e);
+                        toast.error(format!("Failed to update watch: {}", e), ToastOptions::new());
+                    }
                 }
-            }
-            is_watching.set(!currently_watching);
-            if !currently_watching {
-                toast.success("Watching repository".to_string(), ToastOptions::new());
-            }
+            });
         }
     };
     let handle_share = {
@@ -331,6 +327,15 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     loading: false,
                     onclick: handle_share.clone(),
                 }
+                ActionButton {
+                    icon: icons::QR_CODE,
+                    label: "QR",
+                    count: None,
+                    active: false,
+                    disabled: false,
+                    loading: false,
+                    onclick: move |_| show_qr_modal.set(true),
+                }
             }
             div { class: "md:hidden relative",
                 button {
@@ -386,6 +391,11 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             label: "Share",
                             onclick: handle_share,
                         }
+                        MobileMenuItem {
+                            icon: icons::QR_CODE,
+                            label: "QR Code",
+                            onclick: move |_| show_qr_modal.set(true),
+                        }
                     }
                 }
             }
@@ -405,6 +415,46 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             lud06: None::<String>,
                             event_id: Some(repo.event_id.clone()),
                             on_close: move |_| show_zap_modal.set(false),
+                        }
+                    }
+                }
+            }
+            if *show_qr_modal.read() {
+                {
+                    let naddr_for_qr = naddr.clone();
+                    let repo_url = format!("https://nostr.blue/code/repo/{}", naddr_for_qr);
+                    let encoded_url = urlencoding::encode(&repo_url);
+                    let qr_img_url = format!("https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={}", encoded_url);
+                    rsx! {
+                        div {
+                            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+                            onclick: move |_| show_qr_modal.set(false),
+                        }
+                        div {
+                            class: "fixed inset-0 z-50 flex items-center justify-center p-4",
+                            onclick: move |_| show_qr_modal.set(false),
+                            div {
+                                class: "bg-background border border-border rounded-lg p-6 w-full max-w-sm shadow-lg",
+                                onclick: move |evt| evt.stop_propagation(),
+                                div { class: "flex justify-between items-center mb-4",
+                                    h2 { class: "text-lg font-bold", "QR Code" }
+                                    button {
+                                        class: "text-muted-foreground hover:text-foreground",
+                                        onclick: move |_| show_qr_modal.set(false),
+                                        "✕"
+                                    }
+                                }
+                                div { class: "flex flex-col items-center gap-4",
+                                    img {
+                                        src: "{qr_img_url}",
+                                        alt: "Repository QR Code",
+                                        class: "w-[200px] h-[200px] rounded bg-white p-2",
+                                    }
+                                    p { class: "text-xs text-muted-foreground text-center break-all font-mono",
+                                        "{naddr_for_qr}"
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -87,6 +87,43 @@ pub fn CodeFileViewerSkeleton() -> Element {
         }
     }
 }
+/// Parse a URL hash like "#L5" or "#L5-L10" into selected line numbers
+pub fn parse_line_hash(hash: &str) -> Option<(usize, usize)> {
+    let hash = hash.trim_start_matches('#');
+    if let Some((start_s, end_s)) = hash.split_once('-') {
+        let start = start_s.strip_prefix('L')?.parse::<usize>().ok()?;
+        let end = end_s.strip_prefix('L')?.parse::<usize>().ok()?;
+        if start > 0 && end > 0 && start <= end {
+            Some((start, end))
+        } else {
+            None
+        }
+    } else {
+        let line = hash.strip_prefix('L')?.parse::<usize>().ok()?;
+        if line > 0 {
+            Some((line, line))
+        } else {
+            None
+        }
+    }
+}
+
+/// Set the URL hash without triggering navigation
+fn set_url_hash(hash: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            if let Ok(location) = window.location() {
+                let _ = location.set_hash(hash);
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = hash;
+    }
+}
+
 /// Main file viewer component
 #[component]
 pub fn CodeFileViewer(
@@ -94,8 +131,12 @@ pub fn CodeFileViewer(
     filename: String,
     #[props(default = "".to_string())]
     git_ref: String,
+    #[props(default = None)]
+    selected_lines: Option<(usize, usize)>,
 ) -> Element {
     let mut copied = use_signal(|| false);
+    let mut sel_start = use_signal(|| selected_lines.map(|(s, _)| s));
+    let mut sel_end = use_signal(|| selected_lines.map(|(_, e)| e));
     let language = detect_language(&filename);
     let is_binary = is_binary_extension(&filename);
     if is_binary {
@@ -228,15 +269,53 @@ pub fn CodeFileViewer(
                         table { class: "w-full border-collapse",
                             tbody {
                                 for (i , line) in displayed_lines.iter().enumerate() {
-                                    tr {
-                                        key: "{i}",
-                                        class: "hover:bg-accent/30 transition-colors",
-                                        td {
-                                            class: "select-none text-right text-muted-foreground px-3 py-0 border-r border-border/50 bg-muted/30 sticky left-0",
-                                            style: "width: {line_number_width + 2}ch; min-width: {line_number_width + 2}ch",
-                                            "{i + 1}"
+                                    {
+                                        let line_num = i + 1;
+                                        let is_selected = match (sel_start(), sel_end()) {
+                                            (Some(s), Some(e)) => line_num >= s && line_num <= e,
+                                            _ => false,
+                                        };
+                                        let row_class = if is_selected {
+                                            "bg-primary/10"
+                                        } else {
+                                            "hover:bg-accent/30 transition-colors"
+                                        };
+                                        rsx! {
+                                            tr {
+                                                key: "{i}",
+                                                id: "L{line_num}",
+                                                class: "{row_class}",
+                                                td {
+                                                    class: "select-none text-right text-muted-foreground px-3 py-0 border-r border-border/50 bg-muted/30 sticky left-0 cursor-pointer hover:text-primary",
+                                                    style: "width: {line_number_width + 2}ch; min-width: {line_number_width + 2}ch",
+                                                    onclick: move |e: MouseEvent| {
+                                                        if e.modifiers().shift() {
+                                                            if let Some(start) = sel_start() {
+                                                                let (new_start, new_end) = if line_num >= start {
+                                                                    (start, line_num)
+                                                                } else {
+                                                                    (line_num, start)
+                                                                };
+                                                                sel_start.set(Some(new_start));
+                                                                sel_end.set(Some(new_end));
+                                                                set_url_hash(&format!("L{new_start}-L{new_end}"));
+                                                            }
+                                                        } else {
+                                                            sel_start.set(Some(line_num));
+                                                            sel_end.set(Some(line_num));
+                                                            set_url_hash(&format!("L{line_num}"));
+                                                        }
+                                                    },
+                                                    a {
+                                                        href: "#L{line_num}",
+                                                        class: "block",
+                                                        onclick: |e: MouseEvent| e.prevent_default(),
+                                                        "{line_num}"
+                                                    }
+                                                }
+                                                td { class: "px-4 py-0 whitespace-pre", "{line}" }
+                                            }
                                         }
-                                        td { class: "px-4 py-0 whitespace-pre", "{line}" }
                                     }
                                 }
                             }

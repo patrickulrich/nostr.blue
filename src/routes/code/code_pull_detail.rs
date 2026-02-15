@@ -200,6 +200,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
     let mut show_merge_confirm = use_signal(|| false);
+    let mut merge_strategy = use_signal(|| "merge".to_string());
     let mut show_update_form = use_signal(|| false);
     let mut update_content = use_signal(String::new);
     let mut update_commit = use_signal(String::new);
@@ -231,7 +232,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             let id = pr_id.clone();
             spawn(async move {
                 is_updating_status.set(true);
-                match update_pr_status_by_id(&id, new_status).await {
+                match update_pr_status_by_id(&id, new_status, None).await {
                     Ok(_) => {}
                     Err(e) => {
                         web_sys::console::error_1(
@@ -245,10 +246,24 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     };
 
     let handle_merge = {
-        let handler = handle_status_change.clone();
+        let pr_id = pr_id.clone();
         move |_| {
+            let strategy = merge_strategy.read().clone();
+            let id = pr_id.clone();
             show_merge_confirm.set(false);
-            handler(IssueStatus::Applied);
+            spawn(async move {
+                is_updating_status.set(true);
+                let strategy_opt = if strategy == "merge" { None } else { Some(strategy.as_str()) };
+                match update_pr_status_by_id(&id, IssueStatus::Applied, strategy_opt).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        web_sys::console::error_1(
+                            &format!("Failed to merge: {}", e).into(),
+                        );
+                    }
+                }
+                is_updating_status.set(false);
+            });
         }
     };
 
@@ -568,6 +583,51 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         h3 { class: "text-lg font-semibold mb-2", "Merge Pull Request" }
                         p { class: "text-sm text-muted-foreground mb-4",
                             "This will mark the pull request as merged (Applied). This action publishes a status event to Nostr relays."
+                        }
+                        // Merge strategy selection
+                        div { class: "space-y-2 mb-4",
+                            label { class: "text-sm font-medium", "Merge strategy" }
+                            div { class: "space-y-1.5",
+                                label { class: "flex items-center gap-2 p-2 rounded-lg hover:bg-accent/50 cursor-pointer",
+                                    input {
+                                        r#type: "radio",
+                                        name: "merge-strategy",
+                                        value: "merge",
+                                        checked: *merge_strategy.read() == "merge",
+                                        onchange: move |_| merge_strategy.set("merge".to_string()),
+                                    }
+                                    div {
+                                        p { class: "text-sm font-medium", "Merge commit" }
+                                        p { class: "text-xs text-muted-foreground", "All commits will be added with a merge commit." }
+                                    }
+                                }
+                                label { class: "flex items-center gap-2 p-2 rounded-lg hover:bg-accent/50 cursor-pointer",
+                                    input {
+                                        r#type: "radio",
+                                        name: "merge-strategy",
+                                        value: "squash",
+                                        checked: *merge_strategy.read() == "squash",
+                                        onchange: move |_| merge_strategy.set("squash".to_string()),
+                                    }
+                                    div {
+                                        p { class: "text-sm font-medium", "Squash and merge" }
+                                        p { class: "text-xs text-muted-foreground", "All commits will be squashed into one commit." }
+                                    }
+                                }
+                                label { class: "flex items-center gap-2 p-2 rounded-lg hover:bg-accent/50 cursor-pointer",
+                                    input {
+                                        r#type: "radio",
+                                        name: "merge-strategy",
+                                        value: "rebase",
+                                        checked: *merge_strategy.read() == "rebase",
+                                        onchange: move |_| merge_strategy.set("rebase".to_string()),
+                                    }
+                                    div {
+                                        p { class: "text-sm font-medium", "Rebase and merge" }
+                                        p { class: "text-xs text-muted-foreground", "Commits will be rebased onto the base branch." }
+                                    }
+                                }
+                            }
                         }
                         div { class: "flex justify-end gap-3",
                             button {
