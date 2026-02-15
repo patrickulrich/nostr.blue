@@ -153,10 +153,19 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
     let issue_id_for_comments = issue_id.clone();
-    let comments = use_resource(move || {
+    let mut comments = use_resource(move || {
         let id = issue_id_for_comments.clone();
         async move { fetch_comments_by_id(&id).await }
     });
+
+    // Poll for new comments every 30 seconds
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(30_000).await;
+            comments.restart();
+        }
+    });
+
     let handle_status_change = {
         let issue_id = issue_id.clone();
         move |new_status: IssueStatus| {

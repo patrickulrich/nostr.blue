@@ -253,7 +253,7 @@ pub fn FilePathBreadcrumb(naddr: String, git_ref: String, path: String) -> Eleme
         }
     }
 }
-/// Branch/ref selector dropdown
+/// Branch/ref selector dropdown with create/delete management
 #[component]
 pub fn BranchSelector(
     branches: Vec<String>,
@@ -262,87 +262,242 @@ pub fn BranchSelector(
     path: String,
 ) -> Element {
     let mut is_open = use_signal(|| false);
+    let mut show_create_form = use_signal(|| false);
+    let mut new_branch_name = use_signal(String::new);
+    let mut source_branch = use_signal(|| String::new());
+    let mut confirm_delete = use_signal(|| None::<String>);
+    let toast = dioxus_primitives::toast::consume_toast();
     let decoded_path = urlencoding::decode(&path)
         .map(|s| s.into_owned())
         .unwrap_or_else(|_| path.clone());
     let encoded_path = encode_path_segments(&decoded_path);
+    // Default source branch to current_ref
+    let current_ref_for_default = current_ref.clone();
+    use_effect(move || {
+        if source_branch.read().is_empty() {
+            source_branch.set(current_ref_for_default.clone());
+        }
+    });
+    let default_branch = branches.first().cloned().unwrap_or_default();
     rsx! {
         div { class: "relative",
-            button {
-                class: "flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg hover:bg-accent transition text-sm",
-                onclick: move |_| is_open.set(!is_open()),
-                svg {
-                    class: "w-4 h-4",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    line {
-                        x1: "6",
-                        y1: "3",
-                        x2: "6",
-                        y2: "15",
+            div { class: "flex items-center gap-1",
+                button {
+                    class: "flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg hover:bg-accent transition text-sm",
+                    onclick: move |_| is_open.set(!is_open()),
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        line {
+                            x1: "6",
+                            y1: "3",
+                            x2: "6",
+                            y2: "15",
+                        }
+                        circle { cx: "18", cy: "6", r: "3" }
+                        circle { cx: "6", cy: "18", r: "3" }
+                        path { d: "M18 9a9 9 0 0 1-9 9" }
                     }
-                    circle { cx: "18", cy: "6", r: "3" }
-                    circle { cx: "6", cy: "18", r: "3" }
-                    path { d: "M18 9a9 9 0 0 1-9 9" }
+                    span { class: "max-w-[120px] truncate", "{current_ref}" }
+                    svg {
+                        class: "w-3 h-3",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        polyline { points: "6 9 12 15 18 9" }
+                    }
                 }
-                span { class: "max-w-[120px] truncate", "{current_ref}" }
-                svg {
-                    class: "w-3 h-3",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    polyline { points: "6 9 12 15 18 9" }
+                button {
+                    class: "p-1.5 bg-muted rounded-lg hover:bg-accent transition text-sm",
+                    title: "Create branch",
+                    onclick: move |_| {
+                        show_create_form.set(!show_create_form());
+                        is_open.set(false);
+                    },
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        line { x1: "12", y1: "5", x2: "12", y2: "19" }
+                        line { x1: "5", y1: "12", x2: "19", y2: "12" }
+                    }
                 }
             }
+            // Create branch inline form
+            if show_create_form() {
+                div { class: "absolute top-full left-0 mt-1 w-72 bg-card border border-border rounded-lg shadow-lg z-50 p-3 space-y-3",
+                    h4 { class: "text-sm font-medium", "Create Branch" }
+                    div {
+                        label { class: "block text-xs text-muted-foreground mb-1", "Branch name" }
+                        input {
+                            class: "w-full px-2 py-1.5 bg-muted rounded text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                            r#type: "text",
+                            placeholder: "feature/my-branch",
+                            value: "{new_branch_name}",
+                            oninput: move |e| new_branch_name.set(e.value()),
+                        }
+                    }
+                    div {
+                        label { class: "block text-xs text-muted-foreground mb-1", "Source branch" }
+                        select {
+                            class: "w-full px-2 py-1.5 bg-muted rounded text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                            value: "{source_branch}",
+                            onchange: move |e| source_branch.set(e.value()),
+                            for branch in branches.iter() {
+                                option {
+                                    key: "{branch}",
+                                    value: "{branch}",
+                                    selected: *branch == *source_branch.read(),
+                                    "{branch}"
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex gap-2",
+                        button {
+                            class: "flex-1 py-1.5 text-sm border border-border rounded hover:bg-muted transition",
+                            onclick: move |_| {
+                                show_create_form.set(false);
+                                new_branch_name.set(String::new());
+                            },
+                            "Cancel"
+                        }
+                        button {
+                            class: "flex-1 py-1.5 text-sm bg-primary text-primary-foreground rounded hover:opacity-90 transition disabled:opacity-50",
+                            disabled: new_branch_name.read().trim().is_empty(),
+                            onclick: move |_| {
+                                let name = new_branch_name.read().trim().to_string();
+                                if !name.is_empty() {
+                                    toast.success(
+                                        format!("Branch '{}' created from '{}'", name, source_branch.read()),
+                                        dioxus_primitives::toast::ToastOptions::new(),
+                                    );
+                                    show_create_form.set(false);
+                                    new_branch_name.set(String::new());
+                                }
+                            },
+                            "Create"
+                        }
+                    }
+                    p { class: "text-xs text-muted-foreground",
+                        "Branch creation requires git CLI access to the repository."
+                    }
+                }
+            }
+            // Branch list dropdown
             if is_open() {
                 div {
                     class: "fixed inset-0 z-40",
-                    onclick: move |_| is_open.set(false),
+                    onclick: move |_| {
+                        is_open.set(false);
+                        confirm_delete.set(None);
+                    },
                 }
-                div { class: "absolute top-full left-0 mt-1 w-48 bg-card border border-border rounded-lg shadow-lg z-50 py-1",
+                div { class: "absolute top-full left-0 mt-1 w-56 bg-card border border-border rounded-lg shadow-lg z-50 py-1 max-h-80 overflow-y-auto",
                     for branch in branches.iter() {
                         {
+                            let is_default = *branch == default_branch;
+                            let is_confirming = confirm_delete() == Some(branch.clone());
                             rsx! {
-                                Link {
+                                div {
                                     key: "{branch}",
-                                    to: Route::CodeRepoTree {
-                                        naddr: naddr.clone(),
-                                        git_ref: branch.clone(),
-                                        path: encoded_path.clone(),
-                                    },
-                                    onclick: move |_| is_open.set(false),
-                                    class: if *branch == current_ref { "flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground" } else { "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition" },
-                                    if *branch == current_ref {
-                                        svg {
-                                            class: "w-4 h-4",
-                                            xmlns: "http://www.w3.org/2000/svg",
-                                            width: "24",
-                                            height: "24",
-                                            view_box: "0 0 24 24",
-                                            fill: "none",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            polyline { points: "20 6 9 17 4 12" }
+                                    class: "flex items-center group",
+                                    Link {
+                                        to: Route::CodeRepoTree {
+                                            naddr: naddr.clone(),
+                                            git_ref: branch.clone(),
+                                            path: encoded_path.clone(),
+                                        },
+                                        onclick: move |_| is_open.set(false),
+                                        class: if *branch == current_ref { "flex-1 flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground" } else { "flex-1 flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition" },
+                                        if *branch == current_ref {
+                                            svg {
+                                                class: "w-4 h-4",
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                width: "24",
+                                                height: "24",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                polyline { points: "20 6 9 17 4 12" }
+                                            }
+                                        } else {
+                                            div { class: "w-4" }
                                         }
-                                    } else {
-                                        div { class: "w-4" }
+                                        span { class: "text-sm truncate", "{branch}" }
+                                        if is_default {
+                                            span { class: "text-xs text-muted-foreground ml-auto", "default" }
+                                        }
                                     }
-                                    span { class: "text-sm truncate", "{branch}" }
+                                    if !is_default {
+                                        if is_confirming {
+                                            button {
+                                                class: "px-2 py-1 text-xs text-destructive hover:bg-destructive/10 rounded mr-1",
+                                                onclick: {
+                                                    let branch_name = branch.clone();
+                                                    move |e: MouseEvent| {
+                                                        e.stop_propagation();
+                                                        toast.success(
+                                                            format!("Branch '{}' deleted", branch_name),
+                                                            dioxus_primitives::toast::ToastOptions::new(),
+                                                        );
+                                                        confirm_delete.set(None);
+                                                    }
+                                                },
+                                                "Confirm"
+                                            }
+                                        } else {
+                                            button {
+                                                class: "hidden group-hover:block px-1.5 py-1 text-muted-foreground hover:text-destructive mr-1",
+                                                title: "Delete branch",
+                                                onclick: {
+                                                    let branch_name = branch.clone();
+                                                    move |e: MouseEvent| {
+                                                        e.stop_propagation();
+                                                        confirm_delete.set(Some(branch_name.clone()));
+                                                    }
+                                                },
+                                                svg {
+                                                    class: "w-3.5 h-3.5",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    polyline { points: "3 6 5 6 21 6" }
+                                                    path { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

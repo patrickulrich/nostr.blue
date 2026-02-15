@@ -209,9 +209,17 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let mut update_error = use_signal(|| None::<String>);
 
     let pr_id_for_comments = pr_id.clone();
-    let comments = use_resource(move || {
+    let mut comments = use_resource(move || {
         let id = pr_id_for_comments.clone();
         async move { fetch_pr_comments_by_id(&id).await }
+    });
+
+    // Poll for new comments every 30 seconds
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(30_000).await;
+            comments.restart();
+        }
     });
 
     // Fetch line-level comments for the Files Changed tab
