@@ -3,13 +3,16 @@
 //! Manage repository settings for NIP-34 repositories.
 use crate::components::icons;
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, publish_repository};
+use crate::services::git_hosting::{fetch_repository, publish_repository_with_extras};
+use crate::services::git_hosting::milestones::milestones_to_tags;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
+use nostr_sdk::prelude::{Tag, TagKind};
+use std::borrow::Cow;
 /// Repository settings page component
 #[component]
 pub fn CodeRepoSettings(naddr: String) -> Element {
@@ -44,6 +47,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut zap_splits = use_signal(Vec::<(String, u32)>::new);
     let mut new_split_pubkey = use_signal(String::new);
     let mut new_split_weight = use_signal(|| 50u32);
+    let mut milestones = use_signal(Vec::<crate::services::git_hosting::milestones::Milestone>::new);
+    let mut new_milestone_name = use_signal(String::new);
+    let mut required_approvals = use_signal(|| 0u32);
+    let mut topics_list = use_signal(Vec::<String>::new);
+    let mut new_topic = use_signal(String::new);
     if let Some(Ok(r)) = repo_result.read().as_ref() {
         if !*form_initialized.read() {
             repo_name.set(r.name.clone().unwrap_or_default());
@@ -56,6 +64,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             if zap_splits.read().is_empty() {
                 zap_splits.set(vec![(r.pubkey.clone(), 100)]);
             }
+            required_approvals.set(r.required_approvals);
+            topics_list.set(r.topics.clone());
             form_initialized.set(true);
         }
     }
@@ -112,7 +122,41 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 } else {
                     Some(description.as_str())
                 };
-                match publish_repository(
+                // Build extra tags for zap splits, milestones, required approvals
+                let mut extra_tags: Vec<Tag> = Vec::new();
+                // Zap split tags
+                let splits_snapshot: Vec<(String, u32)> = zap_splits.read().clone();
+                for (pubkey, weight) in &splits_snapshot {
+                    if let Ok(pk) = PublicKey::parse(pubkey) {
+                        extra_tags.push(Tag::custom(
+                            TagKind::Custom(Cow::Borrowed("zap")),
+                            [pk.to_hex(), "wss://relay.damus.io".to_string(), weight.to_string()],
+                        ));
+                    }
+                }
+                // Milestone tags
+                let milestones_snapshot = milestones.read().clone();
+                for tag_values in milestones_to_tags(&milestones_snapshot) {
+                    if tag_values.len() >= 2 {
+                        let kind = TagKind::Custom(Cow::Owned(tag_values[0].clone()));
+                        let values: Vec<String> = tag_values[1..].to_vec();
+                        extra_tags.push(Tag::custom(kind, values));
+                    }
+                }
+                // Topic tags
+                let topics_snapshot: Vec<String> = topics_list.read().clone();
+                for topic in &topics_snapshot {
+                    extra_tags.push(Tag::hashtag(topic.as_str()));
+                }
+                // Required approvals tag
+                let req_approvals = *required_approvals.read();
+                if req_approvals > 0 {
+                    extra_tags.push(Tag::custom(
+                        TagKind::Custom(Cow::Borrowed("required-approvals")),
+                        [req_approvals.to_string()],
+                    ));
+                }
+                match publish_repository_with_extras(
                         &repo_data.id,
                         name_opt,
                         desc_opt,
@@ -120,6 +164,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                         &web_urls,
                         &relays,
                         &maintainer_keys,
+                        &extra_tags,
                     )
                     .await
                 {
@@ -509,6 +554,78 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                 }
                             }
                         }
+                        // Topics section
+                        div { class: "space-y-4 pt-6 border-t border-border",
+                            h2 { class: "font-semibold text-lg flex items-center gap-2",
+                                "Topics"
+                                span { class: "text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full",
+                                    "{topics_list.read().len()}"
+                                }
+                            }
+                            p { class: "text-sm text-muted-foreground",
+                                "Tags that help others discover your repository."
+                            }
+                            div { class: "flex flex-wrap gap-2",
+                                for (index, topic) in topics_list.read().iter().enumerate() {
+                                    span {
+                                        key: "{topic}",
+                                        class: "inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-sm group",
+                                        "{topic}"
+                                        button {
+                                            class: "ml-1 text-primary/50 hover:text-destructive transition",
+                                            onclick: move |_| {
+                                                let mut list = topics_list.write();
+                                                list.remove(index);
+                                            },
+                                            svg {
+                                                class: "w-3 h-3",
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                width: "24",
+                                                height: "24",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                                line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            div { class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "text",
+                                    placeholder: "e.g., rust, nostr, git",
+                                    value: "{new_topic}",
+                                    oninput: move |e| new_topic.set(e.value()),
+                                    onkeypress: move |e: KeyboardEvent| {
+                                        if e.key() == Key::Enter {
+                                            let topic = new_topic.read().trim().to_lowercase();
+                                            if !topic.is_empty() && !topics_list.read().contains(&topic) {
+                                                topics_list.write().push(topic);
+                                                new_topic.set(String::new());
+                                            }
+                                        }
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:opacity-90 transition disabled:opacity-50",
+                                    disabled: new_topic.read().trim().is_empty(),
+                                    onclick: move |_| {
+                                        let topic = new_topic.read().trim().to_lowercase();
+                                        if !topic.is_empty() && !topics_list.read().contains(&topic) {
+                                            topics_list.write().push(topic);
+                                            new_topic.set(String::new());
+                                        }
+                                    },
+                                    "Add"
+                                }
+                            }
+                        }
                         // Zap Split Configuration
                         div { class: "space-y-4 pt-6 border-t border-border",
                             h2 { class: "font-semibold text-lg flex items-center gap-2",
@@ -669,6 +786,156 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         if total != 100 {
                                             span { "(should equal 100%)" }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                        // Milestones section
+                        div { class: "space-y-4 pt-6 border-t border-border",
+                            h2 { class: "font-semibold text-lg flex items-center gap-2",
+                                svg {
+                                    class: "w-5 h-5",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" }
+                                    line { x1: "4", y1: "22", x2: "4", y2: "15" }
+                                }
+                                "Milestones"
+                                span { class: "text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full",
+                                    "{milestones.read().len()}"
+                                }
+                            }
+                            p { class: "text-sm text-muted-foreground",
+                                "Track project goals and organize issues by milestone."
+                            }
+                            div { class: "space-y-2",
+                                for (idx , ms) in milestones.read().iter().enumerate() {
+                                    div {
+                                        key: "{ms.id}",
+                                        class: "flex items-center gap-3 p-3 bg-muted/50 rounded-lg group",
+                                        svg {
+                                            class: "w-4 h-4 text-muted-foreground shrink-0",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            width: "24",
+                                            height: "24",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" }
+                                            line { x1: "4", y1: "22", x2: "4", y2: "15" }
+                                        }
+                                        div { class: "flex-1 min-w-0",
+                                            span { class: "text-sm font-medium truncate block", "{ms.name}" }
+                                            if !ms.description.is_empty() {
+                                                span { class: "text-xs text-muted-foreground truncate block", "{ms.description}" }
+                                            }
+                                        }
+                                        button {
+                                            class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                            onclick: move |_| {
+                                                let mut list = milestones.write();
+                                                list.remove(idx);
+                                            },
+                                            svg {
+                                                class: "w-4 h-4",
+                                                xmlns: "http://www.w3.org/2000/svg",
+                                                width: "24",
+                                                height: "24",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "2",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                                line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            div { class: "flex gap-2",
+                                input {
+                                    class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "text",
+                                    placeholder: "Milestone name (e.g. v1.0)",
+                                    value: "{new_milestone_name}",
+                                    oninput: move |e| new_milestone_name.set(e.value()),
+                                    onkeypress: move |e: KeyboardEvent| {
+                                        if e.key() == Key::Enter {
+                                            let name = new_milestone_name.read().trim().to_string();
+                                            if !name.is_empty() {
+                                                use crate::services::git_hosting::milestones::{Milestone, generate_milestone_id};
+                                                let id = generate_milestone_id(&name);
+                                                let ms = Milestone {
+                                                    id,
+                                                    name,
+                                                    description: String::new(),
+                                                    due_date: None,
+                                                };
+                                                milestones.write().push(ms);
+                                                new_milestone_name.set(String::new());
+                                            }
+                                        }
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:opacity-90 transition disabled:opacity-50",
+                                    disabled: new_milestone_name.read().trim().is_empty(),
+                                    onclick: move |_| {
+                                        let name = new_milestone_name.read().trim().to_string();
+                                        if !name.is_empty() {
+                                            use crate::services::git_hosting::milestones::{Milestone, generate_milestone_id};
+                                            let id = generate_milestone_id(&name);
+                                            let ms = Milestone {
+                                                id,
+                                                name,
+                                                description: String::new(),
+                                                due_date: None,
+                                            };
+                                            milestones.write().push(ms);
+                                            new_milestone_name.set(String::new());
+                                        }
+                                    },
+                                    "Add"
+                                }
+                            }
+                        }
+                        // Required Approvals section
+                        div { class: "space-y-4 pt-6 border-t border-border",
+                            h2 { class: "font-semibold text-lg", "Merge Policy" }
+                            p { class: "text-sm text-muted-foreground",
+                                "Set the number of approvals required before a pull request can be merged."
+                            }
+                            div { class: "flex items-center gap-3",
+                                label { class: "text-sm font-medium", "Required approvals:" }
+                                input {
+                                    class: "w-20 px-3 py-2 bg-muted rounded-lg text-sm text-center font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "number",
+                                    min: "0",
+                                    max: "10",
+                                    value: "{required_approvals}",
+                                    oninput: move |e| {
+                                        if let Ok(v) = e.value().parse::<u32>() {
+                                            required_approvals.set(v.min(10));
+                                        }
+                                    },
+                                }
+                                span { class: "text-xs text-muted-foreground",
+                                    if *required_approvals.read() == 0 {
+                                        "No approval requirement"
+                                    } else {
+                                        "approvals needed to merge"
                                     }
                                 }
                             }

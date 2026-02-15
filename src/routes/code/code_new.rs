@@ -102,7 +102,7 @@ pub fn CodeNew() -> Element {
             let name_opt = if name_val.is_empty() { None } else { Some(name_val.as_str()) };
             let desc_opt = if desc_val.is_empty() { None } else { Some(desc_val.as_str()) };
 
-            let _topic_list: Vec<&str> = topics_val
+            let topic_list: Vec<&str> = topics_val
                 .split(',')
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
@@ -116,6 +116,7 @@ pub fn CodeNew() -> Element {
                 &web_list,
                 &relay_list,
                 &maintainers,
+                &topic_list,
             )
             .await
             {

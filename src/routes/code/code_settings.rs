@@ -2,9 +2,13 @@
 //!
 //! User-specific settings for the code section: git identity,
 //! default branch preference, editor preferences, and notification toggles.
+use crate::components::code::SshKeyManager;
 use crate::routes::Route;
 use crate::stores::auth_store;
+use crate::stores::nwc_store::{self, ConnectionStatus};
+use crate::stores::profiles::PROFILE_CACHE;
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 
@@ -284,6 +288,223 @@ pub fn CodeSettings() -> Element {
                             on_toggle: move |val: bool| {
                                 settings.write().notify_review_requests = val;
                             },
+                        }
+                    }
+                }
+
+                // ── Lightning Wallet (NWC) ──────────────────────
+                WalletSection {}
+
+                // ── SSH Keys ────────────────────────────────────
+                div { class: "bg-card border border-border rounded-lg p-4 space-y-4",
+                    h2 { class: "text-lg font-semibold text-foreground flex items-center gap-2",
+                        svg {
+                            class: "w-5 h-5",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" }
+                        }
+                        "SSH Keys"
+                    }
+                    p { class: "text-sm text-muted-foreground",
+                        "Manage SSH keys for Git push access to repositories."
+                    }
+                    SshKeyManager {}
+                }
+            }
+        }
+    }
+}
+
+/// NWC Wallet configuration section.
+#[component]
+fn WalletSection() -> Element {
+    let status = nwc_store::NWC_STATUS.read().clone();
+    let balance = *nwc_store::NWC_BALANCE.read();
+    let mut nwc_uri = use_signal(String::new);
+    let mut connect_error = use_signal(|| None::<String>);
+    let mut is_connecting = use_signal(|| false);
+
+    // Look up current user's lightning address
+    let lightning_address = {
+        let auth = auth_store::AUTH_STATE.read();
+        if let Some(ref pk) = auth.pubkey {
+            let cache = PROFILE_CACHE.read();
+            cache.peek(pk).and_then(|p| p.lud16.clone())
+        } else {
+            None
+        }
+    };
+
+    let handle_connect = move |_| {
+        let uri = nwc_uri.read().clone();
+        if uri.trim().is_empty() {
+            connect_error.set(Some("Please enter a NWC connection string".to_string()));
+            return;
+        }
+        connect_error.set(None);
+        is_connecting.set(true);
+        spawn(async move {
+            match nwc_store::connect_nwc(&uri).await {
+                Ok(()) => {
+                    nwc_uri.set(String::new());
+                    connect_error.set(None);
+                }
+                Err(e) => {
+                    connect_error.set(Some(e));
+                }
+            }
+            is_connecting.set(false);
+        });
+    };
+
+    let handle_disconnect = move |_| {
+        nwc_store::disconnect_nwc();
+    };
+
+    let handle_refresh = move |_| {
+        spawn(async move {
+            let _ = nwc_store::refresh_balance().await;
+        });
+    };
+
+    rsx! {
+        div { class: "bg-card border border-border rounded-lg p-4 space-y-4",
+            h2 { class: "text-lg font-semibold text-foreground flex items-center gap-2",
+                svg {
+                    class: "w-5 h-5",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" }
+                }
+                "Lightning Wallet"
+            }
+            p { class: "text-sm text-muted-foreground",
+                "Connect a Nostr Wallet Connect (NWC) compatible wallet to enable bounty payments and zap distribution."
+            }
+
+            // Status badge
+            div { class: "flex items-center gap-3",
+                match &status {
+                    ConnectionStatus::Connected => rsx! {
+                        span { class: "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-600 dark:text-green-400",
+                            span { class: "w-2 h-2 rounded-full bg-green-500" }
+                            "Connected"
+                        }
+                    },
+                    ConnectionStatus::Connecting => rsx! {
+                        span { class: "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+                            span { class: "w-2 h-2 rounded-full bg-yellow-500 animate-pulse" }
+                            "Connecting..."
+                        }
+                    },
+                    ConnectionStatus::Error(msg) => rsx! {
+                        span { class: "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400",
+                            span { class: "w-2 h-2 rounded-full bg-red-500" }
+                            "Error: {msg}"
+                        }
+                    },
+                    ConnectionStatus::Disconnected => rsx! {
+                        span { class: "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground",
+                            span { class: "w-2 h-2 rounded-full bg-muted-foreground" }
+                            "Not connected"
+                        }
+                    },
+                }
+            }
+
+            // Balance + Lightning address (when connected)
+            if matches!(status, ConnectionStatus::Connected) {
+                div { class: "p-3 bg-muted rounded-lg space-y-2",
+                    div { class: "flex items-center justify-between",
+                        span { class: "text-sm text-muted-foreground", "Balance" }
+                        div { class: "flex items-center gap-2",
+                            span { class: "text-sm font-mono font-medium",
+                                match balance {
+                                    Some(msats) => format!("{} sats", msats / 1000),
+                                    None => "Loading...".to_string(),
+                                }
+                            }
+                            button {
+                                class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground",
+                                title: "Refresh balance",
+                                onclick: handle_refresh,
+                                svg {
+                                    class: "w-3.5 h-3.5",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    polyline { points: "23 4 23 10 17 10" }
+                                    polyline { points: "1 20 1 14 7 14" }
+                                    path { d: "M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" }
+                                }
+                            }
+                        }
+                    }
+                    if let Some(ref addr) = lightning_address {
+                        div { class: "flex items-center justify-between",
+                            span { class: "text-sm text-muted-foreground", "Lightning Address" }
+                            span { class: "text-sm font-mono", "{addr}" }
+                        }
+                    }
+                }
+
+                button {
+                    class: "px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 transition text-sm font-medium",
+                    onclick: handle_disconnect,
+                    "Disconnect Wallet"
+                }
+            }
+
+            // Connect form (when disconnected)
+            if matches!(status, ConnectionStatus::Disconnected | ConnectionStatus::Error(_)) {
+                div { class: "space-y-3",
+                    div {
+                        label { class: "block text-sm font-medium mb-2", "NWC Connection String" }
+                        input {
+                            class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                            r#type: "text",
+                            placeholder: "nostr+walletconnect://...",
+                            value: "{nwc_uri.read()}",
+                            oninput: move |e| {
+                                nwc_uri.set(e.value());
+                            },
+                        }
+                        p { class: "text-xs text-muted-foreground mt-1",
+                            "Get this from your NWC-compatible wallet (e.g. Alby, Mutiny, Coinos)."
+                        }
+                    }
+                    if let Some(ref err) = *connect_error.read() {
+                        p { class: "text-sm text-destructive", "{err}" }
+                    }
+                    button {
+                        class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm font-medium disabled:opacity-50",
+                        disabled: *is_connecting.read(),
+                        onclick: handle_connect,
+                        if *is_connecting.read() {
+                            "Connecting..."
+                        } else {
+                            "Connect Wallet"
                         }
                     }
                 }

@@ -4,7 +4,7 @@
 use crate::components::code::DiffViewer;
 use crate::components::icons;
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, git_service::compare_refs_github};
+use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
@@ -52,14 +52,23 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
         error.set(None);
         has_compared.set(true);
         spawn(async move {
-            match compare_refs_github(&repo, &base, &head).await {
-                Ok(diff) => {
-                    diff_content.set(diff);
+            // Try universal git_service compare first, falls back to GitHub API internally
+            if git_service::GitService::is_initialized()
+                || git_service::GitService::init().await.is_ok()
+            {
+                match git_service::git_service().compare_refs(&repo, &base, &head).await {
+                    Ok(diff) => {
+                        diff_content.set(diff);
+                        loading.set(false);
+                        return;
+                    }
+                    Err(e) => {
+                        error.set(Some(e));
+                        diff_content.set(String::new());
+                    }
                 }
-                Err(e) => {
-                    error.set(Some(e));
-                    diff_content.set(String::new());
-                }
+            } else {
+                error.set(Some("Failed to initialize git service".to_string()));
             }
             loading.set(false);
         });

@@ -92,6 +92,31 @@ fn RepoContent(repo: Repository, naddr: String) -> Element {
             if let Some(desc) = &repo.description {
                 p { class: "text-muted-foreground", "{desc}" }
             }
+            if let Some(fork_ref) = &repo.fork_of {
+                div { class: "flex items-center gap-2 text-sm text-muted-foreground",
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "18", r: "3" }
+                        circle { cx: "6", cy: "6", r: "3" }
+                        circle { cx: "18", cy: "6", r: "3" }
+                        path { d: "M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" }
+                        line { x1: "12", y1: "12", x2: "12", y2: "15" }
+                    }
+                    span { "Forked from " }
+                    code { class: "px-1.5 py-0.5 bg-muted rounded text-xs font-mono",
+                        "{fork_ref.chars().take(12).collect::<String>()}..."
+                    }
+                }
+            }
             RepoTabNav {
                 naddr: naddr.clone(),
                 active_tab: "overview".to_string(),
@@ -207,6 +232,21 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                                         }
                                     }
                                     "{url}"
+                                }
+                            }
+                        }
+                    }
+                }
+                // Topics card
+                if !repo.topics.is_empty() {
+                    div { class: "bg-card border border-border rounded-lg p-4",
+                        h3 { class: "text-sm font-semibold text-foreground mb-3", "Topics" }
+                        div { class: "flex flex-wrap gap-1",
+                            for topic in repo.topics.iter() {
+                                span {
+                                    key: "{topic}",
+                                    class: "px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs",
+                                    "{topic}"
                                 }
                             }
                         }

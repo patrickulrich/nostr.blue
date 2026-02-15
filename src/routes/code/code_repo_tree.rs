@@ -69,8 +69,18 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                 if let Some(repo) = repo_signal.read().clone() {
                     let ref_str = git_ref_for_finder.clone();
                     spawn(async move {
+                        // Try REST API first (GitHub/GitLab/Codeberg)
                         if let Ok(paths) =
                             file_fetcher::fetch_all_file_paths(&repo, Some(&ref_str)).await
+                        {
+                            all_file_paths.set(paths);
+                            return;
+                        }
+                        // Fall back to isomorphic-git (works for all sources including GRASP)
+                        if let Ok(paths) =
+                            git_service::git_service()
+                                .list_all_files(&repo, Some(&ref_str))
+                                .await
                         {
                             all_file_paths.set(paths);
                         }

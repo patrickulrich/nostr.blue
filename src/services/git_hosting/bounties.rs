@@ -103,6 +103,48 @@ pub async fn claim_bounty(
 ) -> Result<EventId, String> {
     update_bounty_status(bounty_event_id, issue_event_id, "claimed", repository).await
 }
+/// Release a bounty by paying via NWC and marking as "paid"
+///
+/// Fetches the claimer's Lightning address from their profile,
+/// generates an invoice, and pays via NWC.
+pub async fn release_bounty(
+    bounty_event_id: EventId,
+    issue_event_id: EventId,
+    claimer_pubkey: &str,
+    amount_sats: u64,
+    repository: Option<&Coordinate>,
+) -> Result<EventId, String> {
+    use crate::stores::nwc_store;
+    use crate::stores::profiles::PROFILE_CACHE;
+
+    // Check NWC is connected
+    if !nwc_store::is_connected() {
+        return Err("NWC wallet not connected. Connect a wallet in Settings first.".to_string());
+    }
+
+    // Look up claimer's lightning address
+    let lud16 = {
+        let cache = PROFILE_CACHE.read();
+        cache.peek(claimer_pubkey).and_then(|p| p.lud16.clone())
+    };
+    let lud16 = lud16.ok_or_else(|| {
+        "Claimer has no Lightning address (lud16) in their profile".to_string()
+    })?;
+
+    // Generate invoice from LNURL
+    let invoice = crate::services::payments::lnurl::get_invoice_from_lud16(&lud16, amount_sats, Some("Bounty payment"))
+        .await
+        .map_err(|e| format!("Failed to get invoice: {}", e))?;
+
+    // Pay via NWC
+    nwc_store::pay_invoice(invoice)
+        .await
+        .map_err(|e| format!("Payment failed: {}", e))?;
+
+    // Mark bounty as paid
+    update_bounty_status(bounty_event_id, issue_event_id, "paid", repository).await
+}
+
 /// Fetch bounties for an issue by event ID string (convenience wrapper)
 pub async fn fetch_bounties_for_issue_by_id(
     issue_ref: &str,

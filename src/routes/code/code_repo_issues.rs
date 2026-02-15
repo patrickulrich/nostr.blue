@@ -1,18 +1,24 @@
 //! Repository Issues Page
 //!
-//! View issues for a repository.
-//! Follows patterns from code_issue_detail.rs and gittr design.
+//! View issues for a repository with filtering by status, search, and labels.
+use crate::components::code::{FilterBar, StatusFilter, filter_issues};
 use crate::components::{icons, CodeIssueRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_issues;
 use crate::stores::nostr_client;
+use crate::utils::nip34::IssueStatus;
 use dioxus::prelude::*;
+
 /// Repository issues page component
 #[component]
 pub fn CodeRepoIssues(naddr: String) -> Element {
-    let mut issues = use_signal(Vec::new);
+    let mut all_issues = use_signal(Vec::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut status_filter = use_signal(|| StatusFilter::Open);
+    let mut search_query = use_signal(String::new);
+    let mut selected_labels = use_signal(Vec::<String>::new);
+
     let naddr_for_effect = naddr.clone();
     use_effect(move || {
         let n = naddr_for_effect.clone();
@@ -24,7 +30,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
             loading.set(true);
             match fetch_repo_issues(&n).await {
                 Ok(fetched) => {
-                    issues.set(fetched);
+                    all_issues.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
@@ -34,6 +40,40 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
             loading.set(false);
         });
     });
+
+    // Derive filtered list
+    let filtered = {
+        let issues = all_issues.read();
+        let status = *status_filter.read();
+        let query = search_query.read().clone();
+        let labels = selected_labels.read().clone();
+        filter_issues(&issues, status, &query, &labels)
+    };
+
+    // Count open/closed for tabs
+    let open_count = all_issues
+        .read()
+        .iter()
+        .filter(|i| i.status == IssueStatus::Open || i.status == IssueStatus::Draft)
+        .count();
+    let closed_count = all_issues
+        .read()
+        .iter()
+        .filter(|i| i.status == IssueStatus::Closed || i.status == IssueStatus::Applied)
+        .count();
+
+    // Collect unique labels for filter chips
+    let available_labels: Vec<String> = {
+        let mut labels: Vec<String> = all_issues
+            .read()
+            .iter()
+            .flat_map(|i| i.labels.clone())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    };
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -66,7 +106,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                             }
                             p { class: "text-sm text-muted-foreground",
                                 if !*loading.read() {
-                                    "{issues.read().len()} issues"
+                                    "{all_issues.read().len()} issues"
                                 }
                             }
                         }
@@ -139,12 +179,32 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                     }
                 } else if *loading.read() {
                     LoadingSkeleton {}
-                } else if issues.read().is_empty() {
-                    EmptyIssues {}
                 } else {
-                    div { class: "border border-border rounded-lg divide-y divide-border",
-                        for issue in issues.read().iter() {
-                            CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
+                    FilterBar {
+                        status_filter: *status_filter.read(),
+                        on_status_change: move |s| status_filter.set(s),
+                        search_query: search_query.read().clone(),
+                        on_search_change: move |q| search_query.set(q),
+                        open_count,
+                        closed_count,
+                        available_labels,
+                        selected_labels: selected_labels.read().clone(),
+                        on_label_toggle: move |label: String| {
+                            let mut labels = selected_labels.write();
+                            if labels.contains(&label) {
+                                labels.retain(|l| *l != label);
+                            } else {
+                                labels.push(label);
+                            }
+                        },
+                    }
+                    if filtered.is_empty() {
+                        EmptyIssues {}
+                    } else {
+                        div { class: "border border-border rounded-lg divide-y divide-border",
+                            for issue in filtered.iter() {
+                                CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
+                            }
                         }
                     }
                 }
@@ -184,7 +244,7 @@ fn EmptyIssues() -> Element {
                 }
             }
             h3 { class: "font-semibold text-lg mb-2", "No Issues" }
-            p { class: "text-muted-foreground text-sm", "This repository has no open issues." }
+            p { class: "text-muted-foreground text-sm", "No issues match the current filters." }
         }
     }
 }

@@ -130,6 +130,7 @@ pub async fn fetch_user_prs(
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 /// Publish a new patch/pull request
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_patch(
     repository: &Coordinate,
     content: &str,
@@ -137,6 +138,8 @@ pub async fn publish_patch(
     parent_commit: Option<&str>,
     is_cover_letter: bool,
     labels: &[&str],
+    closes_issues: &[&str],
+    branch_name: Option<&str>,
 ) -> Result<EventId, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
@@ -169,6 +172,22 @@ pub async fn publish_patch(
     for label in labels {
         builder = builder.tag(Tag::hashtag(*label));
     }
+    // Add linked issue tags with "closes" marker
+    for issue_id in closes_issues {
+        if let Ok(eid) = EventId::from_hex(issue_id) {
+            builder = builder.tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                [eid.to_hex(), String::new(), String::new(), "closes".to_string()],
+            ));
+        }
+    }
+    // Add branch name tag
+    if let Some(name) = branch_name {
+        builder = builder.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("branch")),
+            [name],
+        ));
+    }
     let output = client
         .send_event_builder(builder)
         .await
@@ -180,6 +199,64 @@ pub async fn publish_patch(
     }
     Ok(event_id)
 }
+/// Publish a PR update event (Kind 1619)
+///
+/// Used when the PR author pushes new commits or updates the patch content.
+/// References the original PR event.
+pub async fn publish_pr_update(
+    pr_id: EventId,
+    repository: &Coordinate,
+    content: &str,
+    commit: Option<&str>,
+    parent_commit: Option<&str>,
+) -> Result<EventId, String> {
+    let client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+    let mut builder = EventBuilder::new(Kind::from(1619), content)
+        .tag(Tag::event(pr_id))
+        .tag(Tag::coordinate(repository.clone(), None))
+        .tag(Tag::public_key(repository.public_key));
+    if let Some(hash) = commit {
+        builder = builder.tag(
+            Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("commit")),
+                [hash],
+            ),
+        );
+    }
+    if let Some(hash) = parent_commit {
+        builder = builder.tag(
+            Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit")),
+                [hash],
+            ),
+        );
+    }
+    let output = client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish PR update: {}", e))?;
+    Ok(*output.id())
+}
+
+/// Publish a PR update by event ID and naddr strings
+pub async fn publish_pr_update_by_id(
+    event_ref: &str,
+    naddr: &str,
+    content: &str,
+    commit: Option<&str>,
+    parent_commit: Option<&str>,
+) -> Result<String, String> {
+    use crate::utils::nip34::decode_naddr;
+    let event_id = decode_event_id(event_ref)
+        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
+    let result = publish_pr_update(event_id, &coord, content, commit, parent_commit).await?;
+    Ok(result.to_hex())
+}
+
 /// Update PR status (Kind 1630-1633)
 pub async fn update_pr_status(
     pr_id: EventId,
@@ -234,6 +311,7 @@ pub async fn fetch_pr_comments(pr_id: EventId) -> Result<Vec<GitComment>, String
     Ok(events.iter().filter_map(GitComment::from_event).collect())
 }
 /// Publish patch/PR by naddr string
+#[allow(clippy::too_many_arguments)]
 pub async fn publish_patch_by_naddr(
     naddr: &str,
     content: &str,
@@ -241,6 +319,8 @@ pub async fn publish_patch_by_naddr(
     parent_commit: Option<&str>,
     is_cover_letter: bool,
     labels: &[&str],
+    closes_issues: &[&str],
+    branch_name: Option<&str>,
 ) -> Result<String, String> {
     use crate::utils::nip34::decode_naddr;
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
@@ -251,6 +331,8 @@ pub async fn publish_patch_by_naddr(
             parent_commit,
             is_cover_letter,
             labels,
+            closes_issues,
+            branch_name,
         )
         .await?;
     Ok(result.to_hex())

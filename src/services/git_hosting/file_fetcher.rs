@@ -85,27 +85,32 @@ pub async fn fetch_file(
     path: &str,
     git_ref: Option<&str>,
 ) -> Result<String, String> {
-    let git_ref = git_ref.unwrap_or("main");
-    for url in &repo.clone {
-        if url.contains("github.com") {
-            if let Some((owner, repo_name)) = parse_github_url(url) {
-                match fetch_github_file(&owner, &repo_name, path, git_ref).await {
-                    Ok(content) => return Ok(content),
-                    Err(_) => continue,
+    let refs_to_try: Vec<&str> = match git_ref {
+        Some(r) => vec![r],
+        None => vec!["main", "master"],
+    };
+    for ref_name in refs_to_try {
+        for url in &repo.clone {
+            if url.contains("github.com") {
+                if let Some((owner, repo_name)) = parse_github_url(url) {
+                    match fetch_github_file(&owner, &repo_name, path, ref_name).await {
+                        Ok(content) => return Ok(content),
+                        Err(_) => continue,
+                    }
                 }
-            }
-        } else if url.contains("gitlab.com") {
-            if let Some((owner, repo_name)) = parse_gitlab_url(url) {
-                match fetch_gitlab_file(&owner, &repo_name, path, git_ref).await {
-                    Ok(content) => return Ok(content),
-                    Err(_) => continue,
+            } else if url.contains("gitlab.com") {
+                if let Some((owner, repo_name)) = parse_gitlab_url(url) {
+                    match fetch_gitlab_file(&owner, &repo_name, path, ref_name).await {
+                        Ok(content) => return Ok(content),
+                        Err(_) => continue,
+                    }
                 }
-            }
-        } else if url.contains("codeberg.org") {
-            if let Some((owner, repo_name)) = parse_codeberg_url(url) {
-                match fetch_codeberg_file(&owner, &repo_name, path, git_ref).await {
-                    Ok(content) => return Ok(content),
-                    Err(_) => continue,
+            } else if url.contains("codeberg.org") {
+                if let Some((owner, repo_name)) = parse_codeberg_url(url) {
+                    match fetch_codeberg_file(&owner, &repo_name, path, ref_name).await {
+                        Ok(content) => return Ok(content),
+                        Err(_) => continue,
+                    }
                 }
             }
         }
@@ -118,27 +123,32 @@ pub async fn fetch_directory(
     path: &str,
     git_ref: Option<&str>,
 ) -> Result<Vec<TreeEntry>, String> {
-    let git_ref = git_ref.unwrap_or("main");
-    for url in &repo.clone {
-        if url.contains("github.com") {
-            if let Some((owner, repo_name)) = parse_github_url(url) {
-                match fetch_github_tree(&owner, &repo_name, path, git_ref).await {
-                    Ok(entries) => return Ok(entries),
-                    Err(_) => continue,
+    let refs_to_try: Vec<&str> = match git_ref {
+        Some(r) => vec![r],
+        None => vec!["main", "master"],
+    };
+    for ref_name in refs_to_try {
+        for url in &repo.clone {
+            if url.contains("github.com") {
+                if let Some((owner, repo_name)) = parse_github_url(url) {
+                    match fetch_github_tree(&owner, &repo_name, path, ref_name).await {
+                        Ok(entries) => return Ok(entries),
+                        Err(_) => continue,
+                    }
                 }
-            }
-        } else if url.contains("gitlab.com") {
-            if let Some((owner, repo_name)) = parse_gitlab_url(url) {
-                match fetch_gitlab_tree(&owner, &repo_name, path, git_ref).await {
-                    Ok(entries) => return Ok(entries),
-                    Err(_) => continue,
+            } else if url.contains("gitlab.com") {
+                if let Some((owner, repo_name)) = parse_gitlab_url(url) {
+                    match fetch_gitlab_tree(&owner, &repo_name, path, ref_name).await {
+                        Ok(entries) => return Ok(entries),
+                        Err(_) => continue,
+                    }
                 }
-            }
-        } else if url.contains("codeberg.org") {
-            if let Some((owner, repo_name)) = parse_codeberg_url(url) {
-                match fetch_codeberg_tree(&owner, &repo_name, path, git_ref).await {
-                    Ok(entries) => return Ok(entries),
-                    Err(_) => continue,
+            } else if url.contains("codeberg.org") {
+                if let Some((owner, repo_name)) = parse_codeberg_url(url) {
+                    match fetch_codeberg_tree(&owner, &repo_name, path, ref_name).await {
+                        Ok(entries) => return Ok(entries),
+                        Err(_) => continue,
+                    }
                 }
             }
         }
@@ -391,11 +401,19 @@ pub async fn fetch_all_file_paths(
     repo: &Repository,
     git_ref: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    let git_ref = git_ref.unwrap_or("main");
-    for url in &repo.clone {
-        if url.contains("github.com") {
-            if let Some((owner, repo_name)) = parse_github_url(url) {
-                return fetch_github_all_paths(&owner, &repo_name, git_ref).await;
+    let refs_to_try: Vec<&str> = match git_ref {
+        Some(r) => vec![r],
+        None => vec!["main", "master"],
+    };
+    for ref_name in refs_to_try {
+        for url in &repo.clone {
+            if url.contains("github.com") {
+                if let Some((owner, repo_name)) = parse_github_url(url) {
+                    match fetch_github_all_paths(&owner, &repo_name, ref_name).await {
+                        Ok(paths) => return Ok(paths),
+                        Err(_) => continue,
+                    }
+                }
             }
         }
     }
@@ -434,14 +452,32 @@ async fn fetch_github_all_paths(
 }
 
 /// Fetch README content for a repository (tries common names)
+///
+/// Tries REST APIs (GitHub/GitLab/Codeberg) first, then falls back to
+/// isomorphic-git for GRASP/ngit and other sources.
 pub async fn fetch_readme(
     repo: &Repository,
     git_ref: Option<&str>,
 ) -> Result<String, String> {
     let readme_names = ["README.md", "README", "readme.md", "Readme.md"];
+    // Try REST APIs first
     for name in readme_names {
         if let Ok(content) = fetch_file(repo, name, git_ref).await {
             return Ok(content);
+        }
+    }
+    // Fall back to isomorphic-git (works for all sources including GRASP)
+    use super::git_service;
+    if git_service::GitService::is_initialized()
+        || git_service::GitService::init().await.is_ok()
+    {
+        for name in readme_names {
+            if let Ok(content) = git_service::git_service()
+                .read_file(repo, name, git_ref.map(|r| if r == "main" { "HEAD" } else { r }))
+                .await
+            {
+                return Ok(content);
+            }
         }
     }
     Err("No README found".to_string())

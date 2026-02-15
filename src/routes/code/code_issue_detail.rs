@@ -4,7 +4,7 @@
 //! bounty display, and permission-based status controls.
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
-use crate::services::git_hosting::bounties::fetch_bounties_for_issue;
+use crate::services::git_hosting::bounties::{claim_bounty, fetch_bounties_for_issue, release_bounty};
 use crate::services::git_hosting::{
     fetch_comments_by_id, fetch_issue, fetch_repository, publish_comment_by_id,
     update_issue_status_by_id,
@@ -359,22 +359,79 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             div { class: "px-4 py-3 border-b border-border bg-muted/30",
                                 h3 { class: "font-semibold text-sm", "Bounties" }
                             }
-                            div { class: "p-4 space-y-2",
+                            div { class: "p-4 space-y-3",
                                 for bounty in bounties.read().iter() {
-                                    div {
-                                        key: "{bounty.event_id}",
-                                        class: "flex items-center justify-between text-sm",
-                                        span { class: "inline-flex items-center gap-1",
-                                            span { class: "text-yellow-400", "\u{26A1}" }
-                                            span { class: "font-mono", "{bounty.amount_sats} sats" }
-                                        }
-                                        span {
-                                            class: match bounty.status {
-                                                crate::utils::nip34::BountyStatus::Pending => "text-xs px-2 py-0.5 rounded-full border border-yellow-500/30 bg-yellow-500/10 text-yellow-500",
-                                                crate::utils::nip34::BountyStatus::Claimed => "text-xs px-2 py-0.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-500",
-                                                crate::utils::nip34::BountyStatus::Paid => "text-xs px-2 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-500",
-                                            },
-                                            "{bounty.status.label()}"
+                                    {
+                                        let bounty_eid = bounty.event_id.clone();
+                                        let bounty_amount = bounty.amount_sats;
+                                        let bounty_status = bounty.status;
+                                        let issue_eid = issue_id.clone();
+                                        let is_owner = is_authenticated && repo.read().as_ref().map(|r| user_pubkey == r.pubkey).unwrap_or(false);
+                                        rsx! {
+                                            div {
+                                                key: "{bounty.event_id}",
+                                                class: "space-y-2",
+                                                div { class: "flex items-center justify-between text-sm",
+                                                    span { class: "inline-flex items-center gap-1",
+                                                        span { class: "text-yellow-400", "\u{26A1}" }
+                                                        span { class: "font-mono", "{bounty_amount} sats" }
+                                                    }
+                                                    span {
+                                                        class: match bounty_status {
+                                                            crate::utils::nip34::BountyStatus::Pending => "text-xs px-2 py-0.5 rounded-full border border-yellow-500/30 bg-yellow-500/10 text-yellow-500",
+                                                            crate::utils::nip34::BountyStatus::Claimed => "text-xs px-2 py-0.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-500",
+                                                            crate::utils::nip34::BountyStatus::Paid => "text-xs px-2 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-500",
+                                                        },
+                                                        "{bounty_status.label()}"
+                                                    }
+                                                }
+                                                // Bounty actions
+                                                if is_authenticated && bounty_status == crate::utils::nip34::BountyStatus::Pending {
+                                                    button {
+                                                        class: "w-full px-3 py-1.5 text-xs bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition",
+                                                        onclick: {
+                                                            let b_eid = bounty_eid.clone();
+                                                            let i_eid = issue_eid.clone();
+                                                            move |_| {
+                                                                let b = b_eid.clone();
+                                                                let i = i_eid.clone();
+                                                                spawn(async move {
+                                                                    if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
+                                                                        if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
+                                                                            let _ = claim_bounty(b_id, i_id, None).await;
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        },
+                                                        "Claim Bounty"
+                                                    }
+                                                }
+                                                if is_owner && bounty_status == crate::utils::nip34::BountyStatus::Claimed {
+                                                    button {
+                                                        class: "w-full px-3 py-1.5 text-xs bg-green-500/10 text-green-500 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition",
+                                                        onclick: {
+                                                            let b_eid = bounty_eid.clone();
+                                                            let i_eid = issue_eid.clone();
+                                                            let amount = bounty_amount;
+                                                            let claimer = user_pubkey.clone();
+                                                            move |_| {
+                                                                let b = b_eid.clone();
+                                                                let i = i_eid.clone();
+                                                                let c = claimer.clone();
+                                                                spawn(async move {
+                                                                    if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
+                                                                        if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
+                                                                            let _ = release_bounty(b_id, i_id, &c, amount, None).await;
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        },
+                                                        "Release Payment"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

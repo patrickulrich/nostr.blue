@@ -6,7 +6,7 @@
 //! This service wraps GitWorkerManager and provides Repository-aware methods
 //! that handle clone URL selection.
 #![allow(dead_code)]
-use crate::services::git_worker::{FileEntry, GitWorkerManager};
+use crate::services::git_worker::{CommitEntry, FileEntry, GitWorkerManager};
 use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
 /// Git Service for repository operations
@@ -102,6 +102,42 @@ impl GitService {
     pub async fn get_branches(&self, repo: &Repository) -> Result<Vec<String>, String> {
         let dir = self.ensure_cloned(repo).await?;
         GitWorkerManager::get_branches(&dir).await
+    }
+    /// Get commit log
+    pub async fn get_log(
+        &self,
+        repo: &Repository,
+        git_ref: Option<&str>,
+        count: u32,
+    ) -> Result<Vec<CommitEntry>, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        let git_ref = git_ref.unwrap_or("HEAD");
+        GitWorkerManager::get_log(&dir, git_ref, count).await
+    }
+    /// List all file paths recursively (flat list for fuzzy finder)
+    pub async fn list_all_files(
+        &self,
+        repo: &Repository,
+        git_ref: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        let git_ref = git_ref.unwrap_or("HEAD");
+        GitWorkerManager::list_all_paths(&dir, git_ref).await
+    }
+    /// Compare two refs and generate a unified diff
+    ///
+    /// Tries local isomorphic-git diff first, falls back to GitHub API.
+    pub async fn compare_refs(
+        &self,
+        repo: &Repository,
+        base: &str,
+        head: &str,
+    ) -> Result<String, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        match GitWorkerManager::diff_refs(&dir, base, head).await {
+            Ok(diff) if !diff.is_empty() => Ok(diff),
+            _ => compare_refs_github(repo, base, head).await,
+        }
     }
 }
 /// Global git service instance

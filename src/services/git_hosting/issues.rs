@@ -137,6 +137,7 @@ pub async fn publish_issue(
     subject: Option<&str>,
     content: &str,
     labels: &[&str],
+    assignees: &[&str],
 ) -> Result<EventId, String> {
     use nostr::nips::nip34::GitIssue;
     let client = get_client().ok_or("Client not initialized")?;
@@ -149,8 +150,14 @@ pub async fn publish_issue(
         subject: subject.map(|s| s.to_string()),
         labels: labels.iter().map(|l| l.to_string()).collect(),
     };
-    let builder = EventBuilder::git_issue(issue)
+    let mut builder = EventBuilder::git_issue(issue)
         .map_err(|e| format!("Failed to build issue event: {}", e))?;
+    // Add assignee p tags
+    for assignee_hex in assignees {
+        if let Ok(pk) = PublicKey::from_hex(assignee_hex) {
+            builder = builder.tag(Tag::public_key(pk));
+        }
+    }
     let output = client
         .send_event_builder(builder)
         .await
@@ -226,10 +233,11 @@ pub async fn publish_issue_by_naddr(
     subject: Option<&str>,
     content: &str,
     labels: &[&str],
+    assignees: &[&str],
 ) -> Result<String, String> {
     use crate::utils::nip34::decode_naddr;
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-    let result = publish_issue(&coord, subject, content, labels).await?;
+    let result = publish_issue(&coord, subject, content, labels, assignees).await?;
     Ok(result.to_hex())
 }
 /// Update issue status by event ID string

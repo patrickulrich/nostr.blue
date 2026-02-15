@@ -95,6 +95,12 @@ pub struct Repository {
     pub star_count: u32,
     pub issue_count: u32,
     pub pr_count: u32,
+    /// Forked from this repository coordinate (naddr)
+    pub fork_of: Option<String>,
+    /// Required number of approvals before merge (0 = no requirement)
+    pub required_approvals: u32,
+    /// Repository topics/tags (from hashtag tags)
+    pub topics: Vec<String>,
 }
 impl Repository {
     /// Parse a Repository from a Kind 30617 event
@@ -110,7 +116,20 @@ impl Repository {
         let mut relays = Vec::new();
         let mut maintainers = Vec::new();
         let mut euc = None;
+        let mut fork_of = None;
+        let mut required_approvals = 0u32;
+        let mut topics = Vec::new();
         for tag in event.tags.iter() {
+            let tag_vec = tag.as_slice();
+            // Parse custom tags first
+            if tag_vec.len() >= 3 && tag_vec[0] == "e" && tag_vec.get(3).map(|s| s.as_str()) == Some("fork") {
+                fork_of = Some(tag_vec[1].to_string());
+                continue;
+            }
+            if tag_vec.len() >= 2 && tag_vec[0] == "required-approvals" {
+                required_approvals = tag_vec[1].parse().unwrap_or(0);
+                continue;
+            }
             match tag.as_standardized() {
                 Some(TagStandard::Identifier(d)) => id = Some(d.clone()),
                 Some(TagStandard::Name(n)) => name = Some(n.clone()),
@@ -130,6 +149,7 @@ impl Repository {
                 Some(TagStandard::GitEarliestUniqueCommitId(hash)) => {
                     euc = Some(hash.to_string());
                 }
+                Some(TagStandard::Hashtag(t)) => topics.push(t.clone()),
                 _ => {}
             }
         }
@@ -155,6 +175,9 @@ impl Repository {
             star_count: 0,
             issue_count: 0,
             pr_count: 0,
+            fork_of,
+            required_approvals,
+            topics,
         })
     }
     /// Get display name (name or id)
@@ -224,6 +247,8 @@ pub struct Issue {
     pub subject: Option<String>,
     /// Labels (from t tags)
     pub labels: Vec<String>,
+    /// Assignee pubkeys (hex, from p tags)
+    pub assignees: Vec<String>,
     /// Event ID (hex)
     pub event_id: String,
     /// Author pubkey (hex)
@@ -244,6 +269,7 @@ impl Issue {
         let mut repository = None;
         let mut subject = None;
         let mut labels = Vec::new();
+        let mut assignees = Vec::new();
         for tag in event.tags.iter() {
             match tag.as_standardized() {
                 Some(TagStandard::Coordinate { coordinate, .. }) => {
@@ -251,10 +277,19 @@ impl Issue {
                 }
                 Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
                 Some(TagStandard::Hashtag(t)) => labels.push(t.clone()),
+                Some(TagStandard::PublicKey { public_key, .. }) => {
+                    // p tags on issues are assignees (not the repo owner tag)
+                    let hex = public_key.to_hex();
+                    if !assignees.contains(&hex) {
+                        assignees.push(hex);
+                    }
+                }
                 _ => {}
             }
         }
         let repository = repository?;
+        // Remove the repo owner from assignees (they're tagged for routing, not assignment)
+        assignees.retain(|pk| *pk != repository.public_key.to_hex());
         let repository_naddr = Nip19Coordinate::new(repository, vec![])
             .to_bech32()
             .unwrap_or_default();
@@ -263,6 +298,7 @@ impl Issue {
             content: event.content.clone(),
             subject,
             labels,
+            assignees,
             event_id: event.id.to_hex(),
             pubkey: event.pubkey.to_hex(),
             created_at: event.created_at.as_secs(),
@@ -321,6 +357,12 @@ pub struct PullRequest {
     pub status: IssueStatus,
     /// Comment count
     pub comment_count: u32,
+    /// Event IDs of issues this PR closes
+    pub linked_issues: Vec<String>,
+    /// Source branch name
+    pub branch_name: Option<String>,
+    /// Clone URLs for this PR's source
+    pub clone_urls: Vec<String>,
 }
 impl PullRequest {
     /// Parse a PullRequest from a Kind 1617 event
@@ -333,7 +375,16 @@ impl PullRequest {
         let mut parent_commit = None;
         let mut labels = Vec::new();
         let mut is_cover_letter = false;
+        let mut linked_issues = Vec::new();
+        let mut branch_name = None;
+        let mut clone_urls = Vec::new();
         for tag in event.tags.iter() {
+            let tag_vec = tag.as_slice();
+            // Check for "closes" marker on e-tags (linked issues)
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "closes" {
+                linked_issues.push(tag_vec[1].to_string());
+                continue;
+            }
             match tag.as_standardized() {
                 Some(TagStandard::Coordinate { coordinate, .. }) => {
                     repository = Some(coordinate.clone());
@@ -348,7 +399,14 @@ impl PullRequest {
                         labels.push(t.clone());
                     }
                 }
+                Some(TagStandard::GitClone(urls)) => {
+                    clone_urls = urls.iter().map(|u| u.to_string()).collect();
+                }
                 _ => {}
+            }
+            // Parse branch name (custom tag)
+            if tag_vec.len() >= 2 && tag_vec[0] == "branch" {
+                branch_name = Some(tag_vec[1].to_string());
             }
             if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit"))
             {
@@ -373,6 +431,9 @@ impl PullRequest {
             created_at: event.created_at.as_secs(),
             status: IssueStatus::Open,
             comment_count: 0,
+            linked_issues,
+            branch_name,
+            clone_urls,
         })
     }
     /// Get display title from content (first line or subject)

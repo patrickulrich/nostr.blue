@@ -6,11 +6,16 @@
 //! - Code snippets
 //! - Navigation to explore, import, etc.
 use crate::components::{icons, CodeRepoCard, CodeSnippetCard};
+use crate::hooks::use_infinite_scroll::use_infinite_scroll;
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_recent_repositories, fetch_recent_snippets};
+use crate::services::git_hosting::{
+    fetch_recent_repositories, fetch_recent_snippets, fetch_user_repositories,
+};
 use crate::stores::nostr_client;
 use crate::utils::nip34::{DisplaySnippet, Repository};
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+use std::collections::HashSet;
 /// Code home page component
 #[component]
 pub fn CodeHome() -> Element {
@@ -39,6 +44,24 @@ pub fn CodeHome() -> Element {
                         "Code"
                     }
                     div { class: "flex items-center gap-2",
+                        Link {
+                            to: Route::CodeNotifications {},
+                            class: "p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition",
+                            svg {
+                                class: "w-5 h-5",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" }
+                                path { d: "M13.73 21a2 2 0 0 1-3.46 0" }
+                            }
+                        }
                         Link {
                             to: Route::CodeImport {},
                             class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
@@ -146,20 +169,70 @@ fn TabButton(props: TabButtonProps) -> Element {
         button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }
     }
 }
-/// Repositories tab - recent/featured repositories
+const PAGE_SIZE: usize = 20;
+/// Repositories tab - recent/featured repositories with infinite scroll
 #[component]
 fn RepositoriesTab() -> Element {
-    let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut repos = use_signal(Vec::<Repository>::new);
+    let mut loading = use_signal(|| true);
+    let mut pagination_loading = use_signal(|| false);
+    let mut has_more = use_signal(|| true);
+    let mut oldest_timestamp = use_signal(|| None::<u64>);
+    // Initial fetch
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
         spawn(async move {
-            let result = fetch_recent_repositories(20).await;
-            repos.set(Some(result));
+            match fetch_recent_repositories(PAGE_SIZE, None).await {
+                Ok(fetched) => {
+                    if let Some(oldest) = fetched.last() {
+                        oldest_timestamp.set(Some(oldest.created_at));
+                    }
+                    has_more.set(fetched.len() >= PAGE_SIZE / 2);
+                    repos.set(fetched);
+                }
+                Err(e) => log::error!("Failed to fetch repos: {}", e),
+            }
+            loading.set(false);
         });
     });
+    // Load more callback for infinite scroll
+    let load_more = move || {
+        if *pagination_loading.peek() || !*has_more.peek() {
+            return;
+        }
+        let until = *oldest_timestamp.peek();
+        spawn(async move {
+            pagination_loading.set(true);
+            match fetch_recent_repositories(PAGE_SIZE, until).await {
+                Ok(fetched) => {
+                    if fetched.is_empty() {
+                        has_more.set(false);
+                    } else {
+                        if let Some(oldest) = fetched.last() {
+                            oldest_timestamp.set(Some(oldest.created_at));
+                        }
+                        let mut current = repos.peek().clone();
+                        let existing: HashSet<_> =
+                            current.iter().map(|r| r.event_id.clone()).collect();
+                        let prev_len = current.len();
+                        for repo in fetched {
+                            if !existing.contains(&repo.event_id) {
+                                current.push(repo);
+                            }
+                        }
+                        has_more.set(current.len() - prev_len >= PAGE_SIZE / 2);
+                        repos.set(current);
+                    }
+                }
+                Err(e) => log::error!("Failed to load more repos: {}", e),
+            }
+            pagination_loading.set(false);
+        });
+    };
+    let sentinel_id = use_infinite_scroll(load_more, has_more, pagination_loading);
     rsx! {
         div { class: "space-y-6",
             div { class: "bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg p-4 border border-border",
@@ -339,30 +412,33 @@ fn RepositoriesTab() -> Element {
                         "See all"
                     }
                 }
-                match &*repos.read() {
-                    Some(Ok(repositories)) if !repositories.is_empty() => rsx! {
-                        div { class: "space-y-3",
-                            for repo in repositories.iter().take(10) {
-                                CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
-                            }
+                if *loading.read() {
+                    div { class: "space-y-3",
+                        for _ in 0..5 {
+                            RepoCardSkeleton {}
                         }
-                    },
-                    Some(Ok(_)) => rsx! {
-                        EmptyState {
-                            title: "No repositories yet",
-                            description: "Be the first to import a repository!",
+                    }
+                } else if repos.read().is_empty() {
+                    EmptyState {
+                        title: "No repositories yet",
+                        description: "Be the first to import a repository!",
+                    }
+                } else {
+                    div { class: "space-y-3",
+                        for repo in repos.read().iter() {
+                            CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
                         }
-                    },
-                    Some(Err(e)) => rsx! {
-                        div { class: "text-center py-8 text-muted-foreground", "Failed to load repositories: {e}" }
-                    },
-                    None => rsx! {
-                        div { class: "space-y-3",
-                            for _ in 0..5 {
+                    }
+                    if *has_more.read() {
+                        div { id: "{sentinel_id}", class: "h-4" }
+                    }
+                    if *pagination_loading.read() {
+                        div { class: "space-y-3 mt-3",
+                            for _ in 0..3 {
                                 RepoCardSkeleton {}
                             }
                         }
-                    },
+                    }
                 }
             }
         }
@@ -477,6 +553,8 @@ fn SnippetsTab() -> Element {
 fn MyReposTab() -> Element {
     use crate::stores::auth_store;
     let auth = auth_store::AUTH_STATE.read();
+    let mut my_repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut loading = use_signal(|| true);
     if !auth.is_authenticated {
         return rsx! {
             div { class: "text-center py-12",
@@ -503,6 +581,29 @@ fn MyReposTab() -> Element {
             }
         };
     }
+    // Snapshot pubkey before async boundary
+    let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        let pubkey_hex = pubkey_hex.clone();
+        if pubkey_hex.is_empty() {
+            return;
+        }
+        let pubkey = match PublicKey::parse(&pubkey_hex) {
+            Ok(pk) => pk,
+            Err(_) => return,
+        };
+        spawn(async move {
+            match fetch_user_repositories(&pubkey, 50).await {
+                Ok(repos) => my_repos.set(Some(Ok(repos))),
+                Err(e) => my_repos.set(Some(Err(e))),
+            }
+            loading.set(false);
+        });
+    });
     rsx! {
         div { class: "space-y-4",
             div { class: "flex items-center justify-between",
@@ -513,9 +614,31 @@ fn MyReposTab() -> Element {
                     "Import Repository"
                 }
             }
-            EmptyState {
-                title: "No repositories yet",
-                description: "Import a repository from GitHub, GitLab, or Codeberg to get started.",
+            if *loading.read() {
+                div { class: "space-y-3",
+                    for _ in 0..3 {
+                        RepoCardSkeleton {}
+                    }
+                }
+            } else {
+                match &*my_repos.read() {
+                    Some(Ok(repos)) if !repos.is_empty() => rsx! {
+                        div { class: "space-y-3",
+                            for repo in repos.iter() {
+                                CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
+                            }
+                        }
+                    },
+                    Some(Err(e)) => rsx! {
+                        div { class: "text-center py-8 text-muted-foreground", "Failed to load repositories: {e}" }
+                    },
+                    _ => rsx! {
+                        EmptyState {
+                            title: "No repositories yet",
+                            description: "Import a repository from GitHub, GitLab, or Codeberg to get started.",
+                        }
+                    },
+                }
             }
         }
     }

@@ -9,6 +9,7 @@ pub mod file_fetcher;
 pub mod git_service;
 pub mod github_import;
 pub mod issues;
+pub mod milestones;
 pub mod notifications;
 pub mod pull_requests;
 pub mod releases;

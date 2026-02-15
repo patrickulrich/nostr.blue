@@ -84,7 +84,7 @@ use blossom::BlossomPage;
 use bookmarks::Bookmarks;
 use cashu_wallet::CashuWallet;
 use citations::{CitationDetail, CitationsHome};
-use code::{CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore, CodeGlobalIssues, CodeGlobalPulls, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodeNew, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlame, CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare, CodeRepoDiscussions, CodeRepoInsights, CodeRepoIssues, CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings, CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets, CodeStars};
+use code::{CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore, CodeGlobalIssues, CodeGlobalPulls, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodeNew, CodeNotifications, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlame, CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare, CodeRepoDiscussions, CodeRepoInsights, CodeRepoIssues, CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings, CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch, CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets, CodeStars, CodeUserProfile};
 use chats::{ChatDetail, ChatNew, Chats};
 use community::{Communities, CommunityNew, CommunityPage};
 use cookies::Cookies;
@@ -229,6 +229,8 @@ pub enum Route {
     CodeGlobalIssues {},
     #[route("/code/pulls")]
     CodeGlobalPulls {},
+    #[route("/code/notifications")]
+    CodeNotifications {},
     #[route("/code/explore")]
     CodeExplore {},
     #[route("/code/repositories")]
@@ -285,6 +287,8 @@ pub enum Route {
     CodePullDetail { note_id: String },
     #[route("/code/discussion/:note_id")]
     CodeDiscussionDetail { note_id: String },
+    #[route("/code/profile/:pubkey")]
+    CodeUserProfile { pubkey: String },
     #[route("/p2p")]
     P2PHome {},
     #[route("/p2p/order/:naddr")]
@@ -561,6 +565,8 @@ fn Layout() -> Element {
         | Route::CodePullDetail { .. }
         | Route::CodeRepoTree { .. }
         | Route::CodeRepoBlob { .. }
+        | Route::CodeUserProfile { .. }
+        | Route::CodeNotifications {}
     );
     let is_p2p_page = matches!(
         current_route,

@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use crate::components::icons;
 use crate::components::ZapModal;
-use crate::routes::Route;
+use crate::services::git_hosting::repository::publish_fork;
 use crate::services::git_hosting::stars::{check_user_star, publish_star, remove_star};
 use crate::stores::code_store::is_repo_starred;
 use crate::stores::nostr_client::HAS_SIGNER;
@@ -21,7 +21,7 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 #[component]
 pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let toast = consume_toast();
-    let nav = use_navigator();
+    let _nav = use_navigator();
     let mut show_zap_modal = use_signal(|| false);
     let mut is_starred = use_signal(|| false);
     let mut star_count = use_signal(|| repo.star_count);
@@ -199,13 +199,46 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             });
         }
     };
+    let mut fork_loading = use_signal(|| false);
+    let fork_event_id = use_signal(|| repo.event_id.clone());
+    let fork_repo_id = use_signal(|| repo.id.clone());
+    let fork_repo_name = use_signal(|| repo.name.clone());
+    let fork_repo_desc = use_signal(|| repo.description.clone());
+    let fork_clone_urls = use_signal(|| repo.clone.clone());
     let handle_fork = move |_| {
         if !*HAS_SIGNER.read() {
             toast.warning("Sign in to fork repositories".to_string(), ToastOptions::new());
             return;
         }
-        // Navigate to new repo page — user creates their own copy
-        nav.push(Route::CodeNew {});
+        if *fork_loading.read() {
+            return;
+        }
+        fork_loading.set(true);
+        let event_id = fork_event_id.read().clone();
+        let id = fork_repo_id.read().clone();
+        let name = fork_repo_name.read().clone();
+        let desc = fork_repo_desc.read().clone();
+        let clone_urls = fork_clone_urls.read().clone();
+        spawn(async move {
+            let fork_id = format!("{}-fork", id);
+            let fork_name = name.as_deref().map(|n| format!("{} (fork)", n));
+            let urls: Vec<&str> = clone_urls.iter().map(|s| s.as_str()).collect();
+            match publish_fork(
+                &event_id,
+                &fork_id,
+                fork_name.as_deref(),
+                desc.as_deref(),
+                &urls,
+            ).await {
+                Ok(_) => {
+                    toast.success("Repository forked!".to_string(), ToastOptions::new());
+                }
+                Err(e) => {
+                    toast.error(format!("Fork failed: {}", e), ToastOptions::new());
+                }
+            }
+            fork_loading.set(false);
+        });
     };
     let handle_zap = move |_| {
         if !*HAS_SIGNER.read() {
@@ -243,8 +276,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     label: "Fork",
                     count: None,
                     active: false,
-                    disabled: false,
-                    loading: false,
+                    disabled: !*HAS_SIGNER.read(),
+                    loading: *fork_loading.read(),
                     onclick: handle_fork,
                 }
                 ActionButton {

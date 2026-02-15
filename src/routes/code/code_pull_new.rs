@@ -15,6 +15,8 @@ pub fn CodePullNew(naddr: String) -> Element {
     let mut commit = use_signal(String::new);
     let mut parent_commit = use_signal(String::new);
     let mut labels = use_signal(String::new);
+    let mut closes_issues = use_signal(String::new);
+    let mut branch_name = use_signal(String::new);
     let mut is_cover_letter = use_signal(|| true);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
@@ -44,6 +46,8 @@ pub fn CodePullNew(naddr: String) -> Element {
             let commit_val = commit.read().clone();
             let parent_val = parent_commit.read().clone();
             let labels_val = labels.read().clone();
+            let closes_val = closes_issues.read().clone();
+            let branch_val = branch_name.read().clone();
             let is_cover = *is_cover_letter.read();
             let naddr = naddr.clone();
             spawn(async move {
@@ -58,6 +62,11 @@ pub fn CodePullNew(naddr: String) -> Element {
                 } else {
                     labels_val.split(',').map(|s| s.trim()).collect()
                 };
+                let closes_list: Vec<&str> = if closes_val.is_empty() {
+                    vec![]
+                } else {
+                    closes_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+                };
                 let commit_ref = if commit_val.is_empty() {
                     None
                 } else {
@@ -68,6 +77,11 @@ pub fn CodePullNew(naddr: String) -> Element {
                 } else {
                     Some(parent_val.as_str())
                 };
+                let branch_ref = if branch_val.is_empty() {
+                    None
+                } else {
+                    Some(branch_val.as_str())
+                };
                 match publish_patch_by_naddr(
                         &naddr,
                         &content_val,
@@ -75,6 +89,8 @@ pub fn CodePullNew(naddr: String) -> Element {
                         parent_ref,
                         is_cover,
                         &label_list,
+                        &closes_list,
+                        branch_ref,
                     )
                     .await
                 {
@@ -287,6 +303,34 @@ pub fn CodePullNew(naddr: String) -> Element {
                         oninput: move |e| labels.set(e.value()),
                     }
                     p { class: "text-xs text-muted-foreground mt-1", "Comma-separated list of labels" }
+                }
+                div {
+                    label { class: "block text-sm font-medium mb-2",
+                        "Branch Name "
+                        span { class: "text-muted-foreground font-normal", "(optional)" }
+                    }
+                    input {
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        r#type: "text",
+                        placeholder: "e.g., feature/my-branch",
+                        value: "{branch_name}",
+                        oninput: move |e| branch_name.set(e.value()),
+                    }
+                    p { class: "text-xs text-muted-foreground mt-1", "Source branch for this patch" }
+                }
+                div {
+                    label { class: "block text-sm font-medium mb-2",
+                        "Closes Issues "
+                        span { class: "text-muted-foreground font-normal", "(optional)" }
+                    }
+                    input {
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        r#type: "text",
+                        placeholder: "e.g., abc123, def456",
+                        value: "{closes_issues}",
+                        oninput: move |e| closes_issues.set(e.value()),
+                    }
+                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated event IDs of issues this PR closes" }
                 }
             }
         }
