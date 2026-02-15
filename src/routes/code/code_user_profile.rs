@@ -3,7 +3,7 @@
 //! Displays a user's code-specific profile at /code/profile/:pubkey
 //! showing their repositories, issues, pull requests, and code snippets.
 use crate::components::{CodeRepoCard, CodeSnippetCard};
-use crate::components::code::{CodeIssueCard, CodePullCard};
+use crate::components::code::{CodeIssueCard, CodePullCard, ContributionGraph};
 use crate::routes::Route;
 use crate::services::git_hosting::{
     fetch_user_issues, fetch_user_prs, fetch_user_repositories, fetch_user_snippets,
@@ -485,6 +485,11 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                         StatChip { label: "Pull Requests", count: pr_count, icon: "pr" }
                         StatChip { label: "Snippets", count: snippet_count, icon: "snippet" }
                     }
+                }
+
+                // Contribution graph
+                div { class: "px-4 mt-4",
+                    ContributionGraph { pubkey: pubkey.clone() }
                 }
 
                 // Tab bar

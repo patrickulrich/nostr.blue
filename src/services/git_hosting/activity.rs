@@ -176,6 +176,79 @@ pub async fn fetch_user_activity(
     Ok(activities)
 }
 
+/// Weekly contribution data for heatmap
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContributionWeek {
+    pub days: [u32; 7], // Sun=0 through Sat=6 counts
+    pub week_start: u64, // Unix timestamp of the Sunday starting this week
+}
+
+/// Fetch 52 weeks of contribution data for a user's code activity.
+///
+/// Returns exactly 52 `ContributionWeek` entries (oldest first) covering
+/// the past year of code-related Nostr events.
+pub async fn fetch_contribution_graph(pubkey: &PublicKey) -> Result<Vec<ContributionWeek>, String> {
+    let now = Timestamp::now().as_secs();
+    let seconds_per_day: u64 = 86400;
+    let seconds_per_week: u64 = 7 * seconds_per_day;
+
+    // Find the start of the current week (Sunday 00:00 UTC)
+    // Nostr timestamps are UTC; day-of-week: Thu 1 Jan 1970 = day 4
+    let days_since_epoch = now / seconds_per_day;
+    let current_weekday = (days_since_epoch + 4) % 7; // 0=Sun
+    let current_week_start = (days_since_epoch - current_weekday) * seconds_per_day;
+
+    // Go back 51 more weeks to get 52 total
+    let graph_start = current_week_start - 51 * seconds_per_week;
+
+    let filter = Filter::new()
+        .kinds(vec![
+            Kind::GitRepoAnnouncement,
+            Kind::GitIssue,
+            Kind::GitPatch,
+            Kind::Custom(1985),
+            Kind::Comment,
+            Kind::GitStatusOpen,
+            Kind::GitStatusApplied,
+            Kind::GitStatusClosed,
+            Kind::GitStatusDraft,
+            Kind::CodeSnippet,
+        ])
+        .author(*pubkey)
+        .since(Timestamp::from(graph_start));
+
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch contribution data: {e}"))?;
+
+    // Initialize 52 weeks
+    let mut weeks: Vec<ContributionWeek> = (0..52)
+        .map(|i| ContributionWeek {
+            days: [0; 7],
+            week_start: graph_start + i as u64 * seconds_per_week,
+        })
+        .collect();
+
+    // Bucket each event into its week/day
+    for event in &events {
+        let ts = event.created_at.as_secs();
+        if ts < graph_start {
+            continue;
+        }
+        let offset = ts - graph_start;
+        let week_index = (offset / seconds_per_week) as usize;
+        if week_index >= 52 {
+            continue;
+        }
+        let day_in_week = ((offset % seconds_per_week) / seconds_per_day) as usize;
+        if day_in_week < 7 {
+            weeks[week_index].days[day_in_week] += 1;
+        }
+    }
+
+    Ok(weeks)
+}
+
 /// Fetch activity for the current authenticated user
 pub async fn fetch_my_activity(limit: usize) -> Result<Vec<Activity>, String> {
     let pubkey_hex = auth_store::get_pubkey().ok_or("Not authenticated")?;

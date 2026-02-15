@@ -4,6 +4,7 @@
 //! issues, pull requests, code snippets, and file browsing.
 pub mod bounty_badge;
 pub mod bounty_form;
+pub mod contribution_graph;
 pub mod contributors_list;
 pub mod filter_bar;
 pub mod dependency_viewer;
@@ -29,6 +30,7 @@ pub mod status_badge;
 pub use bounty_badge::BountyBadge;
 #[allow(unused_imports)]
 pub use bounty_form::BountyForm;
+pub use contribution_graph::ContributionGraph;
 pub use contributors_list::ContributorsList;
 #[allow(unused_imports)]
 pub use dependency_viewer::DependencyViewer;
