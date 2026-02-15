@@ -91,12 +91,11 @@ fn SyncStatusBadge(relay_count: usize, updated_at: u64) -> Element {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let age_secs = now.saturating_sub(updated_at);
-    // Consider "synced" if updated within 24 hours, "stale" if older than 7 days
-    let (status_text, status_class) = if relay_count == 0 {
+    let (status_text, status_class) = if updated_at == 0 {
+        ("Unknown", "border-border text-muted-foreground")
+    } else if relay_count == 0 {
         ("No relays", "border-yellow-500/50 text-yellow-500")
-    } else if age_secs < 86400 {
-        ("Synced", "border-green-500/50 text-green-500")
-    } else if age_secs < 604800 {
+    } else if age_secs < 604_800 {
         ("Synced", "border-green-500/50 text-green-500")
     } else {
         ("Stale", "border-yellow-500/50 text-yellow-500")
@@ -106,15 +105,19 @@ fn SyncStatusBadge(relay_count: usize, updated_at: u64) -> Element {
     } else {
         format!("{} relays", relay_count)
     };
-    let tooltip = if relay_count == 0 {
+    let tooltip = if updated_at == 0 {
+        "No timestamp data available".to_string()
+    } else if relay_count == 0 {
         "No relays declared for this repository".to_string()
     } else {
-        let age_text = if age_secs < 3600 {
-            "less than an hour ago".to_string()
-        } else if age_secs < 86400 {
+        let age_text = if age_secs < 60 {
+            "just now".to_string()
+        } else if age_secs < 3600 {
+            format!("{} minutes ago", age_secs / 60)
+        } else if age_secs < 86_400 {
             format!("{} hours ago", age_secs / 3600)
         } else {
-            format!("{} days ago", age_secs / 86400)
+            format!("{} days ago", age_secs / 86_400)
         };
         format!("{} | Last updated {}", relay_label, age_text)
     };
@@ -122,7 +125,6 @@ fn SyncStatusBadge(relay_count: usize, updated_at: u64) -> Element {
         span {
             class: "ml-1 px-1.5 py-0.5 text-xs rounded-full border {status_class} cursor-default flex items-center gap-1",
             title: "{tooltip}",
-            // Sync icon (two arrows)
             svg {
                 class: "w-3 h-3",
                 xmlns: "http://www.w3.org/2000/svg",

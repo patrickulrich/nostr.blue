@@ -100,6 +100,31 @@ pub async fn fetch_user_repos(
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
 }
+/// Fetch organization's public repositories
+pub async fn fetch_org_repos(
+    org: &str,
+    limit: usize,
+) -> Result<Vec<GitHubRepo>, String> {
+    let url = format!(
+        "https://api.github.com/orgs/{}/repos?sort=updated&per_page={}",
+        org,
+        limit,
+    );
+    let response = Request::get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if response.status() == 404 {
+        return Err("Organization not found. Try using it as a username instead.".to_string());
+    }
+    if !response.ok() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+}
+
 /// Search GitHub repositories
 pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, String> {
     let url = format!(

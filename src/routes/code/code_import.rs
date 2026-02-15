@@ -4,11 +4,18 @@
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{
-    github_import::{fetch_repo_from_url, GitHubRepo},
+    github_import::{fetch_org_repos, fetch_repo_from_url, fetch_user_repos, GitHubRepo},
     publish_repository,
 };
 use crate::stores::auth_store;
 use dioxus::prelude::*;
+
+/// Import mode toggle
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImportMode {
+    Single,
+    Bulk,
+}
 /// Import wizard steps
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ImportStep {
@@ -23,6 +30,7 @@ enum ImportStep {
 pub fn CodeImport() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let nav = use_navigator();
+    let mut import_mode = use_signal(|| ImportMode::Single);
     let mut current_step = use_signal(|| ImportStep::EnterUrl);
     let url_input = use_signal(String::new);
     let mut is_fetching = use_signal(|| false);
@@ -34,6 +42,15 @@ pub fn CodeImport() -> Element {
     let include_web_url = use_signal(|| true);
     let include_clone_url = use_signal(|| true);
     let mut published_naddr = use_signal(|| None::<String>);
+    // Bulk import state
+    let bulk_username = use_signal(String::new);
+    let mut bulk_repos = use_signal(Vec::<GitHubRepo>::new);
+    let mut bulk_selected = use_signal(Vec::<bool>::new);
+    let mut bulk_importing = use_signal(|| false);
+    let mut bulk_progress = use_signal(|| 0usize);
+    let mut bulk_total = use_signal(|| 0usize);
+    let mut bulk_completed = use_signal(|| 0usize);
+    let mut bulk_fetched = use_signal(|| false);
     if !auth.is_authenticated {
         return rsx! {
             NotAuthenticatedState {}
@@ -157,8 +174,29 @@ pub fn CodeImport() -> Element {
                         "Import Repository"
                     }
                 }
-                div { class: "px-4 pb-4",
-                    StepIndicator { current: *current_step.read() }
+                div { class: "px-4 pb-4 space-y-3",
+                    // Mode toggle
+                    div { class: "flex justify-center gap-1 p-1 bg-muted rounded-lg w-fit mx-auto",
+                        button {
+                            class: if *import_mode.read() == ImportMode::Single { "px-4 py-1.5 text-sm font-medium rounded-md bg-background shadow" } else { "px-4 py-1.5 text-sm text-muted-foreground rounded-md hover:text-foreground transition" },
+                            onclick: move |_| {
+                                import_mode.set(ImportMode::Single);
+                                error_message.set(None);
+                            },
+                            "Single Repo"
+                        }
+                        button {
+                            class: if *import_mode.read() == ImportMode::Bulk { "px-4 py-1.5 text-sm font-medium rounded-md bg-background shadow" } else { "px-4 py-1.5 text-sm text-muted-foreground rounded-md hover:text-foreground transition" },
+                            onclick: move |_| {
+                                import_mode.set(ImportMode::Bulk);
+                                error_message.set(None);
+                            },
+                            "Bulk Import"
+                        }
+                    }
+                    if *import_mode.read() == ImportMode::Single {
+                        StepIndicator { current: *current_step.read() }
+                    }
                 }
             }
             div { class: "p-4 max-w-2xl mx-auto",
@@ -167,41 +205,135 @@ pub fn CodeImport() -> Element {
                         "{error}"
                     }
                 }
-                match *current_step.read() {
-                    ImportStep::EnterUrl => rsx! {
-                        EnterUrlStep {
-                            url_input,
-                            is_fetching: *is_fetching.read(),
-                            on_submit: handle_fetch_repo,
-                        }
-                    },
-                    ImportStep::Preview => rsx! {
-                        PreviewStep {
-                            repo: github_repo.read().clone(),
-                            on_continue: handle_configure,
-                            on_back: move |_| current_step.set(ImportStep::EnterUrl),
-                        }
-                    },
-                    ImportStep::Configure => rsx! {
-                        ConfigureStep {
-                            repo_id,
-                            repo_name,
-                            repo_description,
-                            include_web_url,
-                            include_clone_url,
-                            on_publish: handle_publish,
-                            on_back: move |_| current_step.set(ImportStep::Preview),
-                        }
-                    },
-                    ImportStep::Publishing => rsx! {
-                        PublishingStep {}
-                    },
-                    ImportStep::Complete => rsx! {
-                        CompleteStep {
-                            repo_name: repo_name.read().clone(),
-                            event_id: published_naddr.read().clone(),
-                        }
-                    },
+                if *import_mode.read() == ImportMode::Bulk {
+                    BulkImportStep {
+                        username: bulk_username,
+                        repos: bulk_repos,
+                        selected: bulk_selected,
+                        is_fetching: *is_fetching.read(),
+                        is_importing: *bulk_importing.read(),
+                        progress: *bulk_progress.read(),
+                        total: *bulk_total.read(),
+                        completed: *bulk_completed.read(),
+                        fetched: *bulk_fetched.read(),
+                        on_fetch: move |_: ()| {
+                            let username = bulk_username.read().clone();
+                            if username.is_empty() {
+                                error_message.set(Some("Please enter a GitHub username or organization".to_string()));
+                                return;
+                            }
+                            spawn(async move {
+                                is_fetching.set(true);
+                                error_message.set(None);
+                                // Try user repos first, then org repos
+                                let result = match fetch_user_repos(&username, 100).await {
+                                    Ok(repos) if !repos.is_empty() => Ok(repos),
+                                    _ => fetch_org_repos(&username, 100).await,
+                                };
+                                match result {
+                                    Ok(repos) => {
+                                        let len = repos.len();
+                                        bulk_repos.set(repos);
+                                        bulk_selected.set(vec![false; len]);
+                                        bulk_fetched.set(true);
+                                    }
+                                    Err(e) => {
+                                        error_message.set(Some(e));
+                                    }
+                                }
+                                is_fetching.set(false);
+                            });
+                        },
+                        on_import: move |_: ()| {
+                            let repos = bulk_repos.read().clone();
+                            let selected = bulk_selected.read().clone();
+                            let to_import: Vec<GitHubRepo> = repos.into_iter()
+                                .zip(selected.iter())
+                                .filter(|(_, &sel)| sel)
+                                .map(|(r, _)| r)
+                                .collect();
+                            if to_import.is_empty() {
+                                error_message.set(Some("Please select at least one repository".to_string()));
+                                return;
+                            }
+                            let total = to_import.len();
+                            bulk_total.set(total);
+                            bulk_progress.set(0);
+                            bulk_completed.set(0);
+                            bulk_importing.set(true);
+                            error_message.set(None);
+                            spawn(async move {
+                                let mut done = 0usize;
+                                for repo in to_import.iter() {
+                                    let relays = [
+                                        "wss://relay.damus.io",
+                                        "wss://nos.lol",
+                                        "wss://relay.snort.social",
+                                    ];
+                                    let clone_urls = vec![repo.clone_url.as_str()];
+                                    let web_urls = vec![repo.html_url.as_str()];
+                                    let name = Some(repo.name.as_str());
+                                    let desc = repo.description.as_deref();
+                                    match publish_repository(
+                                        &repo.name,
+                                        name,
+                                        desc,
+                                        &clone_urls,
+                                        &web_urls,
+                                        &relays,
+                                        &[],
+                                        &[],
+                                    ).await {
+                                        Ok(_) => { done += 1; }
+                                        Err(e) => {
+                                            log::error!("Failed to import {}: {}", repo.name, e);
+                                        }
+                                    }
+                                    bulk_progress.set(bulk_progress() + 1);
+                                }
+                                bulk_completed.set(done);
+                                bulk_importing.set(false);
+                            });
+                        },
+                        on_error: move |msg: String| error_message.set(Some(msg)),
+                    }
+                } else {
+                    match *current_step.read() {
+                        ImportStep::EnterUrl => rsx! {
+                            EnterUrlStep {
+                                url_input,
+                                is_fetching: *is_fetching.read(),
+                                on_submit: handle_fetch_repo,
+                            }
+                        },
+                        ImportStep::Preview => rsx! {
+                            PreviewStep {
+                                repo: github_repo.read().clone(),
+                                on_continue: handle_configure,
+                                on_back: move |_| current_step.set(ImportStep::EnterUrl),
+                            }
+                        },
+                        ImportStep::Configure => rsx! {
+                            ConfigureStep {
+                                repo_id,
+                                repo_name,
+                                repo_description,
+                                include_web_url,
+                                include_clone_url,
+                                on_publish: handle_publish,
+                                on_back: move |_| current_step.set(ImportStep::Preview),
+                            }
+                        },
+                        ImportStep::Publishing => rsx! {
+                            PublishingStep {}
+                        },
+                        ImportStep::Complete => rsx! {
+                            CompleteStep {
+                                repo_name: repo_name.read().clone(),
+                                event_id: published_naddr.read().clone(),
+                            }
+                        },
+                    }
                 }
             }
         }
@@ -626,6 +758,190 @@ fn CompleteStep(repo_name: String, event_id: Option<String>) -> Element {
         }
     }
 }
+/// Bulk import step - fetch repos from a user/org and import selected ones
+#[component]
+fn BulkImportStep(
+    username: Signal<String>,
+    repos: Signal<Vec<GitHubRepo>>,
+    selected: Signal<Vec<bool>>,
+    is_fetching: bool,
+    is_importing: bool,
+    progress: usize,
+    total: usize,
+    completed: usize,
+    fetched: bool,
+    on_fetch: EventHandler<()>,
+    on_import: EventHandler<()>,
+    on_error: EventHandler<String>,
+) -> Element {
+    let all_selected = !selected.read().is_empty() && selected.read().iter().all(|&s| s);
+    let any_selected = selected.read().iter().any(|&s| s);
+    let selected_count = selected.read().iter().filter(|&&s| s).count();
+    rsx! {
+        div { class: "space-y-6",
+            div { class: "p-4 bg-muted rounded-lg",
+                div { class: "flex items-start gap-3",
+                    div { class: "w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0",
+                        svg {
+                            class: "w-5 h-5 text-primary",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }
+                            circle { cx: "9", cy: "7", r: "4" }
+                            path { d: "M23 21v-2a4 4 0 0 0-3-3.87" }
+                            path { d: "M16 3.13a4 4 0 0 1 0 7.75" }
+                        }
+                    }
+                    div {
+                        h3 { class: "font-semibold mb-1", "Bulk Import" }
+                        p { class: "text-sm text-muted-foreground",
+                            "Import multiple repositories at once from a GitHub user or organization."
+                        }
+                    }
+                }
+            }
+            // Username/org input
+            div {
+                label { class: "block text-sm font-medium mb-2", "GitHub Username or Organization" }
+                div { class: "flex gap-2",
+                    input {
+                        class: "flex-1 px-4 py-3 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        r#type: "text",
+                        placeholder: "username or organization",
+                        value: "{username}",
+                        disabled: is_fetching || is_importing,
+                        oninput: move |e| username.set(e.value()),
+                        onkeypress: move |e: KeyboardEvent| {
+                            if e.key() == Key::Enter && !is_fetching && !is_importing {
+                                on_fetch.call(());
+                            }
+                        },
+                    }
+                    button {
+                        class: "px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition disabled:opacity-50",
+                        disabled: is_fetching || is_importing,
+                        onclick: move |_| on_fetch.call(()),
+                        if is_fetching { "Loading..." } else { "Fetch Repos" }
+                    }
+                }
+            }
+            // Repo checklist
+            if fetched && !repos.read().is_empty() {
+                div { class: "border border-border rounded-lg overflow-hidden",
+                    // Header with select all
+                    div { class: "flex items-center gap-3 px-4 py-2.5 bg-muted/50 border-b border-border",
+                        input {
+                            r#type: "checkbox",
+                            class: "w-4 h-4 rounded border-border",
+                            checked: all_selected,
+                            disabled: is_importing,
+                            onchange: move |e| {
+                                let checked = e.checked();
+                                let len = selected.read().len();
+                                selected.set(vec![checked; len]);
+                            },
+                        }
+                        span { class: "text-sm font-medium",
+                            if selected_count > 0 {
+                                "{selected_count} of {repos.read().len()} selected"
+                            } else {
+                                "{repos.read().len()} repositories found"
+                            }
+                        }
+                    }
+                    // Repo list
+                    div { class: "max-h-96 overflow-y-auto divide-y divide-border/50",
+                        for (i, repo) in repos.read().iter().enumerate() {
+                            {
+                                let is_checked = selected.read().get(i).copied().unwrap_or(false);
+                                rsx! {
+                                    label {
+                                        key: "{repo.full_name}",
+                                        class: if is_checked { "flex items-start gap-3 px-4 py-3 bg-primary/5 cursor-pointer" } else { "flex items-start gap-3 px-4 py-3 hover:bg-accent/30 cursor-pointer" },
+                                        input {
+                                            r#type: "checkbox",
+                                            class: "w-4 h-4 rounded border-border mt-0.5",
+                                            checked: is_checked,
+                                            disabled: is_importing,
+                                            onchange: {
+                                                let idx = i;
+                                                move |e| {
+                                                    let mut sel = selected.read().clone();
+                                                    if idx < sel.len() {
+                                                        sel[idx] = e.checked();
+                                                        selected.set(sel);
+                                                    }
+                                                }
+                                            },
+                                        }
+                                        div { class: "flex-1 min-w-0",
+                                            div { class: "flex items-center gap-2",
+                                                span { class: "text-sm font-medium truncate", "{repo.name}" }
+                                                if let Some(lang) = &repo.language {
+                                                    span { class: "text-xs text-muted-foreground px-1.5 py-0.5 bg-muted rounded", "{lang}" }
+                                                }
+                                            }
+                                            if let Some(desc) = &repo.description {
+                                                p { class: "text-xs text-muted-foreground mt-0.5 line-clamp-1", "{desc}" }
+                                            }
+                                        }
+                                        span { class: "text-xs text-muted-foreground shrink-0",
+                                            "{repo.stargazers_count}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Import button
+                if is_importing {
+                    {
+                        let pct = if total > 0 { (progress * 100) / total } else { 0 };
+                        rsx! {
+                            div { class: "space-y-3",
+                                div { class: "flex items-center justify-between text-sm",
+                                    span { "Importing repositories..." }
+                                    span { class: "text-muted-foreground", "{progress}/{total}" }
+                                }
+                                div { class: "w-full bg-muted rounded-full h-2",
+                                    div {
+                                        class: "bg-primary h-2 rounded-full transition-all",
+                                        style: "width: {pct}%",
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if progress > 0 && !is_importing {
+                    div { class: "p-4 bg-green-500/10 border border-green-500/20 rounded-lg text-sm",
+                        "Successfully imported {completed} of {total} repositories."
+                    }
+                } else {
+                    button {
+                        class: "w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition disabled:opacity-50",
+                        disabled: !any_selected,
+                        onclick: move |_| on_import.call(()),
+                        "Import {selected_count} Selected"
+                    }
+                }
+            }
+            if fetched && repos.read().is_empty() {
+                div { class: "text-center py-8 text-muted-foreground",
+                    "No public repositories found for this user/organization."
+                }
+            }
+        }
+    }
+}
+
 #[component]
 fn NotAuthenticatedState() -> Element {
     rsx! {

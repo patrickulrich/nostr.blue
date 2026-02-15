@@ -264,7 +264,7 @@ pub fn BranchSelector(
     let mut is_open = use_signal(|| false);
     let mut show_create_form = use_signal(|| false);
     let mut new_branch_name = use_signal(String::new);
-    let mut source_branch = use_signal(|| String::new());
+    let mut source_branch = use_signal(String::new);
     let mut confirm_delete = use_signal(|| None::<String>);
     let toast = dioxus_primitives::toast::consume_toast();
     let decoded_path = urlencoding::decode(&path)
