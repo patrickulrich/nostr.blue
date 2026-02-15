@@ -200,38 +200,71 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     };
     let mut fork_loading = use_signal(|| false);
+    let mut show_fork_modal = use_signal(|| false);
     let fork_event_id = use_signal(|| repo.event_id.clone());
     let fork_repo_id = use_signal(|| repo.id.clone());
     let fork_repo_name = use_signal(|| repo.name.clone());
     let fork_repo_desc = use_signal(|| repo.description.clone());
     let fork_clone_urls = use_signal(|| repo.clone.clone());
+    // Pre-filled form state for the fork modal
+    let mut fork_form_name = use_signal(|| {
+        repo.name.as_deref()
+            .map(|n| format!("{} (fork)", n))
+            .unwrap_or_else(|| format!("{}-fork", repo.id))
+    });
+    let mut fork_form_desc = use_signal(|| repo.description.clone().unwrap_or_default());
+    let mut fork_form_clone_urls = use_signal(|| {
+        repo.clone.iter().map(|s| s.to_string()).collect::<Vec<String>>().join("\n")
+    });
     let handle_fork = move |_| {
         if !*HAS_SIGNER.read() {
             toast.warning("Sign in to fork repositories".to_string(), ToastOptions::new());
             return;
         }
+        // Pre-fill form fields from parent repo when opening modal
+        let name = fork_repo_name.read().clone();
+        let id = fork_repo_id.read().clone();
+        let desc = fork_repo_desc.read().clone();
+        let urls = fork_clone_urls.read().clone();
+        fork_form_name.set(
+            name.as_deref()
+                .map(|n| format!("{} (fork)", n))
+                .unwrap_or_else(|| format!("{}-fork", id))
+        );
+        fork_form_desc.set(desc.unwrap_or_default());
+        fork_form_clone_urls.set(urls.join("\n"));
+        show_fork_modal.set(true);
+    };
+    let handle_fork_submit = move |_| {
         if *fork_loading.read() {
             return;
         }
         fork_loading.set(true);
         let event_id = fork_event_id.read().clone();
         let id = fork_repo_id.read().clone();
-        let name = fork_repo_name.read().clone();
-        let desc = fork_repo_desc.read().clone();
-        let clone_urls = fork_clone_urls.read().clone();
+        let form_name = fork_form_name.read().clone();
+        let form_desc = fork_form_desc.read().clone();
+        let form_urls_raw = fork_form_clone_urls.read().clone();
         spawn(async move {
             let fork_id = format!("{}-fork", id);
-            let fork_name = name.as_deref().map(|n| format!("{} (fork)", n));
-            let urls: Vec<&str> = clone_urls.iter().map(|s| s.as_str()).collect();
+            let fork_name = if form_name.trim().is_empty() { None } else { Some(form_name.trim().to_string()) };
+            let fork_desc = if form_desc.trim().is_empty() { None } else { Some(form_desc.trim().to_string()) };
+            let urls: Vec<String> = form_urls_raw
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            let url_refs: Vec<&str> = urls.iter().map(|s| s.as_str()).collect();
             match publish_fork(
                 &event_id,
                 &fork_id,
                 fork_name.as_deref(),
-                desc.as_deref(),
-                &urls,
+                fork_desc.as_deref(),
+                &url_refs,
             ).await {
                 Ok(_) => {
                     toast.success("Repository forked!".to_string(), ToastOptions::new());
+                    show_fork_modal.set(false);
                 }
                 Err(e) => {
                     toast.error(format!("Fork failed: {}", e), ToastOptions::new());
@@ -372,6 +405,124 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             lud06: None::<String>,
                             event_id: Some(repo.event_id.clone()),
                             on_close: move |_| show_zap_modal.set(false),
+                        }
+                    }
+                }
+            }
+            if *show_fork_modal.read() {
+                div {
+                    class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+                    onclick: move |_| {
+                        if !*fork_loading.peek() {
+                            show_fork_modal.set(false);
+                        }
+                    },
+                }
+                div {
+                    class: "fixed inset-0 z-50 flex items-center justify-center p-4",
+                    onclick: move |_| {
+                        if !*fork_loading.peek() {
+                            show_fork_modal.set(false);
+                        }
+                    },
+                    div {
+                        class: "bg-background border border-border rounded-lg p-6 w-full max-w-md shadow-lg max-h-[90vh] overflow-y-auto",
+                        onclick: move |evt| evt.stop_propagation(),
+                        // Header
+                        div { class: "flex justify-between items-center mb-6",
+                            h2 { class: "text-xl font-bold", "Fork Repository" }
+                            button {
+                                class: "text-muted-foreground hover:text-foreground disabled:opacity-50",
+                                disabled: *fork_loading.read(),
+                                onclick: move |_| {
+                                    if !*fork_loading.peek() {
+                                        show_fork_modal.set(false);
+                                    }
+                                },
+                                "✕"
+                            }
+                        }
+                        // Form
+                        div { class: "space-y-4",
+                            // Fork name
+                            div {
+                                label { class: "block text-sm font-medium mb-2", "Fork Name" }
+                                input {
+                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary",
+                                    r#type: "text",
+                                    placeholder: "my-project-fork",
+                                    maxlength: "200",
+                                    value: "{fork_form_name}",
+                                    oninput: move |e| fork_form_name.set(e.value().clone()),
+                                }
+                            }
+                            // Description
+                            div {
+                                label { class: "block text-sm font-medium mb-2", "Description (optional)" }
+                                textarea {
+                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none",
+                                    rows: "3",
+                                    placeholder: "A brief description of this fork",
+                                    maxlength: "500",
+                                    value: "{fork_form_desc}",
+                                    oninput: move |e| fork_form_desc.set(e.value().clone()),
+                                }
+                            }
+                            // Clone URLs
+                            div {
+                                label { class: "block text-sm font-medium mb-2", "Clone URLs (one per line)" }
+                                textarea {
+                                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-primary resize-none font-mono text-sm",
+                                    rows: "3",
+                                    placeholder: "https://example.com/repo.git",
+                                    value: "{fork_form_clone_urls}",
+                                    oninput: move |e| fork_form_clone_urls.set(e.value().clone()),
+                                }
+                                p { class: "text-xs text-muted-foreground mt-1",
+                                    "Enter the clone URLs for your fork, one per line."
+                                }
+                            }
+                            // Actions
+                            div { class: "flex gap-3 justify-end pt-2",
+                                button {
+                                    class: "px-4 py-2 text-muted-foreground hover:text-foreground",
+                                    disabled: *fork_loading.read(),
+                                    onclick: move |_| {
+                                        if !*fork_loading.peek() {
+                                            show_fork_modal.set(false);
+                                        }
+                                    },
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2",
+                                    disabled: *fork_loading.read(),
+                                    onclick: handle_fork_submit,
+                                    if *fork_loading.read() {
+                                        svg {
+                                            class: "w-4 h-4 animate-spin",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            width: "24",
+                                            height: "24",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            circle {
+                                                cx: "12",
+                                                cy: "12",
+                                                r: "10",
+                                                stroke_opacity: "0.25",
+                                            }
+                                            path { d: "M12 2a10 10 0 0 1 10 10", stroke_opacity: "1" }
+                                        }
+                                        "Forking..."
+                                    } else {
+                                        span { class: "w-4 h-4", dangerous_inner_html: "{icons::GIT_FORK}" }
+                                        "Fork Repository"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
