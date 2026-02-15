@@ -6,6 +6,7 @@ use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repository;
 use crate::services::git_hosting::releases::{delete_release, fetch_repo_releases, publish_release};
+use crate::stores::media::blossom_store;
 use crate::stores::{auth_store, nostr_client};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
@@ -481,16 +482,97 @@ fn NewReleaseForm(naddr: String) -> Element {
     let mut title = use_signal(String::new);
     let mut description = use_signal(String::new);
     let mut asset_urls = use_signal(|| vec![String::new()]);
+    let mut uploaded_assets: Signal<Vec<(String, String)>> = use_signal(Vec::new); // (filename, url)
+    let mut is_uploading = use_signal(|| false);
+    let mut upload_error = use_signal(|| None::<String>);
     let mut prerelease = use_signal(|| false);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
+    let handle_file_upload = move |_| {
+        spawn(async move {
+            use wasm_bindgen::JsCast;
+            upload_error.set(None);
+            let Some(window) = web_sys::window() else { return };
+            let Some(document) = window.document() else { return };
+            let Some(body) = document.body() else { return };
+            let Ok(input_el) = document.create_element("input") else { return };
+            let Ok(input) = input_el.dyn_into::<web_sys::HtmlInputElement>() else { return };
+            input.set_type("file");
+            input.set_multiple(true);
+            input.set_attribute("style", "display: none").ok();
+            body.append_child(&input).ok();
+            let (tx, rx) = futures::channel::oneshot::channel::<Vec<web_sys::File>>();
+            let tx = std::rc::Rc::new(std::cell::RefCell::new(Some(tx)));
+            let input_for_closure = input.clone();
+            let input_for_cleanup = input.clone();
+            let _listener = gloo_events::EventListener::once(
+                &input,
+                "change",
+                move |_| {
+                    if let Some(tx) = tx.borrow_mut().take() {
+                        let mut files = Vec::new();
+                        if let Some(file_list) = input_for_closure.files() {
+                            for i in 0..file_list.length() {
+                                if let Some(f) = file_list.get(i) {
+                                    files.push(f);
+                                }
+                            }
+                        }
+                        let _ = tx.send(files);
+                    }
+                },
+            );
+            input.click();
+            use futures::future::{select, Either};
+            use gloo_timers::future::TimeoutFuture;
+            let timeout = TimeoutFuture::new(300_000);
+            let files = match select(std::pin::pin!(rx), std::pin::pin!(timeout)).await {
+                Either::Left((Ok(files), _)) if !files.is_empty() => files,
+                _ => {
+                    body.remove_child(&input_for_cleanup).ok();
+                    return;
+                }
+            };
+            body.remove_child(&input_for_cleanup).ok();
+            is_uploading.set(true);
+            for file in files {
+                let name = file.name();
+                let mime_type = file.type_();
+                let mime = if mime_type.is_empty() {
+                    "application/octet-stream".to_string()
+                } else {
+                    mime_type
+                };
+                let array_buffer = match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+                    Ok(buf) => buf,
+                    Err(_) => {
+                        upload_error.set(Some(format!("Failed to read file: {}", name)));
+                        continue;
+                    }
+                };
+                let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+                let mut data = vec![0u8; uint8_array.length() as usize];
+                uint8_array.copy_to(&mut data);
+                match blossom_store::upload_image(data, mime, 100, None).await {
+                    Ok(url) => {
+                        uploaded_assets.write().push((name, url));
+                    }
+                    Err(e) => {
+                        upload_error.set(Some(format!("Upload failed: {}", e)));
+                    }
+                }
+            }
+            is_uploading.set(false);
+        });
+    };
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
             let tag = tag_name.read().clone();
             let title_val = title.read().clone();
             let desc = description.read().clone();
-            let assets = asset_urls.read().clone();
+            let manual_assets = asset_urls.read().clone();
+            let uploaded = uploaded_assets.read().clone();
             let is_pre = *prerelease.read();
             let naddr = naddr.clone();
             spawn(async move {
@@ -517,17 +599,24 @@ fn NewReleaseForm(naddr: String) -> Element {
                 } else {
                     Some(title_val.as_str())
                 };
-                let asset_refs: Vec<&str> = assets
+                let mut all_assets: Vec<String> = uploaded
                     .iter()
-                    .filter(|a| !a.trim().is_empty())
-                    .map(|a| a.as_str())
+                    .map(|(_, url)| url.clone())
                     .collect();
+                all_assets.extend(
+                    manual_assets
+                        .iter()
+                        .filter(|a| !a.trim().is_empty())
+                        .cloned(),
+                );
+                let asset_refs: Vec<&str> = all_assets.iter().map(|a| a.as_str()).collect();
                 match publish_release(&coord, &tag, title_opt, &desc, &asset_refs, is_pre).await {
                     Ok(_) => {
                         tag_name.set(String::new());
                         title.set(String::new());
                         description.set(String::new());
                         asset_urls.set(vec![String::new()]);
+                        uploaded_assets.set(Vec::new());
                         prerelease.set(false);
                     }
                     Err(e) => {
@@ -586,10 +675,108 @@ fn NewReleaseForm(naddr: String) -> Element {
             }
             div {
                 label { class: "block text-sm font-medium mb-2",
-                    "Asset URLs "
+                    "Assets "
                     span { class: "text-muted-foreground font-normal", "(optional)" }
                 }
-                div { class: "space-y-2",
+                div { class: "space-y-3",
+                    // Upload button
+                    button {
+                        class: "flex items-center gap-2 px-3 py-2 text-sm border border-dashed border-border rounded-lg hover:bg-accent transition w-full justify-center disabled:opacity-50",
+                        r#type: "button",
+                        disabled: *is_uploading.read(),
+                        onclick: handle_file_upload,
+                        if *is_uploading.read() {
+                            svg {
+                                class: "w-4 h-4 animate-spin",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M21 12a9 9 0 1 1-6.219-8.56" }
+                            }
+                            "Uploading..."
+                        } else {
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
+                                polyline { points: "17 8 12 3 7 8" }
+                                line { x1: "12", y1: "3", x2: "12", y2: "15" }
+                            }
+                            "Upload files"
+                        }
+                    }
+                    if let Some(err) = upload_error.read().as_ref() {
+                        p { class: "text-sm text-destructive", "{err}" }
+                    }
+                    // Uploaded files list
+                    if !uploaded_assets.read().is_empty() {
+                        div { class: "space-y-1",
+                            for (i, (name, url)) in uploaded_assets.read().iter().enumerate() {
+                                div { key: "{i}", class: "flex items-center gap-2 p-2 bg-muted/50 rounded-lg text-sm",
+                                    svg {
+                                        class: "w-3.5 h-3.5 text-green-500 shrink-0",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        width: "24",
+                                        height: "24",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "M20 6L9 17l-5-5" }
+                                    }
+                                    span { class: "truncate flex-1", "{name}" }
+                                    a {
+                                        href: "{url}",
+                                        target: "_blank",
+                                        rel: "noopener noreferrer",
+                                        class: "text-xs text-muted-foreground hover:text-primary truncate max-w-48",
+                                        "{url}"
+                                    }
+                                    button {
+                                        class: "p-0.5 text-muted-foreground hover:text-destructive transition shrink-0",
+                                        r#type: "button",
+                                        onclick: move |_| {
+                                            let mut assets = uploaded_assets.read().clone();
+                                            assets.remove(i);
+                                            uploaded_assets.set(assets);
+                                        },
+                                        svg {
+                                            class: "w-3.5 h-3.5",
+                                            xmlns: "http://www.w3.org/2000/svg",
+                                            width: "24",
+                                            height: "24",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                            line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Manual URL inputs
+                    p { class: "text-xs text-muted-foreground", "Or add asset URLs manually:" }
                     for (i , _) in asset_urls.read().iter().enumerate() {
                         div { key: "{i}", class: "flex gap-2",
                             input {
@@ -607,6 +794,7 @@ fn NewReleaseForm(naddr: String) -> Element {
                     }
                     button {
                         class: "text-sm text-primary hover:underline",
+                        r#type: "button",
                         onclick: move |_| {
                             let mut urls = asset_urls.read().clone();
                             urls.push(String::new());

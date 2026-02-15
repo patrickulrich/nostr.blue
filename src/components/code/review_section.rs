@@ -32,6 +32,22 @@ pub async fn publish_review_event(pr_event_id: &str, state: &str, content: &str)
     Ok(output.id().to_hex())
 }
 
+/// Dismiss a review by publishing a Kind 5 deletion event
+async fn dismiss_review(review_event_id: &str) -> std::result::Result<(), String> {
+    use nostr::nips::nip09::EventDeletionRequest;
+    let client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached".to_string());
+    }
+    let event_id = EventId::from_hex(review_event_id)
+        .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let request = EventDeletionRequest::new().id(event_id).reason("Review dismissed");
+    let builder = EventBuilder::delete(request);
+    client.send_event_builder(builder).await
+        .map_err(|e| format!("Failed to dismiss review: {}", e))?;
+    Ok(())
+}
+
 /// Local review state enum for form selection
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LocalReviewState {
@@ -88,6 +104,7 @@ pub fn PRReviewSection(
     let can_review = is_authenticated
         && user_pubkey != pr_pubkey
         && maintainers.contains(&user_pubkey);
+    let is_maintainer = is_authenticated && maintainers.contains(&user_pubkey);
     let mut show_form = use_signal(|| false);
     let mut selected_state = use_signal(|| LocalReviewState::Approved);
     let mut review_body = use_signal(String::new);
@@ -237,6 +254,8 @@ pub fn PRReviewSection(
                                     .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
                                     .unwrap_or_else(|| truncate_pubkey(&review.pubkey));
                                 let picture = profile.as_ref().and_then(|p| p.picture.clone());
+                                let review_event_id = review.event_id.clone();
+                                let review_pubkey = review.pubkey.clone();
                                 rsx! {
                                     div {
                                         key: "{review.pubkey}_{review.created_at}",
@@ -260,6 +279,27 @@ pub fn PRReviewSection(
                                                 }
                                                 span { class: "text-xs text-muted-foreground",
                                                     {format_relative_time_or(review.created_at, "")}
+                                                }
+                                                if is_maintainer && !review_event_id.is_empty() {
+                                                    button {
+                                                        class: "px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10 rounded transition",
+                                                        onclick: {
+                                                            let eid = review_event_id.clone();
+                                                            let rpk = review_pubkey.clone();
+                                                            move |_| {
+                                                                let eid = eid.clone();
+                                                                let rpk = rpk.clone();
+                                                                spawn(async move {
+                                                                    if let Err(e) = dismiss_review(&eid).await {
+                                                                        web_sys::console::error_1(&format!("Failed to dismiss review: {}", e).into());
+                                                                        return;
+                                                                    }
+                                                                    reviews.write().retain(|r| r.pubkey != rpk || r.event_id != eid);
+                                                                });
+                                                            }
+                                                        },
+                                                        "Dismiss"
+                                                    }
                                                 }
                                             }
                                             if !review.content.is_empty() {

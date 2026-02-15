@@ -4,6 +4,7 @@
 use crate::components::{
     BranchSelector, CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb,
 };
+#[cfg(target_arch = "wasm32")]
 use crate::components::code::file_viewer::parse_line_hash;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};

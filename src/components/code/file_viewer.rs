@@ -88,6 +88,7 @@ pub fn CodeFileViewerSkeleton() -> Element {
     }
 }
 /// Parse a URL hash like "#L5" or "#L5-L10" into selected line numbers
+#[allow(dead_code)]
 pub fn parse_line_hash(hash: &str) -> Option<(usize, usize)> {
     let hash = hash.trim_start_matches('#');
     if let Some((start_s, end_s)) = hash.split_once('-') {
