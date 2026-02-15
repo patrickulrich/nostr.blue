@@ -369,3 +369,121 @@ pub async fn fetch_pr_comments_by_id(
         .map_err(|e| format!("Invalid event reference: {}", e))?;
     fetch_pr_comments(event_id).await
 }
+
+/// A comment anchored to a specific file and line in a diff
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineComment {
+    /// Event ID (hex)
+    pub event_id: String,
+    /// Author pubkey (hex)
+    pub pubkey: String,
+    /// Comment content
+    pub content: String,
+    /// Created timestamp (unix seconds)
+    pub created_at: u64,
+    /// File path the comment is anchored to
+    pub file_path: String,
+    /// Line number within the file the comment is anchored to
+    pub line_number: usize,
+}
+
+/// Publish a line-level comment on a PR
+///
+/// Uses Kind::Comment (1111) like regular PR comments, with additional
+/// `["file", "{file_path}"]` and `["line", "{line_number}"]` tags to
+/// anchor the comment to a specific location in the diff.
+pub async fn publish_line_comment(
+    pr_id: EventId,
+    pr_author: PublicKey,
+    content: &str,
+    file_path: &str,
+    line_number: usize,
+) -> Result<EventId, String> {
+    use nostr::nips::nip22::CommentTarget;
+    let client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+    let comment_to = CommentTarget::event(pr_id, Kind::GitPatch, Some(pr_author), None);
+    let builder = EventBuilder::comment(content, comment_to, None)
+        .tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("file")),
+            [file_path.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("line")),
+            [line_number.to_string()],
+        ));
+    let output = client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish line comment: {}", e))?;
+    Ok(*output.id())
+}
+
+/// Fetch line comments for a PR
+///
+/// Fetches all Kind 1111 comments for the PR and filters for those
+/// that have both "file" and "line" tags, parsing them into LineComment structs.
+pub async fn fetch_line_comments(pr_id: EventId) -> Result<Vec<LineComment>, String> {
+    let filter = Filter::new().kind(Kind::Comment).event(pr_id);
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch line comments: {}", e))?;
+    let mut comments = Vec::new();
+    for event in &events {
+        let mut file_path = None;
+        let mut line_number = None;
+        for tag in event.tags.iter() {
+            let kind = tag.kind();
+            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("file")) {
+                if let Some(f) = tag.content() {
+                    file_path = Some(f.to_string());
+                }
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("line")) {
+                if let Some(l) = tag.content() {
+                    line_number = l.parse::<usize>().ok();
+                }
+            }
+        }
+        // Only include comments that have both file and line tags
+        if let (Some(fp), Some(ln)) = (file_path, line_number) {
+            comments.push(LineComment {
+                event_id: event.id.to_hex(),
+                pubkey: event.pubkey.to_hex(),
+                content: event.content.clone(),
+                created_at: event.created_at.as_secs(),
+                file_path: fp,
+                line_number: ln,
+            });
+        }
+    }
+    // Sort by creation time ascending
+    comments.sort_by_key(|c| c.created_at);
+    Ok(comments)
+}
+
+/// Publish a line-level comment on a PR by event ID and author hex strings
+pub async fn publish_line_comment_by_id(
+    event_ref: &str,
+    author_hex: &str,
+    content: &str,
+    file_path: &str,
+    line_number: usize,
+) -> Result<String, String> {
+    let event_id = decode_event_id(event_ref)
+        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let author = PublicKey::from_hex(author_hex)
+        .map_err(|e| format!("Invalid author pubkey: {}", e))?;
+    let result = publish_line_comment(event_id, author, content, file_path, line_number).await?;
+    Ok(result.to_hex())
+}
+
+/// Fetch line comments for a PR by event ID string
+pub async fn fetch_line_comments_by_id(
+    event_ref: &str,
+) -> Result<Vec<LineComment>, String> {
+    let event_id = decode_event_id(event_ref)
+        .map_err(|e| format!("Invalid event reference: {}", e))?;
+    fetch_line_comments(event_id).await
+}

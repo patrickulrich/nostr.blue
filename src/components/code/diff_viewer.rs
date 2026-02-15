@@ -4,8 +4,16 @@
 //! file headers, and hunk markers. Supports unified and side-by-side
 //! view modes with collapsible hunks. Falls back to prose rendering
 //! for cover letters or non-diff content.
+//!
+//! Supports line-level commenting: clickable "+" icons in the gutter
+//! open an inline comment form, and existing line comments are
+//! displayed between diff lines.
 use std::collections::HashMap;
 
+use crate::services::git_hosting::pull_requests::LineComment;
+use crate::stores::profiles::PROFILE_CACHE;
+use crate::utils::format::truncate_pubkey;
+use crate::utils::format_relative_time_or;
 use dioxus::prelude::*;
 
 /// View mode for the diff viewer
@@ -175,12 +183,47 @@ fn build_side_by_side_rows(lines: &[DiffLine]) -> Vec<SideBySideRow> {
     rows
 }
 
+/// Build a lookup from (file_path, line_number) to Vec<LineComment>
+fn build_line_comment_map(comments: &[LineComment]) -> HashMap<(String, usize), Vec<LineComment>> {
+    let mut map: HashMap<(String, usize), Vec<LineComment>> = HashMap::new();
+    for c in comments {
+        map.entry((c.file_path.clone(), c.line_number))
+            .or_default()
+            .push(c.clone());
+    }
+    map
+}
+
+/// Determine the effective line number for a diff line (prefer new_num, fall back to old_num)
+fn effective_line_number(diff_line: &DiffLine) -> Option<usize> {
+    diff_line.new_num.or(diff_line.old_num)
+}
+
 /// Diff viewer component
+///
+/// Renders a unified or side-by-side diff with optional line-level
+/// commenting support. When `pr_event_id` is provided, a "+" icon
+/// appears in the gutter on hover to add inline comments.
 #[component]
-pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
+pub fn DiffViewer(
+    content: String,
+    is_cover_letter: bool,
+    #[props(default)]
+    pr_event_id: Option<String>,
+    #[props(default)]
+    line_comments: Vec<LineComment>,
+    #[props(default)]
+    on_line_comment: Option<EventHandler<(String, usize, String)>>,
+) -> Element {
     let mut view_mode = use_signal(|| DiffViewMode::Unified);
     let mut collapsed_hunks: Signal<HashMap<(usize, usize), bool>> =
         use_signal(HashMap::new);
+    // Track which file+line has the inline comment form open
+    let mut active_comment_line: Signal<Option<(String, usize)>> = use_signal(|| None);
+    // Text content of the inline comment form
+    let mut comment_text = use_signal(String::new);
+
+    let has_commenting = pr_event_id.is_some() && on_line_comment.is_some();
 
     if is_cover_letter || !is_diff_content(&content) {
         return rsx! {
@@ -341,6 +384,14 @@ pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
 
     let current_mode = *view_mode.read();
 
+    // Build a lookup map for line comments by (file_path, line_number)
+    let comment_map = build_line_comment_map(&line_comments);
+
+    // Column count for spanning rows (unified mode)
+    // With commenting: comment-gutter + old-num + new-num + +/- indicator + content = 5
+    // Without commenting: old-num + new-num + +/- indicator + content = 4
+    let unified_colspan = if has_commenting { "5" } else { "4" };
+
     rsx! {
         div { class: "space-y-4",
             // View mode toggle
@@ -410,6 +461,9 @@ pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
                                                             }
                                                         }
                                                     } else {
+                                                        if has_commenting {
+                                                            td { class: "w-5" }
+                                                        }
                                                         td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50" }
                                                         td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50" }
                                                         td { class: "w-4 px-1 text-center select-none" }
@@ -432,15 +486,46 @@ pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
                                             match current_mode {
                                                 DiffViewMode::Unified => rsx! {
                                                     for (line_idx, diff_line) in hunk.lines.iter().enumerate() {
+                                                        // The diff line row
                                                         tr {
                                                             key: "line-{hunk_idx}-{line_idx}",
-                                                            class: match diff_line.kind {
-                                                                LineKind::Add => "bg-green-500/10",
-                                                                LineKind::Remove => "bg-red-500/10",
-                                                                LineKind::Hunk => "bg-blue-500/10",
-                                                                LineKind::Info => "bg-muted/50",
-                                                                LineKind::Context => "",
+                                                            class: {
+                                                                let bg = match diff_line.kind {
+                                                                    LineKind::Add => "bg-green-500/10",
+                                                                    LineKind::Remove => "bg-red-500/10",
+                                                                    LineKind::Hunk => "bg-blue-500/10",
+                                                                    LineKind::Info => "bg-muted/50",
+                                                                    LineKind::Context => "",
+                                                                };
+                                                                if has_commenting && !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
+                                                                    format!("{bg} group")
+                                                                } else {
+                                                                    bg.to_string()
+                                                                }
                                                             },
+                                                            // Comment gutter "+" button (only in unified mode with commenting enabled)
+                                                            if has_commenting {
+                                                                td { class: "w-5 text-center select-none border-r border-border/50",
+                                                                    if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
+                                                                        {
+                                                                            let file_for_click = section.file_path.clone();
+                                                                            let line_num = effective_line_number(diff_line).unwrap_or(0);
+                                                                            rsx! {
+                                                                                button {
+                                                                                    class: "w-4 h-4 flex items-center justify-center text-primary opacity-0 group-hover:opacity-100 hover:bg-primary/20 rounded transition-opacity text-[10px] font-bold",
+                                                                                    title: "Add line comment",
+                                                                                    onclick: move |e| {
+                                                                                        e.stop_propagation();
+                                                                                        active_comment_line.set(Some((file_for_click.clone(), line_num)));
+                                                                                        comment_text.set(String::new());
+                                                                                    },
+                                                                                    "+"
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                             td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50",
                                                                 if let Some(n) = diff_line.old_num {
                                                                     "{n}"
@@ -475,6 +560,88 @@ pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
                                                                     LineKind::Context => rsx! {
                                                                         span { "{diff_line.content}" }
                                                                     },
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // Display existing line comments for this file + line
+                                                        if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
+                                                            if let Some(line_num) = effective_line_number(diff_line) {
+                                                                if let Some(comments) = comment_map.get(&(section.file_path.clone(), line_num)) {
+                                                                    for lc in comments.iter() {
+                                                                        tr {
+                                                                            key: "lc-{lc.event_id}",
+                                                                            class: "bg-accent/30",
+                                                                            td {
+                                                                                colspan: unified_colspan,
+                                                                                class: "px-4 py-2",
+                                                                                InlineLineComment { comment: lc.clone() }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // Inline comment form (if this line is selected)
+                                                        if has_commenting {
+                                                            if let Some(line_num) = effective_line_number(diff_line) {
+                                                                {
+                                                                    let is_active = active_comment_line.read().as_ref()
+                                                                        .map(|(f, l)| f == &section.file_path && *l == line_num)
+                                                                        .unwrap_or(false);
+                                                                    if is_active {
+                                                                        let file_for_submit = section.file_path.clone();
+                                                                        rsx! {
+                                                                            tr {
+                                                                                key: "comment-form-{line_num}",
+                                                                                class: "bg-accent/20",
+                                                                                td {
+                                                                                    colspan: unified_colspan,
+                                                                                    class: "p-3",
+                                                                                    div { class: "space-y-2",
+                                                                                        textarea {
+                                                                                            class: "w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary resize-y font-sans",
+                                                                                            placeholder: "Write a line comment...",
+                                                                                            rows: 3,
+                                                                                            value: "{comment_text}",
+                                                                                            oninput: move |e| comment_text.set(e.value()),
+                                                                                        }
+                                                                                        div { class: "flex justify-end gap-2",
+                                                                                            button {
+                                                                                                class: "px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition",
+                                                                                                onclick: move |_| {
+                                                                                                    active_comment_line.set(None);
+                                                                                                    comment_text.set(String::new());
+                                                                                                },
+                                                                                                "Cancel"
+                                                                                            }
+                                                                                            button {
+                                                                                                class: "px-3 py-1 text-xs bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
+                                                                                                disabled: comment_text.read().trim().is_empty(),
+                                                                                                onclick: {
+                                                                                                    let file_path = file_for_submit.clone();
+                                                                                                    move |_| {
+                                                                                                        let text = comment_text.read().clone();
+                                                                                                        if !text.trim().is_empty() {
+                                                                                                            if let Some(ref handler) = on_line_comment {
+                                                                                                                handler.call((file_path.clone(), line_num, text));
+                                                                                                            }
+                                                                                                            active_comment_line.set(None);
+                                                                                                            comment_text.set(String::new());
+                                                                                                        }
+                                                                                                    }
+                                                                                                },
+                                                                                                "Comment"
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        rsx! {}
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -527,6 +694,23 @@ pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
                                                                     }
                                                                 }
                                                             }
+
+                                                            // Display existing line comments for the right (new) side line
+                                                            if let Some(line_num) = row.right_num {
+                                                                if let Some(comments) = comment_map.get(&(section.file_path.clone(), line_num)) {
+                                                                    for lc in comments.iter() {
+                                                                        tr {
+                                                                            key: "lc-sbs-{lc.event_id}",
+                                                                            class: "bg-accent/30",
+                                                                            td {
+                                                                                colspan: "4",
+                                                                                class: "px-4 py-2",
+                                                                                InlineLineComment { comment: lc.clone() }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 },
@@ -540,6 +724,40 @@ pub fn DiffViewer(content: String, is_cover_letter: bool) -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Inline display of a single line comment within the diff
+#[component]
+fn InlineLineComment(comment: LineComment) -> Element {
+    let author_profile = PROFILE_CACHE.read().peek(&comment.pubkey).cloned();
+    let author_name = author_profile
+        .as_ref()
+        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
+    rsx! {
+        div { class: "flex items-start gap-2 text-xs font-sans",
+            div { class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center shrink-0 overflow-hidden",
+                if let Some(picture) = author_profile.as_ref().and_then(|p| p.picture.as_ref()) {
+                    img {
+                        class: "w-full h-full object-cover",
+                        src: "{picture}",
+                        alt: "Author",
+                    }
+                } else {
+                    span { class: "text-[10px]", "{author_name.chars().next().unwrap_or('?')}" }
+                }
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "flex items-center gap-2",
+                    span { class: "font-medium text-foreground", "{author_name}" }
+                    span { class: "text-muted-foreground",
+                        {format_relative_time_or(comment.created_at, "Unknown")}
+                    }
+                }
+                p { class: "text-sm text-foreground mt-0.5 whitespace-pre-wrap", "{comment.content}" }
             }
         }
     }

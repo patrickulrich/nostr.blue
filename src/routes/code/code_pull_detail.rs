@@ -9,6 +9,9 @@ use crate::services::git_hosting::{
     fetch_pr_comments_by_id, fetch_pull_request, fetch_repository, publish_pr_comment_by_id,
     publish_pr_update_by_id, update_pr_status_by_id,
 };
+use crate::services::git_hosting::pull_requests::{
+    fetch_line_comments_by_id, publish_line_comment_by_id, LineComment,
+};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{truncate_commit, truncate_pubkey};
@@ -208,6 +211,18 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let comments = use_resource(move || {
         let id = pr_id_for_comments.clone();
         async move { fetch_pr_comments_by_id(&id).await }
+    });
+
+    // Fetch line-level comments for the Files Changed tab
+    let pr_id_for_line_comments = pr_id.clone();
+    let mut line_comments: Signal<Vec<LineComment>> = use_signal(Vec::new);
+    use_effect(move || {
+        let id = pr_id_for_line_comments.clone();
+        spawn(async move {
+            if let Ok(lcs) = fetch_line_comments_by_id(&id).await {
+                line_comments.set(lcs);
+            }
+        });
     });
 
     let handle_status_change = {
@@ -754,10 +769,35 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         }
                     }
                 },
-                PrTab::FilesChanged => rsx! {
-                    DiffViewer {
-                        content: pr.content.clone(),
-                        is_cover_letter: pr.is_cover_letter,
+                PrTab::FilesChanged => {
+                    let pr_id_for_handler = pr_id.clone();
+                    let pr_pubkey_for_handler = pr_pubkey.clone();
+                    rsx! {
+                        DiffViewer {
+                            content: pr.content.clone(),
+                            is_cover_letter: pr.is_cover_letter,
+                            pr_event_id: Some(pr_id.clone()),
+                            line_comments: line_comments.read().clone(),
+                            on_line_comment: move |(file, line_num, text): (String, usize, String)| {
+                                let id = pr_id_for_handler.clone();
+                                let author = pr_pubkey_for_handler.clone();
+                                spawn(async move {
+                                    match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
+                                        Ok(_) => {
+                                            // Refresh line comments after publishing
+                                            if let Ok(lcs) = fetch_line_comments_by_id(&id).await {
+                                                line_comments.set(lcs);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            web_sys::console::error_1(
+                                                &format!("Failed to publish line comment: {}", e).into(),
+                                            );
+                                        }
+                                    }
+                                });
+                            },
+                        }
                     }
                 },
             }
