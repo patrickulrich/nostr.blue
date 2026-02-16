@@ -67,6 +67,13 @@ pub fn CodePullNew(naddr: String) -> Element {
                 } else {
                     closes_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
+                for id in &closes_list {
+                    if nostr_sdk::EventId::from_hex(id).is_err() {
+                        error_message.set(Some(format!("Invalid event ID: {}", id)));
+                        is_publishing.set(false);
+                        return;
+                    }
+                }
                 let commit_ref = if commit_val.is_empty() {
                     None
                 } else {

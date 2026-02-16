@@ -61,9 +61,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             relay_list.set(r.relays.clone());
             maintainer_list.set(r.maintainers.clone());
             // zap_splits init - default to repo owner at 100%
+            // TODO: parse zap split tags from the raw event when Repository carries them
             if zap_splits.read().is_empty() {
                 zap_splits.set(vec![(r.pubkey.clone(), 100)]);
             }
+            // TODO: parse milestone tags from the raw event when Repository carries them
             required_approvals.set(r.required_approvals);
             topics_list.set(r.topics.clone());
             form_initialized.set(true);
@@ -511,16 +513,17 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         if e.key() == Key::Enter {
                                             let key = new_maintainer.read().trim().to_string();
                                             if !key.is_empty() {
-                                                let hex_key = if key.starts_with("npub1") {
-                                                    PublicKey::parse(&key)
-                                                        .map(|pk| pk.to_hex())
-                                                        .unwrap_or(key.clone())
-                                                } else {
-                                                    key.clone()
-                                                };
-                                                if !maintainer_list.read().contains(&hex_key) {
-                                                    maintainer_list.write().push(hex_key);
-                                                    new_maintainer.set(String::new());
+                                                match PublicKey::parse(&key) {
+                                                    Ok(pk) => {
+                                                        let hex_key = pk.to_hex();
+                                                        if !maintainer_list.read().contains(&hex_key) {
+                                                            maintainer_list.write().push(hex_key);
+                                                            new_maintainer.set(String::new());
+                                                        }
+                                                    }
+                                                    Err(_) => {
+                                                        save_error.set(Some("Invalid public key. Enter a valid npub or hex pubkey.".to_string()));
+                                                    }
                                                 }
                                             }
                                         }
@@ -532,16 +535,17 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     onclick: move |_| {
                                         let key = new_maintainer.read().trim().to_string();
                                         if !key.is_empty() {
-                                            let hex_key = if key.starts_with("npub1") {
-                                                PublicKey::parse(&key)
-                                                    .map(|pk| pk.to_hex())
-                                                    .unwrap_or(key.clone())
-                                            } else {
-                                                key.clone()
-                                            };
-                                            if !maintainer_list.read().contains(&hex_key) {
-                                                maintainer_list.write().push(hex_key);
-                                                new_maintainer.set(String::new());
+                                            match PublicKey::parse(&key) {
+                                                Ok(pk) => {
+                                                    let hex_key = pk.to_hex();
+                                                    if !maintainer_list.read().contains(&hex_key) {
+                                                        maintainer_list.write().push(hex_key);
+                                                        new_maintainer.set(String::new());
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    save_error.set(Some("Invalid public key. Enter a valid npub or hex pubkey.".to_string()));
+                                                }
                                             }
                                         }
                                     },

@@ -131,14 +131,15 @@ pub fn CodeBounties() -> Element {
         BountySort::LowestReward => sorted_bounties.sort_by(|a, b| a.bounty.amount_sats.cmp(&b.bounty.amount_sats)),
     }
 
-    // Stats
-    let total_count = bounties.read().len();
-    let total_sats: u64 = bounties.read().iter().map(|l| l.bounty.amount_sats).sum();
-    let pending_count = bounties
-        .read()
+    // Stats (single read of bounties signal)
+    let bounties_snapshot = bounties.read();
+    let total_count = bounties_snapshot.len();
+    let total_sats: u64 = bounties_snapshot.iter().map(|l| l.bounty.amount_sats).sum();
+    let pending_count = bounties_snapshot
         .iter()
         .filter(|l| l.bounty.status == BountyStatus::Pending)
         .count();
+    drop(bounties_snapshot);
 
     rsx! {
         div { class: "min-h-screen",

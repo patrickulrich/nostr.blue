@@ -180,8 +180,11 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                     Some(Ok(content)) => rsx! {
                         ReadmeViewer { content: Some(content.clone()), loading: false }
                     },
-                    Some(Err(_)) => rsx! {
-                        ReadmeViewer { content: None, loading: false }
+                    Some(Err(e)) => {
+                        log::warn!("Failed to fetch readme: {}", e);
+                        rsx! {
+                            ReadmeViewer { content: None, loading: false }
+                        }
                     },
                     None => rsx! {
                         ReadmeViewer { loading: true }
@@ -204,7 +207,7 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                     div { class: "bg-card border border-border rounded-lg p-4",
                         h3 { class: "text-sm font-semibold text-foreground mb-3", "Links" }
                         div { class: "space-y-2",
-                            for url in repo.web.iter() {
+                            for url in repo.web.iter().filter(|u| u.starts_with("http://") || u.starts_with("https://")) {
                                 a {
                                     key: "{url}",
                                     href: "{url}",

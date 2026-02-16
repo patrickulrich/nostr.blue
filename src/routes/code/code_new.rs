@@ -377,7 +377,7 @@ fn DynamicListField(props: DynamicListFieldProps) -> Element {
             }
             div { class: "space-y-2",
                 for (i , value) in values.read().iter().enumerate() {
-                    div { key: "{i}", class: "flex items-center gap-2",
+                    div { key: "{i}_{value}", class: "flex items-center gap-2",
                         input {
                             class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",

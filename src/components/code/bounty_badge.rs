@@ -46,11 +46,12 @@ fn format_with_commas(n: u64) -> String {
 /// Display a bounty amount badge with status indicator
 #[component]
 pub fn BountyStatusBadge(amount: u64, status: crate::utils::nip34::BountyStatus) -> Element {
-    let (bg_class, text_class, label) = match status {
-        crate::utils::nip34::BountyStatus::Pending => ("bg-yellow-500/20", "text-yellow-400", "Pending"),
-        crate::utils::nip34::BountyStatus::Claimed => ("bg-blue-500/20", "text-blue-400", "Claimed"),
-        crate::utils::nip34::BountyStatus::Paid => ("bg-green-500/20", "text-green-400", "Paid"),
+    let (bg_class, text_class) = match status {
+        crate::utils::nip34::BountyStatus::Pending => ("bg-yellow-500/20", "text-yellow-400"),
+        crate::utils::nip34::BountyStatus::Claimed => ("bg-blue-500/20", "text-blue-400"),
+        crate::utils::nip34::BountyStatus::Paid => ("bg-green-500/20", "text-green-400"),
     };
+    let label = status.label();
     rsx! {
         span { class: "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full {bg_class} {text_class} text-xs font-medium",
             "\u{26A1}"

@@ -47,8 +47,8 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                         div { class: "flex items-center gap-1 ml-auto",
                             for assignee in issue.assignees.iter() {
                                 {
-                                    let short = if assignee.len() > 8 {
-                                        format!("{}...", &assignee[..6])
+                                    let short = if assignee.chars().count() > 8 {
+                                        format!("{}...", assignee.chars().take(6).collect::<String>())
                                     } else {
                                         assignee.clone()
                                     };

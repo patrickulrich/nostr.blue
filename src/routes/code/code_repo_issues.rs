@@ -41,29 +41,33 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
         });
     });
 
-    // Derive filtered list
-    let filtered = {
+    // Derive filtered list (memoized)
+    let filtered = use_memo(move || {
         let issues = all_issues.read();
         let status = *status_filter.read();
         let query = search_query.read().clone();
         let labels = selected_labels.read().clone();
         filter_issues(&issues, status, &query, &labels)
-    };
+    });
 
-    // Count open/closed for tabs
-    let open_count = all_issues
-        .read()
-        .iter()
-        .filter(|i| i.status == IssueStatus::Open || i.status == IssueStatus::Draft)
-        .count();
-    let closed_count = all_issues
-        .read()
-        .iter()
-        .filter(|i| i.status == IssueStatus::Closed || i.status == IssueStatus::Applied)
-        .count();
+    // Count open/closed for tabs (memoized)
+    let open_count = use_memo(move || {
+        all_issues
+            .read()
+            .iter()
+            .filter(|i| i.status == IssueStatus::Open || i.status == IssueStatus::Draft)
+            .count()
+    });
+    let closed_count = use_memo(move || {
+        all_issues
+            .read()
+            .iter()
+            .filter(|i| i.status == IssueStatus::Closed || i.status == IssueStatus::Applied)
+            .count()
+    });
 
-    // Collect unique labels for filter chips
-    let available_labels: Vec<String> = {
+    // Collect unique labels for filter chips (memoized)
+    let available_labels = use_memo(move || {
         let mut labels: Vec<String> = all_issues
             .read()
             .iter()
@@ -72,7 +76,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
         labels.sort();
         labels.dedup();
         labels
-    };
+    });
 
     rsx! {
         div { class: "min-h-screen",
@@ -185,9 +189,9 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                         on_status_change: move |s| status_filter.set(s),
                         search_query: search_query.read().clone(),
                         on_search_change: move |q| search_query.set(q),
-                        open_count,
-                        closed_count,
-                        available_labels,
+                        open_count: open_count(),
+                        closed_count: closed_count(),
+                        available_labels: available_labels(),
                         selected_labels: selected_labels.read().clone(),
                         on_label_toggle: move |label: String| {
                             let mut labels = selected_labels.write();
@@ -198,11 +202,11 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                             }
                         },
                     }
-                    if filtered.is_empty() {
+                    if filtered().is_empty() {
                         EmptyIssues {}
                     } else {
                         div { class: "border border-border rounded-lg divide-y divide-border",
-                            for issue in filtered.iter() {
+                            for issue in filtered().iter() {
                                 CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
                             }
                         }

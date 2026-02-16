@@ -560,7 +560,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
 
             // Merge confirmation modal
             if *show_merge_confirm.read() {
-                div { class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm flex items-center justify-center",
+                div { class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center",
                     onclick: move |_| show_merge_confirm.set(false),
                     div {
                         class: "bg-background border border-border rounded-xl p-6 max-w-md mx-4 shadow-lg",

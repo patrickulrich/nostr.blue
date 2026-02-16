@@ -484,7 +484,9 @@ pub fn DiffViewer(
                                         let is_collapsed = collapsed_hunks.read().get(&(section_idx, hunk_idx)).copied().unwrap_or(false);
                                         if !is_collapsed {
                                             match current_mode {
-                                                DiffViewMode::Unified => rsx! {
+                                                DiffViewMode::Unified => {
+                                                    let cached_file_path = section.file_path.clone();
+                                                    rsx! {
                                                     for (line_idx, diff_line) in hunk.lines.iter().enumerate() {
                                                         // The diff line row
                                                         tr {
@@ -508,7 +510,7 @@ pub fn DiffViewer(
                                                                 td { class: "w-5 text-center select-none border-r border-border/50",
                                                                     if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
                                                                         {
-                                                                            let file_for_click = section.file_path.clone();
+                                                                            let file_for_click = cached_file_path.clone();
                                                                             let line_num = effective_line_number(diff_line).unwrap_or(0);
                                                                             rsx! {
                                                                                 button {
@@ -567,7 +569,7 @@ pub fn DiffViewer(
                                                         // Display existing line comments for this file + line
                                                         if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
                                                             if let Some(line_num) = effective_line_number(diff_line) {
-                                                                if let Some(comments) = comment_map.get(&(section.file_path.clone(), line_num)) {
+                                                                if let Some(comments) = comment_map.get(&(cached_file_path.clone(), line_num)) {
                                                                     for lc in comments.iter() {
                                                                         tr {
                                                                             key: "lc-{lc.event_id}",
@@ -588,10 +590,10 @@ pub fn DiffViewer(
                                                             if let Some(line_num) = effective_line_number(diff_line) {
                                                                 {
                                                                     let is_active = active_comment_line.read().as_ref()
-                                                                        .map(|(f, l)| f == &section.file_path && *l == line_num)
+                                                                        .map(|(f, l)| f == &cached_file_path && *l == line_num)
                                                                         .unwrap_or(false);
                                                                     if is_active {
-                                                                        let file_for_submit = section.file_path.clone();
+                                                                        let file_for_submit = cached_file_path.clone();
                                                                         rsx! {
                                                                             tr {
                                                                                 key: "comment-form-{line_num}",
@@ -646,7 +648,7 @@ pub fn DiffViewer(
                                                             }
                                                         }
                                                     }
-                                                },
+                                                }},
                                                 DiffViewMode::SideBySide => {
                                                     let rows = build_side_by_side_rows(&hunk.lines);
                                                     rsx! {
@@ -775,7 +777,7 @@ struct DiffLine {
     content: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum LineKind {
     Context,
     Add,

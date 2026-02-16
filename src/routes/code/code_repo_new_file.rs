@@ -18,6 +18,9 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.starts_with('/') {
         return Some("Path must not start with /".to_string());
     }
+    if path.contains('\0') {
+        return Some("Path must not contain null bytes".to_string());
+    }
     if path.contains("..") {
         return Some("Path must not contain .. segments".to_string());
     }

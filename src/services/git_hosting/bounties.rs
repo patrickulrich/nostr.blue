@@ -101,7 +101,33 @@ pub async fn claim_bounty(
     issue_event_id: EventId,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
-    update_bounty_status(bounty_event_id, issue_event_id, "claimed", repository).await
+    let client = get_client().ok_or("Client not initialized")?;
+    if !*HAS_SIGNER.read() {
+        return Err("No signer attached. Cannot publish events.".to_string());
+    }
+    let signer = client.signer().await.map_err(|e| format!("Failed to get signer: {}", e))?;
+    let claimer_pubkey = signer.get_public_key().await.map_err(|e| format!("Failed to get public key: {}", e))?;
+    let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
+        .tag(Tag::event(issue_event_id))
+        .tag(Tag::event(bounty_event_id))
+        .tag(Tag::custom(
+            TagKind::Custom(Cow::Borrowed("status")),
+            ["claimed"],
+        ))
+        .tag(Tag::public_key(claimer_pubkey));
+    if let Some(coord) = repository {
+        builder = builder.tag(Tag::coordinate(coord.clone(), None));
+    }
+    let output = client
+        .send_event_builder(builder)
+        .await
+        .map_err(|e| format!("Failed to publish: {}", e))?;
+    let event_id = *output.id();
+    let filter = Filter::new().id(event_id);
+    if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(2)).await {
+        cache_bounty_events(&events);
+    }
+    Ok(event_id)
 }
 /// Release a bounty by paying via NWC and marking as "paid"
 ///

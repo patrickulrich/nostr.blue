@@ -194,8 +194,9 @@ pub fn filter_prs(
                 return true;
             }
             let q = query.to_lowercase();
+            let title = pr.display_title().to_lowercase();
             let content = pr.content.to_lowercase();
-            content.contains(&q)
+            title.contains(&q) || content.contains(&q)
         })
         .filter(|pr| {
             if selected_labels.is_empty() {

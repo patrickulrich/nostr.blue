@@ -48,13 +48,18 @@ pub fn CodeGlobalPulls() -> Element {
         spawn(async move {
             loading.set(true);
             if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
-                if let Ok(fetched) = fetch_user_prs(&pk, 100).await {
+                let (created_res, assigned_res, mentioned_res) = futures::join!(
+                    fetch_user_prs(&pk, 100),
+                    fetch_prs_assigned_to(&pk, 100),
+                    fetch_prs_mentioning(&pk, 100)
+                );
+                if let Ok(fetched) = created_res {
                     created_prs.set(fetched);
                 }
-                if let Ok(fetched) = fetch_prs_assigned_to(&pk, 100).await {
+                if let Ok(fetched) = assigned_res {
                     assigned_prs.set(fetched);
                 }
-                if let Ok(fetched) = fetch_prs_mentioning(&pk, 100).await {
+                if let Ok(fetched) = mentioned_res {
                     mentioned_prs.set(fetched);
                 }
             }

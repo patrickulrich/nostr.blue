@@ -39,10 +39,15 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 if git_service::GitService::is_initialized()
                     || git_service::GitService::init().await.is_ok()
                 {
-                    if let Ok(entries) = git_service().get_log(repo, None, 50).await {
-                        commits_result.set(Some(Ok(CommitData::Git(entries))));
-                        repo_result.set(Some(result));
-                        return;
+                    match git_service().get_log(repo, None, 50).await {
+                        Ok(entries) => {
+                            commits_result.set(Some(Ok(CommitData::Git(entries))));
+                            repo_result.set(Some(result));
+                            return;
+                        }
+                        Err(e) => {
+                            log::warn!("git_service get_log failed, falling back to GitHub API: {}", e);
+                        }
                     }
                 }
                 // Fall back to GitHub API for GitHub-hosted repos
@@ -320,6 +325,7 @@ fn format_commit_date(date_str: &str) -> String {
 }
 
 /// Format a Unix timestamp to a date string
+// TODO: consolidate with other date formatting utilities (e.g. format_relative_time_or, format_time_ago)
 fn format_unix_timestamp(timestamp: u64) -> String {
     let secs = timestamp as i64;
     let days_since_epoch = secs / 86400;

@@ -58,6 +58,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     let mut prs = use_signal(Vec::<PullRequest>::new);
     let mut snippets = use_signal(Vec::<DisplaySnippet>::new);
 
+    // Request staleness guard
+    let mut request_id = use_signal(|| 0u32);
+
     // Clipboard copied state
     #[allow(unused_mut)]
     let mut npub_copied = use_signal(|| false);
@@ -91,6 +94,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         prs.set(Vec::new());
         snippets.set(Vec::new());
         is_following.set(false);
+
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
 
         spawn(async move {
             // Wait for client
@@ -129,6 +135,12 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             let issues_result = fetch_user_issues(&parsed, 50).await;
             let prs_result = fetch_user_prs(&parsed, 50).await;
             let snippets_result = fetch_user_snippets(&parsed, 50).await;
+
+            // Discard stale results if pubkey changed during async fetch
+            if *request_id.peek() != current_id {
+                log::debug!("Discarding stale profile result");
+                return;
+            }
 
             let repo_count = repos_result.as_ref().map(|r| r.len()).unwrap_or(0);
             let issue_count = issues_result.as_ref().map(|i| i.len()).unwrap_or(0);
@@ -375,7 +387,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
 
                                 // Metadata links row
                                 div { class: "mt-3 flex flex-wrap items-center gap-3 text-sm",
-                                    if let Some(ref website_url) = website {
+                                    if let Some(ref website_url) = website.as_ref().filter(|u| u.starts_with("http://") || u.starts_with("https://")) {
                                         a {
                                             href: "{website_url}",
                                             target: "_blank",

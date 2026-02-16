@@ -125,7 +125,6 @@ pub fn FuzzyFinder(
     }
 }
 
-#[allow(dead_code)]
 fn subsequence_match(query: &str, target: &str) -> bool {
     let mut chars = target.chars();
     for qc in query.chars() {
@@ -140,7 +139,6 @@ fn subsequence_match(query: &str, target: &str) -> bool {
     true
 }
 
-#[allow(dead_code)]
 fn highlight_matches(text: &str, query: &str) -> Element {
     if query.is_empty() {
         return rsx! { span { "{text}" } };

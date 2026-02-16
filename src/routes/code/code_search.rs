@@ -91,7 +91,7 @@ impl ParsedQuery {
             }
         }
         if let Some(ref author) = self.author {
-            if !issue.pubkey.contains(author) {
+            if issue.pubkey != *author {
                 return false;
             }
         }
@@ -111,7 +111,7 @@ impl ParsedQuery {
             }
         }
         if let Some(ref author) = self.author {
-            if !pr.pubkey.contains(author) {
+            if pr.pubkey != *author {
                 return false;
             }
         }

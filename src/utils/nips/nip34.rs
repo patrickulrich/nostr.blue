@@ -506,20 +506,14 @@ impl Discussion {
                     repository = Some(coordinate.clone());
                 }
                 Some(TagStandard::Hashtag(t)) => hashtags.push(t.clone()),
+                Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
                 _ => {}
             }
-            // Check for custom "subject" tag
+            // Check for custom "subject" tag (overrides standard if present)
             if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("subject")) {
                 if let Some(s) = tag.content() {
                     subject = Some(s.to_string());
                 }
-            }
-        }
-        // Also check standard Subject tag
-        for tag in event.tags.iter() {
-            if let Some(TagStandard::Subject(s)) = tag.as_standardized() {
-                subject = Some(s.clone());
-                break;
             }
         }
         let repository = repository?;
@@ -680,6 +674,8 @@ pub struct Bounty {
     pub pubkey: String,
     /// Created timestamp
     pub created_at: u64,
+    /// Claimer pubkey (hex) - set when status is "claimed", parsed from p tag or event author
+    pub claimer: Option<String>,
 }
 impl Bounty {
     pub const KIND: u16 = 9806;
@@ -691,11 +687,15 @@ impl Bounty {
         let mut issue_event_id = None;
         let mut amount_sats = 0u64;
         let mut status = BountyStatus::Pending;
+        let mut claimer_pubkey = None;
         for tag in event.tags.iter() {
             if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
                 if issue_event_id.is_none() {
                     issue_event_id = Some(event_id.to_hex());
                 }
+            }
+            if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+                claimer_pubkey = Some(public_key.to_hex());
             }
             let kind = tag.kind();
             if kind == TagKind::Custom(std::borrow::Cow::Borrowed("amount")) {
@@ -709,6 +709,12 @@ impl Bounty {
             }
         }
         let issue_event_id = issue_event_id?;
+        // For claimed bounties, use p tag as claimer; fall back to event author
+        let claimer = if status == BountyStatus::Claimed {
+            Some(claimer_pubkey.unwrap_or_else(|| event.pubkey.to_hex()))
+        } else {
+            claimer_pubkey
+        };
         Some(Self {
             issue_event_id,
             amount_sats,
@@ -716,6 +722,7 @@ impl Bounty {
             event_id: event.id.to_hex(),
             pubkey: event.pubkey.to_hex(),
             created_at: event.created_at.as_secs(),
+            claimer,
         })
     }
 }

@@ -80,18 +80,23 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
         }
         spawn(async move {
             let result = fetch_repository(&n).await;
-            if let Ok(ref repo) = result {
-                for url in repo.clone.iter() {
-                    if let Some((owner, repo_name)) = parse_github_url(url) {
-                        let detail = fetch_commit_detail(&owner, &repo_name, &s).await;
-                        commit_result.set(Some(detail));
-                        break;
+            match &result {
+                Ok(repo) => {
+                    for url in repo.clone.iter() {
+                        if let Some((owner, repo_name)) = parse_github_url(url) {
+                            let detail = fetch_commit_detail(&owner, &repo_name, &s).await;
+                            commit_result.set(Some(detail));
+                            break;
+                        }
+                    }
+                    if commit_result.read().is_none() {
+                        commit_result.set(Some(Err(
+                            "No GitHub URL found for this repository".to_string(),
+                        )));
                     }
                 }
-                if commit_result.read().is_none() {
-                    commit_result.set(Some(Err(
-                        "No GitHub URL found for this repository".to_string(),
-                    )));
+                Err(e) => {
+                    commit_result.set(Some(Err(format!("Repository not found: {}", e))));
                 }
             }
             repo_result.set(Some(result));

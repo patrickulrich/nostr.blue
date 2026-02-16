@@ -12,6 +12,7 @@ use crate::services::git_hosting::{
     github_import::{fetch_file_commits, GitHubCommit},
 };
 use crate::stores::nostr_client;
+use crate::utils::is_safe_path;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 /// Repository blame page component
@@ -76,6 +77,12 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                 let decoded = urlencoding::decode(&path)
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| path.clone());
+                if !is_safe_path(&decoded) {
+                    log::warn!("Path traversal attempt blocked in blame: {}", decoded);
+                    error.set(Some("Invalid path".to_string()));
+                    loading.set(false);
+                    return;
+                }
                 // Fetch file content and commit history in parallel
                 let (file_result, commits_result) = {
                     let repo_clone = repo.clone();
@@ -114,7 +121,10 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
         gh.map(|(owner, repo_name)| {
             format!(
                 "https://github.com/{}/{}/blame/{}/{}",
-                owner, repo_name, gr, dp
+                urlencoding::encode(&owner),
+                urlencoding::encode(&repo_name),
+                urlencoding::encode(&gr),
+                urlencoding::encode(&dp)
             )
         })
     };

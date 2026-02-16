@@ -28,7 +28,7 @@ export function initMermaidDiagrams() {
 
     // Load mermaid.js from CDN
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js';
     script.onload = () => {
         try {
             window.mermaid.initialize({

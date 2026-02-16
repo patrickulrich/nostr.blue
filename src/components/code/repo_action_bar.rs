@@ -201,11 +201,29 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     };
     let mut fork_loading = use_signal(|| false);
     let mut show_fork_modal = use_signal(|| false);
-    let fork_event_id = use_signal(|| repo.event_id.clone());
-    let fork_repo_id = use_signal(|| repo.id.clone());
-    let fork_repo_name = use_signal(|| repo.name.clone());
-    let fork_repo_desc = use_signal(|| repo.description.clone());
-    let fork_clone_urls = use_signal(|| repo.clone.clone());
+    let mut fork_event_id = use_signal(|| repo.event_id.clone());
+    let mut fork_repo_id = use_signal(|| repo.id.clone());
+    let mut fork_repo_name = use_signal(|| repo.name.clone());
+    let mut fork_repo_desc = use_signal(|| repo.description.clone());
+    let mut fork_clone_urls = use_signal(|| repo.clone.clone());
+    // Sync fork signals when repo prop changes
+    {
+        if *fork_event_id.peek() != repo.event_id {
+            fork_event_id.set(repo.event_id.clone());
+        }
+        if *fork_repo_id.peek() != repo.id {
+            fork_repo_id.set(repo.id.clone());
+        }
+        if *fork_repo_name.peek() != repo.name {
+            fork_repo_name.set(repo.name.clone());
+        }
+        if *fork_repo_desc.peek() != repo.description {
+            fork_repo_desc.set(repo.description.clone());
+        }
+        if *fork_clone_urls.peek() != repo.clone {
+            fork_clone_urls.set(repo.clone.clone());
+        }
+    }
     // Pre-filled form state for the fork modal
     let mut fork_form_name = use_signal(|| {
         repo.name.as_deref()

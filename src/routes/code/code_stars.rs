@@ -30,7 +30,9 @@ pub fn CodeStars() -> Element {
         spawn(async move {
             loading.set(true);
             // Load stars from relays into STARRED_REPOS
-            let _ = load_user_stars().await;
+            if let Err(e) = load_user_stars().await {
+                log::warn!("Failed to load user stars: {}", e);
+            }
             // Get Repository objects from cache
             let starred = code_store::get_starred_repos();
             repos.set(starred);
@@ -38,20 +40,22 @@ pub fn CodeStars() -> Element {
         });
     });
 
-    let query = search_query.read().to_lowercase();
-    let filtered: Vec<_> = repos
-        .read()
-        .iter()
-        .filter(|r| {
-            if query.is_empty() {
-                return true;
-            }
-            let name = r.name.clone().unwrap_or_else(|| r.id.clone()).to_lowercase();
-            let desc = r.description.clone().unwrap_or_default().to_lowercase();
-            name.contains(&query) || desc.contains(&query)
-        })
-        .cloned()
-        .collect();
+    let filtered = use_memo(move || {
+        let query = search_query.read().to_lowercase();
+        repos
+            .read()
+            .iter()
+            .filter(|r| {
+                if query.is_empty() {
+                    return true;
+                }
+                let name = r.name.clone().unwrap_or_else(|| r.id.clone()).to_lowercase();
+                let desc = r.description.clone().unwrap_or_default().to_lowercase();
+                name.contains(&query) || desc.contains(&query)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    });
 
     rsx! {
         div { class: "min-h-screen",
@@ -94,11 +98,11 @@ pub fn CodeStars() -> Element {
             div { class: "p-4",
                 if *loading.read() {
                     LoadingState {}
-                } else if filtered.is_empty() {
-                    EmptyState { has_search: !query.is_empty() }
+                } else if filtered().is_empty() {
+                    EmptyState { has_search: !search_query.read().is_empty() }
                 } else {
                     div { class: "space-y-3",
-                        for repo in filtered.iter() {
+                        for repo in filtered().iter() {
                             CodeRepoCard { key: "{repo.event_id}", repo: repo.clone() }
                         }
                     }

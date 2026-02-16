@@ -126,8 +126,8 @@ impl CodeNotification {
         });
 
         let content = event.content.to_string();
-        let summary = if content.len() > 100 {
-            format!("{}...", &content[..100])
+        let summary = if content.chars().count() > 100 {
+            format!("{}...", content.chars().take(100).collect::<String>())
         } else {
             content
         };

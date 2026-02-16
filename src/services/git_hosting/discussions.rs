@@ -13,17 +13,18 @@ use crate::utils::nip34::{decode_event_id, Discussion, GitComment};
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Fetch a discussion by its event ID (note1 or nevent1)
 pub async fn fetch_discussion(event_ref: &str) -> Result<Discussion, String> {
-    if let Some(discussion) = get_cached_discussion(event_ref) {
-        return Ok(discussion);
-    }
     let event_id = decode_event_id(event_ref)
         .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let hex_id = event_id.to_hex();
+    if let Some(discussion) = get_cached_discussion(&hex_id) {
+        return Ok(discussion);
+    }
     let filter = Filter::new().id(event_id).kind(Kind::Custom(Discussion::KIND));
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch discussion: {}", e))?;
     cache_discussion_events(&events);
-    get_cached_discussion(&event_id.to_hex())
+    get_cached_discussion(&hex_id)
         .ok_or_else(|| "Discussion not found".to_string())
 }
 /// Fetch discussions for a repository by naddr

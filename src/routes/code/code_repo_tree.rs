@@ -10,6 +10,7 @@ use crate::services::git_hosting::{fetch_repository, file_fetcher, git_service};
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+use dioxus_core::use_drop;
 #[component]
 pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut loading = use_signal(|| true);
@@ -19,6 +20,10 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut show_fuzzy_finder = use_signal(|| false);
     let mut all_file_paths = use_signal(Vec::<String>::new);
+
+    // Store cleanup function for "t" key listener removal
+    #[allow(unused_variables, unused_mut)]
+    let mut t_key_cleanup = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
 
     // Keyboard shortcut: press 't' to open fuzzy finder
     use_effect(move || {
@@ -51,11 +56,17 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let _ = window.add_event_listener_with_callback(
-                "keydown",
-                closure.as_ref().unchecked_ref(),
-            );
+            let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            window.add_event_listener_with_callback("keydown", &js_fn).ok();
+            t_key_cleanup.set(Some((js_fn, window.clone())));
             closure.forget();
+        }
+    });
+
+    use_drop(move || {
+        #[cfg(target_arch = "wasm32")]
+        if let Some((func, win)) = t_key_cleanup.peek().as_ref() {
+            win.remove_event_listener_with_callback("keydown", func).ok();
         }
     });
 

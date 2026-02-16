@@ -105,13 +105,14 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
         spawn(async move {
             data_loading.set(true);
 
-            // Fetch issues and PRs in parallel-ish (spawn both, await results)
-            let issues_result = fetch_repo_issues(&n).await;
+            // Fetch issues and PRs in parallel
+            let (issues_result, prs_result) = futures::join!(
+                fetch_repo_issues(&n),
+                fetch_repo_prs(&n)
+            );
             if let Ok(fetched) = issues_result {
                 issues.set(fetched);
             }
-
-            let prs_result = fetch_repo_prs(&n).await;
             if let Ok(fetched) = prs_result {
                 prs.set(fetched);
             }
@@ -138,7 +139,14 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let open_prs = prs_read.iter().filter(|p| p.status == IssueStatus::Open).count();
     let merged_prs = prs_read.iter().filter(|p| p.status == IssueStatus::Applied).count();
 
-    let maintainer_count = repo.maintainers.len() + 1; // +1 for owner
+    let maintainer_count = {
+        let mut unique = std::collections::HashSet::new();
+        unique.insert(repo.pubkey.clone());
+        for m in &repo.maintainers {
+            unique.insert(m.clone());
+        }
+        unique.len()
+    };
 
     rsx! {
         div { class: "space-y-4",
@@ -326,8 +334,8 @@ fn ActivityTimeline(issues: Vec<Issue>, prs: Vec<PullRequest>) -> Element {
 
     rsx! {
         div { class: "border border-border rounded-lg divide-y divide-border",
-            for (idx , entry) in entries.iter().enumerate() {
-                TimelineRow { key: "{idx}", entry: entry.clone() }
+            for entry in entries.iter() {
+                TimelineRow { key: "{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
             }
         }
     }

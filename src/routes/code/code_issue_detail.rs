@@ -398,7 +398,11 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 spawn(async move {
                                                                     if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
                                                                         if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
-                                                                            let _ = claim_bounty(b_id, i_id, None).await;
+                                                                            if let Err(e) = claim_bounty(b_id, i_id, None).await {
+                                                                                web_sys::console::error_1(
+                                                                                    &format!("Failed to claim bounty: {}", e).into(),
+                                                                                );
+                                                                            }
                                                                         }
                                                                     }
                                                                 });
@@ -414,7 +418,10 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                             let b_eid = bounty_eid.clone();
                                                             let i_eid = issue_eid.clone();
                                                             let amount = bounty_amount;
-                                                            let claimer = user_pubkey.clone();
+                                                            let claimer = bounties.read().iter()
+                                                                .find(|b| b.event_id == bounty_eid)
+                                                                .and_then(|b| b.claimer.clone())
+                                                                .unwrap_or_default();
                                                             move |_| {
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();

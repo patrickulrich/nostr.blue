@@ -12,6 +12,7 @@
 #[allow(unused_imports)]
 use crate::routes::Route;
 use dioxus::prelude::*;
+use dioxus_core::use_drop;
 
 #[component]
 pub fn CodeKeyboardShortcuts() -> Element {
@@ -21,6 +22,10 @@ pub fn CodeKeyboardShortcuts() -> Element {
     #[allow(unused_variables)]
     let nav = navigator();
 
+    // Store cleanup function for event listener removal
+    #[allow(unused_variables, unused_mut)]
+    let mut cleanup_fn = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
+
     // Set up keyboard event listener once
     use_effect(move || {
         #[cfg(target_arch = "wasm32")]
@@ -29,7 +34,6 @@ pub fn CodeKeyboardShortcuts() -> Element {
             use wasm_bindgen::JsCast;
 
             let window = web_sys::window().expect("no global window");
-            let window_for_listener = window.clone();
 
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
                 // Check if target is input/textarea/select - skip shortcuts if so
@@ -69,7 +73,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     pending_g.set(true);
 
                     // Reset after 1 second timeout
-                    let window_clone = window.clone();
+                    let window_clone = web_sys::window().unwrap();
                     let callback = Closure::once(move || {
                         pending_g.set(false);
                     });
@@ -107,13 +111,17 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let _ = window_for_listener.add_event_listener_with_callback(
-                "keydown",
-                closure.as_ref().unchecked_ref()
-            );
-
-            // Keep closure alive - leak it for simplicity
+            let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            window.add_event_listener_with_callback("keydown", &js_fn).ok();
+            cleanup_fn.set(Some((js_fn, window.clone())));
             closure.forget();
+        }
+    });
+
+    use_drop(move || {
+        #[cfg(target_arch = "wasm32")]
+        if let Some((func, win)) = cleanup_fn.peek().as_ref() {
+            win.remove_event_listener_with_callback("keydown", func).ok();
         }
     });
 
@@ -136,7 +144,6 @@ pub fn CodeKeyboardShortcuts() -> Element {
                         ShortcutRow { keys: "g then r", description: "Go to Repositories" }
                         ShortcutRow { keys: "g then s", description: "Go to Snippets" }
                         ShortcutRow { keys: "g then h", description: "Go to Code Home" }
-                        ShortcutRow { keys: "t", description: "Open file finder" }
                         ShortcutRow { keys: "?", description: "Show this help" }
                         ShortcutRow { keys: "Esc", description: "Close this help" }
                     }

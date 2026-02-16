@@ -114,7 +114,7 @@ pub async fn fetch_issues_mentioning(
 ) -> Result<Vec<Issue>, String> {
     let filter = Filter::new()
         .kind(Kind::GitIssue)
-        .pubkey(*pubkey)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
         .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await

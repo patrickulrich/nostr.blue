@@ -4,6 +4,7 @@
 //! and optional aggregate stats (issue count, PR count).
 use crate::stores::profiles::PROFILE_CACHE;
 use dioxus::prelude::*;
+use std::collections::HashSet;
 
 /// Display a list of repository contributors with role badges and optional stats
 #[component]
@@ -15,9 +16,10 @@ pub fn ContributorsList(
     #[props(default = None)]
     pr_count: Option<u32>,
 ) -> Element {
-    // Total contributor count: 1 (owner) + maintainers who aren't the owner
-    let unique_maintainers: Vec<&String> = maintainers
-        .iter()
+    // Deduplicate maintainers using HashSet, excluding the owner
+    let seen: HashSet<&String> = maintainers.iter().collect();
+    let unique_maintainers: Vec<&String> = seen
+        .into_iter()
         .filter(|m| **m != owner)
         .collect();
     let total_count = 1 + unique_maintainers.len();
@@ -60,10 +62,10 @@ pub fn ContributorsList(
                     }
                 }
             }
-            // Maintainers (excluding owner to avoid duplication)
-            for maintainer in maintainers.iter().filter(|m| **m != owner) {
+            // Maintainers (deduplicated, excluding owner)
+            for maintainer in unique_maintainers.iter() {
                 {
-                    let pk = maintainer.clone();
+                    let pk = (*maintainer).clone();
                     let profile = PROFILE_CACHE.read().peek(&pk).cloned();
                     let picture = profile.as_ref().and_then(|p| p.picture.clone());
                     let display_name = profile

@@ -100,7 +100,7 @@ pub async fn fetch_prs_mentioning(
 ) -> Result<Vec<PullRequest>, String> {
     let filter = Filter::new()
         .kind(Kind::GitPatch)
-        .pubkey(*pubkey)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
         .limit(limit);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await

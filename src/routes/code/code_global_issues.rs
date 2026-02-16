@@ -25,11 +25,6 @@ enum StatusFilter {
 
 #[component]
 pub fn CodeGlobalIssues() -> Element {
-    let auth = auth_store::AUTH_STATE.read();
-    if !auth.is_authenticated {
-        return rsx! { NotAuthenticatedState {} };
-    }
-    let user_pubkey = auth.pubkey.clone().unwrap_or_default();
     let mut created_issues = use_signal(Vec::<Issue>::new);
     let mut assigned_issues = use_signal(Vec::<Issue>::new);
     let mut mentioned_issues = use_signal(Vec::<Issue>::new);
@@ -38,6 +33,12 @@ pub fn CodeGlobalIssues() -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
+
+    let auth = auth_store::AUTH_STATE.read();
+    if !auth.is_authenticated {
+        return rsx! { NotAuthenticatedState {} };
+    }
+    let user_pubkey = auth.pubkey.clone().unwrap_or_default();
     let user_pubkey_for_effect = user_pubkey.clone();
     use_effect(move || {
         let pk_hex = user_pubkey_for_effect.clone();
@@ -48,13 +49,18 @@ pub fn CodeGlobalIssues() -> Element {
         spawn(async move {
             loading.set(true);
             if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
-                if let Ok(fetched) = fetch_user_issues(&pk, 100).await {
+                let (created_res, assigned_res, mentioned_res) = futures::join!(
+                    fetch_user_issues(&pk, 100),
+                    fetch_issues_assigned_to(&pk, 100),
+                    fetch_issues_mentioning(&pk, 100)
+                );
+                if let Ok(fetched) = created_res {
                     created_issues.set(fetched);
                 }
-                if let Ok(fetched) = fetch_issues_assigned_to(&pk, 100).await {
+                if let Ok(fetched) = assigned_res {
                     assigned_issues.set(fetched);
                 }
-                if let Ok(fetched) = fetch_issues_mentioning(&pk, 100).await {
+                if let Ok(fetched) = mentioned_res {
                     mentioned_issues.set(fetched);
                 }
             }

@@ -55,6 +55,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
             return;
         }
         spawn(async move {
+            error.set(None);
             loading.set(true);
             match fetch_repo_discussions(&n).await {
                 Ok(fetched) => {

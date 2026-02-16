@@ -48,10 +48,23 @@ pub fn milestones_to_tags(milestones: &[Milestone]) -> Vec<Vec<String>> {
 
 /// Generate a simple slug ID from a milestone name
 pub fn generate_milestone_id(name: &str) -> String {
-    name.to_lowercase()
+    let raw: String = name
+        .to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
+        .collect();
+    let mut result = String::with_capacity(raw.len());
+    let mut prev_dash = false;
+    for c in raw.chars() {
+        if c == '-' {
+            if !prev_dash {
+                result.push(c);
+            }
+            prev_dash = true;
+        } else {
+            result.push(c);
+            prev_dash = false;
+        }
+    }
+    result.trim_matches('-').to_string()
 }

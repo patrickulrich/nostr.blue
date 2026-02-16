@@ -54,6 +54,7 @@ pub mod repost;
 pub mod time;
 pub mod timed_serializer;
 pub mod url_metadata;
+pub mod path_validation;
 pub mod validation;
 pub mod video_kinds;
 pub use data_state::DataState;
@@ -66,6 +67,7 @@ pub use thread_tree::{build_thread_tree, ThreadNode};
 pub use error::log_fetch_error;
 pub use repost::{extract_reposted_event, process_events_to_feed_items, FeedItem};
 pub use time::{format_time_ago, safe_duration_millis};
+pub use path_validation::is_safe_path;
 pub use validation::{css_safe_url, is_valid_http_url};
 /// Generate a random alphanumeric ID (9 characters)
 /// Used for poll options and other unique identifiers

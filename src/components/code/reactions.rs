@@ -24,12 +24,10 @@ pub fn CodeReactions(event_id: String, event_author: String) -> Element {
                 },
                 disabled: !has_signer,
                 onclick: move |_| {
-                    if has_signer {
-                        if is_liked {
-                            reaction.react_with.call(ReactionEmoji::Unlike);
-                        } else {
-                            reaction.toggle_like.call(());
-                        }
+                    if is_liked {
+                        reaction.react_with.call(ReactionEmoji::Unlike);
+                    } else {
+                        reaction.toggle_like.call(());
                     }
                 },
                 // Thumbs up icon
