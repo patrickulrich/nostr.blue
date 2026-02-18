@@ -723,7 +723,7 @@ fn DiscoverTab() -> Element {
                     None => rsx! {
                         div { class: "grid grid-cols-2 gap-3",
                             for _ in 0..4 {
-                                div { class: "p-4 border border-border rounded-lg animate-pulse",
+                                div { class: "bg-card p-4 border border-border rounded-lg animate-pulse",
                                     div { class: "h-4 bg-muted rounded w-1/2 mb-2" }
                                     div { class: "h-6 bg-muted rounded w-1/3" }
                                 }
@@ -822,7 +822,7 @@ fn DiscoverTab() -> Element {
                     None => rsx! {
                         div { class: "space-y-2",
                             for _ in 0..3 {
-                                div { class: "p-3 border border-border rounded-lg animate-pulse flex items-center gap-3",
+                                div { class: "bg-card p-3 border border-border rounded-lg animate-pulse flex items-center gap-3",
                                     div { class: "w-10 h-10 rounded-full bg-muted" }
                                     div { class: "flex-1",
                                         div { class: "h-4 bg-muted rounded w-1/3 mb-1" }
@@ -1181,7 +1181,7 @@ fn EmptyState(title: &'static str, description: &'static str) -> Element {
 #[component]
 fn RepoCardSkeleton() -> Element {
     rsx! {
-        div { class: "p-4 border border-border rounded-lg animate-pulse",
+        div { class: "bg-card p-4 border border-border rounded-lg animate-pulse",
             div { class: "flex items-start gap-3",
                 div { class: "w-10 h-10 rounded-lg bg-muted" }
                 div { class: "flex-1",
@@ -1201,7 +1201,7 @@ fn RepoCardSkeleton() -> Element {
 #[component]
 fn SnippetCardSkeleton() -> Element {
     rsx! {
-        div { class: "border border-border rounded-lg overflow-hidden animate-pulse",
+        div { class: "bg-card border border-border rounded-lg overflow-hidden animate-pulse",
             div { class: "px-4 py-2 bg-muted/50 border-b border-border flex items-center justify-between",
                 div { class: "h-4 bg-muted rounded w-24" }
                 div { class: "h-4 bg-muted rounded w-12" }

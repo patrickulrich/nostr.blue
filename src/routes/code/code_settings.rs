@@ -9,6 +9,8 @@ use crate::stores::nwc_store::{self, ConnectionStatus};
 use crate::stores::profiles::PROFILE_CACHE;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use std::time::Duration;
 use gloo_storage::{LocalStorage, Storage};
 use serde::{Deserialize, Serialize};
 
@@ -367,6 +369,7 @@ fn WalletSection() -> Element {
     let mut nwc_uri = use_signal(String::new);
     let mut connect_error = use_signal(|| None::<String>);
     let mut is_connecting = use_signal(|| false);
+    let toast = consume_toast();
 
     // Look up current user's lightning address
     let lightning_address = {
@@ -406,9 +409,16 @@ fn WalletSection() -> Element {
     };
 
     let handle_refresh = move |_| {
+        let toast = toast;
         spawn(async move {
             if let Err(e) = nwc_store::refresh_balance().await {
                 web_sys::console::error_1(&format!("Failed to refresh balance: {}", e).into());
+                toast.error(
+                    format!("Failed to refresh balance: {}", e),
+                    ToastOptions::new()
+                        .duration(Duration::from_secs(5))
+                        .permanent(false),
+                );
             }
         });
     };
