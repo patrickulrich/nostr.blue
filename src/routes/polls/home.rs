@@ -146,8 +146,10 @@ pub fn Polls() -> Element {
                             event_ids.clone(),
                             Duration::from_secs(5),
                         ).await {
+                            if *request_id.peek() != current_id { return; }
                             interaction_counts.set(counts);
                         }
+                        if *request_id.peek() != current_id { return; }
                         match stream_interaction_counts(
                             event_ids,
                             interaction_counts,
@@ -185,6 +187,7 @@ pub fn Polls() -> Element {
         let last_id = *last_event_id.read();
         let current_feed_type = *feed_type.read();
         loading.set(true);
+        let rid = *request_id.peek();
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_polls(until, last_id).await,
@@ -227,10 +230,12 @@ pub fn Polls() -> Element {
                             new_event_ids.clone(),
                             Duration::from_secs(5),
                         ).await {
+                            if *request_id.peek() != rid { return; }
                             interaction_counts.with_mut(|existing| {
                                 existing.extend(counts);
                             });
                         }
+                        if *request_id.peek() != rid { return; }
                         // Extend streaming subscription to cover new poll IDs
                         all_streamed_ids.with_mut(|ids| {
                             ids.extend(new_event_ids);

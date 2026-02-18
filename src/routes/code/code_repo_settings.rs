@@ -899,6 +899,9 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         if e.key() == Key::Enter {
                                             let name = new_milestone_name.read().trim().to_string();
                                             if !name.is_empty() {
+                                                if milestones.read().iter().any(|m| m.name == name) {
+                                                    return;
+                                                }
                                                 use crate::services::git_hosting::milestones::{Milestone, generate_milestone_id};
                                                 let id = generate_milestone_id(&name);
                                                 let ms = Milestone {
@@ -919,6 +922,9 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     onclick: move |_| {
                                         let name = new_milestone_name.read().trim().to_string();
                                         if !name.is_empty() {
+                                            if milestones.read().iter().any(|m| m.name == name) {
+                                                return;
+                                            }
                                             use crate::services::git_hosting::milestones::{Milestone, generate_milestone_id};
                                             let id = generate_milestone_id(&name);
                                             let ms = Milestone {

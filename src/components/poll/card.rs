@@ -44,6 +44,7 @@ pub fn PollCard(
     let mut show_results = use_signal(|| false);
     let mut is_voting = use_signal(|| false);
     let mut vote_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
+    let mut vote_gen = use_signal(|| 0u32);
     // Interaction bar state
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
@@ -140,6 +141,8 @@ pub fn PollCard(
                         }
                     }
                     // Subscribe for real-time vote updates
+                    vote_gen += 1;
+                    let current_vote_gen = *vote_gen.peek();
                     if let Some(client) = nostr_client::get_client() {
                         let since_ts = votes.read().iter()
                             .map(|v| v.created_at)
@@ -157,6 +160,7 @@ pub fn PollCard(
                                 spawn(async move {
                                     let mut notifications = client.notifications();
                                     while let Ok(notification) = notifications.recv().await {
+                                        if *vote_gen.peek() != current_vote_gen { break; }
                                         if let RelayPoolNotification::Event {
                                             subscription_id: sub_id,
                                             event: new_vote,

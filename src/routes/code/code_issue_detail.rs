@@ -105,7 +105,10 @@ pub fn CodeIssueDetail(note_id: String) -> Element {
 fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> Element {
     let issue_id = issue.event_id.clone();
     let issue_pubkey = issue.pubkey.clone();
-    let issue_status = issue.status;
+    let mut display_status = use_signal(|| issue.status);
+    use_effect(use_reactive(&issue.status, move |status| {
+        display_status.set(status);
+    }));
     let author_profile = PROFILE_CACHE.read().peek(&issue.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
@@ -164,7 +167,9 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
             spawn(async move {
                 is_updating_status.set(true);
                 match update_issue_status_by_id(&id, new_status).await {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        display_status.set(new_status);
+                    }
                     Err(e) => {
                         web_sys::console::error_1(
                             &format!("Failed to update status: {}", e).into(),
@@ -213,7 +218,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             "Issue #{issue.event_id.chars().take(8).collect::<String>()}"
                         }
                     }
-                    CodeStatusBadge { status: issue_status }
+                    CodeStatusBadge { status: display_status() }
                 }
                 div { class: "flex items-center gap-3",
                     Link {
@@ -244,7 +249,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
             // Status actions
             if can_update_status {
                 div { class: "flex flex-wrap gap-2",
-                    if issue_status != IssueStatus::Closed {
+                    if display_status() != IssueStatus::Closed {
                         button {
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -255,7 +260,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             "Close Issue"
                         }
                     }
-                    if issue_status == IssueStatus::Closed {
+                    if display_status() == IssueStatus::Closed {
                         button {
                             class: "px-3 py-1.5 text-sm bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),

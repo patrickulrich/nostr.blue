@@ -606,11 +606,15 @@ fn MyReposTab() -> Element {
         }
         let pubkey_hex = pubkey_hex.clone();
         if pubkey_hex.is_empty() {
+            loading.set(false);
             return;
         }
         let pubkey = match PublicKey::parse(&pubkey_hex) {
             Ok(pk) => pk,
-            Err(_) => return,
+            Err(_) => {
+                loading.set(false);
+                return;
+            }
         };
         spawn(async move {
             match fetch_user_repositories(&pubkey, 50).await {
@@ -1015,7 +1019,7 @@ fn DeveloperCard(rank: usize, developer: TopDeveloper) -> Element {
     rsx! {
         Link {
             to: Route::CodeUserProfile { pubkey: pubkey.clone() },
-            class: "p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+            class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
             div { class: "text-sm font-bold text-muted-foreground w-6 text-center", "#{rank}" }
             img {
                 class: "w-10 h-10 rounded-full bg-muted",

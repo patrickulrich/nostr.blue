@@ -277,6 +277,13 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 fork_loading.set(false);
                 return;
             }
+            for url in &urls {
+                if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("git://") && !url.starts_with("ssh://") && !url.contains('@') {
+                    toast.error(format!("Invalid URL format: {}", url), ToastOptions::new());
+                    fork_loading.set(false);
+                    return;
+                }
+            }
             let url_refs: Vec<&str> = urls.iter().map(|s| s.as_str()).collect();
             match publish_fork(
                 &event_id,
@@ -396,6 +403,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         MobileMenuItem {
                             icon: icons::GIT_FORK,
                             label: "Fork",
+                            disabled: !*HAS_SIGNER.read() || *fork_loading.read(),
+                            loading: *fork_loading.read(),
                             onclick: handle_fork,
                         }
                         MobileMenuItem {

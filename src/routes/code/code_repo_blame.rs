@@ -61,6 +61,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                 let repo = match fetch_repository(&naddr).await {
                     Ok(r) => r,
                     Err(e) => {
+                        if *gen.read() != current_gen { return; }
                         error.set(Some(format!("Repository not found: {}", e)));
                         loading.set(false);
                         return;
@@ -129,7 +130,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                 urlencoding::encode(&owner),
                 urlencoding::encode(&repo_name),
                 urlencoding::encode(&gr),
-                urlencoding::encode(&dp)
+                dp.split('/').map(|seg| urlencoding::encode(seg)).collect::<Vec<_>>().join("/")
             )
         })
     };
@@ -354,8 +355,11 @@ fn BlameCommitHeader(commits: Vec<GitHubCommit>, filename: String) -> Element {
 /// Displays the file content with numbered lines
 #[component]
 fn BlameFileContent(content: String, filename: String) -> Element {
-    let lines: Vec<&str> = content.lines().collect();
-    let line_count = lines.len();
+    let max_display_lines = 5000;
+    let all_lines: Vec<&str> = content.lines().collect();
+    let line_count = all_lines.len();
+    let truncated = line_count > max_display_lines;
+    let lines: Vec<&str> = if truncated { all_lines[..max_display_lines].to_vec() } else { all_lines };
     let gutter_width = if line_count >= 1000 {
         "w-16"
     } else if line_count >= 100 {
@@ -405,6 +409,11 @@ fn BlameFileContent(content: String, filename: String) -> Element {
                             }
                         }
                     }
+                }
+            }
+            if truncated {
+                div { class: "px-4 py-3 border-t border-border bg-muted/50 text-center text-sm text-muted-foreground",
+                    "Showing {max_display_lines} of {line_count} lines. File too large for full blame view."
                 }
             }
         }
