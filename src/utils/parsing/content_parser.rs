@@ -906,9 +906,10 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
         return extract_id_from_path(path, "/community/")
             .map(ContentToken::NostrBlueCommunity);
     }
-    if path.starts_with("/chats/") {
-        return extract_id_from_path(path, "/chats/")
-            .map(ContentToken::NostrBlueChannel);
+    if path.starts_with("/chats/") && !path.starts_with("/chats/new") {
+        return extract_id_from_path(path, "/chats/").and_then(|id| {
+            EventId::from_hex(&id).ok().map(|_| ContentToken::NostrBlueChannel(id))
+        });
     }
     None
 }
