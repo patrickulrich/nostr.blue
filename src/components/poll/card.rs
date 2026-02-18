@@ -8,6 +8,7 @@ use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
 use crate::stores::nostr_client::{self, publish_repost, delete_repost, HAS_SIGNER};
+use crate::stores::relay;
 use crate::utils::format::{format_relative_time_or, format_sats_compact};
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -45,6 +46,7 @@ pub fn PollCard(
     let mut is_voting = use_signal(|| false);
     let mut vote_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let mut vote_gen = use_signal(|| 0u32);
+    let mut poll_relay_urls: Signal<Vec<nostr_sdk::RelayUrl>> = use_signal(Vec::new);
     // Interaction bar state
     let mut is_reposting = use_signal(|| false);
     let mut is_reposted = use_signal(|| false);
@@ -127,6 +129,7 @@ pub fn PollCard(
             let (ends_at, poll_relays) = poll
                 .map(|p| (p.ends_at, p.relays))
                 .unwrap_or((None, Vec::new()));
+            let poll_relays_for_sub = poll_relays.clone();
             match fetch_poll_votes(poll_id, ends_at, poll_relays).await {
                 Ok(vote_events) => {
                     votes.set(vote_events.clone());
@@ -144,6 +147,14 @@ pub fn PollCard(
                     vote_gen += 1;
                     let current_vote_gen = *vote_gen.peek();
                     if let Some(client) = nostr_client::get_client() {
+                        // Re-add poll relays for subscription lifetime
+                        if !poll_relays_for_sub.is_empty() {
+                            let added = relay::add_relays(&client, &poll_relays_for_sub).await;
+                            if !added.is_empty() {
+                                nostr_client::ensure_relays_ready(&client).await;
+                            }
+                            poll_relay_urls.set(added);
+                        }
                         let since_ts = votes.read().iter()
                             .map(|v| v.created_at)
                             .max()
@@ -197,12 +208,20 @@ pub fn PollCard(
             loading_votes.set(false);
         }
     });
-    // Cleanup vote subscription on unmount
+    // Cleanup vote subscription and poll relays on unmount
     use_drop(move || {
+        let relays = poll_relay_urls.peek().clone();
         if let Some(sub_id) = vote_sub_id.peek().clone() {
             spawn(async move {
                 if let Some(client) = nostr_client::get_client() {
                     client.unsubscribe(&sub_id).await;
+                    relay::remove_relays(&client, &relays).await;
+                }
+            });
+        } else if !relays.is_empty() {
+            spawn(async move {
+                if let Some(client) = nostr_client::get_client() {
+                    relay::remove_relays(&client, &relays).await;
                 }
             });
         }
