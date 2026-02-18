@@ -119,7 +119,7 @@ pub use external_content_card::ExternalContentList;
 pub use code::{
     BranchSelector, CodeFileTree, CodeFileViewer, CodeFileViewerSkeleton, CodeIssueRow,
     CodePullRow, CodeReactions, CodeRepoCard, CodeSnippetCard, CodeStatusBadge,
-    FilePathBreadcrumb, FileTreeSkeleton, LabelPicker,
+    FilePathBreadcrumb, FileTreeSkeleton, LabelPicker, PRReviewSection,
 };
 pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
 pub use citation::{CitationPickerModal, CitationSelection};

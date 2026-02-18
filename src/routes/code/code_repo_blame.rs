@@ -39,6 +39,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
         let path = path.clone();
         move || format!("{}:{}:{}", naddr, git_ref, path)
     });
+    let mut gen = use_signal(|| 0u32);
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
@@ -49,6 +50,8 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
             if !client_initialized {
                 return;
             }
+            gen += 1;
+            let current_gen = *gen.read();
             let naddr = naddr.clone();
             let git_ref = git_ref.clone();
             let path = path.clone();
@@ -63,6 +66,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                         return;
                     }
                 };
+                if *gen.read() != current_gen { return; }
                 repo_signal.set(Some(repo.clone()));
                 let gh_info = extract_github_info(&repo);
                 github_info.set(gh_info.clone());
@@ -95,6 +99,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                         fetch_file_commits(&owner, &repo_name, &decoded, &git_ref, 30);
                     futures::join!(file_future, commits_future)
                 };
+                if *gen.read() != current_gen { return; }
                 match file_result {
                     Ok(content) => file_content.set(content),
                     Err(e) => {

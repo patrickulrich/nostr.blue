@@ -298,7 +298,7 @@ pub fn SshKeyManager() -> Element {
                                                 }
                                             } else {
                                                 button {
-                                                    class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-destructive",
+                                                    class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-destructive",
                                                     title: "Delete key",
                                                     onclick: move |_| confirm_delete.set(Some(eid_for_confirm.clone())),
                                                     svg {

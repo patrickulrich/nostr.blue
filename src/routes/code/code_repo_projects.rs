@@ -91,6 +91,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
             return;
         }
         spawn(async move {
+            fetch_error.set(None);
             loading.set(true);
 
             // Fetch repo metadata
@@ -203,19 +204,19 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                     div { class: "flex gap-4 overflow-x-auto pb-4",
                         BoardColumn {
                             title: "Draft",
-                            color: "bg-muted-foreground",
+                            color: "bg-yellow-500",
                             count: draft.len(),
                             items: draft,
                         }
                         BoardColumn {
                             title: "Open",
-                            color: "bg-blue-500",
+                            color: "bg-green-500",
                             count: open.len(),
                             items: open,
                         }
                         BoardColumn {
                             title: "Applied",
-                            color: "bg-green-500",
+                            color: "bg-purple-500",
                             count: applied.len(),
                             items: applied,
                         }

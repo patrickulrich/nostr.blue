@@ -36,65 +36,18 @@ pub fn ContributorsList(
                 }
             }
             // Owner
-            {
-                let profile = PROFILE_CACHE.read().peek(&owner).cloned();
-                let picture = profile.as_ref().and_then(|p| p.picture.clone());
-                let display_name = profile
-                    .as_ref()
-                    .and_then(|p| p.display_name.as_ref().or(p.name.as_ref()))
-                    .cloned()
-                    .unwrap_or_else(|| truncate_pk(&owner));
-                let initial = display_name.chars().next().unwrap_or('?');
-                rsx! {
-                    div {
-                        class: "flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition",
-                        div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden",
-                            if let Some(pic) = &picture {
-                                img {
-                                    class: "w-full h-full object-cover",
-                                    src: "{pic}",
-                                    alt: "{display_name}",
-                                }
-                            } else {
-                                span { class: "text-xs text-muted-foreground", "{initial}" }
-                            }
-                        }
-                        span { class: "text-sm font-medium text-foreground", "{display_name}" }
-                        span { class: "px-2 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-400", "Owner" }
-                    }
-                }
+            ContributorRow {
+                pk: owner.clone(),
+                role: "Owner".to_string(),
+                role_class: "bg-purple-500/20 text-purple-400".to_string(),
             }
             // Maintainers (deduplicated, excluding owner)
             for maintainer in unique_maintainers.iter() {
-                {
-                    let pk = (*maintainer).clone();
-                    let profile = PROFILE_CACHE.read().peek(&pk).cloned();
-                    let picture = profile.as_ref().and_then(|p| p.picture.clone());
-                    let display_name = profile
-                        .as_ref()
-                        .and_then(|p| p.display_name.as_ref().or(p.name.as_ref()))
-                        .cloned()
-                        .unwrap_or_else(|| truncate_pk(&pk));
-                    let initial = display_name.chars().next().unwrap_or('?');
-                    rsx! {
-                        div {
-                            key: "{pk}",
-                            class: "flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition",
-                            div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden",
-                                if let Some(pic) = &picture {
-                                    img {
-                                        class: "w-full h-full object-cover",
-                                        src: "{pic}",
-                                        alt: "{display_name}",
-                                    }
-                                } else {
-                                    span { class: "text-xs text-muted-foreground", "{initial}" }
-                                }
-                            }
-                            span { class: "text-sm font-medium text-foreground", "{display_name}" }
-                            span { class: "px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400", "Maintainer" }
-                        }
-                    }
+                ContributorRow {
+                    key: "{maintainer}",
+                    pk: (*maintainer).clone(),
+                    role: "Maintainer".to_string(),
+                    role_class: "bg-blue-500/20 text-blue-400".to_string(),
                 }
             }
             // Aggregate stats summary
@@ -116,6 +69,37 @@ pub fn ContributorsList(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Renders a contributor avatar + display name + role badge row
+#[component]
+fn ContributorRow(pk: String, role: String, role_class: String) -> Element {
+    let profile = PROFILE_CACHE.read().peek(&pk).cloned();
+    let picture = profile.as_ref().and_then(|p| p.picture.clone());
+    let display_name = profile
+        .as_ref()
+        .and_then(|p| p.display_name.as_ref().or(p.name.as_ref()))
+        .cloned()
+        .unwrap_or_else(|| truncate_pk(&pk));
+    let initial = display_name.chars().next().unwrap_or('?');
+    rsx! {
+        div {
+            class: "flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition",
+            div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden",
+                if let Some(pic) = &picture {
+                    img {
+                        class: "w-full h-full object-cover",
+                        src: "{pic}",
+                        alt: "{display_name}",
+                    }
+                } else {
+                    span { class: "text-xs text-muted-foreground", "{initial}" }
+                }
+            }
+            span { class: "text-sm font-medium text-foreground", "{display_name}" }
+            span { class: "px-2 py-0.5 text-xs rounded-full {role_class}", "{role}" }
         }
     }
 }

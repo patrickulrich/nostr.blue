@@ -108,6 +108,15 @@ pub fn parse_package_json(content: &str) -> Vec<Dependency> {
                 });
             }
         }
+        if let Some(obj) = json.get("optionalDependencies").and_then(|v| v.as_object()) {
+            for (name, version) in obj {
+                deps.push(Dependency {
+                    name: name.clone(),
+                    version: version.as_str().unwrap_or("*").to_string(),
+                    dep_type: DepType::Optional,
+                });
+            }
+        }
     }
     deps
 }
@@ -157,6 +166,7 @@ pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
     let runtime: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Runtime).collect();
     let dev: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Dev).collect();
     let build: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Build).collect();
+    let optional: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Optional).collect();
 
     rsx! {
         div { class: "space-y-4",
@@ -178,6 +188,9 @@ pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
                 }
                 if !build.is_empty() {
                     span { class: "text-orange-500", "{build.len()} build" }
+                }
+                if !optional.is_empty() {
+                    span { class: "text-gray-500", "{optional.len()} optional" }
                 }
             }
 

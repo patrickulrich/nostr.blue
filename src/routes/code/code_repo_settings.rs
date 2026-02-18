@@ -135,11 +135,14 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 // Build extra tags for zap splits, milestones, required approvals
                 let mut extra_tags: Vec<Tag> = Vec::new();
                 // Zap split tags
+                let default_relay = relay_snapshot.first()
+                    .map(|r| r.to_string())
+                    .unwrap_or_default();
                 for (pubkey, weight) in &splits_snapshot {
                     if let Ok(pk) = PublicKey::parse(pubkey) {
                         extra_tags.push(Tag::custom(
                             TagKind::Custom(Cow::Borrowed("zap")),
-                            [pk.to_hex(), "wss://relay.damus.io".to_string(), weight.to_string()],
+                            [pk.to_hex(), default_relay.clone(), weight.to_string()],
                         ));
                     }
                 }
@@ -738,11 +741,15 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 match PublicKey::parse(&pk) {
                                                     Ok(parsed) => {
                                                         let hex_key = parsed.to_hex();
-                                                        let mut splits = zap_splits.write();
-                                                        splits.push((hex_key, w));
-                                                        drop(splits);
-                                                        new_split_pubkey.set(String::new());
-                                                        new_split_weight.set(50);
+                                                        if zap_splits.read().iter().any(|(pk, _)| pk == &hex_key) {
+                                                            save_error.set(Some("This pubkey is already in the zap split list.".to_string()));
+                                                        } else {
+                                                            let mut splits = zap_splits.write();
+                                                            splits.push((hex_key, w));
+                                                            drop(splits);
+                                                            new_split_pubkey.set(String::new());
+                                                            new_split_weight.set(50);
+                                                        }
                                                     }
                                                     Err(_) => {
                                                         save_error.set(Some("Invalid public key. Enter a valid npub or hex pubkey.".to_string()));
@@ -760,7 +767,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     value: "{new_split_weight}",
                                     oninput: move |e| {
                                         if let Ok(w) = e.value().parse::<u32>() {
-                                            new_split_weight.set(w.min(100));
+                                            new_split_weight.set(w.clamp(1, 100));
                                         }
                                     },
                                 }
@@ -774,11 +781,15 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             match PublicKey::parse(&pk) {
                                                 Ok(parsed) => {
                                                     let hex_key = parsed.to_hex();
-                                                    let mut splits = zap_splits.write();
-                                                    splits.push((hex_key, w));
-                                                    drop(splits);
-                                                    new_split_pubkey.set(String::new());
-                                                    new_split_weight.set(50);
+                                                    if zap_splits.read().iter().any(|(pk, _)| pk == &hex_key) {
+                                                        save_error.set(Some("This pubkey is already in the zap split list.".to_string()));
+                                                    } else {
+                                                        let mut splits = zap_splits.write();
+                                                        splits.push((hex_key, w));
+                                                        drop(splits);
+                                                        new_split_pubkey.set(String::new());
+                                                        new_split_weight.set(50);
+                                                    }
                                                 }
                                                 Err(_) => {
                                                     save_error.set(Some("Invalid public key. Enter a valid npub or hex pubkey.".to_string()));

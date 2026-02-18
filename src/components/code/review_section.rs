@@ -94,13 +94,18 @@ pub fn PRReviewSection(
     let mut reviews = use_signal(Vec::<PersistedReview>::new);
     let mut publish_error = use_signal(|| None::<String>);
 
-    // Fetch persisted reviews from relays on mount
+    // Fetch persisted reviews from relays on mount, with generation counter
+    // to discard stale responses when pr_id changes rapidly
+    let mut gen = use_signal(|| 0u32);
     use_effect(
         use_reactive(
             &pr_id,
             move |id| {
+                gen += 1;
+                let current_gen = *gen.read();
                 spawn(async move {
                     if let Ok(persisted) = fetch_pr_reviews(&id).await {
+                        if *gen.read() != current_gen { return; }
                         // Merge: keep optimistic entries not yet confirmed by relays
                         let current = reviews.read().clone();
                         let optimistic: Vec<_> = current

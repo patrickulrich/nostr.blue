@@ -118,12 +118,13 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
             let mut results = upload_results.write().clone();
             let total = files.len();
 
-            for (i, file) in files.iter().enumerate() {
+            for (i, file) in files.into_iter().enumerate() {
                 current_file_index.set(i);
                 let quality = 100u8;
+                let file_size = file.data.len();
                 match blossom_store::upload_image(
-                    file.data.clone(),
-                    file.mime_type.clone(),
+                    file.data,
+                    file.mime_type,
                     quality,
                     Some(server_url.clone()),
                 )
@@ -134,7 +135,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                         results.push(UploadResult {
                             name: file.name.clone(),
                             url,
-                            size: file.data.len(),
+                            size: file_size,
                         });
                     }
                     Err(e) => {
@@ -186,7 +187,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                         to: Route::CodeRepo {
                             naddr: naddr.clone(),
                         },
-                        class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
+                        class: "text-muted-foreground hover:text-foreground transition",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",
@@ -343,7 +344,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                                 }
                                             }
                                             button {
-                                                class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded transition shrink-0",
+                                                class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded transition",
                                                 onclick: move |_| handle_remove_file(i),
                                                 svg {
                                                     class: "w-4 h-4",

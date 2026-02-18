@@ -141,11 +141,15 @@ pub fn PollCard(
                     }
                     // Subscribe for real-time vote updates
                     if let Some(client) = nostr_client::get_client() {
+                        let since_ts = votes.read().iter()
+                            .map(|v| v.created_at)
+                            .max()
+                            .map(|t| Timestamp::from_secs(t.as_secs().saturating_sub(1)))
+                            .unwrap_or(Timestamp::now());
                         let vote_filter = Filter::new()
                             .kind(Kind::PollResponse)
                             .event(poll_id)
-                            .since(Timestamp::now())
-                            .limit(0);
+                            .since(since_ts);
                         match client.subscribe(vote_filter, None).await {
                             Ok(output) => {
                                 let subscription_id = output.val;

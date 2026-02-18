@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::time::Duration;
 use crate::stores::code_store::{cache_bounty_events, get_cached_bounties};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
-use crate::utils::nip34::Bounty;
+use crate::utils::nip34::{Bounty, BountyStatus};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Fetch bounties for an issue by event ID hex
@@ -148,6 +148,37 @@ pub async fn release_bounty(
         return Err("NWC wallet not connected. Connect a wallet in Settings first.".to_string());
     }
 
+    // Re-fetch the bounty event to validate current state before payment
+    let bounty_filter = Filter::new().id(bounty_event_id);
+    let bounty_events = fetch_events_aggregated(bounty_filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to verify bounty state: {e}"))?;
+    let bounty_event = bounty_events.first()
+        .ok_or_else(|| "Bounty event not found".to_string())?;
+    let current = Bounty::from_event(bounty_event)
+        .ok_or_else(|| "Failed to parse bounty event".to_string())?;
+
+    // Validate bounty is in "claimed" state
+    if current.status != BountyStatus::Claimed {
+        return Err(format!(
+            "Bounty not in claimed state (current: {})",
+            current.status.label()
+        ));
+    }
+
+    // Validate claimer pubkey matches
+    if current.claimer.as_deref() != Some(claimer_pubkey) {
+        return Err("Claimer pubkey mismatch".to_string());
+    }
+
+    // Validate amount matches
+    if current.amount_sats != amount_sats {
+        return Err(format!(
+            "Amount mismatch: expected {} sats, bounty has {} sats",
+            amount_sats, current.amount_sats
+        ));
+    }
+
     // Look up claimer's lightning address
     let lud16 = {
         let cache = PROFILE_CACHE.read();
@@ -168,7 +199,12 @@ pub async fn release_bounty(
     // Pay via NWC
     if let Err(e) = nwc_store::pay_invoice(invoice).await {
         // Rollback: revert status to claimed so it can be retried
-        let _ = update_bounty_status(bounty_event_id, issue_event_id, "claimed", repository).await;
+        if let Err(rollback_err) = update_bounty_status(bounty_event_id, issue_event_id, "claimed", repository).await {
+            log::error!("Bounty rollback failed: {rollback_err}");
+            return Err(format!(
+                "Payment failed: {e}. WARNING: Rollback also failed: {rollback_err}. Bounty may be in inconsistent state."
+            ));
+        }
         return Err(format!("Payment failed: {}", e));
     }
 

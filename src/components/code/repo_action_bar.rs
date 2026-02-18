@@ -455,7 +455,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         div { class: "flex justify-between items-center mb-6",
                             h2 { class: "text-xl font-bold", "Fork Repository" }
                             button {
-                                class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground disabled:opacity-50",
+                                class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground disabled:opacity-50",
                                 disabled: *fork_loading.read(),
                                 onclick: move |_| {
                                     if !*fork_loading.peek() {

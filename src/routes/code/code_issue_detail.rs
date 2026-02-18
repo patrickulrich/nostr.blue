@@ -115,8 +115,8 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     // Fetch repository for permission checks
     let mut repo = use_signal(|| None::<Repository>);
     let repo_naddr = issue.repository_naddr.clone();
-    use_effect(move || {
-        let naddr = repo_naddr.clone();
+    use_effect(use_reactive(&repo_naddr, move |naddr| {
+        repo.set(None); // clear stale data
         if naddr.is_empty() {
             return;
         }
@@ -125,19 +125,19 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                 repo.set(Some(r));
             }
         });
-    });
+    }));
 
     // Fetch bounties for this issue
     let mut bounties = use_signal(Vec::<Bounty>::new);
     let issue_id_for_bounties = issue_id.clone();
-    use_effect(move || {
-        let id = issue_id_for_bounties.clone();
+    use_effect(use_reactive(&issue_id_for_bounties, move |id| {
+        bounties.set(Vec::new()); // clear stale data
         spawn(async move {
             if let Ok(b) = fetch_bounties_for_issue(&id).await {
                 bounties.set(b);
             }
         });
-    });
+    }));
 
     // Permission checks: can_change_status includes author check; fall back to author-only when repo not loaded
     let can_update_status = is_authenticated
@@ -153,7 +153,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let mut is_updating_status = use_signal(|| false);
     let mut claiming_bounty = use_signal(|| Option::<String>::None);
     let issue_id_for_comments = issue_id.clone();
-    let comments = use_resource(move || {
+    let mut comments = use_resource(move || {
         let id = issue_id_for_comments.clone();
         async move { fetch_comments_by_id(&id).await }
     });
@@ -191,6 +191,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                 match publish_comment_by_id(&id, &author, &content).await {
                     Ok(_) => {
                         new_comment.set(String::new());
+                        comments.restart();
                     }
                     Err(e) => {
                         comment_error.set(Some(e));
@@ -355,7 +356,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                 div { class: "space-y-4",
                     // Bounty section
                     if !bounties.read().is_empty() {
-                        div { class: "border border-border rounded-lg",
+                        div { class: "bg-card border border-border rounded-lg",
                             div { class: "px-4 py-3 border-b border-border bg-muted/30",
                                 h3 { class: "font-semibold text-sm", "Bounties" }
                             }
@@ -427,9 +428,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                             let b_eid = bounty_eid.clone();
                                                             let i_eid = issue_eid.clone();
                                                             let amount = bounty_amount;
-                                                            let claimer = bounties.read().iter()
-                                                                .find(|b| b.event_id == bounty_eid)
-                                                                .and_then(|b| b.claimer.clone());
+                                                            let claimer = bounty.claimer.clone();
                                                             move |_| {
                                                                 if claiming_bounty.read().is_some() {
                                                                     return;
@@ -484,7 +483,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
 
                     // Labels section
                     if !issue.labels.is_empty() {
-                        div { class: "border border-border rounded-lg",
+                        div { class: "bg-card border border-border rounded-lg",
                             div { class: "px-4 py-3 border-b border-border bg-muted/30",
                                 h3 { class: "font-semibold text-sm", "Labels" }
                             }
@@ -504,7 +503,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
 
                     // Repository link
                     if !issue.repository_naddr.is_empty() {
-                        div { class: "border border-border rounded-lg p-3",
+                        div { class: "bg-card border border-border rounded-lg p-3",
                             h4 { class: "text-xs font-medium text-muted-foreground mb-2", "Repository" }
                             Link {
                                 to: Route::CodeRepo {

@@ -50,7 +50,7 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                                     rsx! {
                                         div {
                                             key: "{assignee}",
-                                            class: "w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] text-primary",
+                                            class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] text-foreground",
                                             title: "{assignee}",
                                             "{assignee.chars().next().unwrap_or('?')}"
                                         }

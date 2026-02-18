@@ -53,7 +53,7 @@ pub fn CodeHome() -> Element {
                     div { class: "flex items-center gap-2",
                         Link {
                             to: Route::CodeNotifications {},
-                            class: "p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition",
+                            class: "p-2 text-muted-foreground hover:text-foreground transition",
                             svg {
                                 class: "w-5 h-5",
                                 xmlns: "http://www.w3.org/2000/svg",

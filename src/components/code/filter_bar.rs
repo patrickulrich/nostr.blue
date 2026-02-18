@@ -129,6 +129,8 @@ pub fn FilterBar(
 }
 
 /// Apply filters to a list of issues
+/// Note: filter_issues and filter_prs below share parallel structure (status/search/label).
+/// They remain separate because Issue and PullRequest are distinct types with different fields.
 pub fn filter_issues(
     issues: &[crate::utils::nip34::Issue],
     status: StatusFilter,

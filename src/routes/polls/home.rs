@@ -36,6 +36,7 @@ pub fn Polls() -> Element {
     let mut last_event_id = use_signal(|| None::<nostr_sdk::EventId>);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
+    let mut all_streamed_ids = use_signal(Vec::<EventId>::new);
     let mut request_id = use_signal(|| 0u64);
     use_effect(move || {
         let _ = refresh_trigger.read();
@@ -58,6 +59,7 @@ pub fn Polls() -> Element {
         }
         interaction_stream_handle.set(None);
         interaction_counts.set(HashMap::new());
+        all_streamed_ids.set(Vec::new());
         // Increment request_id for stale detection
         request_id.with_mut(|v| *v += 1);
         let current_id = *request_id.peek();
@@ -137,6 +139,7 @@ pub fn Polls() -> Element {
                     // Fetch interaction counts
                     let event_ids: Vec<EventId> = current_events.iter().map(|e| e.id).collect();
                     drop(current_events);
+                    all_streamed_ids.set(event_ids.clone());
                     loading.set(false);
                     if !event_ids.is_empty() {
                         if let Ok(counts) = fetch_interaction_counts_batch(
@@ -218,15 +221,38 @@ pub fn Polls() -> Element {
                             current.extend(unique_new);
                         });
                     loading.set(false);
-                    // Fetch interaction counts for new page
+                    // Fetch interaction counts for new page and extend streaming
                     if !new_event_ids.is_empty() {
                         if let Ok(counts) = fetch_interaction_counts_batch(
-                            new_event_ids,
+                            new_event_ids.clone(),
                             Duration::from_secs(5),
                         ).await {
                             interaction_counts.with_mut(|existing| {
                                 existing.extend(counts);
                             });
+                        }
+                        // Extend streaming subscription to cover new poll IDs
+                        all_streamed_ids.with_mut(|ids| {
+                            ids.extend(new_event_ids);
+                        });
+                        // Restart interaction stream with all IDs
+                        let old_handle = interaction_stream_handle.peek().clone();
+                        if let Some(handle) = old_handle {
+                            interaction_stream_handle.set(None);
+                            handle.unsubscribe().await;
+                        }
+                        let full_ids = all_streamed_ids.read().clone();
+                        match stream_interaction_counts(
+                            full_ids,
+                            interaction_counts,
+                            Some(600),
+                        ).await {
+                            Ok(handle) => {
+                                interaction_stream_handle.set(Some(handle));
+                            }
+                            Err(e) => {
+                                log::error!("Failed to restart interaction stream for polls: {}", e);
+                            }
                         }
                     }
                 }
