@@ -1,7 +1,8 @@
 /// Markdown rendering utilities for NIP-23 long-form content
 use pulldown_cmark::{html, Options, Parser};
 /// Render markdown to safe HTML
-/// Uses pulldown-cmark for parsing and ammonia for sanitization
+/// Uses pulldown-cmark for parsing and ammonia for sanitization.
+/// Mermaid code blocks are converted to `<div class="mermaid">` for client-side rendering.
 pub fn render_markdown(markdown: &str) -> String {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -12,7 +13,37 @@ pub fn render_markdown(markdown: &str) -> String {
     let parser = Parser::new_ext(markdown, options);
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
-    sanitize_html(&html_output)
+    let sanitized = sanitize_html(&html_output);
+    convert_mermaid_blocks(&sanitized)
+}
+
+/// Convert mermaid code blocks from `<pre><code class="language-mermaid">...</code></pre>`
+/// into `<div class="mermaid">...</div>` so the mermaid.js library can render them as diagrams.
+fn convert_mermaid_blocks(html: &str) -> String {
+    // pulldown-cmark renders fenced ```mermaid blocks as:
+    //   <pre><code class="language-mermaid">...content...</code></pre>
+    let mut result = html.to_string();
+    while let Some(start) = result.find("<pre><code class=\"language-mermaid\">") {
+        let code_start = start + "<pre><code class=\"language-mermaid\">".len();
+        if let Some(end_offset) = result[code_start..].find("</code></pre>") {
+            let code_end = code_start + end_offset;
+            let diagram_content = &result[code_start..code_end];
+            // Decode HTML entities back to plain text for mermaid parsing
+            // Decode safe HTML entities back for mermaid parsing.
+            // Do NOT decode &lt;/&gt; — the browser decodes them via textContent,
+            // and decoding here would re-introduce XSS vectors (e.g. <script> tags).
+            let decoded = diagram_content
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#x27;", "'");
+            let replacement = format!("<div class=\"mermaid\">{}</div>", decoded);
+            let block_end = code_end + "</code></pre>".len();
+            result = format!("{}{}{}", &result[..start], replacement, &result[block_end..]);
+        } else {
+            break;
+        }
+    }
+    result
 }
 /// Sanitize HTML using ammonia
 /// Allows safe tags and attributes while removing potentially dangerous content
@@ -125,5 +156,57 @@ mod tests {
         assert!(html.contains("<table"));
         assert!(html.contains("<th>"));
         assert!(html.contains("<td>"));
+    }
+    #[test]
+    fn test_mermaid_block_converted() {
+        let md = "# Diagram\n\n```mermaid\ngraph TD;\n    A-->B;\n```\n\nSome text after.";
+        let html = render_markdown(md);
+        assert!(
+            html.contains("<div class=\"mermaid\">"),
+            "Should contain mermaid div, got: {}",
+            html
+        );
+        assert!(
+            html.contains("graph TD;"),
+            "Should preserve diagram content"
+        );
+        assert!(
+            !html.contains("<pre><code class=\"language-mermaid\">"),
+            "Should not contain original code block"
+        );
+    }
+    #[test]
+    fn test_mermaid_block_decodes_entities() {
+        let md = "```mermaid\ngraph TD;\n    A-->|\"yes\"|B;\n```";
+        let html = render_markdown(md);
+        assert!(html.contains("<div class=\"mermaid\">"));
+        // The &quot; from HTML encoding should be decoded back
+        assert!(
+            html.contains("\"yes\""),
+            "Should decode HTML entities in mermaid content, got: {}",
+            html
+        );
+    }
+    #[test]
+    fn test_non_mermaid_code_blocks_unchanged() {
+        let md = "```rust\nfn main() {}\n```";
+        let html = render_markdown(md);
+        assert!(html.contains("<pre><code"));
+        assert!(!html.contains("<div class=\"mermaid\">"));
+    }
+    #[test]
+    fn test_multiple_mermaid_blocks() {
+        let md = "```mermaid\ngraph LR;\n    A-->B;\n```\n\nText\n\n```mermaid\nsequenceDiagram\n    Alice->>Bob: Hello\n```";
+        let html = render_markdown(md);
+        let count = html.matches("<div class=\"mermaid\">").count();
+        assert_eq!(count, 2, "Should convert both mermaid blocks");
+    }
+    #[test]
+    fn test_mermaid_block_script_tag_sanitized() {
+        let input = "```mermaid\ngraph TD\n    A[<script>alert('xss')</script>] --> B\n```";
+        let result = render_markdown(input);
+        assert!(!result.contains("<script"), "Script tags inside mermaid blocks must be sanitized");
+        // Verify the mermaid content is still rendered (converted to div)
+        assert!(result.contains("mermaid"));
     }
 }

@@ -10,11 +10,15 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 use crate::services::git_worker::GitWorkerManager;
 use crate::stores::grasp_servers;
-use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
+use crate::utils::nip34::{Bounty, Discussion, DisplaySnippet, Issue, IssueStatus, PersistedReview, PullRequest, Release, Repository};
 const REPO_CACHE_SIZE: usize = 100;
 const ISSUE_CACHE_SIZE: usize = 200;
 const PR_CACHE_SIZE: usize = 200;
 const SNIPPET_CACHE_SIZE: usize = 200;
+const DISCUSSION_CACHE_SIZE: usize = 200;
+const RELEASE_CACHE_SIZE: usize = 100;
+const BOUNTY_CACHE_SIZE: usize = 200;
+const REVIEW_CACHE_SIZE: usize = 200;
 /// Repository cache (keyed by coordinate string "30617:pubkey:d-tag")
 pub static CODE_REPOS_CACHE: GlobalSignal<LruCache<String, Repository>> = GlobalSignal::new(||
 LruCache::new(NonZeroUsize::new(REPO_CACHE_SIZE).unwrap()));
@@ -27,6 +31,18 @@ LruCache::new(NonZeroUsize::new(PR_CACHE_SIZE).unwrap()));
 /// Code Snippet cache (keyed by event ID hex)
 pub static CODE_SNIPPETS_CACHE: GlobalSignal<LruCache<String, DisplaySnippet>> = GlobalSignal::new(||
 LruCache::new(NonZeroUsize::new(SNIPPET_CACHE_SIZE).unwrap()));
+/// Discussion cache (keyed by event ID hex)
+pub static CODE_DISCUSSIONS_CACHE: GlobalSignal<LruCache<String, Discussion>> = GlobalSignal::new(||
+LruCache::new(NonZeroUsize::new(DISCUSSION_CACHE_SIZE).unwrap()));
+/// Release cache (keyed by event ID hex)
+pub static CODE_RELEASES_CACHE: GlobalSignal<LruCache<String, Release>> = GlobalSignal::new(||
+LruCache::new(NonZeroUsize::new(RELEASE_CACHE_SIZE).unwrap()));
+/// Bounty cache (keyed by issue_event_id, stores Vec<Bounty>)
+pub static CODE_BOUNTIES_CACHE: GlobalSignal<LruCache<String, Vec<Bounty>>> = GlobalSignal::new(||
+LruCache::new(NonZeroUsize::new(BOUNTY_CACHE_SIZE).unwrap()));
+/// Persisted review cache (keyed by pr_event_id, stores Vec<PersistedReview>)
+pub static CODE_REVIEWS_CACHE: GlobalSignal<LruCache<String, Vec<PersistedReview>>> = GlobalSignal::new(||
+LruCache::new(NonZeroUsize::new(REVIEW_CACHE_SIZE).unwrap()));
 /// User's own repositories (coordinate strings)
 pub static USER_REPOS: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
 /// User's own code snippets (event IDs)
@@ -196,6 +212,64 @@ pub fn get_user_snippets() -> Vec<DisplaySnippet> {
     let ids = USER_SNIPPETS.read();
     let cache = CODE_SNIPPETS_CACHE.read();
     ids.iter().filter_map(|id| cache.peek(id).cloned()).collect()
+}
+/// Get a discussion from cache by event ID
+pub fn get_cached_discussion(event_id: &str) -> Option<Discussion> {
+    CODE_DISCUSSIONS_CACHE.read().peek(event_id).cloned()
+}
+/// Parse and cache discussions from events
+pub fn cache_discussion_events(events: &[NostrEvent]) {
+    let mut cache = CODE_DISCUSSIONS_CACHE.write();
+    for event in events {
+        if let Some(discussion) = Discussion::from_event(event) {
+            cache.put(discussion.event_id.clone(), discussion);
+        }
+    }
+}
+/// Get a release from cache by event ID
+pub fn get_cached_release(event_id: &str) -> Option<Release> {
+    CODE_RELEASES_CACHE.read().peek(event_id).cloned()
+}
+/// Parse and cache releases from events
+pub fn cache_release_events(events: &[NostrEvent]) {
+    let mut cache = CODE_RELEASES_CACHE.write();
+    for event in events {
+        if let Some(release) = Release::from_event(event) {
+            cache.put(release.event_id.clone(), release);
+        }
+    }
+}
+/// Get cached bounties for an issue by issue event ID
+pub fn get_cached_bounties(issue_event_id: &str) -> Option<Vec<Bounty>> {
+    CODE_BOUNTIES_CACHE.read().peek(issue_event_id).cloned()
+}
+/// Parse and cache bounties from events (grouped by issue_event_id)
+pub fn cache_bounty_events(events: &[NostrEvent]) {
+    use std::collections::HashMap;
+    let mut grouped: HashMap<String, Vec<Bounty>> = HashMap::new();
+    for event in events {
+        if let Some(bounty) = Bounty::from_event(event) {
+            grouped.entry(bounty.issue_event_id.clone()).or_default().push(bounty);
+        }
+    }
+    let mut cache = CODE_BOUNTIES_CACHE.write();
+    for (issue_id, bounties) in grouped {
+        cache.put(issue_id, bounties);
+    }
+}
+/// Parse and cache persisted reviews from events (grouped by pr_event_id)
+pub fn cache_persisted_review_events(events: &[NostrEvent]) {
+    use std::collections::HashMap;
+    let mut grouped: HashMap<String, Vec<PersistedReview>> = HashMap::new();
+    for event in events {
+        if let Some(review) = PersistedReview::from_event(event) {
+            grouped.entry(review.pr_event_id.clone()).or_default().push(review);
+        }
+    }
+    let mut cache = CODE_REVIEWS_CACHE.write();
+    for (pr_id, reviews) in grouped {
+        cache.put(pr_id, reviews);
+    }
 }
 /// Get snippets by language
 pub fn get_snippets_by_language(language: &str) -> Vec<DisplaySnippet> {
@@ -457,6 +531,10 @@ pub fn clear_caches() {
     CODE_ISSUES_CACHE.write().clear();
     CODE_PRS_CACHE.write().clear();
     CODE_SNIPPETS_CACHE.write().clear();
+    CODE_DISCUSSIONS_CACHE.write().clear();
+    CODE_RELEASES_CACHE.write().clear();
+    CODE_BOUNTIES_CACHE.write().clear();
+    CODE_REVIEWS_CACHE.write().clear();
     USER_REPOS.write().clear();
     USER_SNIPPETS.write().clear();
     STARRED_REPOS.write().clear();

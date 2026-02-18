@@ -34,13 +34,34 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                     }
                 }
             }
-            if !issue.labels.is_empty() {
-                div { class: "mt-2 flex flex-wrap gap-1",
+            if !issue.labels.is_empty() || !issue.assignees.is_empty() {
+                div { class: "mt-2 flex flex-wrap gap-1 items-center",
                     for (idx , label) in issue.labels.iter().enumerate() {
                         span {
                             key: "{idx}_{label}",
                             class: "px-2 py-0.5 text-xs rounded-full bg-accent text-accent-foreground",
                             "{label}"
+                        }
+                    }
+                    if !issue.assignees.is_empty() {
+                        div { class: "flex items-center gap-1 ml-auto",
+                            for assignee in issue.assignees.iter() {
+                                {
+                                    let short = if assignee.chars().count() > 8 {
+                                        format!("{}...", assignee.chars().take(6).collect::<String>())
+                                    } else {
+                                        assignee.clone()
+                                    };
+                                    rsx! {
+                                        div {
+                                            key: "{assignee}",
+                                            class: "w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] text-primary",
+                                            title: "{short}",
+                                            "{assignee.chars().next().unwrap_or('?')}"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

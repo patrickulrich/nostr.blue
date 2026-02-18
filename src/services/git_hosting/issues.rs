@@ -92,6 +92,31 @@ pub async fn fetch_user_issues(
     cache_issue_events(&events);
     Ok(events.iter().filter_map(Issue::from_event).collect())
 }
+/// Fetch issues assigned to a user (tagged with #p)
+pub async fn fetch_issues_assigned_to(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<Issue>, String> {
+    let filter = Filter::new()
+        .kind(Kind::GitIssue)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex())
+        .limit(limit);
+    let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to fetch assigned issues: {}", e))?;
+    cache_issue_events(&events);
+    Ok(events.iter().filter_map(Issue::from_event).collect())
+}
+/// Fetches issues mentioning the given pubkey.
+///
+/// Note: NIP-34 uses p-tags for both assignment and mentions with no protocol-level
+/// distinction, so this delegates to `fetch_issues_assigned_to`.
+pub async fn fetch_issues_mentioning(
+    pubkey: &PublicKey,
+    limit: usize,
+) -> Result<Vec<Issue>, String> {
+    fetch_issues_assigned_to(pubkey, limit).await
+}
 /// Search issues by text (NIP-50)
 pub async fn search_issues(query: &str, limit: usize) -> Result<Vec<Issue>, String> {
     let filter = Filter::new().kind(Kind::GitIssue).search(query).limit(limit);
@@ -107,6 +132,7 @@ pub async fn publish_issue(
     subject: Option<&str>,
     content: &str,
     labels: &[&str],
+    assignees: &[&str],
 ) -> Result<EventId, String> {
     use nostr::nips::nip34::GitIssue;
     let client = get_client().ok_or("Client not initialized")?;
@@ -119,8 +145,14 @@ pub async fn publish_issue(
         subject: subject.map(|s| s.to_string()),
         labels: labels.iter().map(|l| l.to_string()).collect(),
     };
-    let builder = EventBuilder::git_issue(issue)
+    let mut builder = EventBuilder::git_issue(issue)
         .map_err(|e| format!("Failed to build issue event: {}", e))?;
+    // Add assignee p tags
+    for assignee_hex in assignees {
+        if let Ok(pk) = PublicKey::from_hex(assignee_hex) {
+            builder = builder.tag(Tag::public_key(pk));
+        }
+    }
     let output = client
         .send_event_builder(builder)
         .await
@@ -196,10 +228,11 @@ pub async fn publish_issue_by_naddr(
     subject: Option<&str>,
     content: &str,
     labels: &[&str],
+    assignees: &[&str],
 ) -> Result<String, String> {
     use crate::utils::nip34::decode_naddr;
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
-    let result = publish_issue(&coord, subject, content, labels).await?;
+    let result = publish_issue(&coord, subject, content, labels, assignees).await?;
     Ok(result.to_hex())
 }
 /// Update issue status by event ID string

@@ -1,19 +1,30 @@
 //! Repository Commits Page
 //!
 //! View commit history for a repository.
+//! Tries isomorphic-git (universal) first, falls back to GitHub API.
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{
-    fetch_repository, github_import::{fetch_commits, parse_github_url, GitHubCommit},
+    fetch_repository, git_service,
+    github_import::{fetch_commits, parse_github_url, GitHubCommit},
 };
+use crate::services::git_worker::CommitEntry;
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+
+/// Unified commit data from either source
+#[derive(Debug, Clone)]
+enum CommitData {
+    GitHub(Vec<GitHubCommit>),
+    Git(Vec<CommitEntry>),
+}
+
 /// Repository commits page component
 #[component]
 pub fn CodeRepoCommits(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut commits_result = use_signal(|| None::<Result<Vec<GitHubCommit>, String>>);
+    let mut commits_result = use_signal(|| None::<Result<CommitData, String>>);
     let naddr_for_effect = naddr.clone();
     use_effect(move || {
         let n = naddr_for_effect.clone();
@@ -24,21 +35,35 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
         spawn(async move {
             let result = fetch_repository(&n).await;
             if let Ok(ref repo) = result {
+                // Try isomorphic-git first (works for ALL repo sources)
+                if git_service::GitService::is_initialized()
+                    || git_service::GitService::init().await.is_ok()
+                {
+                    match git_service().get_log(repo, None, 50).await {
+                        Ok(entries) => {
+                            commits_result.set(Some(Ok(CommitData::Git(entries))));
+                            repo_result.set(Some(result));
+                            return;
+                        }
+                        Err(e) => {
+                            log::warn!("git_service get_log failed, falling back to GitHub API: {}", e);
+                        }
+                    }
+                }
+                // Fall back to GitHub API for GitHub-hosted repos
                 for url in repo.clone.iter() {
                     if let Some((owner, repo_name)) = parse_github_url(url) {
                         let commits = fetch_commits(&owner, &repo_name, 30).await;
-                        commits_result.set(Some(commits));
-                        break;
+                        commits_result
+                            .set(Some(commits.map(CommitData::GitHub)));
+                        repo_result.set(Some(result));
+                        return;
                     }
                 }
-                if commits_result.read().is_none() {
-                    commits_result
-                        .set(
-                            Some(
-                                Err("No GitHub URL found for this repository".to_string()),
-                            ),
-                        );
-                }
+                commits_result.set(Some(Err(
+                    "Could not load commits. Try cloning the repository first by browsing its files."
+                        .to_string(),
+                )));
             }
             repo_result.set(Some(result));
         });
@@ -93,12 +118,22 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
             }
             div { class: "p-4",
                 match &*commits_result.read() {
-                    Some(Ok(list)) if !list.is_empty() => rsx! {
+                    Some(Ok(CommitData::GitHub(list))) if !list.is_empty() => rsx! {
                         div { class: "space-y-3",
                             p { class: "text-sm text-muted-foreground mb-4", "{list.len()} commits" }
                             div { class: "border border-border rounded-lg divide-y divide-border",
                                 for commit in list.iter() {
-                                    CommitRow { key: "{commit.sha}", commit: commit.clone() }
+                                    GitHubCommitRow { key: "{commit.sha}", commit: commit.clone() }
+                                }
+                            }
+                        }
+                    },
+                    Some(Ok(CommitData::Git(list))) if !list.is_empty() => rsx! {
+                        div { class: "space-y-3",
+                            p { class: "text-sm text-muted-foreground mb-4", "{list.len()} commits" }
+                            div { class: "border border-border rounded-lg divide-y divide-border",
+                                for commit in list.iter() {
+                                    GitCommitRow { key: "{commit.oid}", commit: commit.clone() }
                                 }
                             }
                         }
@@ -147,8 +182,10 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
         }
     }
 }
+
+/// Commit row for GitHub API data
 #[component]
-fn CommitRow(commit: GitHubCommit) -> Element {
+fn GitHubCommitRow(commit: GitHubCommit) -> Element {
     let message = &commit.commit.message;
     let (title, body) = match message.find('\n') {
         Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
@@ -220,6 +257,65 @@ fn CommitRow(commit: GitHubCommit) -> Element {
         }
     }
 }
+
+/// Commit row for isomorphic-git data
+#[component]
+fn GitCommitRow(commit: CommitEntry) -> Element {
+    let message = &commit.message;
+    let (title, body) = match message.find('\n') {
+        Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
+        None => (message.as_str(), None),
+    };
+    let formatted_date = format_unix_timestamp(commit.timestamp);
+    let short_oid = if commit.oid.len() >= 7 {
+        &commit.oid[..7]
+    } else {
+        &commit.oid
+    };
+    let initial = commit.author.chars().next().unwrap_or('?');
+    rsx! {
+        div { class: "p-4 hover:bg-muted/50 transition",
+            div { class: "flex items-start justify-between gap-4",
+                div { class: "flex-1 min-w-0",
+                    p { class: "font-medium truncate", "{title}" }
+                    if let Some(b) = body {
+                        if !b.is_empty() {
+                            p { class: "text-sm text-muted-foreground mt-1 line-clamp-2",
+                                "{b}"
+                            }
+                        }
+                    }
+                    div { class: "flex items-center gap-3 mt-2 text-sm text-muted-foreground",
+                        div { class: "flex items-center gap-2",
+                            div { class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center text-xs",
+                                "{initial}"
+                            }
+                            span { "{commit.author}" }
+                        }
+                        span { "committed {formatted_date}" }
+                    }
+                }
+                span { class: "flex items-center gap-2 px-2 py-1 bg-muted rounded text-xs font-mono",
+                    svg {
+                        class: "w-3 h-3 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "12", r: "3" }
+                    }
+                    "{short_oid}"
+                }
+            }
+        }
+    }
+}
+
 /// Format a commit date string to relative time
 fn format_commit_date(date_str: &str) -> String {
     if let Some(date_part) = date_str.split('T').next() {
@@ -227,6 +323,57 @@ fn format_commit_date(date_str: &str) -> String {
     }
     date_str.to_string()
 }
+
+/// Format a Unix timestamp to a date string
+// TODO: consolidate with other date formatting utilities (e.g. format_relative_time_or, format_time_ago)
+fn format_unix_timestamp(timestamp: u64) -> String {
+    let secs = timestamp as i64;
+    let days_since_epoch = secs / 86400;
+    // Simple date calculation
+    let mut year = 1970i64;
+    let mut remaining_days = days_since_epoch;
+    loop {
+        let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_months = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 0usize;
+    for (i, &dim) in days_in_months.iter().enumerate() {
+        if remaining_days < dim {
+            month = i + 1;
+            break;
+        }
+        remaining_days -= dim;
+    }
+    if month == 0 {
+        month = 12;
+    }
+    let day = remaining_days + 1;
+    format!("{}-{:02}-{:02}", year, month, day)
+}
+
 #[component]
 fn EmptyCommits() -> Element {
     rsx! {
