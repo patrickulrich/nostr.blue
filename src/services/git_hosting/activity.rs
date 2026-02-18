@@ -100,7 +100,7 @@ impl Activity {
                 })
                 .unwrap_or_else(|| "Untitled PR".to_string());
             (ActivityType::PullRequestOpened, subject)
-        } else if kind == Kind::Custom(1985) {
+        } else if kind == Kind::Custom(9807) {
             (ActivityType::ReviewSubmitted, "Code review".to_string())
         } else if kind == Kind::Comment {
             (ActivityType::CommentPosted, "Comment".to_string())
@@ -158,7 +158,7 @@ pub async fn fetch_user_activity(
             Kind::GitRepoAnnouncement,
             Kind::GitIssue,
             Kind::GitPatch,
-            Kind::Custom(1985),
+            Kind::Custom(9807),
             Kind::Comment,
             Kind::GitStatusOpen,
             Kind::GitStatusApplied,
@@ -210,7 +210,7 @@ pub async fn fetch_contribution_graph(pubkey: &PublicKey) -> Result<Vec<Contribu
             Kind::GitRepoAnnouncement,
             Kind::GitIssue,
             Kind::GitPatch,
-            Kind::Custom(1985),
+            Kind::Custom(9807),
             Kind::Comment,
             Kind::GitStatusOpen,
             Kind::GitStatusApplied,
@@ -319,7 +319,7 @@ pub async fn fetch_top_developers(limit: usize) -> Result<Vec<TopDeveloper>, Str
             Kind::GitRepoAnnouncement,
             Kind::GitIssue,
             Kind::GitPatch,
-            Kind::Custom(1985),
+            Kind::Custom(9807),
             Kind::Comment,
             Kind::GitStatusOpen,
             Kind::GitStatusApplied,
@@ -362,7 +362,7 @@ pub async fn fetch_recent_global_activity(limit: usize) -> Result<Vec<Activity>,
             Kind::GitRepoAnnouncement,
             Kind::GitIssue,
             Kind::GitPatch,
-            Kind::Custom(1985),
+            Kind::Custom(9807),
             Kind::Comment,
             Kind::GitStatusOpen,
             Kind::GitStatusApplied,

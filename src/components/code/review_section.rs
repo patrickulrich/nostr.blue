@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 
-/// Publish a review as a Kind 1985 event on Nostr
+/// Publish a review as a Kind 9807 event on Nostr
 pub async fn publish_review_event(pr_event_id: &str, state: &str, content: &str) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
@@ -21,7 +21,7 @@ pub async fn publish_review_event(pr_event_id: &str, state: &str, content: &str)
     }
     let event_id = EventId::from_hex(pr_event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
-    let builder = EventBuilder::new(Kind::Custom(1985), content)
+    let builder = EventBuilder::new(Kind::Custom(PersistedReview::KIND), content)
         .tag(Tag::event(event_id))
         .tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("state")),
@@ -94,15 +94,18 @@ pub fn PRReviewSection(
     let mut reviews = use_signal(Vec::<PersistedReview>::new);
 
     // Fetch persisted reviews from relays on mount
-    let pr_id_for_fetch = pr_id.clone();
-    use_effect(move || {
-        let id = pr_id_for_fetch.clone();
-        spawn(async move {
-            if let Ok(persisted) = fetch_pr_reviews(&id).await {
-                reviews.set(persisted);
-            }
-        });
-    });
+    use_effect(
+        use_reactive(
+            &pr_id,
+            move |id| {
+                spawn(async move {
+                    if let Ok(persisted) = fetch_pr_reviews(&id).await {
+                        reviews.set(persisted);
+                    }
+                });
+            },
+        ),
+    );
 
     let review_list = reviews.read();
     let approve_count = review_list.iter().filter(|r| r.state == crate::utils::nip34::ReviewState::Approved).count();

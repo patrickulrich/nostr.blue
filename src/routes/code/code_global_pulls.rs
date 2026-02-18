@@ -37,34 +37,37 @@ pub fn CodeGlobalPulls() -> Element {
 
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
-    let user_pubkey_for_effect = user_pubkey.clone();
-    use_effect(move || {
-        let pk_hex = user_pubkey_for_effect.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized || pk_hex.is_empty() {
-            return;
-        }
-        spawn(async move {
-            loading.set(true);
-            if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
-                let (created_res, assigned_res, mentioned_res) = futures::join!(
-                    fetch_user_prs(&pk, 100),
-                    fetch_prs_assigned_to(&pk, 100),
-                    fetch_prs_mentioning(&pk, 100)
-                );
-                if let Ok(fetched) = created_res {
-                    created_prs.set(fetched);
+    use_effect(
+        use_reactive(
+            &user_pubkey,
+            move |pk_hex| {
+                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+                if !client_initialized || pk_hex.is_empty() {
+                    return;
                 }
-                if let Ok(fetched) = assigned_res {
-                    assigned_prs.set(fetched);
-                }
-                if let Ok(fetched) = mentioned_res {
-                    mentioned_prs.set(fetched);
-                }
-            }
-            loading.set(false);
-        });
-    });
+                spawn(async move {
+                    loading.set(true);
+                    if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
+                        let (created_res, assigned_res, mentioned_res) = futures::join!(
+                            fetch_user_prs(&pk, 100),
+                            fetch_prs_assigned_to(&pk, 100),
+                            fetch_prs_mentioning(&pk, 100)
+                        );
+                        if let Ok(fetched) = created_res {
+                            created_prs.set(fetched);
+                        }
+                        if let Ok(fetched) = assigned_res {
+                            assigned_prs.set(fetched);
+                        }
+                        if let Ok(fetched) = mentioned_res {
+                            mentioned_prs.set(fetched);
+                        }
+                    }
+                    loading.set(false);
+                });
+            },
+        ),
+    );
 
     if !auth.is_authenticated {
         return rsx! { NotAuthenticatedState {} };

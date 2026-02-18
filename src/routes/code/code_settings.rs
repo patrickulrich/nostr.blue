@@ -68,8 +68,9 @@ fn load_code_settings() -> CodeSettingsData {
     LocalStorage::get::<CodeSettingsData>(CODE_SETTINGS_KEY).unwrap_or_default()
 }
 
-fn save_code_settings(settings: &CodeSettingsData) {
-    let _ = LocalStorage::set(CODE_SETTINGS_KEY, settings);
+fn save_code_settings(settings: &CodeSettingsData) -> Result<(), String> {
+    LocalStorage::set(CODE_SETTINGS_KEY, settings)
+        .map_err(|e| format!("Failed to save settings: {}", e))
 }
 
 /// Code Settings page component.
@@ -90,12 +91,18 @@ pub fn CodeSettings() -> Element {
 
     let handle_save = move |_| {
         let data = settings.read().clone();
-        save_code_settings(&data);
-        save_success.set(true);
-        spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(2500).await;
-            save_success.set(false);
-        });
+        match save_code_settings(&data) {
+            Ok(()) => {
+                save_success.set(true);
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(2500).await;
+                    save_success.set(false);
+                });
+            }
+            Err(e) => {
+                web_sys::console::error_1(&format!("Settings save failed: {}", e).into());
+            }
+        }
     };
 
     rsx! {

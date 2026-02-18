@@ -71,49 +71,52 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
 
     let mut request_id = use_signal(|| 0u32);
 
-    let naddr_for_effect = naddr.clone();
-    let sha_for_effect = sha.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
-        let s = sha_for_effect.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        let current_id = *request_id.peek() + 1;
-        request_id.set(current_id);
-        spawn(async move {
-            let result = fetch_repository(&n).await;
-            if *request_id.peek() != current_id {
-                return;
-            }
-            match &result {
-                Ok(repo) => {
-                    let mut found = false;
-                    for url in repo.clone.iter() {
-                        if let Some((owner, repo_name)) = parse_github_url(url) {
-                            let detail = fetch_commit_detail(&owner, &repo_name, &s).await;
-                            if *request_id.peek() != current_id {
-                                return;
+    use_effect(
+        use_reactive(
+            (&naddr, &sha),
+            move |(n, s)| {
+                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+                if !client_initialized {
+                    return;
+                }
+                let current_id = *request_id.peek() + 1;
+                request_id.set(current_id);
+                spawn(async move {
+                    let result = fetch_repository(&n).await;
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
+                    match &result {
+                        Ok(repo) => {
+                            let mut found = false;
+                            for url in repo.clone.iter() {
+                                if let Some((owner, repo_name)) = parse_github_url(url) {
+                                    let detail =
+                                        fetch_commit_detail(&owner, &repo_name, &s).await;
+                                    if *request_id.peek() != current_id {
+                                        return;
+                                    }
+                                    commit_result.set(Some(detail));
+                                    found = true;
+                                    break;
+                                }
                             }
-                            commit_result.set(Some(detail));
-                            found = true;
-                            break;
+                            if !found {
+                                commit_result.set(Some(Err(
+                                    "No GitHub URL found for this repository".to_string(),
+                                )));
+                            }
+                        }
+                        Err(e) => {
+                            commit_result
+                                .set(Some(Err(format!("Repository not found: {}", e))));
                         }
                     }
-                    if !found {
-                        commit_result.set(Some(Err(
-                            "No GitHub URL found for this repository".to_string(),
-                        )));
-                    }
-                }
-                Err(e) => {
-                    commit_result.set(Some(Err(format!("Repository not found: {}", e))));
-                }
-            }
-            repo_result.set(Some(result));
-        });
-    });
+                    repo_result.set(Some(result));
+                });
+            },
+        ),
+    );
 
     rsx! {
         div { class: "min-h-screen",

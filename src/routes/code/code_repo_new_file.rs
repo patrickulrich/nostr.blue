@@ -24,6 +24,9 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.contains("..") {
         return Some("Path must not contain .. segments".to_string());
     }
+    if path.contains('\n') || path.contains('\r') {
+        return Some("Path must not contain newline characters".to_string());
+    }
     for segment in path.split('/') {
         if segment.is_empty() {
             return Some("Path must not contain empty segments (double slashes)".to_string());
@@ -427,6 +430,10 @@ async fn submit_new_file(
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Please sign in first.".to_string());
+    }
+
+    if commit_message.contains('\n') || commit_message.contains('\r') {
+        return Err("Commit message must not contain newline characters".to_string());
     }
 
     // Decode the repository coordinate

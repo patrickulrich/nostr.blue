@@ -1,6 +1,6 @@
 //! Reviews Service
 //!
-//! Handles fetching persisted PR reviews (Kind 1985) from Nostr relays.
+//! Handles fetching persisted PR reviews (Kind 9807) from Nostr relays.
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 use crate::stores::content::code_store::cache_persisted_review_events;
@@ -14,7 +14,7 @@ pub async fn fetch_pr_reviews(pr_event_id_hex: &str) -> Result<Vec<PersistedRevi
     let event_id = EventId::from_hex(pr_event_id_hex)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
     let filter = Filter::new()
-        .kind(Kind::Custom(1985))
+        .kind(Kind::Custom(9807))
         .event(event_id);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await

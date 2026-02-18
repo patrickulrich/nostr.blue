@@ -81,7 +81,7 @@ impl CodeNotification {
                 })
                 .unwrap_or_else(|| "Untitled PR".to_string());
             (CodeNotificationType::PullRequestOpened, subject)
-        } else if kind == Kind::Custom(1985) {
+        } else if kind == Kind::Custom(9807) {
             (
                 CodeNotificationType::ReviewReceived,
                 "Review on your PR".to_string(),
@@ -159,7 +159,7 @@ pub async fn fetch_code_notifications(limit: usize) -> Result<Vec<CodeNotificati
         .kinds(vec![
             Kind::GitIssue,
             Kind::GitPatch,
-            Kind::Custom(1985),
+            Kind::Custom(9807),
             Kind::Comment,
             Kind::GitStatusOpen,
             Kind::GitStatusApplied,

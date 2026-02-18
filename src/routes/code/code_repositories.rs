@@ -16,26 +16,29 @@ pub fn CodeRepositories() -> Element {
 
     let auth = auth_store::AUTH_STATE.read();
     let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
-    let pubkey_for_effect = pubkey_hex.clone();
-    use_effect(move || {
-        let pk = pubkey_for_effect.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        spawn(async move {
-            if pk.is_empty() {
-                repos_result.set(Some(Err("No public key".to_string())));
-                return;
-            }
-            let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
-                fetch_user_repositories(&pubkey, 50).await
-            } else {
-                Err("Invalid public key".to_string())
-            };
-            repos_result.set(Some(result));
-        });
-    });
+    use_effect(
+        use_reactive(
+            &pubkey_hex,
+            move |pk| {
+                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+                if !client_initialized {
+                    return;
+                }
+                spawn(async move {
+                    if pk.is_empty() {
+                        repos_result.set(Some(Err("No public key".to_string())));
+                        return;
+                    }
+                    let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
+                        fetch_user_repositories(&pubkey, 50).await
+                    } else {
+                        Err("Invalid public key".to_string())
+                    };
+                    repos_result.set(Some(result));
+                });
+            },
+        ),
+    );
 
     if !auth.is_authenticated {
         return rsx! {

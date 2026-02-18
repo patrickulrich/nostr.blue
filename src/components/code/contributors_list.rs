@@ -122,8 +122,11 @@ pub fn ContributorsList(
 
 #[allow(dead_code)]
 fn truncate_pk(pk: &str) -> String {
-    if pk.len() > 12 {
-        format!("{}...{}", &pk[..6], &pk[pk.len() - 4..])
+    let char_count = pk.chars().count();
+    if char_count > 12 {
+        let prefix: String = pk.chars().take(6).collect();
+        let suffix: String = pk.chars().skip(char_count - 4).collect();
+        format!("{}...{}", prefix, suffix)
     } else {
         pk.to_string()
     }

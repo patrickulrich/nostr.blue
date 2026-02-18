@@ -615,7 +615,7 @@ impl Release {
                 }
             } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("prerelease")) {
                 if let Some(v) = tag.content() {
-                    prerelease = v == "true";
+                    prerelease = v.eq_ignore_ascii_case("true");
                 }
             }
         }
@@ -763,7 +763,7 @@ impl ReviewState {
         }
     }
 }
-/// Persisted PR review (Kind 1985)
+/// Persisted PR review (Kind 9807)
 #[derive(Debug, Clone, PartialEq)]
 pub struct PersistedReview {
     /// PR event ID this review targets
@@ -780,8 +780,8 @@ pub struct PersistedReview {
     pub created_at: u64,
 }
 impl PersistedReview {
-    pub const KIND: u16 = 1985;
-    /// Parse a PersistedReview from a Kind 1985 event
+    pub const KIND: u16 = 9807;
+    /// Parse a PersistedReview from a Kind 9807 event
     pub fn from_event(event: &Event) -> Option<Self> {
         if event.kind != Kind::Custom(Self::KIND) {
             return None;
