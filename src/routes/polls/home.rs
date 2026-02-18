@@ -142,12 +142,17 @@ pub fn Polls() -> Element {
                     all_streamed_ids.set(event_ids.clone());
                     loading.set(false);
                     if !event_ids.is_empty() {
-                        if let Ok(counts) = fetch_interaction_counts_batch(
+                        match fetch_interaction_counts_batch(
                             event_ids.clone(),
                             Duration::from_secs(5),
                         ).await {
-                            if *request_id.peek() != current_id { return; }
-                            interaction_counts.set(counts);
+                            Ok(counts) => {
+                                if *request_id.peek() != current_id { return; }
+                                interaction_counts.set(counts);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to fetch interaction counts: {e}");
+                            }
                         }
                         if *request_id.peek() != current_id { return; }
                         match stream_interaction_counts(

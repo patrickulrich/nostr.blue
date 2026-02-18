@@ -66,5 +66,11 @@ pub fn generate_milestone_id(name: &str) -> String {
             prev_dash = false;
         }
     }
-    result.trim_matches('-').to_string()
+    let slug = result.trim_matches('-').to_string();
+    if slug.is_empty() {
+        // Deterministic fallback using byte sum of the original name
+        let hash: u16 = name.bytes().fold(0u16, |acc, b| acc.wrapping_add(b as u16));
+        return format!("milestone-{:04x}", hash);
+    }
+    slug
 }

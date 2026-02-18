@@ -19,8 +19,8 @@ pub fn FuzzyFinder(
     let naddr_nav = naddr.clone();
     let git_ref_nav = git_ref.clone();
 
-    let filtered = use_memo(use_reactive((&files,), move |(files,)| {
-        let q = query.read().to_lowercase();
+    let filtered = use_memo(use_reactive((&files, &*query.read()), move |(files, q)| {
+        let q = q.to_lowercase();
         if q.is_empty() {
             return files.iter().take(20).cloned().collect::<Vec<_>>();
         }

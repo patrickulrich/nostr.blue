@@ -15,6 +15,7 @@ use crate::services::git_hosting::{
 };
 use crate::stores::nostr_client;
 use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::PublicKey;
 
@@ -89,11 +90,10 @@ impl ParsedQuery {
                 return false;
             }
         }
-        if !self.labels.is_empty() {
-            let issue_labels: Vec<String> = issue.labels.iter().map(|l| l.to_lowercase()).collect();
-            if !self.labels.iter().all(|l| issue_labels.contains(l)) {
-                return false;
-            }
+        if !self.labels.is_empty()
+            && !self.labels.iter().all(|l| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
+        {
+            return false;
         }
         if let Some(ref author) = self.author {
             if issue.pubkey != *author {
@@ -109,11 +109,10 @@ impl ParsedQuery {
                 return false;
             }
         }
-        if !self.labels.is_empty() {
-            let pr_labels: Vec<String> = pr.labels.iter().map(|l| l.to_lowercase()).collect();
-            if !self.labels.iter().all(|l| pr_labels.contains(l)) {
-                return false;
-            }
+        if !self.labels.is_empty()
+            && !self.labels.iter().all(|l| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
+        {
+            return false;
         }
         if let Some(ref author) = self.author {
             if pr.pubkey != *author {
@@ -157,7 +156,10 @@ pub fn CodeSearch(q: String) -> Element {
         let q = query_for_effect.clone();
         let parsed = ParsedQuery::parse(&q);
         let search_text = if parsed.text.is_empty() && parsed.has_filters() {
-            // Filters only - use a space to fetch broadly
+            // When the user specified only structured filters (e.g. `is:open label:bug`)
+            // with no free-text, we still need a non-empty query string to trigger relay
+            // searches. A single space acts as a wildcard that fetches broadly so the
+            // client-side filters in `matches_issue`/`matches_pr` can narrow results.
             " ".to_string()
         } else {
             parsed.text.clone()
@@ -357,7 +359,7 @@ pub fn CodeSearch(q: String) -> Element {
                             }
                             if let Some(ref author) = parsed_for_filter.author {
                                 span { class: "px-2 py-0.5 rounded-full text-xs bg-orange-500/10 text-orange-500 border border-orange-500/20",
-                                    "author:{author}"
+                                    "author:{truncate_pubkey(author)}"
                                 }
                             }
                         }

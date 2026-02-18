@@ -258,11 +258,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
 
     let handle_submit_comment = {
         let pr_id = pr_id.clone();
-        let pr_pubkey = pr_pubkey.clone();
+        let user_pubkey = user_pubkey.clone();
         move |_| {
             let content = new_comment.read().clone();
             let id = pr_id.clone();
-            let author = pr_pubkey.clone();
+            let author = user_pubkey.clone();
             if content.trim().is_empty() {
                 return;
             }

@@ -46,7 +46,14 @@ pub fn BountyForm(
                     }
                 };
                 let coord = if !naddr.is_empty() {
-                    decode_naddr(&naddr).ok()
+                    match decode_naddr(&naddr) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            error.set(Some(format!("Invalid repository address: {}", e)));
+                            is_submitting.set(false);
+                            return;
+                        }
+                    }
                 } else {
                     None
                 };

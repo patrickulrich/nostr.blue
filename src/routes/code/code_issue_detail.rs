@@ -117,27 +117,37 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
 
     // Fetch repository for permission checks
     let mut repo = use_signal(|| None::<Repository>);
+    let mut repo_gen = use_signal(|| 0u32);
     let repo_naddr = issue.repository_naddr.clone();
     use_effect(use_reactive(&repo_naddr, move |naddr| {
         repo.set(None); // clear stale data
         if naddr.is_empty() {
             return;
         }
+        repo_gen += 1;
+        let gen = *repo_gen.read();
         spawn(async move {
             if let Ok(r) = fetch_repository(&naddr).await {
-                repo.set(Some(r));
+                if *repo_gen.read() == gen {
+                    repo.set(Some(r));
+                }
             }
         });
     }));
 
     // Fetch bounties for this issue
     let mut bounties = use_signal(Vec::<Bounty>::new);
+    let mut bounties_gen = use_signal(|| 0u32);
     let issue_id_for_bounties = issue_id.clone();
     use_effect(use_reactive(&issue_id_for_bounties, move |id| {
         bounties.set(Vec::new()); // clear stale data
+        bounties_gen += 1;
+        let gen = *bounties_gen.read();
         spawn(async move {
             if let Ok(b) = fetch_bounties_for_issue(&id).await {
-                bounties.set(b);
+                if *bounties_gen.read() == gen {
+                    bounties.set(b);
+                }
             }
         });
     }));

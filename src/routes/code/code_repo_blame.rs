@@ -58,6 +58,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
             spawn(async move {
                 loading.set(true);
                 error.set(None);
+                commits.set(Vec::new());
                 let repo = match fetch_repository(&naddr).await {
                     Ok(r) => r,
                     Err(e) => {

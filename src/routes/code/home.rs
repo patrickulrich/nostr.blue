@@ -203,10 +203,11 @@ fn RepositoriesTab() -> Element {
         spawn(async move {
             match fetch_recent_repositories(PAGE_SIZE, None).await {
                 Ok(fetched) => {
+                    let raw_count = fetched.len();
                     if let Some(oldest) = fetched.last() {
                         oldest_timestamp.set(Some(oldest.created_at));
                     }
-                    has_more.set(fetched.len() >= PAGE_SIZE / 2);
+                    has_more.set(raw_count >= PAGE_SIZE);
                     repos.set(fetched);
                 }
                 Err(e) => log::error!("Failed to fetch repos: {}", e),
@@ -227,19 +228,19 @@ fn RepositoriesTab() -> Element {
                     if fetched.is_empty() {
                         has_more.set(false);
                     } else {
+                        let raw_count = fetched.len();
                         if let Some(oldest) = fetched.last() {
                             oldest_timestamp.set(Some(oldest.created_at));
                         }
                         let mut current = repos.peek().clone();
                         let existing: HashSet<_> =
                             current.iter().map(|r| r.event_id.clone()).collect();
-                        let prev_len = current.len();
                         for repo in fetched {
                             if !existing.contains(&repo.event_id) {
                                 current.push(repo);
                             }
                         }
-                        has_more.set(current.len() - prev_len >= PAGE_SIZE / 2);
+                        has_more.set(raw_count >= PAGE_SIZE);
                         repos.set(current);
                     }
                 }

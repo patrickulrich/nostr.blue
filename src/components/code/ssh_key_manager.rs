@@ -48,6 +48,9 @@ pub fn SshKeyManager() -> Element {
     });
 
     let handle_add = move |_| {
+        if *adding.peek() {
+            return;
+        }
         let title = new_title.read().clone();
         let key = new_key.read().clone();
         if title.trim().is_empty() || key.trim().is_empty() {
@@ -68,9 +71,9 @@ pub fn SshKeyManager() -> Element {
             ));
             return;
         }
+        adding.set(true);
+        error.set(None);
         spawn(async move {
-            adding.set(true);
-            error.set(None);
             match ssh_keys::publish_ssh_key(title.trim(), &trimmed).await {
                 Ok(_) => {
                     // Refresh the key list

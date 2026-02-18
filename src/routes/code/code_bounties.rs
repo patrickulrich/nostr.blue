@@ -1,7 +1,6 @@
 //! Bounty Marketplace
 //!
 //! Browse all open bounties across repositories.
-#![allow(dead_code)]
 use crate::components::icons;
 use crate::routes::Route;
 use crate::stores::nostr_client;

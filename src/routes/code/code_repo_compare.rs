@@ -111,7 +111,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                         div { class: "flex-1",
                             label { class: "block text-sm font-medium mb-2", "Base" }
                             input {
-                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                                 r#type: "text",
                                 placeholder: "main",
                                 value: "{base_branch}",
@@ -122,7 +122,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                         div { class: "flex-1",
                             label { class: "block text-sm font-medium mb-2", "Head" }
                             input {
-                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                                class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                                 r#type: "text",
                                 placeholder: "feature-branch",
                                 value: "{head_branch}",

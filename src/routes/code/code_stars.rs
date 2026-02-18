@@ -21,6 +21,11 @@ pub fn CodeStars() -> Element {
         if !client_initialized {
             return;
         }
+        let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
+        if !is_authenticated {
+            loading.set(false);
+            return;
+        }
         spawn(async move {
             loading.set(true);
             // Load stars from relays into STARRED_REPOS

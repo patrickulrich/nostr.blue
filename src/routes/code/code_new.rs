@@ -46,6 +46,11 @@ pub fn CodeNew() -> Element {
     }
 
     let handle_submit = move |_| {
+        if *is_publishing.peek() {
+            return;
+        }
+        is_publishing.set(true);
+
         let id_val = repo_id.read().clone();
         let name_val = name.read().clone();
         let desc_val = description.read().clone();
@@ -58,10 +63,10 @@ pub fn CodeNew() -> Element {
         spawn(async move {
             if id_val.trim().is_empty() {
                 error_message.set(Some("Repository ID is required".to_string()));
+                is_publishing.set(false);
                 return;
             }
 
-            is_publishing.set(true);
             error_message.set(None);
 
             // Filter out empty URLs
@@ -299,7 +304,7 @@ pub fn CodeNew() -> Element {
                 div { class: "space-y-2",
                     label { class: "block text-sm font-medium text-foreground", "Topics" }
                     input {
-                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground",
+                        class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground",
                         placeholder: "rust, nostr, git (comma-separated)",
                         value: "{topics_input}",
                         oninput: move |e| topics_input.set(e.value()),

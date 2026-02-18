@@ -378,12 +378,19 @@ fn EditReleaseForm(
                 } else {
                     Some(title_val.as_str())
                 };
-                let asset_refs: Vec<&str> = assets
+                let non_empty_assets: Vec<&str> = assets
                     .iter()
                     .filter(|a| !a.trim().is_empty())
                     .map(|a| a.as_str())
                     .collect();
-                match publish_release(&coord, &tag, title_opt, &desc, &asset_refs, is_pre).await {
+                for url in &non_empty_assets {
+                    if !is_valid_http_url(url) {
+                        error_message.set(Some(format!("Invalid asset URL: {}", url)));
+                        is_publishing.set(false);
+                        return;
+                    }
+                }
+                match publish_release(&coord, &tag, title_opt, &desc, &non_empty_assets, is_pre).await {
                     Ok(_) => {
                         on_saved.call(());
                     }
@@ -409,7 +416,7 @@ fn EditReleaseForm(
                     span { class: "text-destructive", "*" }
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                     r#type: "text",
                     placeholder: "v1.0.0",
                     value: "{tag_name}",
@@ -422,7 +429,7 @@ fn EditReleaseForm(
                     span { class: "text-muted-foreground font-normal", "(optional)" }
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                     r#type: "text",
                     placeholder: "Release title",
                     value: "{title}",
@@ -435,7 +442,7 @@ fn EditReleaseForm(
                     span { class: "text-destructive", "*" }
                 }
                 textarea {
-                    class: "w-full h-32 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm resize-y",
+                    class: "w-full h-32 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm resize-y",
                     placeholder: "Describe what's in this release...",
                     value: "{description}",
                     oninput: move |e| description.set(e.value()),
@@ -450,7 +457,7 @@ fn EditReleaseForm(
                     for (i , _) in asset_urls.read().iter().enumerate() {
                         div { key: "{i}", class: "flex gap-2",
                             input {
-                                class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                                class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                                 r#type: "url",
                                 placeholder: "https://example.com/asset.tar.gz",
                                 value: "{asset_urls.read()[i]}",
@@ -545,12 +552,19 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                 } else {
                     Some(title_val.as_str())
                 };
-                let asset_refs: Vec<&str> = assets
+                let non_empty_assets: Vec<&str> = assets
                     .iter()
                     .filter(|a| !a.trim().is_empty())
                     .map(|a| a.as_str())
                     .collect();
-                match publish_release(&coord, &tag, title_opt, &desc, &asset_refs, is_pre).await {
+                for url in &non_empty_assets {
+                    if !is_valid_http_url(url) {
+                        error_message.set(Some(format!("Invalid asset URL: {}", url)));
+                        is_publishing.set(false);
+                        return;
+                    }
+                }
+                match publish_release(&coord, &tag, title_opt, &desc, &non_empty_assets, is_pre).await {
                     Ok(_) => {
                         tag_name.set(String::new());
                         title.set(String::new());
@@ -581,7 +595,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                     span { class: "text-destructive", "*" }
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                     r#type: "text",
                     placeholder: "v1.0.0",
                     value: "{tag_name}",
@@ -594,7 +608,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                     span { class: "text-muted-foreground font-normal", "(optional)" }
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                     r#type: "text",
                     placeholder: "Release title",
                     value: "{title}",
@@ -607,7 +621,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                     span { class: "text-destructive", "*" }
                 }
                 textarea {
-                    class: "w-full h-32 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm resize-y",
+                    class: "w-full h-32 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm resize-y",
                     placeholder: "Describe what's in this release...",
                     value: "{description}",
                     oninput: move |e| description.set(e.value()),
@@ -622,7 +636,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                     for (i , _) in asset_urls.read().iter().enumerate() {
                         div { key: "{i}", class: "flex gap-2",
                             input {
-                                class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder-muted-foreground text-sm",
+                                class: "flex-1 px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
                                 r#type: "url",
                                 placeholder: "https://example.com/asset.tar.gz",
                                 value: "{asset_urls.read()[i]}",

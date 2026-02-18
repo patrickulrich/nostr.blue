@@ -25,8 +25,8 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     #[allow(unused_variables, unused_mut)]
     let mut t_key_cleanup = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
 
-    // Keyboard shortcut: press 't' to open fuzzy finder
-    use_effect(move || {
+    // Keyboard shortcut: press 't' to open fuzzy finder (one-time registration)
+    use_hook(move || {
         #[cfg(target_arch = "wasm32")]
         {
             use wasm_bindgen::prelude::*;

@@ -307,30 +307,30 @@ pub fn PRReviewSection(
                 if can_review {
                     if *show_form.read() {
                         div { class: "bg-card border border-border rounded-lg p-4 space-y-3",
-                            div { class: "flex gap-2",
+                            div { class: "bg-muted rounded-lg overflow-hidden p-1 flex gap-2",
                                 button {
                                     class: if *selected_state.read() == LocalReviewState::Approved {
-                                        "flex-1 px-2 py-1.5 text-xs rounded-lg border-2 border-green-500 bg-green-500/10 text-green-500 font-medium"
+                                        "flex-1 px-2 py-1.5 text-xs border-2 border-green-500 bg-green-500/10 text-green-500 font-medium"
                                     } else {
-                                        "flex-1 px-2 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:bg-accent/50 transition"
+                                        "flex-1 px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/50 transition"
                                     },
                                     onclick: move |_| selected_state.set(LocalReviewState::Approved),
                                     "Approve"
                                 }
                                 button {
                                     class: if *selected_state.read() == LocalReviewState::ChangesRequested {
-                                        "flex-1 px-2 py-1.5 text-xs rounded-lg border-2 border-orange-500 bg-orange-500/10 text-orange-500 font-medium"
+                                        "flex-1 px-2 py-1.5 text-xs border-2 border-orange-500 bg-orange-500/10 text-orange-500 font-medium"
                                     } else {
-                                        "flex-1 px-2 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:bg-accent/50 transition"
+                                        "flex-1 px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/50 transition"
                                     },
                                     onclick: move |_| selected_state.set(LocalReviewState::ChangesRequested),
                                     "Request Changes"
                                 }
                                 button {
                                     class: if *selected_state.read() == LocalReviewState::Commented {
-                                        "flex-1 px-2 py-1.5 text-xs rounded-lg border-2 border-blue-500 bg-blue-500/10 text-blue-500 font-medium"
+                                        "flex-1 px-2 py-1.5 text-xs border-2 border-blue-500 bg-blue-500/10 text-blue-500 font-medium"
                                     } else {
-                                        "flex-1 px-2 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:bg-accent/50 transition"
+                                        "flex-1 px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/50 transition"
                                     },
                                     onclick: move |_| selected_state.set(LocalReviewState::Commented),
                                     "Comment"

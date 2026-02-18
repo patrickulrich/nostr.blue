@@ -51,7 +51,7 @@ pub fn CodeRepoCard(
                     for (idx, topic) in repo.topics.iter().enumerate() {
                         span {
                             key: "{idx}_{topic}",
-                            class: "px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs",
+                            class: "px-2 py-0.5 rounded-full bg-accent text-accent-foreground text-xs",
                             "{topic}"
                         }
                     }

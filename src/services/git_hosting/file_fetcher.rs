@@ -42,6 +42,14 @@ struct GitHubContentResponse {
 }
 /// Extract owner and repo from GitHub URL
 fn parse_github_url(url: &str) -> Option<(String, String)> {
+    // Normalize SSH URLs (git@github.com:owner/repo.git) to HTTPS form
+    let url = if url.contains("github.com:") && !url.contains("://") {
+        let after_colon = url.split("github.com:").nth(1)?;
+        let normalized = format!("https://github.com/{}", after_colon);
+        return parse_github_url(&normalized);
+    } else {
+        url
+    };
     let url = url.trim_end_matches(".git").trim_end_matches('/');
     let parts: Vec<&str> = url.split('/').collect();
     let github_idx = parts.iter().position(|&p| p.contains("github.com"))?;

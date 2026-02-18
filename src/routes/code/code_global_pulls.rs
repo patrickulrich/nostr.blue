@@ -45,14 +45,20 @@ pub fn CodeGlobalPulls() -> Element {
                 if !client_initialized || pk_hex.is_empty() {
                     return;
                 }
+                let captured_pk = pk_hex.clone();
                 spawn(async move {
                     loading.set(true);
-                    if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
+                    if let Ok(pk) = PublicKey::from_hex(&captured_pk) {
                         let (created_res, assigned_res, mentioned_res) = futures::join!(
                             fetch_user_prs(&pk, 100),
                             fetch_prs_assigned_to(&pk, 100),
                             fetch_prs_mentioning(&pk, 100)
                         );
+                        // Check if pubkey changed while we were fetching
+                        let current_pk = auth_store::AUTH_STATE.read().pubkey.clone().unwrap_or_default();
+                        if current_pk != captured_pk {
+                            return;
+                        }
                         if let Ok(fetched) = created_res {
                             created_prs.set(fetched);
                         }

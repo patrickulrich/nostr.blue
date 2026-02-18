@@ -39,6 +39,9 @@ pub async fn publish_bounty(
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
+    if amount_sats == 0 {
+        return Err("Bounty amount must be greater than 0".into());
+    }
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
         .tag(Tag::custom(

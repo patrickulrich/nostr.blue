@@ -50,7 +50,7 @@ pub fn FilterBar(
                             line { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }
                         }
                         input {
-                            class: "w-full pl-10 pr-3 py-2 bg-muted border border-border rounded-lg text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary",
+                            class: "w-full pl-10 pr-3 py-2 bg-muted border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Filter by title or content...",
                             value: "{search_query}",
@@ -137,6 +137,7 @@ pub fn filter_issues(
     query: &str,
     selected_labels: &[String],
 ) -> Vec<crate::utils::nip34::Issue> {
+    let q = query.to_lowercase();
     issues
         .iter()
         .filter(|issue| {
@@ -153,10 +154,9 @@ pub fn filter_issues(
         })
         .filter(|issue| {
             // Text search
-            if query.is_empty() {
+            if q.is_empty() {
                 return true;
             }
-            let q = query.to_lowercase();
             let title = issue.display_title().to_lowercase();
             let content = issue.content.to_lowercase();
             title.contains(&q) || content.contains(&q)
@@ -179,6 +179,7 @@ pub fn filter_prs(
     query: &str,
     selected_labels: &[String],
 ) -> Vec<crate::utils::nip34::PullRequest> {
+    let q = query.to_lowercase();
     prs.iter()
         .filter(|pr| {
             match status {
@@ -192,10 +193,9 @@ pub fn filter_prs(
             }
         })
         .filter(|pr| {
-            if query.is_empty() {
+            if q.is_empty() {
                 return true;
             }
-            let q = query.to_lowercase();
             let title = pr.display_title().to_lowercase();
             let content = pr.content.to_lowercase();
             title.contains(&q) || content.contains(&q)

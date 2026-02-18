@@ -324,6 +324,21 @@ const methods = {
   async diff({ dir, base, head }) {
     validateRepoDir(dir);
 
+    // Maximum blob size to include in diff (2 MB)
+    const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+
+    /**
+     * Check if a blob appears to be binary by scanning for null bytes
+     * in the first 8 KB of data.
+     */
+    function isBinary(uint8Array) {
+      const scanLen = Math.min(uint8Array.length, 8192);
+      for (let i = 0; i < scanLen; i++) {
+        if (uint8Array[i] === 0) return true;
+      }
+      return false;
+    }
+
     let baseOid, headOid;
     try {
       baseOid = await resolveRefWithFallback(dir, base);
@@ -346,19 +361,43 @@ const methods = {
     for (const filepath of allFiles) {
       let baseContent = null;
       let headContent = null;
+      let skipReason = null;
 
       try {
         const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });
-        baseContent = new TextDecoder().decode(blob);
+        if (blob.byteLength > MAX_DIFF_BYTES) {
+          skipReason = 'File too large to diff';
+        } else if (isBinary(blob)) {
+          skipReason = 'Binary file';
+        } else {
+          baseContent = new TextDecoder().decode(blob);
+        }
       } catch (e) {
         // File doesn't exist in base
       }
 
-      try {
-        const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath });
-        headContent = new TextDecoder().decode(blob);
-      } catch (e) {
-        // File doesn't exist in head
+      if (!skipReason) {
+        try {
+          const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath });
+          if (blob.byteLength > MAX_DIFF_BYTES) {
+            skipReason = 'File too large to diff';
+          } else if (isBinary(blob)) {
+            skipReason = 'Binary file';
+          } else {
+            headContent = new TextDecoder().decode(blob);
+          }
+        } catch (e) {
+          // File doesn't exist in head
+        }
+      }
+
+      if (skipReason) {
+        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push(`--- a/${filepath}`);
+        diffParts.push(`+++ b/${filepath}`);
+        diffParts.push(`@@ -0,0 +0,0 @@`);
+        diffParts.push(` ${skipReason}`);
+        continue;
       }
 
       // Skip unchanged files

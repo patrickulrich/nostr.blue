@@ -103,6 +103,14 @@ impl Activity {
         } else if kind == Kind::Custom(9807) {
             (ActivityType::ReviewSubmitted, "Code review".to_string())
         } else if kind == Kind::Comment {
+            // Only treat comments with an "a" tag referencing a repo (30617:) as code comments
+            let has_repo_tag = event.tags.iter().any(|t| {
+                let v = t.as_slice();
+                v.len() >= 2 && v[0] == "a" && v[1].starts_with("30617:")
+            });
+            if !has_repo_tag {
+                return None;
+            }
             (ActivityType::CommentPosted, "Comment".to_string())
         } else if kind == Kind::GitStatusOpen
             || kind == Kind::GitStatusApplied

@@ -26,7 +26,8 @@ export function initMermaidDiagrams() {
         return;
     }
 
-    // Load mermaid.js from CDN
+    // Load mermaid.js from CDN (skip if already injected)
+    if (document.querySelector('script[src*="mermaid"]')) return;
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js';
     script.onload = () => {

@@ -10,6 +10,7 @@ use crate::services::git_hosting::{
 };
 use crate::services::git_worker::CommitEntry;
 use crate::stores::nostr_client;
+use crate::utils::format_time_ago;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 
@@ -268,7 +269,7 @@ fn GitCommitRow(commit: CommitEntry) -> Element {
         Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
         None => (message.as_str(), None),
     };
-    let formatted_date = format_unix_timestamp(commit.timestamp);
+    let formatted_date = format_time_ago(commit.timestamp);
     let short_oid = if commit.oid.len() >= 7 {
         &commit.oid[..7]
     } else {
@@ -324,56 +325,6 @@ fn format_commit_date(date_str: &str) -> String {
         return date_part.to_string();
     }
     date_str.to_string()
-}
-
-/// Format a Unix timestamp to a date string
-// TODO: consolidate with other date formatting utilities (e.g. format_relative_time_or, format_time_ago)
-fn format_unix_timestamp(timestamp: u64) -> String {
-    let secs = timestamp as i64;
-    let days_since_epoch = secs / 86400;
-    // Simple date calculation
-    let mut year = 1970i64;
-    let mut remaining_days = days_since_epoch;
-    loop {
-        let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
-            366
-        } else {
-            365
-        };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_in_months = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    let mut month = 0usize;
-    for (i, &dim) in days_in_months.iter().enumerate() {
-        if remaining_days < dim {
-            month = i + 1;
-            break;
-        }
-        remaining_days -= dim;
-    }
-    if month == 0 {
-        month = 12;
-    }
-    let day = remaining_days + 1;
-    format!("{}-{:02}-{:02}", year, month, day)
 }
 
 #[component]

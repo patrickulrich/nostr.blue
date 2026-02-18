@@ -140,6 +140,12 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
         let r = repo_for_fetch.clone();
         async move { fetch_readme(&r, None).await }
     });
+    // Log readme fetch errors once via effect instead of in the render path
+    use_effect(move || {
+        if let Some(Err(e)) = &*readme_resource.read() {
+            log::warn!("Failed to fetch readme: {}", e);
+        }
+    });
     rsx! {
         div { class: "flex flex-col lg:flex-row gap-6",
             // Main column
@@ -175,7 +181,7 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                         div { class: "flex-1 p-3 bg-muted rounded-lg",
                             p { class: "text-xs text-muted-foreground mb-2", "Clone" }
                             code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
-                                "{repo.clone.first().unwrap_or(&String::new())}"
+                                "{repo.clone.first().map(String::as_str).unwrap_or(\"\")}"
                             }
                         }
                     }
@@ -184,11 +190,8 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                     Some(Ok(content)) => rsx! {
                         ReadmeViewer { content: Some(content.clone()), loading: false }
                     },
-                    Some(Err(e)) => {
-                        log::warn!("Failed to fetch readme: {}", e);
-                        rsx! {
-                            ReadmeViewer { content: None, loading: false, error: Some(e.clone()) }
-                        }
+                    Some(Err(e)) => rsx! {
+                        ReadmeViewer { content: None, loading: false, error: Some(e.clone()) }
                     },
                     None => rsx! {
                         ReadmeViewer { loading: true }

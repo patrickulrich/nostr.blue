@@ -89,7 +89,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                     match &result {
                         Ok(repo) => {
                             let mut found = false;
-                            for url in repo.clone.iter() {
+                            for url in repo.clone.iter().chain(repo.web.iter()) {
                                 if let Some((owner, repo_name)) = parse_github_url(url) {
                                     let detail =
                                         fetch_commit_detail(&owner, &repo_name, &s).await;

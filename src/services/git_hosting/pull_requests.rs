@@ -167,14 +167,24 @@ pub async fn publish_patch(
     for label in labels {
         builder = builder.tag(Tag::hashtag(*label));
     }
-    // Add linked issue tags with "closes" marker
+    // Validate all issue IDs upfront
+    let mut invalid_ids = Vec::new();
+    let mut parsed_issue_ids = Vec::new();
     for issue_id in closes_issues {
-        if let Ok(eid) = EventId::from_hex(issue_id) {
-            builder = builder.tag(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-                [eid.to_hex(), String::new(), String::new(), "closes".to_string()],
-            ));
+        match EventId::parse(issue_id) {
+            Ok(eid) => parsed_issue_ids.push(eid),
+            Err(_) => invalid_ids.push(*issue_id),
         }
+    }
+    if !invalid_ids.is_empty() {
+        return Err(format!("Invalid issue IDs: {}", invalid_ids.join(", ")));
+    }
+    // Add linked issue tags with "closes" marker
+    for eid in &parsed_issue_ids {
+        builder = builder.tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+            [eid.to_hex(), String::new(), String::new(), "closes".to_string()],
+        ));
     }
     // Add branch name tag
     if let Some(name) = branch_name {

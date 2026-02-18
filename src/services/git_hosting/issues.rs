@@ -147,11 +147,21 @@ pub async fn publish_issue(
     };
     let mut builder = EventBuilder::git_issue(issue)
         .map_err(|e| format!("Failed to build issue event: {}", e))?;
-    // Add assignee p tags
+    // Validate all assignees upfront
+    let mut invalid_assignees = Vec::new();
+    let mut parsed_assignees = Vec::new();
     for assignee_hex in assignees {
-        if let Ok(pk) = PublicKey::from_hex(assignee_hex) {
-            builder = builder.tag(Tag::public_key(pk));
+        match PublicKey::parse(assignee_hex) {
+            Ok(pk) => parsed_assignees.push(pk),
+            Err(_) => invalid_assignees.push(*assignee_hex),
         }
+    }
+    if !invalid_assignees.is_empty() {
+        return Err(format!("Invalid assignee keys: {}", invalid_assignees.join(", ")));
+    }
+    // Add assignee p tags
+    for pk in &parsed_assignees {
+        builder = builder.tag(Tag::public_key(*pk));
     }
     let output = client
         .send_event_builder(builder)

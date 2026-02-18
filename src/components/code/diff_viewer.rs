@@ -396,14 +396,14 @@ pub fn DiffViewer(
         div { class: "space-y-4",
             // View mode toggle
             div { class: "flex items-center gap-2 mb-4",
-                div { class: "bg-muted rounded-lg p-1",
+                div { class: "bg-muted rounded-lg overflow-hidden p-1",
                     button {
-                        class: if current_mode == DiffViewMode::Unified { "px-3 py-1.5 text-xs rounded-lg bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
+                        class: if current_mode == DiffViewMode::Unified { "px-3 py-1.5 text-xs bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
                         onclick: move |_| view_mode.set(DiffViewMode::Unified),
                         "Unified"
                     }
                     button {
-                        class: if current_mode == DiffViewMode::SideBySide { "px-3 py-1.5 text-xs rounded-lg bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
+                        class: if current_mode == DiffViewMode::SideBySide { "px-3 py-1.5 text-xs bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
                         onclick: move |_| view_mode.set(DiffViewMode::SideBySide),
                         "Side by Side"
                     }

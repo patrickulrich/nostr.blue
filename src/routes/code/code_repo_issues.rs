@@ -19,9 +19,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
     let mut search_query = use_signal(String::new);
     let mut selected_labels = use_signal(Vec::<String>::new);
 
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -39,7 +37,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     // Derive filtered list (memoized)
     let filtered = use_memo(move || {
