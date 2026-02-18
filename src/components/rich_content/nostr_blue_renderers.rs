@@ -31,7 +31,7 @@ use dioxus::prelude::*;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{Event, Kind, PublicKey, ToBech32};
 
-use super::minicards::render_playlist_minicard;
+use super::minicards::{render_channel_minicard, render_playlist_minicard};
 
 /// Generic loading skeleton for nostr.blue content cards
 pub(super) fn nostr_blue_loading_skeleton() -> Element {
@@ -1061,6 +1061,23 @@ pub(super) fn NostrBlueCommunityRenderer(id: String) -> Element {
                     icons::UsersIcon { class: "w-4 h-4" }
                     "Invalid Community"
                 }
+            }
+        }
+    }
+}
+
+/// Renders a nostr.blue channel (NIP-28) link as a card
+#[component]
+pub(super) fn NostrBlueChannelRenderer(id: String) -> Element {
+    let fetch = use_fetch_event_by_id(id.clone(), &[40], "Channel not found");
+    rsx! {
+        div { class: "my-2", onclick: move |e: MouseEvent| e.stop_propagation(),
+            if fetch.is_loading() {
+                {nostr_blue_loading_skeleton()}
+            } else if let Some(err) = fetch.error().as_ref() {
+                {nostr_blue_error(err)}
+            } else if let Some(ev) = fetch.event().as_ref() {
+                {render_channel_minicard(ev, &id)}
             }
         }
     }
