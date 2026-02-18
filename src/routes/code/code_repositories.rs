@@ -16,12 +16,12 @@ pub fn CodeRepositories() -> Element {
 
     let auth = auth_store::AUTH_STATE.read();
     let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
     use_effect(
         use_reactive(
-            &pubkey_hex,
-            move |pk| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized {
+            &(pubkey_hex, client_initialized),
+            move |(pk, initialized)| {
+                if !initialized {
                     return;
                 }
                 spawn(async move {

@@ -75,6 +75,10 @@ pub async fn publish_ssh_key(title: &str, public_key: &str) -> Result<EventId, S
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".into());
     }
+    // Reject private keys — only public keys should be submitted
+    if public_key.contains("PRIVATE KEY") {
+        return Err("Private keys must not be uploaded. Please provide a public key only.".into());
+    }
     // Compute SSH key fingerprint from OpenSSH public key format
     let fingerprint = compute_ssh_fingerprint(public_key);
     let mut builder = EventBuilder::new(Kind::Custom(52), public_key)

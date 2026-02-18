@@ -79,6 +79,7 @@ pub fn CodeSettings() -> Element {
     // All hooks must be called before any early returns to maintain stable call-order indices.
     let mut settings = use_signal(load_code_settings);
     let mut save_success = use_signal(|| false);
+    let mut save_error = use_signal(|| None::<String>);
 
     let auth = auth_store::AUTH_STATE.read();
     if !auth.is_authenticated {
@@ -93,6 +94,7 @@ pub fn CodeSettings() -> Element {
         let data = settings.read().clone();
         match save_code_settings(&data) {
             Ok(()) => {
+                save_error.set(None);
                 save_success.set(true);
                 spawn(async move {
                     gloo_timers::future::TimeoutFuture::new(2500).await;
@@ -100,7 +102,12 @@ pub fn CodeSettings() -> Element {
                 });
             }
             Err(e) => {
+                save_error.set(Some(e.clone()));
                 web_sys::console::error_1(&format!("Settings save failed: {}", e).into());
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(2500).await;
+                    save_error.set(None);
+                });
             }
         }
     };
@@ -140,6 +147,27 @@ pub fn CodeSettings() -> Element {
             }
 
             div { class: "p-4 max-w-2xl mx-auto space-y-6",
+                // Error banner
+                if let Some(err) = save_error.read().as_ref() {
+                    div { class: "p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm flex items-center gap-2",
+                        svg {
+                            class: "w-4 h-4",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "12", cy: "12", r: "10" }
+                            line { x1: "15", y1: "9", x2: "9", y2: "15" }
+                            line { x1: "9", y1: "9", x2: "15", y2: "15" }
+                        }
+                        "{err}"
+                    }
+                }
                 // Success banner
                 if *save_success.read() {
                     div { class: "p-4 bg-green-500/10 border border-green-500/20 rounded-lg text-green-600 dark:text-green-400 text-sm flex items-center gap-2",
@@ -379,7 +407,9 @@ fn WalletSection() -> Element {
 
     let handle_refresh = move |_| {
         spawn(async move {
-            let _ = nwc_store::refresh_balance().await;
+            if let Err(e) = nwc_store::refresh_balance().await {
+                web_sys::console::error_1(&format!("Failed to refresh balance: {}", e).into());
+            }
         });
     };
 
@@ -491,7 +521,7 @@ fn WalletSection() -> Element {
                         label { class: "block text-sm font-medium mb-2", "NWC Connection String" }
                         input {
                             class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
-                            r#type: "text",
+                            r#type: "password",
                             placeholder: "nostr+walletconnect://...",
                             value: "{nwc_uri.read()}",
                             oninput: move |e| {

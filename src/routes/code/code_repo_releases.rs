@@ -10,6 +10,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::{decode_naddr, Release, Repository};
+use crate::utils::validation::is_valid_http_url;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::EventId;
@@ -283,6 +284,7 @@ fn ReleaseCard(
                     p { class: "text-xs font-medium text-muted-foreground mb-2", "Assets" }
                     div { class: "space-y-1",
                         for (i, asset) in release.assets.iter().enumerate() {
+                            if is_valid_http_url(asset) {
                             a {
                                 key: "{i}",
                                 href: "{asset}",
@@ -305,6 +307,7 @@ fn ReleaseCard(
                                     line { x1: "12", y1: "15", x2: "12", y2: "3" }
                                 }
                                 "{asset}"
+                            }
                             }
                         }
                     }

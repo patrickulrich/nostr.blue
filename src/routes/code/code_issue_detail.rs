@@ -151,7 +151,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
-    let mut claiming_bounty = use_signal(|| false);
+    let mut claiming_bounty = use_signal(|| Option::<String>::None);
     let issue_id_for_comments = issue_id.clone();
     let comments = use_resource(move || {
         let id = issue_id_for_comments.clone();
@@ -389,15 +389,15 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                 if is_authenticated && bounty_status == crate::utils::nip34::BountyStatus::Pending {
                                                     button {
                                                         class: "w-full px-3 py-1.5 text-xs bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition disabled:opacity-50",
-                                                        disabled: *claiming_bounty.read(),
+                                                        disabled: claiming_bounty.read().is_some(),
                                                         onclick: {
                                                             let b_eid = bounty_eid.clone();
                                                             let i_eid = issue_eid.clone();
                                                             move |_| {
-                                                                if *claiming_bounty.read() {
+                                                                if claiming_bounty.read().is_some() {
                                                                     return;
                                                                 }
-                                                                claiming_bounty.set(true);
+                                                                claiming_bounty.set(Some(b_eid.clone()));
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
                                                                 spawn(async move {
@@ -410,7 +410,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             }
                                                                         }
                                                                     }
-                                                                    claiming_bounty.set(false);
+                                                                    claiming_bounty.set(None);
                                                                 });
                                                             }
                                                         },
@@ -420,7 +420,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                 if is_owner && bounty_status == crate::utils::nip34::BountyStatus::Claimed {
                                                     button {
                                                         class: "w-full px-3 py-1.5 text-xs bg-green-500/10 text-green-500 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition disabled:opacity-50",
-                                                        disabled: *claiming_bounty.read(),
+                                                        disabled: claiming_bounty.read().is_some(),
                                                         onclick: {
                                                             let b_eid = bounty_eid.clone();
                                                             let i_eid = issue_eid.clone();
@@ -429,10 +429,10 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 .find(|b| b.event_id == bounty_eid)
                                                                 .and_then(|b| b.claimer.clone());
                                                             move |_| {
-                                                                if *claiming_bounty.read() {
+                                                                if claiming_bounty.read().is_some() {
                                                                     return;
                                                                 }
-                                                                claiming_bounty.set(true);
+                                                                claiming_bounty.set(Some(b_eid.clone()));
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
                                                                 let c = claimer.clone();
@@ -444,7 +444,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             web_sys::console::error_1(
                                                                                 &"Cannot release bounty: no claimer found for this bounty".into(),
                                                                             );
-                                                                            claiming_bounty.set(false);
+                                                                            claiming_bounty.set(None);
                                                                             return;
                                                                         }
                                                                     };
@@ -461,7 +461,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             }
                                                                         }
                                                                     }
-                                                                    claiming_bounty.set(false);
+                                                                    claiming_bounty.set(None);
                                                                 });
                                                             }
                                                         },

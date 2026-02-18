@@ -14,7 +14,7 @@ use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 
 /// Publish a review as a Kind 9807 event on Nostr
-pub async fn publish_review_event(pr_event_id: &str, state: &str, content: &str) -> std::result::Result<String, String> {
+pub async fn publish_review_event(pr_event_id: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
@@ -25,7 +25,7 @@ pub async fn publish_review_event(pr_event_id: &str, state: &str, content: &str)
         .tag(Tag::event(event_id))
         .tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("state")),
-            [state],
+            [state.as_str()],
         ));
     let output = client.send_event_builder(builder).await
         .map_err(|e| format!("Failed to publish review: {}", e))?;
@@ -65,11 +65,11 @@ impl LocalReviewState {
         }
     }
 
-    fn to_event_str(self) -> &'static str {
+    fn to_review_state(self) -> crate::utils::nip34::ReviewState {
         match self {
-            Self::Approved => "approved",
-            Self::ChangesRequested => "changes_requested",
-            Self::Commented => "commented",
+            Self::Approved => crate::utils::nip34::ReviewState::Approved,
+            Self::ChangesRequested => crate::utils::nip34::ReviewState::ChangesRequested,
+            Self::Commented => crate::utils::nip34::ReviewState::Commented,
         }
     }
 }
@@ -100,7 +100,16 @@ pub fn PRReviewSection(
             move |id| {
                 spawn(async move {
                     if let Ok(persisted) = fetch_pr_reviews(&id).await {
-                        reviews.set(persisted);
+                        // Merge: keep optimistic entries not yet confirmed by relays
+                        let current = reviews.read().clone();
+                        let optimistic: Vec<_> = current
+                            .into_iter()
+                            .filter(|r| r.event_id.is_empty())
+                            .filter(|r| !persisted.iter().any(|p| p.pubkey == r.pubkey))
+                            .collect();
+                        let mut merged = persisted;
+                        merged.extend(optimistic);
+                        reviews.set(merged);
                     }
                 });
             },
@@ -125,17 +134,13 @@ pub fn PRReviewSection(
             } else {
                 body
             };
-            let state_str = state.to_event_str();
+            let review_state = state.to_review_state();
             let now = web_sys::js_sys::Date::now() as u64 / 1000;
             // Add to local display immediately
             let local_review = PersistedReview {
                 pr_event_id: pr_id.clone(),
                 content: content.clone(),
-                state: match state {
-                    LocalReviewState::Approved => crate::utils::nip34::ReviewState::Approved,
-                    LocalReviewState::ChangesRequested => crate::utils::nip34::ReviewState::ChangesRequested,
-                    LocalReviewState::Commented => crate::utils::nip34::ReviewState::Commented,
-                },
+                state: review_state,
                 event_id: String::new(),
                 pubkey: user_pubkey.clone(),
                 created_at: now,
@@ -151,7 +156,7 @@ pub fn PRReviewSection(
             let saved_content = content.clone();
             let saved_pubkey = user_pubkey.clone();
             spawn(async move {
-                if let Err(e) = publish_review_event(&id, state_str, &saved_content).await {
+                if let Err(e) = publish_review_event(&id, review_state, &saved_content).await {
                     web_sys::console::error_1(&format!("Failed to publish review: {}", e).into());
                     // Rollback: remove the optimistic entry
                     let mut current = reviews.write();
@@ -249,9 +254,10 @@ pub fn PRReviewSection(
                                     .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
                                     .unwrap_or_else(|| truncate_pubkey(&review.pubkey));
                                 let picture = profile.as_ref().and_then(|p| p.picture.clone());
+                                let review_key = if review.event_id.is_empty() { format!("{}_{}", review.pubkey, review.created_at) } else { review.event_id.clone() };
                                 rsx! {
                                     div {
-                                        key: "{review.pubkey}_{review.created_at}",
+                                        key: "{review_key}",
                                         class: "flex items-start gap-2 p-2 rounded-lg bg-muted/30",
                                         div { class: "w-6 h-6 rounded-full bg-muted flex items-center justify-center overflow-hidden shrink-0",
                                             if let Some(pic) = &picture {
@@ -287,7 +293,7 @@ pub fn PRReviewSection(
                 // Add Review button / form
                 if can_review {
                     if *show_form.read() {
-                        div { class: "border border-border rounded-lg p-3 space-y-3",
+                        div { class: "bg-card border border-border rounded-lg p-4 space-y-3",
                             div { class: "flex gap-2",
                                 button {
                                     class: if *selected_state.read() == LocalReviewState::Approved {

@@ -6,7 +6,7 @@ use crate::components::icons;
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::utils::format::{format_relative_time_or, format_sats_with_separator, truncate_pubkey};
-use crate::utils::nip34::{Bounty, BountyStatus, Issue};
+use crate::utils::nip34::{decode_naddr, Bounty, BountyStatus, Issue};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
@@ -80,8 +80,9 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
             if i.repository_naddr.is_empty() {
                 None
             } else {
-                // Extract repo identifier from naddr (last segment after ':')
-                i.repository_naddr.split(':').next_back().map(|s| s.to_string())
+                decode_naddr(&i.repository_naddr)
+                    .ok()
+                    .map(|coord| coord.identifier.clone())
             }
         });
         listings.push(BountyListing {

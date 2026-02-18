@@ -85,6 +85,7 @@ pub fn CodeGlobalPulls() -> Element {
         .into_iter()
         .collect();
     let query = search_query.read().to_lowercase();
+    let current_label = label_filter.read().clone();
     let filtered: Vec<_> = all_prs_for_tab
         .iter()
         .filter(|p| match *status_filter.read() {
@@ -104,7 +105,7 @@ pub fn CodeGlobalPulls() -> Element {
             title.contains(&query) || content.contains(&query)
                 || p.labels.iter().any(|l| l.to_lowercase().contains(&query))
         })
-        .filter(|p| match label_filter.read().as_deref() {
+        .filter(|p| match current_label.as_deref() {
             Some(filter) => p.labels.contains(&filter.to_string()),
             None => true,
         })

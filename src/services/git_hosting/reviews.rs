@@ -14,7 +14,7 @@ pub async fn fetch_pr_reviews(pr_event_id_hex: &str) -> Result<Vec<PersistedRevi
     let event_id = EventId::from_hex(pr_event_id_hex)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
     let filter = Filter::new()
-        .kind(Kind::Custom(9807))
+        .kind(Kind::Custom(PersistedReview::KIND))
         .event(event_id);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await

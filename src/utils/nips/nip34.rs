@@ -95,7 +95,7 @@ pub struct Repository {
     pub star_count: u32,
     pub issue_count: u32,
     pub pr_count: u32,
-    /// Forked from this repository coordinate (naddr)
+    /// Forked from this repository event ID (hex) from e-tag with fork marker
     pub fork_of: Option<String>,
     /// Required number of approvals before merge (0 = no requirement)
     pub required_approvals: u32,
@@ -753,6 +753,13 @@ impl ReviewState {
             Self::Approved => "Approved",
             Self::ChangesRequested => "Changes Requested",
             Self::Commented => "Commented",
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::ChangesRequested => "changes_requested",
+            Self::Commented => "commented",
         }
     }
     pub fn css_class(&self) -> &'static str {
