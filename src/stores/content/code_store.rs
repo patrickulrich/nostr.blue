@@ -253,8 +253,11 @@ pub fn cache_bounty_events(events: &[NostrEvent]) {
         }
     }
     let mut cache = CODE_BOUNTIES_CACHE.write();
-    for (issue_id, bounties) in grouped {
-        cache.put(issue_id, bounties);
+    for (issue_id, new_bounties) in grouped {
+        let mut merged = cache.peek(&issue_id).cloned().unwrap_or_default();
+        merged.extend(new_bounties);
+        merged.dedup_by(|a, b| a.event_id == b.event_id);
+        cache.put(issue_id, merged);
     }
 }
 /// Parse and cache persisted reviews from events (grouped by pr_event_id)
@@ -267,8 +270,11 @@ pub fn cache_persisted_review_events(events: &[NostrEvent]) {
         }
     }
     let mut cache = CODE_REVIEWS_CACHE.write();
-    for (pr_id, reviews) in grouped {
-        cache.put(pr_id, reviews);
+    for (pr_id, new_reviews) in grouped {
+        let mut merged = cache.peek(&pr_id).cloned().unwrap_or_default();
+        merged.extend(new_reviews);
+        merged.dedup_by(|a, b| a.event_id == b.event_id);
+        cache.put(pr_id, merged);
     }
 }
 /// Get snippets by language

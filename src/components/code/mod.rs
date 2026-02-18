@@ -40,11 +40,9 @@ pub use file_tree::{BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSk
 pub use file_viewer::{CodeFileViewer, CodeFileViewerSkeleton};
 #[allow(unused_imports)]
 pub use fuzzy_finder::FuzzyFinder;
-#[allow(unused_imports)]
 pub use label_picker::LabelPicker;
 pub use issue_card::{CodeIssueCard, CodeIssueRow};
 pub use pull_card::{CodePullCard, CodePullRow};
-#[allow(unused_imports)]
 pub use reactions::CodeReactions;
 pub use readme_viewer::ReadmeViewer;
 pub use repo_action_bar::RepoActionBar;

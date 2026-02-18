@@ -78,12 +78,12 @@ pub fn CodeGlobalPulls() -> Element {
         FilterTab::Assigned => assigned_prs.read().clone(),
         FilterTab::Mentioned => mentioned_prs.read().clone(),
     };
-    let all_labels: Vec<String> = all_prs_for_tab
+    let mut all_labels: Vec<String> = all_prs_for_tab
         .iter()
         .flat_map(|p| p.labels.iter().cloned())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
         .collect();
+    all_labels.sort();
+    all_labels.dedup();
     let query = search_query.read().to_lowercase();
     let current_label = label_filter.read().clone();
     let filtered: Vec<_> = all_prs_for_tab

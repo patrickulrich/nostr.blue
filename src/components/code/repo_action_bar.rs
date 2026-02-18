@@ -272,6 +272,11 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .collect();
+            if urls.is_empty() {
+                toast.error("At least one clone URL is required".to_string(), ToastOptions::new());
+                fork_loading.set(false);
+                return;
+            }
             let url_refs: Vec<&str> = urls.iter().map(|s| s.as_str()).collect();
             match publish_fork(
                 &event_id,
@@ -429,7 +434,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             }
             if *show_fork_modal.read() {
                 div {
-                    class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+                    class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
                     onclick: move |_| {
                         if !*fork_loading.peek() {
                             show_fork_modal.set(false);
@@ -450,7 +455,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         div { class: "flex justify-between items-center mb-6",
                             h2 { class: "text-xl font-bold", "Fork Repository" }
                             button {
-                                class: "text-muted-foreground hover:text-foreground disabled:opacity-50",
+                                class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground disabled:opacity-50",
                                 disabled: *fork_loading.read(),
                                 onclick: move |_| {
                                     if !*fork_loading.peek() {

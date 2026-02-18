@@ -135,8 +135,8 @@ impl GitService {
     ) -> Result<String, String> {
         let dir = self.ensure_cloned(repo).await?;
         match GitWorkerManager::diff_refs(&dir, base, head).await {
-            Ok(diff) if !diff.is_empty() => Ok(diff),
-            _ => compare_refs_github(repo, base, head).await,
+            Ok(diff) => Ok(diff),
+            Err(_) => compare_refs_github(repo, base, head).await,
         }
     }
 }

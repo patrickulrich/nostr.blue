@@ -27,6 +27,9 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.contains('\n') || path.contains('\r') {
         return Some("Path must not contain newline characters".to_string());
     }
+    if path.contains('\\') {
+        return Some("Backslash path separators are not allowed".to_string());
+    }
     for segment in path.split('/') {
         if segment.is_empty() {
             return Some("Path must not contain empty segments (double slashes)".to_string());

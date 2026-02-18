@@ -92,6 +92,7 @@ pub fn PRReviewSection(
     let mut selected_state = use_signal(|| LocalReviewState::Approved);
     let mut review_body = use_signal(String::new);
     let mut reviews = use_signal(Vec::<PersistedReview>::new);
+    let mut publish_error = use_signal(|| None::<String>);
 
     // Fetch persisted reviews from relays on mount
     use_effect(
@@ -151,13 +152,14 @@ pub fn PRReviewSection(
             drop(current);
             show_form.set(false);
             review_body.set(String::new());
+            publish_error.set(None);
             // Publish to relays
             let id = pr_id.clone();
             let saved_content = content.clone();
             let saved_pubkey = user_pubkey.clone();
             spawn(async move {
                 if let Err(e) = publish_review_event(&id, review_state, &saved_content).await {
-                    web_sys::console::error_1(&format!("Failed to publish review: {}", e).into());
+                    publish_error.set(Some(format!("Failed to publish review: {}", e)));
                     // Rollback: remove the optimistic entry
                     let mut current = reviews.write();
                     current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
@@ -288,6 +290,12 @@ pub fn PRReviewSection(
                                 }
                             }
                         }
+                    }
+                }
+                // Publish error display
+                if let Some(err) = publish_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                        "{err}"
                     }
                 }
                 // Add Review button / form

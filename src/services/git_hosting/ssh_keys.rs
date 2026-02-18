@@ -80,12 +80,11 @@ pub async fn publish_ssh_key(title: &str, public_key: &str) -> Result<EventId, S
         return Err("Private keys must not be uploaded. Please provide a public key only.".into());
     }
     // Compute SSH key fingerprint from OpenSSH public key format
-    let fingerprint = compute_ssh_fingerprint(public_key);
-    let mut builder = EventBuilder::new(Kind::Custom(52), public_key)
-        .tag(Tag::custom(TagKind::custom("title"), vec![title.to_string()]));
-    if let Some(fp) = &fingerprint {
-        builder = builder.tag(Tag::custom(TagKind::custom("fingerprint"), vec![fp.clone()]));
-    }
+    let fingerprint = compute_ssh_fingerprint(public_key)
+        .ok_or_else(|| "Invalid SSH public key format".to_string())?;
+    let builder = EventBuilder::new(Kind::Custom(52), public_key)
+        .tag(Tag::custom(TagKind::custom("title"), vec![title.to_string()]))
+        .tag(Tag::custom(TagKind::custom("fingerprint"), vec![fingerprint]));
     let output = client
         .send_event_builder(builder)
         .await

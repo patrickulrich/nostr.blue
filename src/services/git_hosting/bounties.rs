@@ -163,7 +163,7 @@ pub async fn release_bounty(
         .map_err(|e| format!("Failed to get invoice: {}", e))?;
 
     // Mark as paid first (prevents double-payment on retry)
-    update_bounty_status(bounty_event_id, issue_event_id, "paid", repository).await?;
+    let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", repository).await?;
 
     // Pay via NWC
     if let Err(e) = nwc_store::pay_invoice(invoice).await {
@@ -172,7 +172,7 @@ pub async fn release_bounty(
         return Err(format!("Payment failed: {}", e));
     }
 
-    Ok(bounty_event_id)
+    Ok(new_event_id)
 }
 
 /// Fetch bounties for an issue by event ID string (convenience wrapper)

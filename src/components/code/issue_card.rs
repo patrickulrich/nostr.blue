@@ -47,16 +47,11 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                         div { class: "flex items-center gap-1 ml-auto",
                             for assignee in issue.assignees.iter() {
                                 {
-                                    let short = if assignee.chars().count() > 8 {
-                                        format!("{}...", assignee.chars().take(6).collect::<String>())
-                                    } else {
-                                        assignee.clone()
-                                    };
                                     rsx! {
                                         div {
                                             key: "{assignee}",
                                             class: "w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] text-primary",
-                                            title: "{short}",
+                                            title: "{assignee}",
                                             "{assignee.chars().next().unwrap_or('?')}"
                                         }
                                     }

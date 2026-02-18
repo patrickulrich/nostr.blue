@@ -80,6 +80,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     let mut items = use_signal(Vec::<BoardItem>::new);
     let mut loading = use_signal(|| true);
     let mut repo = use_signal(|| None);
+    let mut fetch_error = use_signal(|| None::<String>);
 
     // Fetch repo + issues + PRs
     let naddr_for_effect = naddr.clone();
@@ -99,11 +100,17 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
 
             // Fetch issues and PRs
             let mut all_items = Vec::new();
-            if let Ok(issues) = fetch_repo_issues(&n).await {
-                all_items.extend(issues.into_iter().map(BoardItem::Issue));
+            let mut errors = Vec::new();
+            match fetch_repo_issues(&n).await {
+                Ok(issues) => all_items.extend(issues.into_iter().map(BoardItem::Issue)),
+                Err(e) => errors.push(format!("Issues: {}", e)),
             }
-            if let Ok(prs) = fetch_repo_prs(&n).await {
-                all_items.extend(prs.into_iter().map(BoardItem::PullRequest));
+            match fetch_repo_prs(&n).await {
+                Ok(prs) => all_items.extend(prs.into_iter().map(BoardItem::PullRequest)),
+                Err(e) => errors.push(format!("PRs: {}", e)),
+            }
+            if !errors.is_empty() && all_items.is_empty() {
+                fetch_error.set(Some(errors.join("; ")));
             }
             items.set(all_items);
             loading.set(false);
@@ -167,6 +174,28 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
 
                 if *loading.read() {
                     LoadingSkeleton {}
+                } else if let Some(err) = fetch_error.read().as_ref() {
+                    div { class: "text-center py-12",
+                        div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
+                            svg {
+                                class: "w-8 h-8 text-destructive",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                circle { cx: "12", cy: "12", r: "10" }
+                                line { x1: "12", y1: "8", x2: "12", y2: "12" }
+                                line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                            }
+                        }
+                        h3 { class: "font-semibold text-lg mb-2", "Failed to load project board" }
+                        p { class: "text-muted-foreground text-sm", "{err}" }
+                    }
                 } else if items_read.is_empty() {
                     EmptyBoard {}
                 } else {
@@ -249,7 +278,7 @@ fn BoardCard(item: BoardItem) -> Element {
     rsx! {
         Link {
             to: item.detail_route(),
-            class: "block bg-card border border-border rounded-lg p-3 hover:bg-accent/50 transition cursor-pointer",
+            class: "block bg-card border border-border rounded-lg p-4 hover:bg-accent/50 transition cursor-pointer",
             // Title
             div { class: "font-medium text-sm mb-2 line-clamp-2", "{item.title()}" }
 

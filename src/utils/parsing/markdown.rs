@@ -35,7 +35,9 @@ fn convert_mermaid_blocks(html: &str) -> String {
             let decoded = diagram_content
                 .replace("&amp;", "&")
                 .replace("&quot;", "\"")
-                .replace("&#x27;", "'");
+                .replace("&#x27;", "'")
+                .replace("&#39;", "'")
+                .replace("&#34;", "\"");
             let replacement = format!("<div class=\"mermaid\">{}</div>", decoded);
             let block_end = code_end + "</code></pre>".len();
             result = format!("{}{}{}", &result[..start], replacement, &result[block_end..]);

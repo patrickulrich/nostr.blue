@@ -119,21 +119,28 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
 
             // Load profile metadata
             match profiles::fetch_profile(parsed.to_hex()).await {
-                Ok(profile) => profile_data.set(Some(profile)),
+                Ok(profile) => {
+                    if *request_id.peek() != current_id { return; }
+                    profile_data.set(Some(profile));
+                }
                 Err(e) => log::warn!("Failed to fetch profile: {}", e),
             }
 
             // Check following status
             if auth_store::is_authenticated() {
                 if let Ok(following) = nostr_client::is_following(parsed.to_hex()).await {
+                    if *request_id.peek() != current_id { return; }
                     is_following.set(following);
                 }
             }
 
             // Load repos (default tab) and counts for all tabs
             let repos_result = fetch_user_repositories(&parsed, 50).await;
+            if *request_id.peek() != current_id { return; }
             let issues_result = fetch_user_issues(&parsed, 50).await;
+            if *request_id.peek() != current_id { return; }
             let prs_result = fetch_user_prs(&parsed, 50).await;
+            if *request_id.peek() != current_id { return; }
             let snippets_result = fetch_user_snippets(&parsed, 50).await;
 
             // Discard stale results if pubkey changed during async fetch

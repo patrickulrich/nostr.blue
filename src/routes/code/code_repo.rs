@@ -113,7 +113,11 @@ fn RepoContent(repo: Repository, naddr: String) -> Element {
                     }
                     span { "Forked from " }
                     code { class: "px-1.5 py-0.5 bg-muted rounded text-xs font-mono",
-                        "{fork_ref.chars().take(12).collect::<String>()}..."
+                        if fork_ref.chars().count() > 12 {
+                            "{fork_ref.chars().take(12).collect::<String>()}..."
+                        } else {
+                            "{fork_ref}"
+                        }
                     }
                 }
             }

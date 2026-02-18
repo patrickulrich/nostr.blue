@@ -275,6 +275,8 @@ pub struct PlatformStats {
     pub total_issues: usize,
     pub total_prs: usize,
     pub total_snippets: usize,
+    /// Whether the counts are approximate (capped by relay limits)
+    pub approximate: bool,
 }
 
 /// Fetch trending repositories (most starred in last 7 days)
@@ -410,5 +412,6 @@ pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
         total_issues: issues.map(|e| e.len()).unwrap_or(0),
         total_prs: prs.map(|e| e.len()).unwrap_or(0),
         total_snippets: snippets.map(|e| e.len()).unwrap_or(0),
+        approximate: true,
     })
 }

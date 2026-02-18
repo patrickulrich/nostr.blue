@@ -343,7 +343,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                                 }
                                             }
                                             button {
-                                                class: "p-1 text-muted-foreground hover:text-destructive transition shrink-0",
+                                                class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded transition shrink-0",
                                                 onclick: move |_| handle_remove_file(i),
                                                 svg {
                                                     class: "w-4 h-4",

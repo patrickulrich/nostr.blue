@@ -64,6 +64,8 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                     "Could not load commits. Try cloning the repository first by browsing its files."
                         .to_string(),
                 )));
+            } else if let Err(ref e) = result {
+                commits_result.set(Some(Err(format!("Failed to load repository: {}", e))));
             }
             repo_result.set(Some(result));
         });

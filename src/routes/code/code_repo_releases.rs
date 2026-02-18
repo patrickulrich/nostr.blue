@@ -10,6 +10,7 @@ use crate::stores::{auth_store, nostr_client};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::{decode_naddr, Release, Repository};
+use crate::utils::permissions;
 use crate::utils::validation::is_valid_http_url;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
@@ -51,6 +52,12 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
     let is_authenticated = auth.is_authenticated;
+    let can_create_release = is_authenticated
+        && repo_data
+            .read()
+            .as_ref()
+            .map(|r| permissions::is_owner(&user_pubkey, r) || permissions::is_maintainer(&user_pubkey, r))
+            .unwrap_or(false);
     let all_releases = releases.read();
     rsx! {
         div { class: "min-h-screen",
@@ -90,27 +97,29 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                             }
                         }
                     }
-                    button {
-                        class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
-                        onclick: move |_| {
-                            let current = *show_new_form.read();
-                            show_new_form.set(!current);
-                        },
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            line { x1: "12", y1: "5", x2: "12", y2: "19" }
-                            line { x1: "5", y1: "12", x2: "19", y2: "12" }
+                    if can_create_release {
+                        button {
+                            class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
+                            onclick: move |_| {
+                                let current = *show_new_form.read();
+                                show_new_form.set(!current);
+                            },
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                line { x1: "12", y1: "5", x2: "12", y2: "19" }
+                                line { x1: "5", y1: "12", x2: "19", y2: "12" }
+                            }
+                            "New Release"
                         }
-                        "New Release"
                     }
                 }
             }

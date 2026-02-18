@@ -396,15 +396,17 @@ pub fn DiffViewer(
         div { class: "space-y-4",
             // View mode toggle
             div { class: "flex items-center gap-2 mb-4",
-                button {
-                    class: if current_mode == DiffViewMode::Unified { "px-3 py-1.5 text-xs rounded-lg bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
-                    onclick: move |_| view_mode.set(DiffViewMode::Unified),
-                    "Unified"
-                }
-                button {
-                    class: if current_mode == DiffViewMode::SideBySide { "px-3 py-1.5 text-xs rounded-lg bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
-                    onclick: move |_| view_mode.set(DiffViewMode::SideBySide),
-                    "Side by Side"
+                div { class: "bg-muted rounded-lg p-1",
+                    button {
+                        class: if current_mode == DiffViewMode::Unified { "px-3 py-1.5 text-xs rounded-lg bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
+                        onclick: move |_| view_mode.set(DiffViewMode::Unified),
+                        "Unified"
+                    }
+                    button {
+                        class: if current_mode == DiffViewMode::SideBySide { "px-3 py-1.5 text-xs rounded-lg bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
+                        onclick: move |_| view_mode.set(DiffViewMode::SideBySide),
+                        "Side by Side"
+                    }
                 }
             }
 
@@ -514,7 +516,7 @@ pub fn DiffViewer(
                                                                             let line_num = effective_line_number(diff_line).unwrap_or(0);
                                                                             rsx! {
                                                                                 button {
-                                                                                    class: "w-4 h-4 flex items-center justify-center text-primary opacity-0 group-hover:opacity-100 hover:bg-primary/20 rounded transition-opacity text-[10px] font-bold",
+                                                                                    class: "p-1 hover:bg-accent rounded transition text-primary opacity-0 group-hover:opacity-100 text-[10px] font-bold flex items-center justify-center",
                                                                                     title: "Add line comment",
                                                                                     onclick: move |e| {
                                                                                         e.stop_propagation();

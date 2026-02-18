@@ -73,12 +73,12 @@ pub fn CodeGlobalIssues() -> Element {
         FilterTab::Assigned => assigned_issues.read().clone(),
         FilterTab::Mentioned => mentioned_issues.read().clone(),
     };
-    let all_labels: Vec<String> = all_issues_for_tab
+    let mut all_labels: Vec<String> = all_issues_for_tab
         .iter()
         .flat_map(|i| i.labels.iter().cloned())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
         .collect();
+    all_labels.sort();
+    all_labels.dedup();
     let query = search_query.read().to_lowercase();
     let filtered: Vec<_> = all_issues_for_tab
         .iter()

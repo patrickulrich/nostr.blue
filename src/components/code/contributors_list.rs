@@ -120,7 +120,6 @@ pub fn ContributorsList(
     }
 }
 
-#[allow(dead_code)]
 fn truncate_pk(pk: &str) -> String {
     let char_count = pk.chars().count();
     if char_count > 12 {

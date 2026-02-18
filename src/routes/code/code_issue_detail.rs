@@ -407,6 +407,8 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                                 web_sys::console::error_1(
                                                                                     &format!("Failed to claim bounty: {}", e).into(),
                                                                                 );
+                                                                            } else if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
+                                                                                bounties.set(refreshed);
                                                                             }
                                                                         }
                                                                     }
@@ -451,7 +453,11 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                     if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
                                                                         if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
                                                                             match release_bounty(b_id, i_id, &c, amount, None).await {
-                                                                                Ok(_) => {}
+                                                                                Ok(_) => {
+                                                                                    if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
+                                                                                        bounties.set(refreshed);
+                                                                                    }
+                                                                                }
                                                                                 Err(e) => {
                                                                                     log::error!("Failed to release bounty: {}", e);
                                                                                     web_sys::console::error_1(

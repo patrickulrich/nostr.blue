@@ -6,7 +6,6 @@
 //! - `g` then `r` → Repositories
 //! - `g` then `s` → Snippets
 //! - `g` then `h` → Code Home
-//! - `t` → Open file finder
 //! - `?` → Show help modal
 
 #[allow(unused_imports)]

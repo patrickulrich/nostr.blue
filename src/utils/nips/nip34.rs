@@ -701,7 +701,9 @@ impl Bounty {
                 }
             }
             if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
-                claimer_pubkey = Some(public_key.to_hex());
+                if claimer_pubkey.is_none() {
+                    claimer_pubkey = Some(public_key.to_hex());
+                }
             }
             let kind = tag.kind();
             if kind == TagKind::Custom(std::borrow::Cow::Borrowed("amount")) {

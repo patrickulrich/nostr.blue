@@ -20,6 +20,7 @@ use crate::services::git_hosting::reviews::fetch_pr_reviews;
 use crate::utils::nip34::{GitComment, IssueStatus, PullRequest, Repository, ReviewState};
 use crate::utils::permissions;
 use dioxus::prelude::*;
+use std::collections::HashSet;
 
 /// PR detail tab
 #[derive(Clone, Copy, PartialEq)]
@@ -155,10 +156,14 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
         let id = pr_id_for_reviews.clone();
         async move {
             match fetch_pr_reviews(&id).await {
-                Ok(reviews) => reviews
-                    .iter()
-                    .filter(|r| r.state == ReviewState::Approved)
-                    .count() as u32,
+                Ok(reviews) => {
+                    let approved_reviewers: HashSet<&str> = reviews
+                        .iter()
+                        .filter(|r| r.state == ReviewState::Approved)
+                        .map(|r| r.pubkey.as_str())
+                        .collect();
+                    approved_reviewers.len() as u32
+                }
                 Err(_) => 0,
             }
         }
@@ -415,7 +420,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             // Status actions
             if can_update_status || can_merge {
                 div { class: "flex flex-wrap gap-2",
-                    if can_merge && pr_status != IssueStatus::Applied {
+                    if can_merge && matches!(pr_status, IssueStatus::Open | IssueStatus::Draft) {
                         button {
                             class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 flex items-center gap-2",
                             disabled: *is_updating_status.read(),

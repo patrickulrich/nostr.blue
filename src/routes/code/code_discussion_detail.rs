@@ -121,7 +121,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
     let discussion_id_for_comments = discussion_id.clone();
-    let comments = use_resource(move || {
+    let mut comments = use_resource(move || {
         let id = discussion_id_for_comments.clone();
         async move { fetch_discussion_comments_by_id(&id).await }
     });
@@ -148,6 +148,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
                 match publish_discussion_comment_by_id(&id, &author, &content).await {
                     Ok(_) => {
                         new_comment.set(String::new());
+                        comments.restart();
                     }
                     Err(e) => {
                         comment_error.set(Some(e));

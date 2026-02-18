@@ -17,6 +17,7 @@ pub async fn fetch_repo_releases(naddr: &str) -> Result<Vec<Release>, String> {
     let coord = decode_naddr(naddr).map_err(|e| format!("Invalid naddr: {}", e))?;
     let filter = Filter::new()
         .kind(Kind::Custom(Release::KIND))
+        .author(coord.public_key)
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), coord.to_string())
         .limit(50);
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)

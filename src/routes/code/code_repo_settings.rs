@@ -124,10 +124,17 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 } else {
                     Some(description.as_str())
                 };
+                // Validate zap split weights total 100%
+                let splits_snapshot: Vec<(String, u32)> = zap_splits.read().clone();
+                let total_weight: u32 = splits_snapshot.iter().map(|(_, w)| *w).sum();
+                if !splits_snapshot.is_empty() && total_weight != 100 {
+                    save_error.set(Some(format!("Zap split weights must total 100% (currently {}%)", total_weight)));
+                    is_saving.set(false);
+                    return;
+                }
                 // Build extra tags for zap splits, milestones, required approvals
                 let mut extra_tags: Vec<Tag> = Vec::new();
                 // Zap split tags
-                let splits_snapshot: Vec<(String, u32)> = zap_splits.read().clone();
                 for (pubkey, weight) in &splits_snapshot {
                     if let Ok(pk) = PublicKey::parse(pubkey) {
                         extra_tags.push(Tag::custom(
@@ -372,7 +379,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         }
                                         span { class: "flex-1 text-sm font-mono truncate", "{relay}" }
                                         button {
-                                            class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                            class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
                                             onclick: move |_| {
                                                 let mut list = relay_list.write();
                                                 list.remove(index);
@@ -406,7 +413,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     onkeypress: move |e: KeyboardEvent| {
                                         if e.key() == Key::Enter {
                                             let url = new_relay_url.read().trim().to_string();
-                                            if !url.is_empty() && url.starts_with("wss://") {
+                                            if !url.is_empty() && url.starts_with("wss://") && !relay_list.read().contains(&url) {
                                                 relay_list.write().push(url);
                                                 new_relay_url.set(String::new());
                                             }
@@ -418,7 +425,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     disabled: new_relay_url.read().trim().is_empty() || !new_relay_url.read().starts_with("wss://"),
                                     onclick: move |_| {
                                         let url = new_relay_url.read().trim().to_string();
-                                        if !url.is_empty() && url.starts_with("wss://") {
+                                        if !url.is_empty() && url.starts_with("wss://") && !relay_list.read().contains(&url) {
                                             relay_list.write().push(url);
                                             new_relay_url.set(String::new());
                                         }
@@ -476,7 +483,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                     span { class: "text-xs text-muted-foreground font-mono truncate block", "{truncate_pubkey(pubkey)}" }
                                                 }
                                                 button {
-                                                    class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                                    class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
                                                     onclick: move |_| {
                                                         let mut list = maintainer_list.write();
                                                         list.remove(index);
@@ -689,7 +696,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 span { class: "text-sm font-mono font-medium", "{w}%" }
                                                 if can_remove {
                                                     button {
-                                                        class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                                        class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
                                                         onclick: move |_| {
                                                             let mut splits = zap_splits.write();
                                                             splits.remove(idx);
@@ -728,18 +735,19 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             let pk = new_split_pubkey.read().trim().to_string();
                                             let w = *new_split_weight.read();
                                             if !pk.is_empty() {
-                                                let hex_key = if pk.starts_with("npub1") {
-                                                    PublicKey::parse(&pk)
-                                                        .map(|k| k.to_hex())
-                                                        .unwrap_or(pk.clone())
-                                                } else {
-                                                    pk.clone()
-                                                };
-                                                let mut splits = zap_splits.write();
-                                                splits.push((hex_key, w));
-                                                drop(splits);
-                                                new_split_pubkey.set(String::new());
-                                                new_split_weight.set(50);
+                                                match PublicKey::parse(&pk) {
+                                                    Ok(parsed) => {
+                                                        let hex_key = parsed.to_hex();
+                                                        let mut splits = zap_splits.write();
+                                                        splits.push((hex_key, w));
+                                                        drop(splits);
+                                                        new_split_pubkey.set(String::new());
+                                                        new_split_weight.set(50);
+                                                    }
+                                                    Err(_) => {
+                                                        save_error.set(Some("Invalid public key. Enter a valid npub or hex pubkey.".to_string()));
+                                                    }
+                                                }
                                             }
                                         }
                                     },
@@ -763,18 +771,19 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         let pk = new_split_pubkey.read().trim().to_string();
                                         let w = *new_split_weight.read();
                                         if !pk.is_empty() {
-                                            let hex_key = if pk.starts_with("npub1") {
-                                                PublicKey::parse(&pk)
-                                                    .map(|k| k.to_hex())
-                                                    .unwrap_or(pk.clone())
-                                            } else {
-                                                pk.clone()
-                                            };
-                                            let mut splits = zap_splits.write();
-                                            splits.push((hex_key, w));
-                                            drop(splits);
-                                            new_split_pubkey.set(String::new());
-                                            new_split_weight.set(50);
+                                            match PublicKey::parse(&pk) {
+                                                Ok(parsed) => {
+                                                    let hex_key = parsed.to_hex();
+                                                    let mut splits = zap_splits.write();
+                                                    splits.push((hex_key, w));
+                                                    drop(splits);
+                                                    new_split_pubkey.set(String::new());
+                                                    new_split_weight.set(50);
+                                                }
+                                                Err(_) => {
+                                                    save_error.set(Some("Invalid public key. Enter a valid npub or hex pubkey.".to_string()));
+                                                }
+                                            }
                                         }
                                     },
                                     "Add"
@@ -845,7 +854,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             }
                                         }
                                         button {
-                                            class: "p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition",
+                                            class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
                                             onclick: move |_| {
                                                 let mut list = milestones.write();
                                                 list.remove(idx);
