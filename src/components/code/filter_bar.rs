@@ -62,7 +62,7 @@ pub fn FilterBar(
                 div { class: "flex border border-border rounded-lg overflow-hidden",
                     button {
                         class: if status_filter == StatusFilter::Open {
-                            "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground"
+                            "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
                             "px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition"
                         },
@@ -75,7 +75,7 @@ pub fn FilterBar(
                     }
                     button {
                         class: if status_filter == StatusFilter::Closed {
-                            "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground"
+                            "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
                             "px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition"
                         },
@@ -88,7 +88,7 @@ pub fn FilterBar(
                     }
                     button {
                         class: if status_filter == StatusFilter::All {
-                            "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground"
+                            "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
                             "px-3 py-2 text-sm text-muted-foreground hover:bg-accent transition"
                         },

@@ -509,10 +509,16 @@ impl Discussion {
                 Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
                 _ => {}
             }
-            // Check for custom "subject" tag (overrides standard if present)
+        }
+        // Custom "subject" tag takes priority over the standard single-letter tag
+        // parsed above. NIP-34 discussions may use the full "subject" tag name,
+        // which `as_standardized()` can miss or conflate with the "s" single-letter
+        // tag. Check after the loop so it always wins.
+        for tag in event.tags.iter() {
             if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("subject")) {
                 if let Some(s) = tag.content() {
                     subject = Some(s.to_string());
+                    break;
                 }
             }
         }

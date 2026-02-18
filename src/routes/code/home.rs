@@ -220,8 +220,8 @@ fn RepositoriesTab() -> Element {
             return;
         }
         let until = *oldest_timestamp.peek();
+        pagination_loading.set(true);
         spawn(async move {
-            pagination_loading.set(true);
             match fetch_recent_repositories(PAGE_SIZE, until).await {
                 Ok(fetched) => {
                     if fetched.is_empty() {
@@ -712,8 +712,8 @@ fn DiscoverTab() -> Element {
                     Some(Ok(s)) => rsx! {
                         div { class: "grid grid-cols-2 gap-3",
                             StatCard { label: "Repositories", value: s.total_repos, icon_type: StatIcon::Repo }
-                            StatCard { label: "Open Issues", value: s.open_issues, icon_type: StatIcon::Issue }
-                            StatCard { label: "Pull Requests", value: s.open_prs, icon_type: StatIcon::PullRequest }
+                            StatCard { label: "Issues", value: s.total_issues, icon_type: StatIcon::Issue }
+                            StatCard { label: "Pull Requests", value: s.total_prs, icon_type: StatIcon::PullRequest }
                             StatCard { label: "Snippets", value: s.total_snippets, icon_type: StatIcon::Snippet }
                         }
                     },

@@ -75,14 +75,37 @@ pub async fn publish_ssh_key(title: &str, public_key: &str) -> Result<EventId, S
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".into());
     }
-    let builder = EventBuilder::new(Kind::Custom(52), public_key)
+    // Compute SSH key fingerprint from OpenSSH public key format
+    let fingerprint = compute_ssh_fingerprint(public_key);
+    let mut builder = EventBuilder::new(Kind::Custom(52), public_key)
         .tag(Tag::custom(TagKind::custom("title"), vec![title.to_string()]));
+    if let Some(fp) = &fingerprint {
+        builder = builder.tag(Tag::custom(TagKind::custom("fingerprint"), vec![fp.clone()]));
+    }
     let output = client
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish SSH key: {}", e))?;
     let event_id = *output.id();
     Ok(event_id)
+}
+/// Compute an SSH fingerprint from an OpenSSH public key string.
+///
+/// Expects format: `ssh-rsa AAAA... comment`
+/// Returns `Some("SHA256:<base64hash>")` or `None` if parsing fails.
+fn compute_ssh_fingerprint(public_key: &str) -> Option<String> {
+    use base64::Engine;
+    use sha2::Digest;
+    let parts: Vec<&str> = public_key.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let key_data = base64::engine::general_purpose::STANDARD
+        .decode(parts[1])
+        .ok()?;
+    let hash = sha2::Sha256::digest(&key_data);
+    let encoded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(hash);
+    Some(format!("SHA256:{}", encoded))
 }
 /// Delete an SSH key by publishing a deletion event
 pub async fn delete_ssh_key(event_id: EventId) -> Result<(), String> {

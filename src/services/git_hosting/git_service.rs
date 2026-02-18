@@ -155,9 +155,11 @@ pub async fn compare_refs_github(
     head: &str,
 ) -> Result<String, String> {
     let (owner, repo_name) = extract_github_info(repo).ok_or("Not a GitHub repository")?;
+    let encoded_base = urlencoding::encode(base);
+    let encoded_head = urlencoding::encode(head);
     let url = format!(
         "https://api.github.com/repos/{}/{}/compare/{}...{}",
-        owner, repo_name, base, head
+        owner, repo_name, encoded_base, encoded_head
     );
     let resp = gloo_net::http::Request::get(&url)
         .header("Accept", "application/vnd.github.v3.diff")

@@ -162,13 +162,17 @@ pub async fn release_bounty(
         .await
         .map_err(|e| format!("Failed to get invoice: {}", e))?;
 
-    // Pay via NWC
-    nwc_store::pay_invoice(invoice)
-        .await
-        .map_err(|e| format!("Payment failed: {}", e))?;
+    // Mark as paid first (prevents double-payment on retry)
+    update_bounty_status(bounty_event_id, issue_event_id, "paid", repository).await?;
 
-    // Mark bounty as paid
-    update_bounty_status(bounty_event_id, issue_event_id, "paid", repository).await
+    // Pay via NWC
+    if let Err(e) = nwc_store::pay_invoice(invoice).await {
+        // Rollback: revert status to claimed so it can be retried
+        let _ = update_bounty_status(bounty_event_id, issue_event_id, "claimed", repository).await;
+        return Err(format!("Payment failed: {}", e));
+    }
+
+    Ok(bounty_event_id)
 }
 
 /// Fetch bounties for an issue by event ID string (convenience wrapper)

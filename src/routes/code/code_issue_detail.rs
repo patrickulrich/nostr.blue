@@ -139,14 +139,13 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
         });
     });
 
-    // Permission checks: author OR maintainer/owner can update status
+    // Permission checks: can_change_status includes author check; fall back to author-only when repo not loaded
     let can_update_status = is_authenticated
-        && (user_pubkey == issue.pubkey
-            || repo
-                .read()
-                .as_ref()
-                .map(|r| permissions::can_change_status(&user_pubkey, r, &issue.pubkey))
-                .unwrap_or(false));
+        && repo
+            .read()
+            .as_ref()
+            .map(|r| permissions::can_change_status(&user_pubkey, r, &issue.pubkey))
+            .unwrap_or(user_pubkey == issue.pubkey);
 
     let mut new_comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);

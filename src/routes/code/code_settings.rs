@@ -209,7 +209,7 @@ pub fn CodeSettings() -> Element {
                                 {
                                     let is_active = settings.read().tab_size == size;
                                     let cls = if is_active {
-                                        "px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground"
+                                        "px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground transition"
                                     } else {
                                         "px-4 py-2 rounded-lg text-sm font-medium bg-muted text-muted-foreground hover:bg-accent transition"
                                     };

@@ -68,6 +68,14 @@ pub fn CodePullNew(naddr: String) -> Element {
                     closes_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
                 for id in &closes_list {
+                    if id.len() != 64 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+                        error_message.set(Some(format!(
+                            "Invalid event ID '{}': must be exactly 64 hex characters",
+                            id
+                        )));
+                        is_publishing.set(false);
+                        return;
+                    }
                     if nostr_sdk::EventId::from_hex(id).is_err() {
                         error_message.set(Some(format!("Invalid event ID: {}", id)));
                         is_publishing.set(false);
@@ -254,7 +262,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                             input {
                                 class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
-                                placeholder: "e.g., abc1234",
+                                placeholder: "Full git commit SHA (e.g., a1b2c3d4...)",
                                 value: "{commit}",
                                 oninput: move |e| commit.set(e.value()),
                             }
@@ -267,7 +275,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                             input {
                                 class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
-                                placeholder: "e.g., def5678",
+                                placeholder: "Full git commit SHA (e.g., e5f6a7b8...)",
                                 value: "{parent_commit}",
                                 oninput: move |e| parent_commit.set(e.value()),
                             }
@@ -333,11 +341,11 @@ pub fn CodePullNew(naddr: String) -> Element {
                     input {
                         class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
-                        placeholder: "e.g., abc123, def456",
+                        placeholder: "64-char hex event ID (e.g., a1b2c3d4e5f6...)",
                         value: "{closes_issues}",
                         oninput: move |e| closes_issues.set(e.value()),
                     }
-                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated event IDs of issues this PR closes" }
+                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated 64-character hex event IDs of issues this PR closes" }
                 }
             }
         }

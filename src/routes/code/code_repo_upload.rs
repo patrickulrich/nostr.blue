@@ -186,7 +186,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                         to: Route::CodeRepo {
                             naddr: naddr.clone(),
                         },
-                        class: "text-muted-foreground hover:text-foreground",
+                        class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",

@@ -272,8 +272,8 @@ pub struct TopDeveloper {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlatformStats {
     pub total_repos: usize,
-    pub open_issues: usize,
-    pub open_prs: usize,
+    pub total_issues: usize,
+    pub total_prs: usize,
     pub total_snippets: usize,
 }
 
@@ -385,7 +385,7 @@ pub async fn fetch_recent_global_activity(limit: usize) -> Result<Vec<Activity>,
 
 /// Fetch platform-wide stats
 ///
-/// Counts total repositories, open issues, open PRs, and snippets
+/// Counts total repositories, issues, PRs, and snippets
 /// across the entire network.
 pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
     // Fetch counts for each category with small limits to be efficient
@@ -407,8 +407,8 @@ pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
 
     Ok(PlatformStats {
         total_repos: repos.map(|e| e.len()).unwrap_or(0),
-        open_issues: issues.map(|e| e.len()).unwrap_or(0),
-        open_prs: prs.map(|e| e.len()).unwrap_or(0),
+        total_issues: issues.map(|e| e.len()).unwrap_or(0),
+        total_prs: prs.map(|e| e.len()).unwrap_or(0),
         total_snippets: snippets.map(|e| e.len()).unwrap_or(0),
     })
 }

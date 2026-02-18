@@ -183,7 +183,7 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                     Some(Err(e)) => {
                         log::warn!("Failed to fetch readme: {}", e);
                         rsx! {
-                            ReadmeViewer { content: None, loading: false }
+                            ReadmeViewer { content: None, loading: false, error: Some(e.clone()) }
                         }
                     },
                     None => rsx! {

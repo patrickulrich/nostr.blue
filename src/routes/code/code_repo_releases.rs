@@ -21,8 +21,10 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut show_new_form = use_signal(|| false);
     let mut repo_data = use_signal(|| None::<Repository>);
+    let mut refresh_counter = use_signal(|| 0u32);
     let naddr_for_effect = naddr.clone();
     use_effect(move || {
+        let _counter = *refresh_counter.read();
         let n = naddr_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -113,7 +115,13 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
             }
             div { class: "p-4 space-y-6",
                 if *show_new_form.read() {
-                    NewReleaseForm { naddr: naddr.clone() }
+                    NewReleaseForm {
+                        naddr: naddr.clone(),
+                        on_published: move |_| {
+                            show_new_form.set(false);
+                            refresh_counter += 1;
+                        },
+                    }
                 }
                 if let Some(err) = error.read().as_ref() {
                     div { class: "text-center text-red-400 py-4", "{err}" }
@@ -131,6 +139,9 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                                 repo: repo_data.read().clone(),
                                 user_pubkey: user_pubkey.clone(),
                                 is_authenticated: is_authenticated,
+                                on_mutated: move |_| {
+                                    refresh_counter += 1;
+                                },
                             }
                         }
                     }
@@ -146,6 +157,7 @@ fn ReleaseCard(
     #[props(default = None)] repo: Option<Repository>,
     #[props(default = String::new())] user_pubkey: String,
     #[props(default = false)] is_authenticated: bool,
+    on_mutated: EventHandler<()>,
 ) -> Element {
     let mut show_edit = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
@@ -171,7 +183,10 @@ fn ReleaseCard(
                 release: release.clone(),
                 naddr: naddr.clone(),
                 on_cancel: move |_| show_edit.set(false),
-                on_saved: move |_| show_edit.set(false),
+                on_saved: move |_| {
+                    show_edit.set(false);
+                    on_mutated.call(());
+                },
             }
         };
     }
@@ -238,6 +253,7 @@ fn ReleaseCard(
                                                 match delete_release(event_id).await {
                                                     Ok(_) => {
                                                         show_delete_confirm.set(false);
+                                                        on_mutated.call(());
                                                     }
                                                     Err(e) => {
                                                         delete_error.set(Some(e));
@@ -476,7 +492,7 @@ fn EditReleaseForm(
     }
 }
 #[component]
-fn NewReleaseForm(naddr: String) -> Element {
+fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
     let mut tag_name = use_signal(String::new);
     let mut title = use_signal(String::new);
     let mut description = use_signal(String::new);
@@ -529,6 +545,7 @@ fn NewReleaseForm(naddr: String) -> Element {
                         description.set(String::new());
                         asset_urls.set(vec![String::new()]);
                         prerelease.set(false);
+                        on_published.call(());
                     }
                     Err(e) => {
                         error_message.set(Some(e));

@@ -6,9 +6,10 @@ use crate::components::icons;
 use crate::routes::Route;
 use crate::stores::nostr_client;
 use crate::utils::format::{format_relative_time_or, format_sats_with_separator, truncate_pubkey};
-use crate::utils::nip34::{Bounty, BountyStatus};
+use crate::utils::nip34::{Bounty, BountyStatus, Issue};
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+use std::collections::HashMap;
 use std::time::Duration;
 
 type Result<T, E = String> = std::result::Result<T, E>;
@@ -38,7 +39,7 @@ struct BountyListing {
     pub repo_name: Option<String>,
 }
 
-/// Fetch all bounties from relays (Kind 9806).
+/// Fetch all bounties from relays (Kind 9806), then look up associated issue titles.
 async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
     let filter = Filter::new()
         .kind(Kind::Custom(Bounty::KIND))
@@ -46,15 +47,48 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
     let events = nostr_client::fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch bounties: {}", e))?;
-    let mut listings = Vec::new();
-    for event in &events {
-        if let Some(bounty) = Bounty::from_event(event) {
-            listings.push(BountyListing {
-                bounty,
-                issue_title: None,
-                repo_name: None,
-            });
+    let bounties: Vec<Bounty> = events.iter().filter_map(Bounty::from_event).collect();
+
+    // Collect unique issue event IDs to look up titles
+    let issue_ids: Vec<EventId> = bounties
+        .iter()
+        .filter_map(|b| EventId::from_hex(&b.issue_event_id).ok())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Fetch associated issue events in one batch
+    let mut issue_map: HashMap<String, Issue> = HashMap::new();
+    if !issue_ids.is_empty() {
+        let issue_filter = Filter::new()
+            .ids(issue_ids)
+            .kind(Kind::GitIssue);
+        if let Ok(issue_events) = nostr_client::fetch_events_aggregated(issue_filter, FETCH_TIMEOUT).await {
+            for event in &issue_events {
+                if let Some(issue) = Issue::from_event(event) {
+                    issue_map.insert(issue.event_id.clone(), issue);
+                }
+            }
         }
+    }
+
+    let mut listings = Vec::new();
+    for bounty in bounties {
+        let issue = issue_map.get(&bounty.issue_event_id);
+        let issue_title = issue.and_then(|i| i.subject.clone());
+        let repo_name = issue.and_then(|i| {
+            if i.repository_naddr.is_empty() {
+                None
+            } else {
+                // Extract repo identifier from naddr (last segment after ':')
+                i.repository_naddr.split(':').next_back().map(|s| s.to_string())
+            }
+        });
+        listings.push(BountyListing {
+            bounty,
+            issue_title,
+            repo_name,
+        });
     }
     // Sort newest first by default
     listings.sort_by(|a, b| b.bounty.created_at.cmp(&a.bounty.created_at));
