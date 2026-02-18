@@ -11,14 +11,11 @@ use nostr_sdk::PublicKey;
 /// Code repositories page component
 #[component]
 pub fn CodeRepositories() -> Element {
-    let auth = auth_store::AUTH_STATE.read();
-    if !auth.is_authenticated {
-        return rsx! {
-            NotAuthenticatedState {}
-        };
-    }
-    let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
+    // All hooks must be called before any early returns to maintain stable call-order indices.
     let mut repos_result = use_signal(|| None::<Result<Vec<Repository>, String>>);
+
+    let auth = auth_store::AUTH_STATE.read();
+    let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
     let pubkey_for_effect = pubkey_hex.clone();
     use_effect(move || {
         let pk = pubkey_for_effect.clone();
@@ -39,6 +36,12 @@ pub fn CodeRepositories() -> Element {
             repos_result.set(Some(result));
         });
     });
+
+    if !auth.is_authenticated {
+        return rsx! {
+            NotAuthenticatedState {}
+        };
+    }
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

@@ -145,9 +145,18 @@ pub fn PRReviewSection(
             review_body.set(String::new());
             // Publish to relays
             let id = pr_id.clone();
+            let saved_content = content.clone();
+            let saved_pubkey = user_pubkey.clone();
             spawn(async move {
-                if let Err(e) = publish_review_event(&id, state_str, &content).await {
+                if let Err(e) = publish_review_event(&id, state_str, &saved_content).await {
                     web_sys::console::error_1(&format!("Failed to publish review: {}", e).into());
+                    // Rollback: remove the optimistic entry
+                    let mut current = reviews.write();
+                    current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
+                    drop(current);
+                    // Restore form so user can retry
+                    show_form.set(true);
+                    review_body.set(saved_content);
                 }
             });
         }

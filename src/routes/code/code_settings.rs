@@ -75,6 +75,10 @@ fn save_code_settings(settings: &CodeSettingsData) {
 /// Code Settings page component.
 #[component]
 pub fn CodeSettings() -> Element {
+    // All hooks must be called before any early returns to maintain stable call-order indices.
+    let mut settings = use_signal(load_code_settings);
+    let mut save_success = use_signal(|| false);
+
     let auth = auth_store::AUTH_STATE.read();
     if !auth.is_authenticated {
         return rsx! {
@@ -83,9 +87,6 @@ pub fn CodeSettings() -> Element {
             }
         };
     }
-
-    let mut settings = use_signal(load_code_settings);
-    let mut save_success = use_signal(|| false);
 
     let handle_save = move |_| {
         let data = settings.read().clone();

@@ -16,6 +16,7 @@ use crate::services::git_hosting::{
 use crate::stores::nostr_client;
 use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
 
 /// Parsed search query with structured filters
 #[derive(Clone, Debug, Default)]
@@ -60,7 +61,11 @@ impl ParsedQuery {
                 }
             } else if let Some(value) = token.strip_prefix("author:") {
                 if !value.is_empty() {
-                    query.author = Some(value.to_string());
+                    // Normalize npub bech32 to hex; fall back to raw string
+                    let normalized = PublicKey::parse(value)
+                        .map(|pk| pk.to_hex())
+                        .unwrap_or_else(|_| value.to_string());
+                    query.author = Some(normalized);
                 }
             } else {
                 text_parts.push(token.to_string());

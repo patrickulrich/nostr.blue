@@ -122,7 +122,7 @@ impl Repository {
         for tag in event.tags.iter() {
             let tag_vec = tag.as_slice();
             // Parse custom tags first
-            if tag_vec.len() >= 3 && tag_vec[0] == "e" && tag_vec.get(3).map(|s| s.as_str()) == Some("fork") {
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec.get(3).map(|s| s.as_str()) == Some("fork") {
                 fork_of = Some(tag_vec[1].to_string());
                 continue;
             }

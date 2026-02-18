@@ -335,14 +335,14 @@ fn ActivityTimeline(issues: Vec<Issue>, prs: Vec<PullRequest>) -> Element {
     rsx! {
         div { class: "border border-border rounded-lg divide-y divide-border",
             for entry in entries.iter() {
-                TimelineRow { key: "{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
+                TimelineRow { key: "{entry.kind:?}_{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
             }
         }
     }
 }
 
 /// Timeline entry types
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum EntryKind {
     Issue,
     PullRequest,

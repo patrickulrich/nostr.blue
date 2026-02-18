@@ -87,16 +87,17 @@ pub async fn delete_release(release_event_id: EventId) -> Result<(), String> {
 }
 /// Fetch a release by its event ID (note1 or nevent1)
 pub async fn fetch_release(event_ref: &str) -> Result<Release, String> {
-    if let Some(release) = get_cached_release(event_ref) {
-        return Ok(release);
-    }
     let event_id = decode_event_id(event_ref)
         .map_err(|e| format!("Invalid event reference: {}", e))?;
+    let hex_id = event_id.to_hex();
+    if let Some(release) = get_cached_release(&hex_id) {
+        return Ok(release);
+    }
     let filter = Filter::new().id(event_id).kind(Kind::Custom(Release::KIND));
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to fetch release: {}", e))?;
     cache_release_events(&events);
-    get_cached_release(&event_id.to_hex())
+    get_cached_release(&hex_id)
         .ok_or_else(|| "Release not found".to_string())
 }

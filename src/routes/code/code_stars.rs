@@ -11,13 +11,7 @@ use dioxus::prelude::*;
 /// Starred repositories page component
 #[component]
 pub fn CodeStars() -> Element {
-    let auth = auth_store::AUTH_STATE.read();
-    if !auth.is_authenticated {
-        return rsx! {
-            NotAuthenticatedState {}
-        };
-    }
-
+    // All hooks must be called before any early returns to maintain stable call-order indices.
     let mut repos = use_signal(Vec::<Repository>::new);
     let mut loading = use_signal(|| true);
     let mut search_query = use_signal(String::new);
@@ -56,6 +50,13 @@ pub fn CodeStars() -> Element {
             .cloned()
             .collect::<Vec<_>>()
     });
+
+    let auth = auth_store::AUTH_STATE.read();
+    if !auth.is_authenticated {
+        return rsx! {
+            NotAuthenticatedState {}
+        };
+    }
 
     rsx! {
         div { class: "min-h-screen",

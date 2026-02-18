@@ -50,11 +50,13 @@ fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_me
     diff.push_str("new file mode 100644\n");
     diff.push_str("--- /dev/null\n");
     diff.push_str(&format!("+++ b/{path}\n"));
-    diff.push_str(&format!("@@ -0,0 +1,{line_count} @@\n"));
-    for line in &lines {
-        diff.push('+');
-        diff.push_str(line);
-        diff.push('\n');
+    if line_count > 0 {
+        diff.push_str(&format!("@@ -0,0 +1,{line_count} @@\n"));
+        for line in &lines {
+            diff.push('+');
+            diff.push_str(line);
+            diff.push('\n');
+        }
     }
     diff
 }

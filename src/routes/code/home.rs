@@ -1015,7 +1015,7 @@ fn DeveloperCard(rank: usize, developer: TopDeveloper) -> Element {
     rsx! {
         Link {
             to: Route::CodeUserProfile { pubkey: pubkey.clone() },
-            class: "p-3 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+            class: "p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
             div { class: "text-sm font-bold text-muted-foreground w-6 text-center", "#{rank}" }
             img {
                 class: "w-10 h-10 rounded-full bg-muted",

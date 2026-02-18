@@ -420,16 +420,33 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                             let amount = bounty_amount;
                                                             let claimer = bounties.read().iter()
                                                                 .find(|b| b.event_id == bounty_eid)
-                                                                .and_then(|b| b.claimer.clone())
-                                                                .unwrap_or_default();
+                                                                .and_then(|b| b.claimer.clone());
                                                             move |_| {
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
                                                                 let c = claimer.clone();
                                                                 spawn(async move {
+                                                                    let c = match c {
+                                                                        Some(ref c) if !c.is_empty() => c.clone(),
+                                                                        _ => {
+                                                                            log::error!("Cannot release bounty: no claimer found");
+                                                                            web_sys::console::error_1(
+                                                                                &"Cannot release bounty: no claimer found for this bounty".into(),
+                                                                            );
+                                                                            return;
+                                                                        }
+                                                                    };
                                                                     if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
                                                                         if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
-                                                                            let _ = release_bounty(b_id, i_id, &c, amount, None).await;
+                                                                            match release_bounty(b_id, i_id, &c, amount, None).await {
+                                                                                Ok(_) => {}
+                                                                                Err(e) => {
+                                                                                    log::error!("Failed to release bounty: {}", e);
+                                                                                    web_sys::console::error_1(
+                                                                                        &format!("Failed to release bounty: {}", e).into(),
+                                                                                    );
+                                                                                }
+                                                                            }
                                                                         }
                                                                     }
                                                                 });

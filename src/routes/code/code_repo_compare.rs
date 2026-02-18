@@ -160,6 +160,10 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                             "Create Pull Request"
                         }
                     }
+                } else if *has_compared.read() && diff_content.read().is_empty() {
+                    div { class: "text-center text-muted-foreground py-8",
+                        "No differences found — branches are identical"
+                    }
                 } else if !*has_compared.read() {
                     div { class: "text-center text-muted-foreground py-8",
                         "Select two branches to compare"

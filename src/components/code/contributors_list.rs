@@ -16,12 +16,14 @@ pub fn ContributorsList(
     #[props(default = None)]
     pr_count: Option<u32>,
 ) -> Element {
-    // Deduplicate maintainers using HashSet, excluding the owner
-    let seen: HashSet<&String> = maintainers.iter().collect();
-    let unique_maintainers: Vec<&String> = seen
-        .into_iter()
-        .filter(|m| **m != owner)
-        .collect();
+    // Deduplicate maintainers while preserving original order, excluding the owner
+    let mut seen = HashSet::new();
+    let mut unique_maintainers = Vec::new();
+    for m in &maintainers {
+        if *m != owner && seen.insert(m.clone()) {
+            unique_maintainers.push(m);
+        }
+    }
     let total_count = 1 + unique_maintainers.len();
 
     rsx! {

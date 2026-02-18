@@ -136,14 +136,13 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
         });
     });
 
-    // Permission checks: author OR maintainer/owner can update status
+    // Permission checks: can_change_status includes author check; fall back to author-only when repo not loaded
     let can_update_status = is_authenticated
-        && (user_pubkey == pr.pubkey
-            || repo
-                .read()
-                .as_ref()
-                .map(|r| permissions::can_change_status(&user_pubkey, r, &pr.pubkey))
-                .unwrap_or(false));
+        && repo
+            .read()
+            .as_ref()
+            .map(|r| permissions::can_change_status(&user_pubkey, r, &pr.pubkey))
+            .unwrap_or(user_pubkey == pr.pubkey);
     let required_approvals = repo
         .read()
         .as_ref()
@@ -919,21 +918,6 @@ fn LoadingSkeleton() -> Element {
 /// indicating potential merge conflicts.
 #[component]
 fn ConflictBanner(parent_commit: String) -> Element {
-    let parent = parent_commit.clone();
-    let _conflict_check = use_resource(move || {
-        let parent = parent.clone();
-        async move {
-            // Try to check if the parent commit exists on the target branch
-            // by fetching the repo and comparing with HEAD log
-            use crate::services::git_hosting::git_service::GitService;
-            if !GitService::is_initialized() {
-                return None; // Can't check without git service
-            }
-            // Return the parent commit for display purposes
-            Some(parent)
-        }
-    });
-
     // Only show when we have a parent commit to reference
     let short_parent = truncate_commit(&parent_commit);
     rsx! {

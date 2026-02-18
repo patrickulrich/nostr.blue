@@ -29,10 +29,11 @@ fn convert_mermaid_blocks(html: &str) -> String {
             let code_end = code_start + end_offset;
             let diagram_content = &result[code_start..code_end];
             // Decode HTML entities back to plain text for mermaid parsing
+            // Decode safe HTML entities back for mermaid parsing.
+            // Do NOT decode &lt;/&gt; — the browser decodes them via textContent,
+            // and decoding here would re-introduce XSS vectors (e.g. <script> tags).
             let decoded = diagram_content
                 .replace("&amp;", "&")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
                 .replace("&quot;", "\"")
                 .replace("&#x27;", "'");
             let replacement = format!("<div class=\"mermaid\">{}</div>", decoded);
@@ -199,5 +200,13 @@ mod tests {
         let html = render_markdown(md);
         let count = html.matches("<div class=\"mermaid\">").count();
         assert_eq!(count, 2, "Should convert both mermaid blocks");
+    }
+    #[test]
+    fn test_mermaid_block_script_tag_sanitized() {
+        let input = "```mermaid\ngraph TD\n    A[<script>alert('xss')</script>] --> B\n```";
+        let result = render_markdown(input);
+        assert!(!result.contains("<script"), "Script tags inside mermaid blocks must be sanitized");
+        // Verify the mermaid content is still rendered (converted to div)
+        assert!(result.contains("mermaid"));
     }
 }

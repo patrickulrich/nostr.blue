@@ -69,6 +69,8 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut commit_result = use_signal(|| None::<Result<CommitDetail, String>>);
 
+    let mut request_id = use_signal(|| 0u32);
+
     let naddr_for_effect = naddr.clone();
     let sha_for_effect = sha.clone();
     use_effect(move || {
@@ -78,18 +80,28 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
         if !client_initialized {
             return;
         }
+        let current_id = *request_id.peek() + 1;
+        request_id.set(current_id);
         spawn(async move {
             let result = fetch_repository(&n).await;
+            if *request_id.peek() != current_id {
+                return;
+            }
             match &result {
                 Ok(repo) => {
+                    let mut found = false;
                     for url in repo.clone.iter() {
                         if let Some((owner, repo_name)) = parse_github_url(url) {
                             let detail = fetch_commit_detail(&owner, &repo_name, &s).await;
+                            if *request_id.peek() != current_id {
+                                return;
+                            }
                             commit_result.set(Some(detail));
+                            found = true;
                             break;
                         }
                     }
-                    if commit_result.read().is_none() {
+                    if !found {
                         commit_result.set(Some(Err(
                             "No GitHub URL found for this repository".to_string(),
                         )));

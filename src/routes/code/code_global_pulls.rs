@@ -25,11 +25,7 @@ enum StatusFilter {
 
 #[component]
 pub fn CodeGlobalPulls() -> Element {
-    let auth = auth_store::AUTH_STATE.read();
-    if !auth.is_authenticated {
-        return rsx! { NotAuthenticatedState {} };
-    }
-    let user_pubkey = auth.pubkey.clone().unwrap_or_default();
+    // All hooks must be called before any early returns to maintain stable call-order indices.
     let mut created_prs = use_signal(Vec::<PullRequest>::new);
     let mut assigned_prs = use_signal(Vec::<PullRequest>::new);
     let mut mentioned_prs = use_signal(Vec::<PullRequest>::new);
@@ -38,6 +34,9 @@ pub fn CodeGlobalPulls() -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
+
+    let auth = auth_store::AUTH_STATE.read();
+    let user_pubkey = auth.pubkey.clone().unwrap_or_default();
     let user_pubkey_for_effect = user_pubkey.clone();
     use_effect(move || {
         let pk_hex = user_pubkey_for_effect.clone();
@@ -66,6 +65,10 @@ pub fn CodeGlobalPulls() -> Element {
             loading.set(false);
         });
     });
+
+    if !auth.is_authenticated {
+        return rsx! { NotAuthenticatedState {} };
+    }
 
     let all_prs_for_tab: Vec<PullRequest> = match *active_tab.read() {
         FilterTab::Created => created_prs.read().clone(),
