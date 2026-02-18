@@ -127,7 +127,7 @@ fn AllContent() -> Element {
         }
         spawn(async move {
             let (repos_res, snippets_res) = futures::join!(
-                fetch_recent_repositories(10), fetch_recent_snippets(10)
+                fetch_recent_repositories(10, None), fetch_recent_snippets(10)
             );
             repos.set(Some(repos_res));
             snippets.set(Some(snippets_res));
@@ -211,7 +211,7 @@ fn RepositoriesContent() -> Element {
             return;
         }
         spawn(async move {
-            let result = fetch_recent_repositories(50).await;
+            let result = fetch_recent_repositories(50, None).await;
             repos.set(Some(result));
         });
     });

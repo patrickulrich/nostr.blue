@@ -115,10 +115,11 @@ pub mod modal;
 pub use modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 pub mod toast;
 pub use external_content_card::ExternalContentList;
+#[allow(unused_imports)]
 pub use code::{
     BranchSelector, CodeFileTree, CodeFileViewer, CodeFileViewerSkeleton, CodeIssueRow,
-    CodePullRow, CodeRepoCard, CodeSnippetCard, CodeStatusBadge, FilePathBreadcrumb,
-    FileTreeSkeleton,
+    CodePullRow, CodeReactions, CodeRepoCard, CodeSnippetCard, CodeStatusBadge,
+    FilePathBreadcrumb, FileTreeSkeleton, LabelPicker, PRReviewSection,
 };
 pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
 pub use citation::{CitationPickerModal, CitationSelection};
