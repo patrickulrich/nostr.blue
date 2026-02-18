@@ -186,14 +186,14 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
         move |_| {
             let content = new_comment.read().clone();
             let id = issue_id.clone();
-            let author = issue_pubkey.clone();
+            let issue_author = issue_pubkey.clone();
             if content.trim().is_empty() {
                 return;
             }
             spawn(async move {
                 is_submitting.set(true);
                 comment_error.set(None);
-                match publish_comment_by_id(&id, &author, &content).await {
+                match publish_comment_by_id(&id, &issue_author, &content).await {
                     Ok(_) => {
                         new_comment.set(String::new());
                         comments.restart();
@@ -537,7 +537,7 @@ fn CommentCard(comment: GitComment) -> Element {
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
     rsx! {
-        div { class: "p-4 border border-border rounded-lg",
+        div { class: "bg-card border border-border rounded-lg p-4",
             div { class: "flex items-center gap-2 mb-2",
                 Link {
                     to: Route::Profile {

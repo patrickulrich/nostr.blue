@@ -1012,7 +1012,7 @@ fn DeleteConfirmModal(
 ) -> Element {
     rsx! {
         div {
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm",
+            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
             onclick: move |e| on_cancel.call(e),
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl",

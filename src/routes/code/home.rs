@@ -990,28 +990,16 @@ fn StatCard(label: &'static str, value: usize, icon_type: StatIcon) -> Element {
 #[component]
 fn DeveloperCard(rank: usize, developer: TopDeveloper) -> Element {
     let pubkey = developer.pubkey.clone();
-    let display_name = {
+    let (display_name, avatar_url) = {
         let cache = PROFILE_CACHE.read();
-        cache
-            .peek(&pubkey)
-            .and_then(|p| {
-                p.display_name
-                    .clone()
-                    .or_else(|| p.name.clone())
-            })
-            .unwrap_or_else(|| truncate_pubkey(&pubkey))
-    };
-    let avatar_url = {
-        let cache = PROFILE_CACHE.read();
-        cache
-            .peek(&pubkey)
+        let profile = cache.peek(&pubkey);
+        let name = profile
+            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+            .unwrap_or_else(|| truncate_pubkey(&pubkey));
+        let avatar = profile
             .and_then(|p| p.picture.clone())
-            .unwrap_or_else(|| {
-                format!(
-                    "https://api.dicebear.com/7.x/identicon/svg?seed={}",
-                    pubkey
-                )
-            })
+            .unwrap_or_else(|| format!("https://api.dicebear.com/7.x/identicon/svg?seed={}", pubkey));
+        (name, avatar)
     };
 
     let suffix = if developer.contribution_count == 1 { "" } else { "s" };

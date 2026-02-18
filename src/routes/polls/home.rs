@@ -253,7 +253,11 @@ pub fn Polls() -> Element {
                             Some(600),
                         ).await {
                             Ok(handle) => {
-                                interaction_stream_handle.set(Some(handle));
+                                if *feed_type.read() == current_feed_type {
+                                    interaction_stream_handle.set(Some(handle));
+                                } else {
+                                    handle.unsubscribe().await;
+                                }
                             }
                             Err(e) => {
                                 log::error!("Failed to restart interaction stream for polls: {}", e);

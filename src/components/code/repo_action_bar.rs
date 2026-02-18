@@ -21,7 +21,6 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 #[component]
 pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let toast = consume_toast();
-    let _nav = use_navigator();
     let mut show_zap_modal = use_signal(|| false);
     let mut is_starred = use_signal(|| false);
     let mut star_count = use_signal(|| repo.star_count);
@@ -225,15 +224,9 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     }
     // Pre-filled form state for the fork modal
-    let mut fork_form_name = use_signal(|| {
-        repo.name.as_deref()
-            .map(|n| format!("{} (fork)", n))
-            .unwrap_or_else(|| format!("{}-fork", repo.id))
-    });
-    let mut fork_form_desc = use_signal(|| repo.description.clone().unwrap_or_default());
-    let mut fork_form_clone_urls = use_signal(|| {
-        repo.clone.iter().map(|s| s.to_string()).collect::<Vec<String>>().join("\n")
-    });
+    let mut fork_form_name = use_signal(String::new);
+    let mut fork_form_desc = use_signal(String::new);
+    let mut fork_form_clone_urls = use_signal(String::new);
     let handle_fork = move |_| {
         if !*HAS_SIGNER.read() {
             toast.warning("Sign in to fork repositories".to_string(), ToastOptions::new());
@@ -264,7 +257,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         let form_desc = fork_form_desc.read().clone();
         let form_urls_raw = fork_form_clone_urls.read().clone();
         spawn(async move {
-            let fork_id = format!("{}-fork", id);
+            let fork_id = format!("{}-fork-{}", id, nostr_sdk::Timestamp::now().as_secs());
             let fork_name = if form_name.trim().is_empty() { None } else { Some(form_name.trim().to_string()) };
             let fork_desc = if form_desc.trim().is_empty() { None } else { Some(form_desc.trim().to_string()) };
             let urls: Vec<String> = form_urls_raw

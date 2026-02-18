@@ -160,10 +160,13 @@ pub fn PollCard(
                             .max()
                             .map(|t| Timestamp::from_secs(t.as_secs().saturating_sub(1)))
                             .unwrap_or(Timestamp::now());
-                        let vote_filter = Filter::new()
+                        let mut vote_filter = Filter::new()
                             .kind(Kind::PollResponse)
                             .event(poll_id)
                             .since(since_ts);
+                        if let Some(until) = ends_at {
+                            vote_filter = vote_filter.until(until);
+                        }
                         match client.subscribe(vote_filter, None).await {
                             Ok(output) => {
                                 let subscription_id = output.val;

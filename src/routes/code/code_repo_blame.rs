@@ -257,7 +257,9 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
 /// Displays the commit history header for the file
 #[component]
 fn BlameCommitHeader(commits: Vec<GitHubCommit>, filename: String) -> Element {
-    let latest = &commits[0];
+    let Some(latest) = commits.first() else {
+        return rsx! { div { class: "bg-card border border-border rounded-lg p-4 text-muted-foreground", "No commit history available" } };
+    };
     let message = &latest.commit.message;
     let (title, _) = match message.find('\n') {
         Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
