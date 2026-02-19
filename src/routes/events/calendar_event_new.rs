@@ -3,6 +3,10 @@
 //! Create new calendar events (NIP-52 kinds 31922/31923)
 use crate::components::MediaUploader;
 use crate::routes::Route;
+use crate::services::geocoding::{self, GeoLocation};
+use crate::services::profile_search::{
+    get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
+};
 use crate::stores::{auth_store, calendar_store};
 use crate::utils::date_helpers::get_today;
 use crate::utils::ics::{parse_ics, IcsDateTime, IcsEvent};
@@ -44,10 +48,49 @@ pub fn CalendarEventNew() -> Element {
     let mut show_ics_selector = use_signal(|| false);
     let mut participants = use_signal(Vec::<(String, String, String)>::new);
     let mut participant_input = use_signal(String::new);
+    // Fix 1: End date/time auto-sync
+    let mut end_manually_set = use_signal(|| false);
+    // Fix 2: Location autocomplete
+    let mut location_suggestions = use_signal(Vec::<GeoLocation>::new);
+    let mut show_location_dropdown = use_signal(|| false);
+    let mut location_debounce = use_signal(|| 0u32);
+    // Fix 3: Participant search
+    let mut participant_results = use_signal(Vec::<ProfileSearchResult>::new);
+    let mut show_participant_dropdown = use_signal(|| false);
+    let mut participant_debounce = use_signal(|| 0u32);
+    let mut contact_pubkeys = use_signal(Vec::<nostr_sdk::prelude::PublicKey>::new);
     let is_authenticated = auth_store::AUTH_STATE.read().is_authenticated;
     let can_publish = use_memo(move || {
         let title_val = title();
         !title_val.trim().is_empty() && !is_publishing()
+    });
+    // Fix 1: Auto-sync end date/time when start changes
+    use_effect(move || {
+        let sd = start_date.read().clone();
+        let st = start_time.read().clone();
+        let et = *event_type.read();
+        if !*end_manually_set.peek() {
+            match et {
+                EventType::TimeBased => {
+                    let start_ts = parse_datetime_to_timestamp(&sd, &st);
+                    if start_ts > 0 {
+                        let (new_date, new_time) = timestamp_to_date_time(start_ts + 3600);
+                        end_date.set(new_date);
+                        end_time.set(new_time);
+                    }
+                }
+                EventType::DateBased => {
+                    end_date.set(sd);
+                }
+            }
+        }
+    });
+    // Fix 3: Load contacts on mount for participant search
+    use_effect(move || {
+        spawn(async move {
+            let contacts = get_contact_pubkeys().await;
+            contact_pubkeys.set(contacts);
+        });
     });
     let add_location = move |_| {
         let loc = location.read().trim().to_string();
@@ -200,6 +243,7 @@ pub fn CalendarEventNew() -> Element {
             }
         }
         if let Some(ref end_dt) = evt.end {
+            end_manually_set.set(true);
             match end_dt {
                 IcsDateTime::Date(date_str) => {
                     end_date.set(date_str.clone());
@@ -517,7 +561,10 @@ pub fn CalendarEventNew() -> Element {
                                 r#type: "date",
                                 class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                 value: "{end_date}",
-                                oninput: move |e| end_date.set(e.value()),
+                                oninput: move |e| {
+                                    end_manually_set.set(true);
+                                    end_date.set(e.value());
+                                },
                             }
                         }
                         if *event_type.read() == EventType::TimeBased {
@@ -527,7 +574,10 @@ pub fn CalendarEventNew() -> Element {
                                     r#type: "time",
                                     class: "w-full px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
                                     value: "{end_time}",
-                                    oninput: move |e| end_time.set(e.value()),
+                                    oninput: move |e| {
+                                        end_manually_set.set(true);
+                                        end_time.set(e.value());
+                                    },
                                 }
                             }
                         }
@@ -546,18 +596,70 @@ pub fn CalendarEventNew() -> Element {
                     }
                     div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Location" }
-                        div { class: "flex gap-2",
-                            input {
-                                r#type: "text",
-                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
-                                placeholder: "Address or online link",
-                                value: "{location}",
-                                oninput: move |e| location.set(e.value()),
+                        div { class: "relative",
+                            div { class: "flex gap-2",
+                                input {
+                                    r#type: "text",
+                                    class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
+                                    placeholder: "Search address or enter online link",
+                                    value: "{location}",
+                                    oninput: move |e| {
+                                        let val = e.value();
+                                        location.set(val.clone());
+                                        if val.trim().len() >= 3 {
+                                            show_location_dropdown.set(true);
+                                            let current_id = *location_debounce.peek() + 1;
+                                            location_debounce.set(current_id);
+                                            spawn(async move {
+                                                gloo_timers::future::TimeoutFuture::new(300).await;
+                                                if *location_debounce.peek() != current_id { return; }
+                                                if let Ok(results) = geocoding::geocode_suggestions(&val, 10).await {
+                                                    location_suggestions.set(results);
+                                                }
+                                            });
+                                        } else {
+                                            show_location_dropdown.set(false);
+                                            location_suggestions.set(vec![]);
+                                        }
+                                    },
+                                    onfocusout: move |_| {
+                                        // Delay hiding to allow click on suggestion
+                                        spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(200).await;
+                                            show_location_dropdown.set(false);
+                                        });
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-3 bg-muted hover:bg-accent rounded-lg transition",
+                                    onclick: add_location,
+                                    "+"
+                                }
                             }
-                            button {
-                                class: "px-4 py-3 bg-muted hover:bg-accent rounded-lg transition",
-                                onclick: add_location,
-                                "+"
+                            if *show_location_dropdown.read() && !location_suggestions.read().is_empty() {
+                                div { class: "absolute left-0 right-0 top-full mt-1 z-50 bg-background border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto",
+                                    for (idx , suggestion) in location_suggestions.read().iter().enumerate() {
+                                        {
+                                            let display = suggestion.display_name.clone();
+                                            rsx! {
+                                                button {
+                                                    key: "{idx}",
+                                                    class: "w-full text-left px-4 py-3 hover:bg-accent transition text-sm border-b border-border last:border-b-0",
+                                                    onmousedown: move |e| e.prevent_default(),
+                                                    onclick: {
+                                                        let display = display.clone();
+                                                        move |_| {
+                                                            location.set(display.clone());
+                                                            show_location_dropdown.set(false);
+                                                            location_suggestions.set(vec![]);
+                                                        }
+                                                    },
+                                                    "{display}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                         if !locations.read().is_empty() {
@@ -625,27 +727,118 @@ pub fn CalendarEventNew() -> Element {
                     div { class: "mb-4",
                         label { class: "block text-sm font-medium mb-2", "Participants" }
                         p { class: "text-xs text-muted-foreground mb-2",
-                            "Invite people to this event (enter npub or hex pubkey)"
+                            "Search by name or paste npub"
                         }
-                        div { class: "flex gap-2 mb-2",
-                            input {
-                                r#type: "text",
-                                class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
-                                placeholder: "npub1... or hex pubkey",
-                                value: "{participant_input}",
-                                oninput: move |e| participant_input.set(e.value()),
-                                onkeydown: move |e| {
-                                    if e.key() == Key::Enter {
-                                        e.prevent_default();
-                                        do_add_participant();
-                                    }
-                                },
+                        div { class: "relative mb-2",
+                            div { class: "flex gap-2",
+                                input {
+                                    r#type: "text",
+                                    class: "flex-1 px-4 py-3 bg-muted rounded-lg border border-border focus:border-primary focus:outline-hidden transition",
+                                    placeholder: "Search by name or paste npub",
+                                    value: "{participant_input}",
+                                    oninput: move |e| {
+                                        let val = e.value();
+                                        participant_input.set(val.clone());
+                                        if val.trim().len() >= 2 {
+                                            show_participant_dropdown.set(true);
+                                            let contacts = contact_pubkeys.peek().clone();
+                                            let cached = search_cached_profiles(&val, 8, &contacts, &[]);
+                                            participant_results.set(cached.clone());
+                                            if val.trim().len() >= 3 && cached.len() < 5 {
+                                                let current_id = *participant_debounce.peek() + 1;
+                                                participant_debounce.set(current_id);
+                                                let query_snapshot = val.clone();
+                                                spawn(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(300).await;
+                                                    if *participant_debounce.peek() != current_id { return; }
+                                                    if let Ok(results) = search_profiles(&query_snapshot, 8, true).await {
+                                                        participant_results.set(results);
+                                                    }
+                                                });
+                                            }
+                                        } else {
+                                            show_participant_dropdown.set(false);
+                                            participant_results.set(vec![]);
+                                        }
+                                    },
+                                    onkeydown: move |e| {
+                                        if e.key() == Key::Enter {
+                                            e.prevent_default();
+                                            show_participant_dropdown.set(false);
+                                            do_add_participant();
+                                        }
+                                    },
+                                    onfocusout: move |_| {
+                                        spawn(async move {
+                                            gloo_timers::future::TimeoutFuture::new(200).await;
+                                            show_participant_dropdown.set(false);
+                                        });
+                                    },
+                                }
+                                button {
+                                    class: "px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg font-medium transition",
+                                    r#type: "button",
+                                    onclick: add_participant,
+                                    "Add"
+                                }
                             }
-                            button {
-                                class: "px-4 py-2 bg-accent hover:bg-accent/80 rounded-lg font-medium transition",
-                                r#type: "button",
-                                onclick: add_participant,
-                                "Add"
+                            if *show_participant_dropdown.read() && !participant_results.read().is_empty() {
+                                div { class: "absolute left-0 right-0 top-full mt-1 z-50 bg-background border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto",
+                                    for result in participant_results.read().iter() {
+                                        {
+                                            let pubkey_hex = result.pubkey.to_hex();
+                                            let display = result.get_display_name();
+                                            let username = result.get_username();
+                                            let picture = result.picture.clone();
+                                            let is_contact = result.is_contact;
+                                            let initial = display.chars().next().unwrap_or('?').to_uppercase().to_string();
+                                            rsx! {
+                                                button {
+                                                    key: "{pubkey_hex}",
+                                                    class: "w-full text-left px-4 py-2 hover:bg-accent transition flex items-center gap-3 border-b border-border last:border-b-0",
+                                                    onmousedown: move |e| e.prevent_default(),
+                                                    onclick: {
+                                                        let pubkey_hex = pubkey_hex.clone();
+                                                        let display = display.clone();
+                                                        move |_| {
+                                                            let mut parts = participants.read().clone();
+                                                            if parts.iter().any(|(pk, _, _)| pk == &pubkey_hex) {
+                                                                error_message.set(Some("Participant already added".to_string()));
+                                                            } else {
+                                                                parts.push((pubkey_hex.clone(), display.clone(), "participant".to_string()));
+                                                                participants.set(parts);
+                                                                error_message.set(None);
+                                                            }
+                                                            participant_input.set(String::new());
+                                                            show_participant_dropdown.set(false);
+                                                            participant_results.set(vec![]);
+                                                        }
+                                                    },
+                                                    if let Some(ref pic) = picture {
+                                                        img {
+                                                            src: "{pic}",
+                                                            alt: "{display}",
+                                                            class: "w-8 h-8 rounded-full object-cover",
+                                                        }
+                                                    } else {
+                                                        div { class: "w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-sm font-medium",
+                                                            "{initial}"
+                                                        }
+                                                    }
+                                                    div { class: "flex-1 min-w-0",
+                                                        div { class: "text-sm font-medium truncate", "{display}" }
+                                                        if let Some(ref uname) = username {
+                                                            div { class: "text-xs text-muted-foreground truncate", "@{uname}" }
+                                                        }
+                                                    }
+                                                    if is_contact {
+                                                        span { class: "text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full", "Following" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                         if !participants.read().is_empty() {
