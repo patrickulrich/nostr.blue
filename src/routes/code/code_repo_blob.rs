@@ -60,19 +60,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                 let decoded_path = urlencoding::decode(&path)
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| path.clone());
-                fn is_safe_path(path: &str) -> bool {
-                    use std::path::{Component, Path};
-                    let path = Path::new(path);
-                    for component in path.components() {
-                        match component {
-                            Component::ParentDir => return false,
-                            Component::RootDir => return false,
-                            Component::Prefix(_) => return false,
-                            _ => {}
-                        }
-                    }
-                    !path.to_string_lossy().starts_with('/')
-                }
+                use crate::utils::is_safe_path;
                 if !is_safe_path(&decoded_path) {
                     log::warn!("Path traversal attempt blocked: {}", decoded_path);
                     error.set(Some("Invalid path".to_string()));

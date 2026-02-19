@@ -186,6 +186,64 @@ fn feature_to_location(feature: &PhotonFeature) -> GeoLocation {
         place_type: props.place_type.clone(),
     }
 }
+/// Nominatim API endpoint (OpenStreetMap — better venue/business name search than Photon)
+const NOMINATIM_API_URL: &str = "https://nominatim.openstreetmap.org/search";
+
+/// Nominatim API response item
+#[derive(Debug, Deserialize)]
+struct NominatimResult {
+    display_name: String,
+    lat: String,
+    lon: String,
+    #[serde(rename = "type")]
+    place_type: Option<String>,
+}
+
+/// Search for location suggestions (for autocomplete)
+///
+/// Uses Nominatim (OpenStreetMap) which handles venue/business name queries
+/// much better than Photon. No caching — autocomplete results are transient.
+pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocation>, String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+    let encoded = urlencoding::encode(trimmed);
+    let url = format!(
+        "{}?format=json&q={}&limit={}&addressdetails=1",
+        NOMINATIM_API_URL, encoded, limit
+    );
+    let response = Request::get(&url)
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("User-Agent", "nostr.blue/0.7")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch suggestions: {}", e))?;
+    if !response.ok() {
+        return Err(format!("Geocode API error: {}", response.status()));
+    }
+    let results: Vec<NominatimResult> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    Ok(results
+        .into_iter()
+        .filter_map(|r| {
+            let lat = r.lat.parse::<f64>().ok()?;
+            let lon = r.lon.parse::<f64>().ok()?;
+            Some(GeoLocation {
+                lat,
+                lon,
+                display_name: r.display_name,
+                city: None,
+                state: None,
+                country: None,
+                country_code: None,
+                place_type: r.place_type,
+            })
+        })
+        .collect())
+}
 /// Decode a geohash to coordinates (center point)
 pub fn geohash_to_coords(geohash: &str) -> Option<(f64, f64)> {
     if geohash.is_empty() {

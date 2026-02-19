@@ -46,6 +46,17 @@ pub fn CodeRepoCard(
             if show_description && !description.is_empty() {
                 p { class: "mt-2 text-sm text-muted-foreground line-clamp-2", "{description}" }
             }
+            if !repo.topics.is_empty() {
+                div { class: "mt-2 flex flex-wrap gap-1",
+                    for (idx, topic) in repo.topics.iter().enumerate() {
+                        span {
+                            key: "{idx}_{topic}",
+                            class: "px-2 py-0.5 rounded-full bg-accent text-accent-foreground text-xs",
+                            "{topic}"
+                        }
+                    }
+                }
+            }
             if show_stats {
                 div { class: "mt-3 flex items-center gap-4 text-sm text-muted-foreground",
                     div { class: "flex items-center gap-1",

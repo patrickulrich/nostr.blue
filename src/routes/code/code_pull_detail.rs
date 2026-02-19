@@ -1,18 +1,33 @@
 //! Pull Request Detail Page
 //!
-//! View a single NIP-34 Git patch/PR (Kind 1617) with comments.
+//! View a single NIP-34 Git patch/PR (Kind 1617) with comments,
+//! diff viewer, code reviews, and merge controls.
+use crate::components::code::{DiffViewer, PRReviewSection};
 use crate::components::{icons, CodeStatusBadge};
 use crate::routes::Route;
 use crate::services::git_hosting::{
-    fetch_pr_comments_by_id, fetch_pull_request, publish_pr_comment_by_id,
-    update_pr_status_by_id,
+    fetch_pr_comments_by_id, fetch_pull_request, fetch_repository, publish_pr_comment_by_id,
+    publish_pr_update_by_id, update_pr_status_by_id,
+};
+use crate::services::git_hosting::pull_requests::{
+    fetch_line_comments_by_id, publish_line_comment_by_id, LineComment,
 };
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{truncate_commit, truncate_pubkey};
 use crate::utils::format_relative_time_or;
-use crate::utils::nip34::{GitComment, IssueStatus, PullRequest};
+use crate::services::git_hosting::reviews::fetch_pr_reviews;
+use crate::utils::nip34::{GitComment, IssueStatus, PersistedReview, PullRequest, Repository, ReviewState};
+use crate::utils::permissions;
 use dioxus::prelude::*;
+
+/// PR detail tab
+#[derive(Clone, Copy, PartialEq)]
+enum PrTab {
+    Conversation,
+    FilesChanged,
+}
+
 /// Pull request detail page component
 #[component]
 pub fn CodePullDetail(note_id: String) -> Element {
@@ -94,6 +109,7 @@ pub fn CodePullDetail(note_id: String) -> Element {
         }
     }
 }
+
 #[component]
 fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> Element {
     let pr_id = pr.event_id.clone();
@@ -104,16 +120,121 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
         .as_ref()
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| pr.pubkey_display());
-    let can_update_status = is_authenticated && user_pubkey == pr.pubkey;
+
+    // Fetch repository for permission checks
+    let mut repo = use_signal(|| None::<Repository>);
+    let repo_naddr = pr.repository_naddr.clone();
+    use_effect(move || {
+        let naddr = repo_naddr.clone();
+        if naddr.is_empty() {
+            return;
+        }
+        spawn(async move {
+            if let Ok(r) = fetch_repository(&naddr).await {
+                repo.set(Some(r));
+            }
+        });
+    });
+
+    // Permission checks: can_change_status includes author check; fall back to author-only when repo not loaded
+    let can_update_status = is_authenticated
+        && repo
+            .read()
+            .as_ref()
+            .map(|r| permissions::can_change_status(&user_pubkey, r, &pr.pubkey))
+            .unwrap_or(user_pubkey == pr.pubkey);
+    let required_approvals = repo
+        .read()
+        .as_ref()
+        .map(|r| r.required_approvals)
+        .unwrap_or(0);
+
+    // Fetch reviews to check approval count
+    let pr_id_for_reviews = pr_id.clone();
+    let approval_count = use_resource(move || {
+        let id = pr_id_for_reviews.clone();
+        async move {
+            match fetch_pr_reviews(&id).await {
+                Ok(reviews) => {
+                    let mut latest: std::collections::HashMap<&str, &PersistedReview> =
+                        std::collections::HashMap::new();
+                    for r in &reviews {
+                        match latest.get(r.pubkey.as_str()) {
+                            Some(existing) if existing.created_at >= r.created_at => {}
+                            _ => { latest.insert(r.pubkey.as_str(), r); }
+                        }
+                    }
+                    latest.values()
+                        .filter(|r| r.state == ReviewState::Approved)
+                        .count() as u32
+                }
+                Err(_) => 0,
+            }
+        }
+    });
+
+    let has_enough_approvals = required_approvals == 0
+        || approval_count
+            .read()
+            .as_ref()
+            .map(|&count| count >= required_approvals)
+            .unwrap_or(false);
+
+    let can_merge = is_authenticated
+        && has_enough_approvals
+        && repo
+            .read()
+            .as_ref()
+            .map(|r| permissions::can_merge(&user_pubkey, r))
+            .unwrap_or(false);
+
+    let maintainers: Vec<String> = repo
+        .read()
+        .as_ref()
+        .map(|r| {
+            let mut m = r.maintainers.clone();
+            if !m.contains(&r.pubkey) {
+                m.push(r.pubkey.clone());
+            }
+            m
+        })
+        .unwrap_or_default();
+
+    let is_pr_author = is_authenticated && user_pubkey == pr.pubkey;
+
+    let mut active_tab = use_signal(|| PrTab::Conversation);
     let mut new_comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
+    let mut status_error = use_signal(|| None::<String>);
+    let mut show_merge_confirm = use_signal(|| false);
+    let mut show_update_form = use_signal(|| false);
+    let mut update_content = use_signal(String::new);
+    let mut update_commit = use_signal(String::new);
+    let mut update_parent = use_signal(String::new);
+    let mut is_submitting_update = use_signal(|| false);
+    let mut update_error = use_signal(|| None::<String>);
+
     let pr_id_for_comments = pr_id.clone();
     let comments = use_resource(move || {
         let id = pr_id_for_comments.clone();
         async move { fetch_pr_comments_by_id(&id).await }
     });
+
+    // Fetch line-level comments for the Files Changed tab
+    let pr_id_for_line_comments = pr_id.clone();
+    let mut line_comments: Signal<Vec<LineComment>> = use_signal(Vec::new);
+    let mut line_comment_error = use_signal(|| None::<String>);
+    use_effect(move || {
+        let id = pr_id_for_line_comments.clone();
+        spawn(async move {
+            if let Ok(lcs) = fetch_line_comments_by_id(&id).await {
+                line_comments.set(lcs);
+            }
+        });
+    });
+
     let handle_status_change = {
         let pr_id = pr_id.clone();
         move |new_status: IssueStatus| {
@@ -121,24 +242,33 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             spawn(async move {
                 is_updating_status.set(true);
                 match update_pr_status_by_id(&id, new_status).await {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        status_error.set(None);
+                    }
                     Err(e) => {
-                        web_sys::console::error_1(
-                            &format!("Failed to update status: {}", e).into(),
-                        );
+                        status_error.set(Some(format!("Failed to update status: {}", e)));
                     }
                 }
                 is_updating_status.set(false);
             });
         }
     };
+
+    let handle_merge = {
+        let handler = handle_status_change.clone();
+        move |_| {
+            show_merge_confirm.set(false);
+            handler(IssueStatus::Applied);
+        }
+    };
+
     let handle_submit_comment = {
         let pr_id = pr_id.clone();
-        let pr_pubkey = pr_pubkey.clone();
+        let user_pubkey = user_pubkey.clone();
         move |_| {
             let content = new_comment.read().clone();
             let id = pr_id.clone();
-            let author = pr_pubkey.clone();
+            let author = user_pubkey.clone();
             if content.trim().is_empty() {
                 return;
             }
@@ -157,13 +287,52 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             });
         }
     };
+
+    let handle_submit_update = {
+        let pr_id = pr_id.clone();
+        let repo_naddr = pr.repository_naddr.clone();
+        move |_| {
+            let content = update_content.read().clone();
+            let commit = update_commit.read().clone();
+            let parent = update_parent.read().clone();
+            let id = pr_id.clone();
+            let naddr = repo_naddr.clone();
+            if content.trim().is_empty() {
+                update_error.set(Some("Update content is required".to_string()));
+                return;
+            }
+            spawn(async move {
+                is_submitting_update.set(true);
+                update_error.set(None);
+                let commit_opt = if commit.is_empty() { None } else { Some(commit.as_str()) };
+                let parent_opt = if parent.is_empty() { None } else { Some(parent.as_str()) };
+                match publish_pr_update_by_id(&id, &naddr, &content, commit_opt, parent_opt).await {
+                    Ok(_) => {
+                        show_update_form.set(false);
+                        update_content.set(String::new());
+                        update_commit.set(String::new());
+                        update_parent.set(String::new());
+                    }
+                    Err(e) => {
+                        update_error.set(Some(e));
+                    }
+                }
+                is_submitting_update.set(false);
+            });
+        }
+    };
+
     let title = if pr.is_cover_letter {
         pr.content.lines().next().map(|s| s.to_string())
     } else {
         None
     };
+
+    let current_tab = *active_tab.read();
+
     rsx! {
         div { class: "space-y-6",
+            // Header section
             div { class: "space-y-4",
                 div { class: "flex items-start justify-between gap-4",
                     h1 { class: "text-xl font-semibold",
@@ -185,6 +354,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     } else {
                         span { class: "px-2 py-0.5 text-xs rounded-full bg-green-500/10 text-green-500 border border-green-500/20",
                             "Patch"
+                        }
+                    }
+                    if pr_status == IssueStatus::Applied {
+                        span { class: "px-2 py-0.5 text-xs rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20",
+                            "Merged"
                         }
                     }
                 }
@@ -210,6 +384,14 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     span { class: "text-sm text-muted-foreground",
                         "opened "
                         {format_relative_time_or(pr.created_at, "Unknown")}
+                    }
+                }
+                if let Some(branch) = &pr.branch_name {
+                    div { class: "flex items-center gap-2 text-sm",
+                        span { class: "text-muted-foreground", "Branch:" }
+                        code { class: "px-2 py-0.5 bg-muted rounded font-mono text-xs",
+                            "{branch}"
+                        }
                     }
                 }
                 if let Some(commit) = &pr.commit {
@@ -240,20 +422,40 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     }
                 }
             }
-            if can_update_status {
+
+            // Status error display
+            if let Some(err) = status_error.read().as_ref() {
+                div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                    "{err}"
+                }
+            }
+
+            // Status actions
+            if can_update_status || can_merge {
                 div { class: "flex flex-wrap gap-2",
-                    if pr_status != IssueStatus::Applied {
+                    if can_merge && matches!(pr_status, IssueStatus::Open | IssueStatus::Draft) {
                         button {
-                            class: "px-3 py-1.5 text-sm bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500/20 transition disabled:opacity-50",
+                            class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 flex items-center gap-2",
                             disabled: *is_updating_status.read(),
-                            onclick: {
-                                let handler = handle_status_change.clone();
-                                move |_| handler(IssueStatus::Applied)
-                            },
-                            "Mark as Merged"
+                            onclick: move |_| show_merge_confirm.set(true),
+                            svg {
+                                class: "w-4 h-4",
+                                xmlns: "http://www.w3.org/2000/svg",
+                                width: "24",
+                                height: "24",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                polyline { points: "16 18 22 12 16 6" }
+                                polyline { points: "8 6 2 12 8 18" }
+                            }
+                            "Merge Pull Request"
                         }
                     }
-                    if pr_status != IssueStatus::Closed {
+                    if can_update_status && pr_status != IssueStatus::Closed && pr_status != IssueStatus::Applied {
                         button {
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -264,7 +466,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "Close PR"
                         }
                     }
-                    if pr_status == IssueStatus::Closed {
+                    if can_update_status && pr_status == IssueStatus::Closed {
                         button {
                             class: "px-3 py-1.5 text-sm bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -277,105 +479,358 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     }
                 }
             }
-            div { class: "border border-border rounded-lg overflow-hidden",
-                div { class: "px-4 py-2 bg-muted/50 border-b border-border",
-                    span { class: "text-sm text-muted-foreground",
-                        if pr.is_cover_letter {
-                            "Cover Letter"
-                        } else {
-                            "Patch Content"
+
+            // Approval requirement notice
+            if required_approvals > 0 && pr_status != IssueStatus::Applied {
+                {
+                    let current_approvals = approval_count.read().as_ref().copied().unwrap_or(0);
+                    let met = current_approvals >= required_approvals;
+                    let color_class = if met { "bg-green-500/10 border-green-500/20 text-green-600" } else { "bg-orange-500/10 border-orange-500/20 text-orange-600" };
+                    rsx! {
+                        div { class: "p-3 rounded-lg border text-sm {color_class}",
+                            if met {
+                                "Approval requirement met ({current_approvals}/{required_approvals})"
+                            } else {
+                                "Requires {required_approvals} approval(s) to merge ({current_approvals}/{required_approvals})"
+                            }
                         }
                     }
                 }
-                pre { class: "p-4 overflow-x-auto text-sm font-mono bg-background whitespace-pre-wrap",
-                    "{pr.content}"
+            }
+
+            // Conflict detection banner
+            if pr_status == IssueStatus::Open || pr_status == IssueStatus::Draft {
+                if let Some(parent) = &pr.parent_commit {
+                    ConflictBanner { parent_commit: parent.clone() }
                 }
             }
-            div { class: "space-y-4",
-                h3 { class: "font-semibold flex items-center gap-2",
-                    "Comments"
-                    span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{pr.comment_count}" }
-                }
-                match &*comments.read() {
-                    Some(Ok(comment_list)) => rsx! {
-                        div { class: "space-y-4",
-                            for comment in comment_list.iter() {
-                                CommentCard { key: "{comment.event_id}", comment: comment.clone() }
-                            }
-                            if comment_list.is_empty() {
-                                p { class: "text-sm text-muted-foreground text-center py-4",
-                                    "No comments yet. Be the first to comment!"
-                                }
-                            }
+
+            // Update PR button (author only)
+            if is_pr_author && pr_status != IssueStatus::Applied && pr_status != IssueStatus::Closed {
+                if !*show_update_form.read() {
+                    button {
+                        class: "px-3 py-1.5 text-sm bg-accent text-foreground rounded-lg hover:bg-accent/80 transition flex items-center gap-1",
+                        onclick: move |_| show_update_form.set(true),
+                        svg {
+                            class: "w-4 h-4",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" }
                         }
-                    },
-                    Some(Err(e)) => rsx! {
-                        p { class: "text-sm text-destructive", "Failed to load comments: {e}" }
-                    },
-                    None => rsx! {
-                        div { class: "space-y-3",
-                            for i in 0..2 {
-                                div {
-                                    key: "{i}",
-                                    class: "p-3 border border-border rounded-lg animate-pulse",
-                                    div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
-                                    div { class: "h-3 bg-muted rounded w-3/4" }
-                                }
-                            }
+                        "Update PR"
+                    }
+                } else {
+                    div { class: "border border-border rounded-lg p-4 space-y-3",
+                        h4 { class: "text-sm font-medium", "Push Update (Kind 1619)" }
+                        if let Some(err) = update_error.read().as_ref() {
+                            div { class: "text-xs text-destructive", "{err}" }
                         }
-                    },
-                }
-                if is_authenticated {
-                    div { class: "border border-border rounded-lg overflow-hidden",
                         textarea {
-                            class: "w-full p-3 text-sm bg-background resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                            placeholder: "Write a comment...",
-                            rows: 3,
-                            value: "{new_comment}",
-                            oninput: move |e| new_comment.set(e.value()),
+                            class: "w-full h-32 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-y",
+                            placeholder: "Updated patch content or description...",
+                            value: "{update_content}",
+                            oninput: move |e| update_content.set(e.value()),
                         }
-                        div { class: "px-3 py-2 bg-muted/50 border-t border-border flex items-center justify-between",
-                            if let Some(error) = comment_error.read().as_ref() {
-                                span { class: "text-xs text-destructive", "{error}" }
-                            } else {
-                                span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                        div { class: "grid grid-cols-2 gap-3",
+                            input {
+                                class: "px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary font-mono",
+                                r#type: "text",
+                                placeholder: "New commit hash (optional)",
+                                value: "{update_commit}",
+                                oninput: move |e| update_commit.set(e.value()),
+                            }
+                            input {
+                                class: "px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary font-mono",
+                                r#type: "text",
+                                placeholder: "Parent commit (optional)",
+                                value: "{update_parent}",
+                                oninput: move |e| update_parent.set(e.value()),
+                            }
+                        }
+                        div { class: "flex justify-end gap-2",
+                            button {
+                                class: "px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition",
+                                onclick: move |_| show_update_form.set(false),
+                                "Cancel"
                             }
                             button {
                                 class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
-                                disabled: *is_submitting.read() || new_comment.read().trim().is_empty(),
-                                onclick: handle_submit_comment,
-                                if *is_submitting.read() {
+                                disabled: *is_submitting_update.read(),
+                                onclick: handle_submit_update,
+                                if *is_submitting_update.read() {
                                     "Submitting..."
                                 } else {
-                                    "Comment"
+                                    "Submit Update"
                                 }
                             }
                         }
                     }
-                } else {
-                    div { class: "p-4 bg-muted rounded-lg text-center",
-                        p { class: "text-sm text-muted-foreground", "Sign in to leave a comment" }
-                    }
                 }
             }
-            div { class: "pt-4 border-t border-border text-xs text-muted-foreground space-y-1",
-                p { "Event ID: {pr.event_id}" }
-                if !pr.repository_naddr.is_empty() {
-                    p {
-                        "Repository: "
-                        Link {
-                            to: Route::CodeRepo {
-                                naddr: pr.repository_naddr.clone(),
-                            },
-                            class: "text-primary hover:underline",
-                            "{pr.repository_naddr.chars().take(20).collect::<String>()}..."
+
+            // Merge confirmation modal
+            if *show_merge_confirm.read() {
+                div { class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center",
+                    onclick: move |_| show_merge_confirm.set(false),
+                    div {
+                        class: "bg-background border border-border rounded-xl p-6 max-w-md mx-4 shadow-lg",
+                        onclick: move |e| e.stop_propagation(),
+                        h3 { class: "text-lg font-semibold mb-2", "Merge Pull Request" }
+                        p { class: "text-sm text-muted-foreground mb-4",
+                            "This will mark the pull request as merged (Applied). This action publishes a status event to Nostr relays."
+                        }
+                        div { class: "flex justify-end gap-3",
+                            button {
+                                class: "px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition",
+                                onclick: move |_| show_merge_confirm.set(false),
+                                "Cancel"
+                            }
+                            button {
+                                class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition",
+                                onclick: handle_merge,
+                                "Confirm Merge"
+                            }
                         }
                     }
                 }
+            }
+
+            // Tab navigation
+            div { class: "flex items-center gap-1 border-b border-border",
+                button {
+                    class: if current_tab == PrTab::Conversation {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 border-primary text-foreground -mb-px"
+                    } else {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
+                    },
+                    onclick: move |_| active_tab.set(PrTab::Conversation),
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
+                    }
+                    "Conversation"
+                    span { class: "ml-1 px-1.5 py-0.5 text-xs rounded-full bg-muted text-muted-foreground",
+                        "{pr.comment_count}"
+                    }
+                }
+                button {
+                    class: if current_tab == PrTab::FilesChanged {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 border-primary text-foreground -mb-px"
+                    } else {
+                        "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
+                    },
+                    onclick: move |_| active_tab.set(PrTab::FilesChanged),
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
+                        polyline { points: "14 2 14 8 20 8" }
+                    }
+                    "Files Changed"
+                }
+            }
+
+            // Tab content
+            match current_tab {
+                PrTab::Conversation => rsx! {
+                    div { class: "grid grid-cols-1 lg:grid-cols-3 gap-6",
+                        // Main content: comments
+                        div { class: "lg:col-span-2 space-y-4",
+                            match &*comments.read() {
+                                Some(Ok(comment_list)) => rsx! {
+                                    div { class: "space-y-4",
+                                        for comment in comment_list.iter() {
+                                            CommentCard { key: "{comment.event_id}", comment: comment.clone() }
+                                        }
+                                        if comment_list.is_empty() {
+                                            p { class: "text-sm text-muted-foreground text-center py-4",
+                                                "No comments yet. Be the first to comment!"
+                                            }
+                                        }
+                                    }
+                                },
+                                Some(Err(e)) => rsx! {
+                                    p { class: "text-sm text-destructive", "Failed to load comments: {e}" }
+                                },
+                                None => rsx! {
+                                    div { class: "space-y-3",
+                                        for i in 0..2 {
+                                            div {
+                                                key: "{i}",
+                                                class: "p-3 border border-border rounded-lg animate-pulse",
+                                                div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
+                                                div { class: "h-3 bg-muted rounded w-3/4" }
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                            // Comment form
+                            if is_authenticated {
+                                div { class: "border border-border rounded-lg overflow-hidden",
+                                    textarea {
+                                        class: "w-full p-3 text-sm bg-background resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                                        placeholder: "Write a comment...",
+                                        rows: 3,
+                                        value: "{new_comment}",
+                                        oninput: move |e| new_comment.set(e.value()),
+                                    }
+                                    div { class: "px-3 py-2 bg-muted/50 border-t border-border flex items-center justify-between",
+                                        if let Some(error) = comment_error.read().as_ref() {
+                                            span { class: "text-xs text-destructive", "{error}" }
+                                        } else {
+                                            span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                                        }
+                                        button {
+                                            class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
+                                            disabled: *is_submitting.read() || new_comment.read().trim().is_empty(),
+                                            onclick: handle_submit_comment,
+                                            if *is_submitting.read() {
+                                                "Submitting..."
+                                            } else {
+                                                "Comment"
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div { class: "p-4 bg-muted rounded-lg text-center",
+                                    p { class: "text-sm text-muted-foreground", "Sign in to leave a comment" }
+                                }
+                            }
+                        }
+
+                        // Sidebar: reviews
+                        div { class: "space-y-4",
+                            PRReviewSection {
+                                pr_id: pr_id.clone(),
+                                pr_pubkey: pr_pubkey.clone(),
+                                maintainers: maintainers.clone(),
+                                user_pubkey: user_pubkey.clone(),
+                                is_authenticated: is_authenticated,
+                            }
+
+                            // Linked issues
+                            if !pr.linked_issues.is_empty() {
+                                div { class: "border border-border rounded-lg p-3",
+                                    h4 { class: "text-xs font-medium text-muted-foreground mb-2", "Linked Issues" }
+                                    div { class: "space-y-1",
+                                        for issue_id in pr.linked_issues.iter() {
+                                            Link {
+                                                key: "{issue_id}",
+                                                to: Route::CodeIssueDetail {
+                                                    note_id: issue_id.clone(),
+                                                },
+                                                class: "flex items-center gap-2 text-sm text-primary hover:underline",
+                                                svg {
+                                                    class: "w-3 h-3 shrink-0",
+                                                    xmlns: "http://www.w3.org/2000/svg",
+                                                    width: "24",
+                                                    height: "24",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "2",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    circle { cx: "12", cy: "12", r: "10" }
+                                                    line { x1: "12", y1: "8", x2: "12", y2: "12" }
+                                                    line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                                                }
+                                                span { class: "font-mono text-xs truncate",
+                                                    "Closes #{issue_id.chars().take(8).collect::<String>()}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Repository link
+                            if !pr.repository_naddr.is_empty() {
+                                div { class: "border border-border rounded-lg p-3",
+                                    h4 { class: "text-xs font-medium text-muted-foreground mb-2", "Repository" }
+                                    Link {
+                                        to: Route::CodeRepo {
+                                            naddr: pr.repository_naddr.clone(),
+                                        },
+                                        class: "text-sm text-primary hover:underline",
+                                        "{pr.repository_naddr.chars().take(30).collect::<String>()}..."
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                PrTab::FilesChanged => {
+                    let pr_id_for_handler = pr_id.clone();
+                    let user_pubkey_for_handler = user_pubkey.clone();
+                    rsx! {
+                        if let Some(err) = line_comment_error.read().as_ref() {
+                            div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                                "{err}"
+                            }
+                        }
+                        DiffViewer {
+                            content: pr.content.clone(),
+                            is_cover_letter: pr.is_cover_letter,
+                            pr_event_id: Some(pr_id.clone()),
+                            line_comments: line_comments.read().clone(),
+                            on_line_comment: move |(file, line_num, text): (String, usize, String)| {
+                                let id = pr_id_for_handler.clone();
+                                let author = user_pubkey_for_handler.clone();
+                                line_comment_error.set(None);
+                                spawn(async move {
+                                    match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
+                                        Ok(_) => {
+                                            // Refresh line comments after publishing
+                                            if let Ok(lcs) = fetch_line_comments_by_id(&id).await {
+                                                line_comments.set(lcs);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
+                                        }
+                                    }
+                                });
+                            },
+                        }
+                    }
+                },
+            }
+
+            // Footer
+            div { class: "pt-4 border-t border-border text-xs text-muted-foreground space-y-1",
+                p { "Event ID: {pr.event_id}" }
             }
         }
     }
 }
+
 #[component]
 fn CommentCard(comment: GitComment) -> Element {
     let author_profile = PROFILE_CACHE.read().peek(&comment.pubkey).cloned();
@@ -412,6 +867,7 @@ fn CommentCard(comment: GitComment) -> Element {
         }
     }
 }
+
 #[component]
 fn ErrorState(message: String) -> Element {
     rsx! {
@@ -449,6 +905,7 @@ fn ErrorState(message: String) -> Element {
         }
     }
 }
+
 #[component]
 fn LoadingSkeleton() -> Element {
     rsx! {
@@ -470,6 +927,45 @@ fn LoadingSkeleton() -> Element {
                         class: "p-4 border border-border rounded-lg",
                         div { class: "h-4 bg-muted rounded w-1/4 mb-2" }
                         div { class: "h-3 bg-muted rounded w-3/4" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Conflict detection banner for PRs.
+///
+/// Shows a warning when the PR's parent commit may have diverged from the target branch,
+/// indicating potential merge conflicts.
+#[component]
+fn ConflictBanner(parent_commit: String) -> Element {
+    // Only show when we have a parent commit to reference
+    let short_parent = truncate_commit(&parent_commit);
+    rsx! {
+        div { class: "p-3 rounded-lg border bg-yellow-500/10 border-yellow-500/20 text-sm",
+            div { class: "flex items-start gap-2",
+                svg {
+                    class: "w-4 h-4 text-yellow-500 shrink-0 mt-0.5",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" }
+                    line { x1: "12", y1: "9", x2: "12", y2: "13" }
+                    line { x1: "12", y1: "17", x2: "12.01", y2: "17" }
+                }
+                div {
+                    p { class: "text-yellow-700 dark:text-yellow-400 font-medium", "Check for conflicts before merging" }
+                    p { class: "text-yellow-600 dark:text-yellow-500 mt-1",
+                        "This PR is based on commit "
+                        code { class: "px-1 py-0.5 bg-yellow-500/10 rounded text-xs font-mono", "{short_parent}" }
+                        ". Verify the target branch hasn't diverged to avoid merge conflicts."
                     }
                 }
             }
