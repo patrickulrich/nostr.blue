@@ -198,7 +198,7 @@ pub async fn release_bounty(
         cache.peek(claimer_pubkey).and_then(|p| p.lud16.clone())
     };
     let lud16 = lud16.ok_or_else(|| {
-        "Claimer has no Lightning address (lud16) in their profile".to_string()
+        "Could not find claimer's Lightning address. Their profile may not be loaded yet, or they may not have a lud16 set.".to_string()
     })?;
 
     // Generate invoice from LNURL

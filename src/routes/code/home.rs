@@ -288,7 +288,7 @@ fn RepositoriesTab() -> Element {
             div { class: "grid grid-cols-2 gap-3",
                 Link {
                     to: Route::CodeExplore {},
-                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -310,7 +310,7 @@ fn RepositoriesTab() -> Element {
                 }
                 Link {
                     to: Route::CodeNew {},
-                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -332,7 +332,7 @@ fn RepositoriesTab() -> Element {
                 }
                 Link {
                     to: Route::CodeGlobalIssues {},
-                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -354,7 +354,7 @@ fn RepositoriesTab() -> Element {
                 }
                 Link {
                     to: Route::CodeGlobalPulls {},
-                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -378,7 +378,7 @@ fn RepositoriesTab() -> Element {
                 }
                 Link {
                     to: Route::CodeStars {},
-                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -399,7 +399,7 @@ fn RepositoriesTab() -> Element {
                 }
                 Link {
                     to: Route::CodeSnippetNew {},
-                    class: "p-4 border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
+                    class: "p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition flex items-center gap-3",
                     svg {
                         class: "w-5 h-5 text-muted-foreground",
                         xmlns: "http://www.w3.org/2000/svg",

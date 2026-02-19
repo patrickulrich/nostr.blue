@@ -141,8 +141,8 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let issue_id_for_bounties = issue_id.clone();
     use_effect(use_reactive(&issue_id_for_bounties, move |id| {
         bounties.set(Vec::new()); // clear stale data
-        bounties_gen += 1;
-        let gen = *bounties_gen.peek();
+        let gen = bounties_gen.peek().wrapping_add(1);
+        bounties_gen.set(gen);
         spawn(async move {
             if let Ok(b) = fetch_bounties_for_issue(&id).await {
                 if *bounties_gen.peek() == gen {

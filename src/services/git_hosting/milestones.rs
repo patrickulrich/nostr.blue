@@ -81,11 +81,12 @@ pub fn generate_milestone_id(name: &str) -> String {
     }
     let slug = result.trim_matches('-').to_string();
     if slug.is_empty() {
-        use std::hash::{Hash, Hasher};
-        use std::collections::hash_map::DefaultHasher;
-        let mut hasher = DefaultHasher::new();
-        name.hash(&mut hasher);
-        return format!("milestone-{:016x}", hasher.finish());
+        let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+        for b in name.as_bytes() {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x100000001b3); // FNV prime
+        }
+        return format!("milestone-{:016x}", hash);
     }
     slug
 }

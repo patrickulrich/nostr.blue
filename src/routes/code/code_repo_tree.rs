@@ -95,6 +95,8 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                                 .await
                         {
                             all_file_paths.set(paths);
+                        } else {
+                            log::warn!("Failed to load file paths for fuzzy finder");
                         }
                     });
                 }

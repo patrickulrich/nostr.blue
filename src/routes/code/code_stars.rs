@@ -55,8 +55,8 @@ pub fn CodeStars() -> Element {
                 if query.is_empty() {
                     return true;
                 }
-                let name = r.name.clone().unwrap_or_else(|| r.id.clone()).to_lowercase();
-                let desc = r.description.clone().unwrap_or_default().to_lowercase();
+                let name = r.name.as_ref().unwrap_or(&r.id).to_lowercase();
+                let desc = r.description.as_deref().unwrap_or_default().to_lowercase();
                 name.contains(&query) || desc.contains(&query)
             })
             .cloned()

@@ -32,7 +32,11 @@ pub fn CodeNew() -> Element {
                 .replace(' ', "-")
                 .chars()
                 .filter(|c| c.is_alphanumeric() || *c == '-')
-                .collect::<String>();
+                .collect::<String>()
+                .split('-')
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("-");
             repo_id.set(slug);
         }
     });

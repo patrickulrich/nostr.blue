@@ -17,10 +17,9 @@ use crate::stores::{auth_store, nostr_client};
 use crate::utils::format::{truncate_commit, truncate_pubkey};
 use crate::utils::format_relative_time_or;
 use crate::services::git_hosting::reviews::fetch_pr_reviews;
-use crate::utils::nip34::{GitComment, IssueStatus, PullRequest, Repository, ReviewState};
+use crate::utils::nip34::{GitComment, IssueStatus, PersistedReview, PullRequest, Repository, ReviewState};
 use crate::utils::permissions;
 use dioxus::prelude::*;
-use std::collections::HashSet;
 
 /// PR detail tab
 #[derive(Clone, Copy, PartialEq)]
@@ -157,12 +156,17 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
         async move {
             match fetch_pr_reviews(&id).await {
                 Ok(reviews) => {
-                    let approved_reviewers: HashSet<&str> = reviews
-                        .iter()
+                    let mut latest: std::collections::HashMap<&str, &PersistedReview> =
+                        std::collections::HashMap::new();
+                    for r in &reviews {
+                        match latest.get(r.pubkey.as_str()) {
+                            Some(existing) if existing.created_at >= r.created_at => {}
+                            _ => { latest.insert(r.pubkey.as_str(), r); }
+                        }
+                    }
+                    latest.values()
                         .filter(|r| r.state == ReviewState::Approved)
-                        .map(|r| r.pubkey.as_str())
-                        .collect();
-                    approved_reviewers.len() as u32
+                        .count() as u32
                 }
                 Err(_) => 0,
             }

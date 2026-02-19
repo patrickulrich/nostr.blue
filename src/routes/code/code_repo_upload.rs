@@ -106,7 +106,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 
     // Handle upload
     let handle_upload = move |_| {
-        let files = selected_files.read().clone();
+        let files: Vec<SelectedFile> = selected_files.write().drain(..).collect();
         if files.is_empty() {
             return;
         }
@@ -696,7 +696,7 @@ fn get_file_extension(name: &str) -> String {
             if ext.len() <= 4 {
                 ext.to_uppercase()
             } else {
-                ext[..4].to_uppercase()
+                ext.chars().take(4).collect::<String>().to_uppercase()
             }
         })
         .unwrap_or_else(|| "FILE".to_string())

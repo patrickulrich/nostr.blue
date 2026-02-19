@@ -146,11 +146,21 @@ impl Activity {
 
         let repo_naddr = event.tags.iter().find_map(|t| {
             let v = t.as_slice();
-            if v.len() >= 2 && v[0] == "a" && v[1].starts_with("30617:") {
-                Some(v[1].to_string())
-            } else {
-                None
+            if v.len() >= 2 && v[0] == "a" {
+                let parts: Vec<&str> = v[1].split(':').collect();
+                if parts.len() >= 3 && parts[0] == "30617" {
+                    if let Ok(pk) = PublicKey::from_hex(parts[1]) {
+                        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
+                            .identifier(parts[2]);
+                        return Some(
+                            Nip19Coordinate::new(coordinate, vec![])
+                                .to_bech32()
+                                .unwrap_or_default(),
+                        );
+                    }
+                }
             }
+            None
         });
 
         Some(Self {
@@ -318,12 +328,9 @@ pub async fn fetch_trending_repositories(limit: usize) -> Result<Vec<Repository>
 
     let mut repos: Vec<Repository> = events.iter().filter_map(Repository::from_event).collect();
 
-    // Sort by star count descending, then by creation time descending as tiebreaker
-    repos.sort_by(|a, b| {
-        b.star_count
-            .cmp(&a.star_count)
-            .then_with(|| b.created_at.cmp(&a.created_at))
-    });
+    // Note: star_count is not available from NIP-34 events, so this effectively
+    // sorts by creation time (recency). Star counting requires separate queries.
+    repos.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     repos.truncate(limit);
     Ok(repos)
 }

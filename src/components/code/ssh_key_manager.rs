@@ -79,8 +79,9 @@ pub fn SshKeyManager() -> Element {
                     // Refresh the key list
                     if let Some(pubkey_hex) = auth_store::get_pubkey() {
                         if let Ok(pk) = PublicKey::from_hex(&pubkey_hex) {
-                            if let Ok(k) = ssh_keys::fetch_ssh_keys(&pk).await {
-                                keys.set(k);
+                            match ssh_keys::fetch_ssh_keys(&pk).await {
+                                Ok(k) => keys.set(k),
+                                Err(e) => log::warn!("SSH key added but list refresh failed: {e}"),
                             }
                         }
                     }

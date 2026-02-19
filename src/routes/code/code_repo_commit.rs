@@ -79,7 +79,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                 if !initialized {
                     return;
                 }
-                let current_id = *request_id.peek() + 1;
+                let current_id = request_id.peek().wrapping_add(1);
                 request_id.set(current_id);
                 spawn(async move {
                     let result = fetch_repository(&n).await;

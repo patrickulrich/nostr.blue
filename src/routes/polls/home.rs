@@ -315,7 +315,7 @@ pub fn Polls() -> Element {
                         }
                         if *show_dropdown.read() {
                             div {
-                                class: "fixed inset-0 z-30",
+                                class: "fixed inset-0 z-40",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     show_dropdown.set(false);

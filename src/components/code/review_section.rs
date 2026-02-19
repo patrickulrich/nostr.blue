@@ -157,7 +157,7 @@ pub fn PRReviewSection(
                 body
             };
             let review_state = state.to_review_state();
-            let now = web_sys::js_sys::Date::now() as u64 / 1000;
+            let now = js_sys::Date::now() as u64 / 1000;
             // Add to local display immediately
             let local_review = PersistedReview {
                 pr_event_id: pr_id.clone(),
@@ -324,7 +324,7 @@ pub fn PRReviewSection(
                 if can_review {
                     if *show_form.read() {
                         div { class: "bg-card border border-border rounded-lg p-4 space-y-3",
-                            div { class: "bg-muted rounded-lg overflow-hidden p-1 flex gap-2",
+                            div { class: "bg-muted rounded-lg overflow-hidden p-1 flex",
                                 button {
                                     class: if *selected_state.read() == LocalReviewState::Approved {
                                         "flex-1 px-2 py-1.5 text-xs border-2 border-green-500 bg-green-500/10 text-green-500 font-medium"
