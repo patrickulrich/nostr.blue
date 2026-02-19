@@ -124,8 +124,8 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
         if naddr.is_empty() {
             return;
         }
-        repo_gen += 1;
-        let gen = *repo_gen.peek();
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         spawn(async move {
             if let Ok(r) = fetch_repository(&naddr).await {
                 if *repo_gen.peek() == gen {

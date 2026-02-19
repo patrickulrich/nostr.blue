@@ -5,8 +5,11 @@ use crate::components::{icons, CodeRepoCard};
 use crate::routes::Route;
 use crate::services::git_hosting::stars::load_user_stars;
 use crate::stores::{auth_store, code_store, nostr_client};
+use crate::stores::nostr_client::fetch_events_aggregated;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+use nostr_sdk::prelude::*;
+use std::time::Duration;
 
 /// Starred repositories page component
 #[component]
@@ -17,6 +20,7 @@ pub fn CodeStars() -> Element {
     let mut search_query = use_signal(String::new);
     let mut star_load_error = use_signal(|| None::<String>);
     let mut refresh_counter = use_signal(|| 0u32);
+    let mut request_id = use_signal(|| 0u32);
 
     use_effect(move || {
         let _counter = *refresh_counter.read();
@@ -29,6 +33,8 @@ pub fn CodeStars() -> Element {
             loading.set(false);
             return;
         }
+        let current_id = request_id.peek().wrapping_add(1);
+        request_id.set(current_id);
         spawn(async move {
             loading.set(true);
             star_load_error.set(None);
@@ -39,6 +45,29 @@ pub fn CodeStars() -> Element {
                 loading.set(false);
                 return;
             }
+            if *request_id.peek() != current_id { loading.set(false); return; }
+            // Hydrate CODE_REPOS_CACHE for starred repos
+            let starred_coords: Vec<_> = code_store::STARRED_REPOS.peek().iter().cloned().collect();
+            if !starred_coords.is_empty() {
+                let authors: std::collections::HashSet<PublicKey> = starred_coords.iter()
+                    .filter_map(|c| {
+                        let parts: Vec<&str> = c.split(':').collect();
+                        if parts.len() >= 3 && parts[0] == "30617" {
+                            PublicKey::from_hex(parts[1]).ok()
+                        } else { None }
+                    })
+                    .collect();
+                if !authors.is_empty() {
+                    let filter = Filter::new()
+                        .kind(Kind::GitRepoAnnouncement)
+                        .authors(authors);
+                    if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(15)).await {
+                        if *request_id.peek() != current_id { loading.set(false); return; }
+                        code_store::cache_repo_events(&events);
+                    }
+                }
+            }
+            if *request_id.peek() != current_id { loading.set(false); return; }
             // Get Repository objects from cache
             let starred = code_store::get_starred_repos();
             repos.set(starred);

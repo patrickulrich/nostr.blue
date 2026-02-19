@@ -81,6 +81,8 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                 }
                 let current_id = request_id.peek().wrapping_add(1);
                 request_id.set(current_id);
+                commit_result.set(None);
+                repo_result.set(None);
                 spawn(async move {
                     let result = fetch_repository(&n).await;
                     if *request_id.peek() != current_id {
@@ -215,7 +217,7 @@ fn CommitHeader(detail: CommitDetail, sha: String) -> Element {
     let short_sha = if sha.len() >= 7 { &sha[..7] } else { &sha };
 
     rsx! {
-        div { class: "bg-card border border-border rounded-lg p-6 space-y-4",
+        div { class: "bg-card border border-border rounded-lg p-4 space-y-4",
             h1 { class: "text-xl font-bold text-foreground", "{title}" }
             if let Some(ref b) = body {
                 if !b.is_empty() {
@@ -260,7 +262,7 @@ fn CommitHeader(detail: CommitDetail, sha: String) -> Element {
 fn LoadingSkeleton() -> Element {
     rsx! {
         div { class: "space-y-4 animate-pulse",
-            div { class: "bg-card border border-border rounded-lg p-6 space-y-4",
+            div { class: "bg-card border border-border rounded-lg p-4 space-y-4",
                 div { class: "h-6 bg-muted rounded w-3/4" }
                 div { class: "flex items-center gap-4",
                     div { class: "h-5 w-5 bg-muted rounded-full" }

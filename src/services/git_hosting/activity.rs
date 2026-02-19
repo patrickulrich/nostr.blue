@@ -152,11 +152,10 @@ impl Activity {
                     if let Ok(pk) = PublicKey::from_hex(parts[1]) {
                         let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
                             .identifier(parts[2]);
-                        return Some(
-                            Nip19Coordinate::new(coordinate, vec![])
-                                .to_bech32()
-                                .unwrap_or_default(),
-                        );
+                        return Nip19Coordinate::new(coordinate, vec![])
+                            .to_bech32()
+                            .ok()
+                            .filter(|s| !s.is_empty());
                     }
                 }
             }
@@ -439,10 +438,10 @@ pub async fn fetch_platform_stats() -> Result<PlatformStats, String> {
     );
 
     Ok(PlatformStats {
-        total_repos: repos.map(|e| e.len()).unwrap_or(0),
-        total_issues: issues.map(|e| e.len()).unwrap_or(0),
-        total_prs: prs.map(|e| e.len()).unwrap_or(0),
-        total_snippets: snippets.map(|e| e.len()).unwrap_or(0),
+        total_repos: repos.unwrap_or_else(|e| { log::warn!("Failed to fetch repos: {e}"); vec![] }).len(),
+        total_issues: issues.unwrap_or_else(|e| { log::warn!("Failed to fetch issues: {e}"); vec![] }).len(),
+        total_prs: prs.unwrap_or_else(|e| { log::warn!("Failed to fetch PRs: {e}"); vec![] }).len(),
+        total_snippets: snippets.unwrap_or_else(|e| { log::warn!("Failed to fetch snippets: {e}"); vec![] }).len(),
         approximate: true,
     })
 }

@@ -147,28 +147,27 @@ pub fn Polls() -> Element {
                     let event_ids: Vec<EventId> = current_events.iter().map(|e| e.id).collect();
                     drop(current_events);
                     all_streamed_ids.set(event_ids.clone());
-                    loading.set(false);
                     if !event_ids.is_empty() {
                         match fetch_interaction_counts_batch(
                             event_ids.clone(),
                             Duration::from_secs(5),
                         ).await {
                             Ok(counts) => {
-                                if *request_id.peek() != current_id { return; }
+                                if *request_id.peek() != current_id { loading.set(false); return; }
                                 interaction_counts.set(counts);
                             }
                             Err(e) => {
                                 log::warn!("Failed to fetch interaction counts: {e}");
                             }
                         }
-                        if *request_id.peek() != current_id { return; }
+                        if *request_id.peek() != current_id { loading.set(false); return; }
                         match stream_interaction_counts(
                             event_ids,
                             interaction_counts,
                             Some(600),
                         ).await {
                             Ok(handle) => {
-                                if *feed_type.read() == current_feed_type {
+                                if *request_id.peek() == current_id && *feed_type.read() == current_feed_type {
                                     interaction_stream_handle.set(Some(handle));
                                 } else {
                                     handle.unsubscribe().await;
@@ -179,6 +178,7 @@ pub fn Polls() -> Element {
                             }
                         }
                     }
+                    loading.set(false);
                 }
                 Err(e) => {
                     if *feed_type.read() != current_feed_type {

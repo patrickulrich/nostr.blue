@@ -98,7 +98,7 @@ pub fn SshKeyManager() -> Element {
     };
 
     let mut handle_delete = move |eid_hex: String| {
-        if deleting_id.read().as_ref() == Some(&eid_hex) { return; }
+        if deleting_id.peek().as_ref() == Some(&eid_hex) { return; }
         deleting_id.set(Some(eid_hex.clone()));
         error.set(None);
         spawn(async move {

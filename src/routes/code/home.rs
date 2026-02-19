@@ -612,7 +612,8 @@ fn MyReposTab() -> Element {
         }
         let pubkey = match PublicKey::parse(&pubkey_hex) {
             Ok(pk) => pk,
-            Err(_) => {
+            Err(e) => {
+                my_repos.set(Some(Err(format!("Failed to parse public key: {}", e))));
                 loading.set(false);
                 return;
             }

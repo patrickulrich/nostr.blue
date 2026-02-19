@@ -207,6 +207,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
+    let mut status_error = use_signal(|| None::<String>);
     let mut show_merge_confirm = use_signal(|| false);
     let mut show_update_form = use_signal(|| false);
     let mut update_content = use_signal(String::new);
@@ -224,6 +225,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     // Fetch line-level comments for the Files Changed tab
     let pr_id_for_line_comments = pr_id.clone();
     let mut line_comments: Signal<Vec<LineComment>> = use_signal(Vec::new);
+    let mut line_comment_error = use_signal(|| None::<String>);
     use_effect(move || {
         let id = pr_id_for_line_comments.clone();
         spawn(async move {
@@ -240,11 +242,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             spawn(async move {
                 is_updating_status.set(true);
                 match update_pr_status_by_id(&id, new_status).await {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        status_error.set(None);
+                    }
                     Err(e) => {
-                        web_sys::console::error_1(
-                            &format!("Failed to update status: {}", e).into(),
-                        );
+                        status_error.set(Some(format!("Failed to update status: {}", e)));
                     }
                 }
                 is_updating_status.set(false);
@@ -418,6 +420,13 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             }
                         }
                     }
+                }
+            }
+
+            // Status error display
+            if let Some(err) = status_error.read().as_ref() {
+                div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                    "{err}"
                 }
             }
 
@@ -781,6 +790,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                     let pr_id_for_handler = pr_id.clone();
                     let user_pubkey_for_handler = user_pubkey.clone();
                     rsx! {
+                        if let Some(err) = line_comment_error.read().as_ref() {
+                            div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                                "{err}"
+                            }
+                        }
                         DiffViewer {
                             content: pr.content.clone(),
                             is_cover_letter: pr.is_cover_letter,
@@ -789,6 +803,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             on_line_comment: move |(file, line_num, text): (String, usize, String)| {
                                 let id = pr_id_for_handler.clone();
                                 let author = user_pubkey_for_handler.clone();
+                                line_comment_error.set(None);
                                 spawn(async move {
                                     match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
                                         Ok(_) => {
@@ -798,9 +813,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                                             }
                                         }
                                         Err(e) => {
-                                            web_sys::console::error_1(
-                                                &format!("Failed to publish line comment: {}", e).into(),
-                                            );
+                                            line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
                                         }
                                     }
                                 });

@@ -158,6 +158,11 @@ pub fn PRReviewSection(
             };
             let review_state = state.to_review_state();
             let now = js_sys::Date::now() as u64 / 1000;
+            // Capture prior review for rollback
+            let prior_review = {
+                let current = reviews.read();
+                current.iter().find(|r| r.pubkey == user_pubkey).cloned()
+            };
             // Add to local display immediately
             let local_review = PersistedReview {
                 pr_event_id: pr_id.clone(),
@@ -182,9 +187,12 @@ pub fn PRReviewSection(
             spawn(async move {
                 if let Err(e) = publish_review_event(&id, &author_pk, review_state, &saved_content).await {
                     publish_error.set(Some(format!("Failed to publish review: {}", e)));
-                    // Rollback: remove the optimistic entry
+                    // Rollback: remove the optimistic entry and restore prior review
                     let mut current = reviews.write();
                     current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
+                    if let Some(prior) = prior_review {
+                        current.push(prior);
+                    }
                     drop(current);
                     // Restore form so user can retry
                     show_form.set(true);
