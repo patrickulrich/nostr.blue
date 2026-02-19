@@ -38,6 +38,13 @@ pub fn Polls() -> Element {
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
     let mut all_streamed_ids = use_signal(Vec::<EventId>::new);
     let mut request_id = use_signal(|| 0u64);
+    use_drop(move || {
+        if let Some(handle) = interaction_stream_handle.peek().clone() {
+            spawn(async move {
+                handle.unsubscribe().await;
+            });
+        }
+    });
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -200,6 +207,10 @@ pub fn Polls() -> Element {
             };
             match result {
                 Ok(new_events) => {
+                    if *request_id.peek() != rid {
+                        loading.set(false);
+                        return;
+                    }
                     if *feed_type.read() != current_feed_type {
                         loading.set(false);
                         return;
@@ -239,6 +250,12 @@ pub fn Polls() -> Element {
                             interaction_counts.with_mut(|existing| {
                                 existing.extend(counts);
                             });
+                        } else {
+                            log::warn!(
+                                "Failed to fetch interaction counts for load_more (rid={}, events={})",
+                                rid,
+                                new_event_ids.len()
+                            );
                         }
                         if *request_id.peek() != rid { return; }
                         // Extend streaming subscription to cover new poll IDs
@@ -298,13 +315,13 @@ pub fn Polls() -> Element {
                         }
                         if *show_dropdown.read() {
                             div {
-                                class: "fixed inset-0 z-20",
+                                class: "fixed inset-0 z-30",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     show_dropdown.set(false);
                                 },
                             }
-                            div { class: "absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-30 min-w-[150px]",
+                            div { class: "absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-40 min-w-[150px]",
                                 button {
                                     class: "w-full px-4 py-2 text-left hover:bg-accent transition",
                                     onclick: move |_| {

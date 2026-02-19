@@ -13,6 +13,14 @@ use crate::stores::auth_store;
 use crate::stores::nostr_client::fetch_events_aggregated;
 use crate::utils::nip34::Repository;
 
+/// Check if an event has an "a" tag referencing a repository (Kind 30617)
+fn has_repo_tag(event: &Event) -> bool {
+    event.tags.iter().any(|t| {
+        let v = t.as_slice();
+        v.len() >= 2 && v[0] == "a" && v[1].starts_with("30617:")
+    })
+}
+
 /// Default timeout for fetching activity events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -243,6 +251,10 @@ pub async fn fetch_contribution_graph(pubkey: &PublicKey) -> Result<Vec<Contribu
 
     // Bucket each event into its week/day
     for event in &events {
+        // Skip Comment events that don't reference a repository
+        if event.kind == Kind::Comment && !has_repo_tag(event) {
+            continue;
+        }
         let ts = event.created_at.as_secs();
         if ts < graph_start {
             continue;
@@ -346,6 +358,10 @@ pub async fn fetch_top_developers(limit: usize) -> Result<Vec<TopDeveloper>, Str
 
     let mut counts: HashMap<String, usize> = HashMap::new();
     for event in &events {
+        // Skip Comment events that don't reference a repository
+        if event.kind == Kind::Comment && !has_repo_tag(event) {
+            continue;
+        }
         *counts.entry(event.pubkey.to_hex()).or_insert(0) += 1;
     }
 

@@ -149,11 +149,10 @@ pub fn CodeSearch(q: String) -> Element {
     let mut snippets = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
     let mut issues = use_signal(|| None::<Result<Vec<Issue>, String>>);
     let mut prs = use_signal(|| None::<Result<Vec<PullRequest>, String>>);
-    let query_for_effect = query.clone();
     let parsed = ParsedQuery::parse(&query);
     let parsed_for_filter = parsed.clone();
-    use_effect(move || {
-        let q = query_for_effect.clone();
+    let query_for_effect = query.clone();
+    use_effect(use_reactive(&query_for_effect, move |q| {
         let parsed = ParsedQuery::parse(&q);
         let search_text = if parsed.text.is_empty() && parsed.has_filters() {
             // When the user specified only structured filters (e.g. `is:open label:bug`)
@@ -211,7 +210,7 @@ pub fn CodeSearch(q: String) -> Element {
                 }
             }
         });
-    });
+    }));
     let handle_search = move |_| {
         let new_query = search_input.read().clone();
         if !new_query.is_empty() {

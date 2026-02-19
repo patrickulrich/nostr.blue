@@ -125,10 +125,10 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
             return;
         }
         repo_gen += 1;
-        let gen = *repo_gen.read();
+        let gen = *repo_gen.peek();
         spawn(async move {
             if let Ok(r) = fetch_repository(&naddr).await {
-                if *repo_gen.read() == gen {
+                if *repo_gen.peek() == gen {
                     repo.set(Some(r));
                 }
             }
@@ -142,10 +142,10 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     use_effect(use_reactive(&issue_id_for_bounties, move |id| {
         bounties.set(Vec::new()); // clear stale data
         bounties_gen += 1;
-        let gen = *bounties_gen.read();
+        let gen = *bounties_gen.peek();
         spawn(async move {
             if let Ok(b) = fetch_bounties_for_issue(&id).await {
-                if *bounties_gen.read() == gen {
+                if *bounties_gen.peek() == gen {
                     bounties.set(b);
                 }
             }
@@ -409,6 +409,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                         onclick: {
                                                             let b_eid = bounty_eid.clone();
                                                             let i_eid = issue_eid.clone();
+                                                            let b_amount = bounty_amount;
                                                             move |_| {
                                                                 if claiming_bounty.read().is_some() {
                                                                     return;
@@ -419,7 +420,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 spawn(async move {
                                                                     if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
                                                                         if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
-                                                                            if let Err(e) = claim_bounty(b_id, i_id, None).await {
+                                                                            if let Err(e) = claim_bounty(b_id, i_id, b_amount, None).await {
                                                                                 web_sys::console::error_1(
                                                                                     &format!("Failed to claim bounty: {}", e).into(),
                                                                                 );

@@ -26,11 +26,15 @@ export function initMermaidDiagrams() {
         return;
     }
 
-    // Load mermaid.js from CDN (skip if already injected)
-    if (document.querySelector('script[src*="mermaid"]')) return;
+    // Load mermaid.js from CDN (skip if already loading/loaded)
+    if (window.__mermaidLoaderStatus === 'loading' || window.__mermaidLoaderStatus === 'loaded') return;
+    window.__mermaidLoaderStatus = 'loading';
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js';
+    script.integrity = 'sha384-S0O1sLxMOAB3LMsmn/jPh3U1Wk8P4ogA4VTmBI4POHE1gOp7Slw8rKNIsl6ORjU';
+    script.crossOrigin = 'anonymous';
     script.onload = () => {
+        window.__mermaidLoaderStatus = 'loaded';
         try {
             window.mermaid.initialize({
                 startOnLoad: false,
@@ -44,6 +48,7 @@ export function initMermaidDiagrams() {
         }
     };
     script.onerror = () => {
+        window.__mermaidLoaderStatus = 'error';
         console.warn('Failed to load mermaid.js from CDN');
     };
     document.head.appendChild(script);
@@ -65,14 +70,14 @@ pub fn ReadmeViewer(
     #[props(default = "README.md".to_string())]
     filename: String,
 ) -> Element {
-    // Check if content contains mermaid blocks to decide whether to load mermaid.js
-    let has_mermaid = content
-        .as_ref()
-        .map(|c| c.contains("```mermaid"))
-        .unwrap_or(false);
-
     // Initialize mermaid.js after the README HTML is rendered into the DOM
+    let content_for_effect = content.clone();
     use_effect(move || {
+        // Read content inside the effect so Dioxus tracks it as a dependency
+        let has_mermaid = content_for_effect
+            .as_ref()
+            .map(|c| c.contains("```mermaid"))
+            .unwrap_or(false);
         if has_mermaid {
             // Small delay to ensure dangerous_inner_html has been applied to the DOM
             spawn(async move {

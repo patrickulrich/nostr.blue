@@ -10,6 +10,24 @@ use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNE
 use crate::utils::nip34::{decode_event_id, GitComment, IssueStatus, PullRequest};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Fetch status events for a set of PR event IDs and apply them to the cache
+async fn fetch_and_apply_pr_statuses(event_ids: &[EventId]) {
+    if event_ids.is_empty() {
+        return;
+    }
+    let status_filter = Filter::new()
+        .kinds(vec![
+            Kind::GitStatusOpen,
+            Kind::GitStatusApplied,
+            Kind::GitStatusClosed,
+            Kind::GitStatusDraft,
+        ])
+        .events(event_ids.to_vec());
+    if let Ok(status_events) = fetch_events_aggregated(status_filter, FETCH_TIMEOUT).await {
+        update_pr_statuses(&status_events);
+    }
+}
 /// Fetch a pull request by its event ID (note1 or nevent1)
 pub async fn fetch_pull_request(event_ref: &str) -> Result<PullRequest, String> {
     if let Some(pr) = get_cached_pr(event_ref) {
@@ -59,23 +77,7 @@ pub async fn fetch_repository_prs(
         .map_err(|e| format!("Failed to fetch pull requests: {}", e))?;
     cache_pr_events(&events);
     let event_ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
-    if !event_ids.is_empty() {
-        let status_filter = Filter::new()
-            .kinds(
-                vec![
-                    Kind::GitStatusOpen,
-                    Kind::GitStatusApplied,
-                    Kind::GitStatusClosed,
-                    Kind::GitStatusDraft,
-                ],
-            )
-            .events(event_ids);
-        if let Ok(status_events) = fetch_events_aggregated(status_filter, FETCH_TIMEOUT)
-            .await
-        {
-            update_pr_statuses(&status_events);
-        }
-    }
+    fetch_and_apply_pr_statuses(&event_ids).await;
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 /// Fetch PRs assigned to a user (tagged with #p)
@@ -91,6 +93,8 @@ pub async fn fetch_prs_assigned_to(
         .await
         .map_err(|e| format!("Failed to fetch assigned PRs: {}", e))?;
     cache_pr_events(&events);
+    let event_ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
+    fetch_and_apply_pr_statuses(&event_ids).await;
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 /// Fetches PRs mentioning the given pubkey.
@@ -110,6 +114,8 @@ pub async fn search_prs(query: &str, limit: usize) -> Result<Vec<PullRequest>, S
         .await
         .map_err(|e| format!("Failed to search pull requests: {}", e))?;
     cache_pr_events(&events);
+    let event_ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
+    fetch_and_apply_pr_statuses(&event_ids).await;
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 /// Fetch pull requests by author
@@ -122,6 +128,8 @@ pub async fn fetch_user_prs(
         .await
         .map_err(|e| format!("Failed to fetch pull requests: {}", e))?;
     cache_pr_events(&events);
+    let event_ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
+    fetch_and_apply_pr_statuses(&event_ids).await;
     Ok(events.iter().filter_map(PullRequest::from_event).collect())
 }
 /// Publish a new patch/pull request
@@ -167,13 +175,16 @@ pub async fn publish_patch(
     for label in labels {
         builder = builder.tag(Tag::hashtag(*label));
     }
-    // Validate all issue IDs upfront
+    // Validate all issue IDs upfront (supports hex, note1, NIP-21, and nevent1)
     let mut invalid_ids = Vec::new();
     let mut parsed_issue_ids = Vec::new();
     for issue_id in closes_issues {
-        match EventId::parse(issue_id) {
-            Ok(eid) => parsed_issue_ids.push(eid),
-            Err(_) => invalid_ids.push(*issue_id),
+        if let Ok(eid) = EventId::parse(issue_id) {
+            parsed_issue_ids.push(eid);
+        } else if let Ok(eid) = decode_event_id(issue_id) {
+            parsed_issue_ids.push(eid);
+        } else {
+            invalid_ids.push(*issue_id);
         }
     }
     if !invalid_ids.is_empty() {

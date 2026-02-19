@@ -15,8 +15,11 @@ pub fn CodeStars() -> Element {
     let mut repos = use_signal(Vec::<Repository>::new);
     let mut loading = use_signal(|| true);
     let mut search_query = use_signal(String::new);
+    let mut star_load_error = use_signal(|| None::<String>);
+    let mut refresh_counter = use_signal(|| 0u32);
 
     use_effect(move || {
+        let _counter = *refresh_counter.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -28,9 +31,13 @@ pub fn CodeStars() -> Element {
         }
         spawn(async move {
             loading.set(true);
+            star_load_error.set(None);
             // Load stars from relays into STARRED_REPOS
             if let Err(e) = load_user_stars().await {
                 log::warn!("Failed to load user stars: {}", e);
+                star_load_error.set(Some(format!("Failed to load stars: {}", e)));
+                loading.set(false);
+                return;
             }
             // Get Repository objects from cache
             let starred = code_store::get_starred_repos();
@@ -102,7 +109,16 @@ pub fn CodeStars() -> Element {
                 }
             }
             div { class: "p-4",
-                if *loading.read() {
+                if let Some(err) = star_load_error.read().as_ref() {
+                    div { class: "text-center py-8",
+                        p { class: "text-red-400 mb-3", "{err}" }
+                        button {
+                            class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm",
+                            onclick: move |_| refresh_counter += 1,
+                            "Retry"
+                        }
+                    }
+                } else if *loading.read() {
                     LoadingState {}
                 } else if filtered().is_empty() {
                     EmptyState { has_search: !search_query.read().is_empty() }
@@ -218,7 +234,7 @@ fn LoadingState() -> Element {
             for i in 0..5 {
                 div {
                     key: "{i}",
-                    class: "p-4 border border-border rounded-lg animate-pulse",
+                    class: "bg-card border border-border rounded-lg p-4 animate-pulse",
                     div { class: "flex items-start gap-3",
                         div { class: "w-10 h-10 rounded-lg bg-muted" }
                         div { class: "flex-1",

@@ -775,7 +775,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                 },
                 PrTab::FilesChanged => {
                     let pr_id_for_handler = pr_id.clone();
-                    let pr_pubkey_for_handler = pr_pubkey.clone();
+                    let user_pubkey_for_handler = user_pubkey.clone();
                     rsx! {
                         DiffViewer {
                             content: pr.content.clone(),
@@ -784,7 +784,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             line_comments: line_comments.read().clone(),
                             on_line_comment: move |(file, line_num, text): (String, usize, String)| {
                                 let id = pr_id_for_handler.clone();
-                                let author = pr_pubkey_for_handler.clone();
+                                let author = user_pubkey_for_handler.clone();
                                 spawn(async move {
                                     match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
                                         Ok(_) => {

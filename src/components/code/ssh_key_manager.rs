@@ -96,10 +96,11 @@ pub fn SshKeyManager() -> Element {
         });
     };
 
-    let handle_delete = move |eid_hex: String| {
+    let mut handle_delete = move |eid_hex: String| {
+        if deleting_id.read().as_ref() == Some(&eid_hex) { return; }
+        deleting_id.set(Some(eid_hex.clone()));
+        error.set(None);
         spawn(async move {
-            deleting_id.set(Some(eid_hex.clone()));
-            error.set(None);
             match EventId::from_hex(&eid_hex) {
                 Ok(eid) => match ssh_keys::delete_ssh_key(eid).await {
                     Ok(()) => {
@@ -341,19 +342,22 @@ fn truncate_key(key: &str) -> String {
     if parts.len() >= 2 {
         let key_type = parts[0];
         let key_data = parts[1];
-        if key_data.len() > 20 {
-            format!(
-                "{} {}...{}",
-                key_type,
-                &key_data[..10],
-                &key_data[key_data.len() - 10..]
-            )
+        let char_count = key_data.chars().count();
+        if char_count > 20 {
+            let prefix: String = key_data.chars().take(10).collect();
+            let suffix: String = key_data.chars().skip(char_count - 10).collect();
+            format!("{} {}...{}", key_type, prefix, suffix)
         } else {
             key.to_string()
         }
-    } else if key.len() > 40 {
-        format!("{}...{}", &key[..20], &key[key.len() - 10..])
     } else {
-        key.to_string()
+        let char_count = key.chars().count();
+        if char_count > 40 {
+            let prefix: String = key.chars().take(20).collect();
+            let suffix: String = key.chars().skip(char_count - 10).collect();
+            format!("{}...{}", prefix, suffix)
+        } else {
+            key.to_string()
+        }
     }
 }

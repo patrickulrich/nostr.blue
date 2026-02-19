@@ -101,19 +101,31 @@ pub fn PRReviewSection(
         use_reactive(
             &pr_id,
             move |id| {
-                gen += 1;
-                let current_gen = *gen.read();
+                let current_gen = gen.read().wrapping_add(1);
+                gen.set(current_gen);
                 spawn(async move {
                     if let Ok(persisted) = fetch_pr_reviews(&id).await {
                         if *gen.read() != current_gen { return; }
+                        // Dedup persisted reviews: keep latest per pubkey
+                        let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
+                        for r in persisted {
+                            by_pubkey.entry(r.pubkey.clone())
+                                .and_modify(|existing| {
+                                    if r.created_at > existing.created_at {
+                                        *existing = r.clone();
+                                    }
+                                })
+                                .or_insert(r);
+                        }
+                        let deduped: Vec<_> = by_pubkey.into_values().collect();
                         // Merge: keep optimistic entries not yet confirmed by relays
                         let current = reviews.read().clone();
                         let optimistic: Vec<_> = current
                             .into_iter()
                             .filter(|r| r.event_id.is_empty())
-                            .filter(|r| !persisted.iter().any(|p| p.pubkey == r.pubkey))
+                            .filter(|r| !deduped.iter().any(|p| p.pubkey == r.pubkey))
                             .collect();
-                        let mut merged = persisted;
+                        let mut merged = deduped;
                         merged.extend(optimistic);
                         reviews.set(merged);
                     }

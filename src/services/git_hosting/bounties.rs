@@ -71,6 +71,7 @@ pub async fn update_bounty_status(
     bounty_event_id: EventId,
     issue_event_id: EventId,
     new_status: &str,
+    amount_sats: u64,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
     let client = get_client().ok_or("Client not initialized")?;
@@ -80,6 +81,10 @@ pub async fn update_bounty_status(
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
         .tag(Tag::event(bounty_event_id))
+        .tag(Tag::custom(
+            TagKind::Custom(Cow::Borrowed("amount")),
+            [amount_sats.to_string()],
+        ))
         .tag(Tag::custom(
             TagKind::Custom(Cow::Borrowed("status")),
             [new_status],
@@ -102,6 +107,7 @@ pub async fn update_bounty_status(
 pub async fn claim_bounty(
     bounty_event_id: EventId,
     issue_event_id: EventId,
+    amount_sats: u64,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
     let client = get_client().ok_or("Client not initialized")?;
@@ -113,6 +119,10 @@ pub async fn claim_bounty(
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
         .tag(Tag::event(issue_event_id))
         .tag(Tag::event(bounty_event_id))
+        .tag(Tag::custom(
+            TagKind::Custom(Cow::Borrowed("amount")),
+            [amount_sats.to_string()],
+        ))
         .tag(Tag::custom(
             TagKind::Custom(Cow::Borrowed("status")),
             ["claimed"],
@@ -197,12 +207,12 @@ pub async fn release_bounty(
         .map_err(|e| format!("Failed to get invoice: {}", e))?;
 
     // Mark as paid first (prevents double-payment on retry)
-    let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", repository).await?;
+    let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", amount_sats, repository).await?;
 
     // Pay via NWC
     if let Err(e) = nwc_store::pay_invoice(invoice).await {
         // Rollback: revert status to claimed so it can be retried
-        if let Err(rollback_err) = update_bounty_status(bounty_event_id, issue_event_id, "claimed", repository).await {
+        if let Err(rollback_err) = update_bounty_status(bounty_event_id, issue_event_id, "claimed", amount_sats, repository).await {
             log::error!("Bounty rollback failed: {rollback_err}");
             return Err(format!(
                 "Payment failed: {e}. WARNING: Rollback also failed: {rollback_err}. Bounty may be in inconsistent state."

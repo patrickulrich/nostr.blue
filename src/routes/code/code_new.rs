@@ -3,9 +3,7 @@
 //! Create a new NIP-34 Git repository announcement (Kind 30617).
 use crate::components::icons;
 use crate::routes::Route;
-use crate::services::git_hosting::publish_repository;
 use crate::stores::auth_store;
-use crate::utils::nips::nip34::encode_repo_naddr;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, Kind, PublicKey};
 
@@ -61,6 +59,9 @@ pub fn CodeNew() -> Element {
         let topics_val = topics_input.read().clone();
 
         spawn(async move {
+            use crate::services::git_hosting::publish_repository;
+            use crate::utils::nips::nip34::encode_repo_naddr;
+
             if id_val.trim().is_empty() {
                 error_message.set(Some("Repository ID is required".to_string()));
                 is_publishing.set(false);
@@ -351,26 +352,22 @@ fn DynamicListField(props: DynamicListFieldProps) -> Element {
     let mut values = props.values;
 
     let add_item = move |_| {
-        let mut current = values.read().clone();
-        current.push(String::new());
-        values.set(current);
+        values.write().push(String::new());
     };
 
     let mut remove_item = move |index: usize| {
-        let mut current = values.read().clone();
-        if current.len() > 1 {
-            current.remove(index);
+        let mut w = values.write();
+        if w.len() > 1 {
+            w.remove(index);
         } else {
-            current[0] = String::new();
+            w[0] = String::new();
         }
-        values.set(current);
     };
 
     let mut update_item = move |index: usize, value: String| {
-        let mut current = values.read().clone();
-        if index < current.len() {
-            current[index] = value;
-            values.set(current);
+        let mut w = values.write();
+        if index < w.len() {
+            w[index] = value;
         }
     };
 

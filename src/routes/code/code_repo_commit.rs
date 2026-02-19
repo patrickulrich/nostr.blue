@@ -71,12 +71,12 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
 
     let mut request_id = use_signal(|| 0u32);
 
+    let client_ready = *nostr_client::CLIENT_INITIALIZED.read();
     use_effect(
         use_reactive(
-            (&naddr, &sha),
-            move |(n, s)| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-                if !client_initialized {
+            (&naddr, &sha, &client_ready),
+            move |(n, s, initialized)| {
+                if !initialized {
                     return;
                 }
                 let current_id = *request_id.peek() + 1;

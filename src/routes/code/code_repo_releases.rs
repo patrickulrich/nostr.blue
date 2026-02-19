@@ -14,7 +14,6 @@ use crate::utils::permissions;
 use crate::utils::validation::is_valid_http_url;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::prelude::EventId;
 /// Repository releases page component
 #[component]
 pub fn CodeRepoReleases(naddr: String) -> Element {
@@ -23,6 +22,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut show_new_form = use_signal(|| false);
     let mut repo_data = use_signal(|| None::<Repository>);
+    let mut repo_error = use_signal(|| None::<String>);
     let mut refresh_counter = use_signal(|| 0u32);
     let naddr_for_effect = naddr.clone();
     use_effect(move || {
@@ -34,8 +34,14 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         }
         spawn(async move {
             loading.set(true);
-            if let Ok(repo) = fetch_repository(&n).await {
-                repo_data.set(Some(repo));
+            match fetch_repository(&n).await {
+                Ok(repo) => {
+                    repo_data.set(Some(repo));
+                    repo_error.set(None);
+                }
+                Err(e) => {
+                    repo_error.set(Some(format!("Failed to load repository: {}", e)));
+                }
             }
             match fetch_repo_releases(&n).await {
                 Ok(fetched) => {
@@ -124,6 +130,11 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                 }
             }
             div { class: "p-4 space-y-6",
+                if let Some(err) = repo_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm",
+                        "{err}"
+                    }
+                }
                 if *show_new_form.read() {
                     NewReleaseForm {
                         naddr: naddr.clone(),
@@ -141,17 +152,22 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                     EmptyReleases {}
                 } else {
                     div { class: "space-y-4",
-                        for release in all_releases.iter() {
-                            ReleaseCard {
-                                key: "{release.event_id}",
-                                release: release.clone(),
-                                naddr: naddr.clone(),
-                                repo: repo_data.read().clone(),
-                                user_pubkey: user_pubkey.clone(),
-                                is_authenticated: is_authenticated,
-                                on_mutated: move |_| {
-                                    refresh_counter += 1;
-                                },
+                        {
+                            let repo_clone = repo_data.read().clone();
+                            rsx! {
+                                for release in all_releases.iter() {
+                                    ReleaseCard {
+                                        key: "{release.event_id}",
+                                        release: release.clone(),
+                                        naddr: naddr.clone(),
+                                        repo: repo_clone.clone(),
+                                        user_pubkey: user_pubkey.clone(),
+                                        is_authenticated: is_authenticated,
+                                        on_mutated: move |_| {
+                                            refresh_counter += 1;
+                                        },
+                                    }
+                                }
                             }
                         }
                     }
@@ -186,7 +202,7 @@ fn ReleaseCard(
         && (user_pubkey == release.pubkey
             || repo
                 .as_ref()
-                .is_some_and(|r| crate::utils::permissions::is_owner(&user_pubkey, r)));
+                .is_some_and(|r| permissions::is_owner(&user_pubkey, r) || permissions::is_maintainer(&user_pubkey, r)));
     if *show_edit.read() {
         return rsx! {
             EditReleaseForm {
@@ -254,6 +270,7 @@ fn ReleaseCard(
                             onclick: {
                                 let event_id_hex = release_event_id.clone();
                                 move |_| {
+                                    use nostr_sdk::prelude::EventId;
                                     let eid = event_id_hex.clone();
                                     spawn(async move {
                                         is_deleting.set(true);

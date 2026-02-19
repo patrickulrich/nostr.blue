@@ -31,6 +31,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
         });
     });
     let handle_compare = move |_| {
+        diff_content.set(String::new());
         let base = base_branch.read().clone();
         let head = head_branch.read().clone();
         if base.trim().is_empty() || head.trim().is_empty() {
@@ -69,6 +70,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                 }
             } else {
                 error.set(Some("Failed to initialize git service".to_string()));
+                diff_content.set(String::new());
             }
             loading.set(false);
         });

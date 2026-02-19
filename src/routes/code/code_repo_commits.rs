@@ -41,10 +41,13 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                     || git_service::GitService::init().await.is_ok()
                 {
                     match git_service().get_log(repo, None, 50).await {
-                        Ok(entries) => {
+                        Ok(entries) if !entries.is_empty() => {
                             commits_result.set(Some(Ok(CommitData::Git(entries))));
                             repo_result.set(Some(result));
                             return;
+                        }
+                        Ok(_) => {
+                            log::warn!("git_service get_log returned empty, falling back to GitHub API");
                         }
                         Err(e) => {
                             log::warn!("git_service get_log failed, falling back to GitHub API: {}", e);

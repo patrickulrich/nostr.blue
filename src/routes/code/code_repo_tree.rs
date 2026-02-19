@@ -6,7 +6,7 @@ use crate::components::{
     BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton,
 };
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, file_fetcher, git_service};
+use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
@@ -80,6 +80,7 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                 if let Some(repo) = repo_signal.read().clone() {
                     let ref_str = git_ref_for_finder.clone();
                     spawn(async move {
+                        use crate::services::git_hosting::file_fetcher;
                         // Try REST API first (GitHub/GitLab/Codeberg)
                         if let Ok(paths) =
                             file_fetcher::fetch_all_file_paths(&repo, Some(&ref_str)).await
