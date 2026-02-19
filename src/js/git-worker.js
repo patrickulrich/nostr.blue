@@ -100,11 +100,13 @@ function validateRepoDir(dir) {
   if (typeof dir !== 'string') {
     throw new Error('Invalid directory path');
   }
-  if (!dir || dir.includes('..') || dir.startsWith('/') || dir.includes('\0')) {
+  if (!dir || dir.includes('..') || dir.includes('\0')) {
     throw new Error('Invalid directory path');
   }
-  const normalized = dir.split('/').filter(p => p && p !== '.').join('/');
-  if (normalized !== dir || normalized.includes('..')) {
+  // Normalize but preserve leading / for LightningFS absolute paths
+  const parts = dir.split('/').filter(p => p && p !== '.');
+  const normalized = (dir.startsWith('/') ? '/' : '') + parts.join('/');
+  if (normalized.includes('..')) {
     throw new Error('Invalid directory path');
   }
   return normalized;
@@ -296,6 +298,152 @@ const methods = {
     } catch {
       return { exists: false };
     }
+  },
+
+  /**
+   * List all file paths recursively (flat list for fuzzy finder)
+   */
+  async listAllPaths({ dir, ref: gitRef = 'HEAD' }) {
+    validateRepoDir(dir);
+
+    let commitOid;
+    try {
+      commitOid = await resolveRefWithFallback(dir, gitRef);
+    } catch (e) {
+      throw new Error(`Could not resolve ref '${gitRef}': ${e.message}`);
+    }
+
+    const files = await git.listFiles({ fs, dir, ref: commitOid });
+    return files;
+  },
+
+  /**
+   * Compare two refs and generate a unified diff
+   * Walks both trees and compares file contents
+   */
+  async diff({ dir, base, head }) {
+    validateRepoDir(dir);
+
+    // Maximum blob size to include in diff (2 MB)
+    const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+
+    /**
+     * Check if a blob appears to be binary by scanning for null bytes
+     * in the first 8 KB of data.
+     */
+    function isBinary(uint8Array) {
+      const scanLen = Math.min(uint8Array.length, 8192);
+      for (let i = 0; i < scanLen; i++) {
+        if (uint8Array[i] === 0) return true;
+      }
+      return false;
+    }
+
+    let baseOid, headOid;
+    try {
+      baseOid = await resolveRefWithFallback(dir, base);
+    } catch (e) {
+      throw new Error(`Could not resolve base ref '${base}': ${e.message}`);
+    }
+    try {
+      headOid = await resolveRefWithFallback(dir, head);
+    } catch (e) {
+      throw new Error(`Could not resolve head ref '${head}': ${e.message}`);
+    }
+
+    // Get file listings for both refs
+    const baseFiles = await git.listFiles({ fs, dir, ref: baseOid });
+    const headFiles = await git.listFiles({ fs, dir, ref: headOid });
+
+    const allFiles = new Set([...baseFiles, ...headFiles]);
+    const diffParts = [];
+
+    for (const filepath of allFiles) {
+      let baseContent = null;
+      let headContent = null;
+      let skipReason = null;
+
+      try {
+        const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });
+        if (blob.byteLength > MAX_DIFF_BYTES) {
+          skipReason = 'File too large to diff';
+        } else if (isBinary(blob)) {
+          skipReason = 'Binary file';
+        } else {
+          baseContent = new TextDecoder().decode(blob);
+        }
+      } catch (e) {
+        // File doesn't exist in base
+      }
+
+      if (!skipReason) {
+        try {
+          const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath });
+          if (blob.byteLength > MAX_DIFF_BYTES) {
+            skipReason = 'File too large to diff';
+          } else if (isBinary(blob)) {
+            skipReason = 'Binary file';
+          } else {
+            headContent = new TextDecoder().decode(blob);
+          }
+        } catch (e) {
+          // File doesn't exist in head
+        }
+      }
+
+      if (skipReason) {
+        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push(`--- a/${filepath}`);
+        diffParts.push(`+++ b/${filepath}`);
+        diffParts.push(`@@ -0,0 +0,0 @@`);
+        diffParts.push(` ${skipReason}`);
+        continue;
+      }
+
+      // Skip unchanged files
+      if (baseContent === headContent) continue;
+
+      // Generate unified diff header
+      if (baseContent === null) {
+        // New file
+        const lines = headContent.split('\n');
+        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push('new file mode 100644');
+        diffParts.push(`--- /dev/null`);
+        diffParts.push(`+++ b/${filepath}`);
+        diffParts.push(`@@ -0,0 +1,${lines.length} @@`);
+        for (const line of lines) {
+          diffParts.push(`+${line}`);
+        }
+      } else if (headContent === null) {
+        // Deleted file
+        const lines = baseContent.split('\n');
+        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push('deleted file mode 100644');
+        diffParts.push(`--- a/${filepath}`);
+        diffParts.push(`+++ /dev/null`);
+        diffParts.push(`@@ -1,${lines.length} +0,0 @@`);
+        for (const line of lines) {
+          diffParts.push(`-${line}`);
+        }
+      } else {
+        // Modified file - simple line-by-line diff
+        const baseLines = baseContent.split('\n');
+        const headLines = headContent.split('\n');
+        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push(`--- a/${filepath}`);
+        diffParts.push(`+++ b/${filepath}`);
+        diffParts.push(`@@ -1,${baseLines.length} +1,${headLines.length} @@`);
+        for (const line of baseLines) {
+          diffParts.push(`-${line}`);
+        }
+        for (const line of headLines) {
+          diffParts.push(`+${line}`);
+        }
+      }
+    }
+
+    return diffParts.join('\n');
   },
 
   /**

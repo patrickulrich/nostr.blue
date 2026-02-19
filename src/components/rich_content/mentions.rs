@@ -308,6 +308,12 @@ pub(super) fn EventMentionRenderer(mention: String) -> Element {
                         }
                     }
                 }
+                40 => {
+                    // NIP-28 channel creation
+                    rsx! {
+                        {render_channel_minicard(&event, &event.id.to_hex())}
+                    }
+                }
                 _ => {
                     rsx! {
                         {render_embedded_note(&event, metadata_clone.as_ref())}
