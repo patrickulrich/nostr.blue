@@ -7,7 +7,6 @@ use crate::components::{
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
-use crate::utils::is_safe_path;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 #[component]
@@ -61,6 +60,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: String) -> Element {
                 let decoded_path = urlencoding::decode(&path)
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| path.clone());
+                use crate::utils::is_safe_path;
                 if !is_safe_path(&decoded_path) {
                     log::warn!("Path traversal attempt blocked: {}", decoded_path);
                     error.set(Some("Invalid path".to_string()));

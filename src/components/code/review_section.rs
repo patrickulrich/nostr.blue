@@ -14,15 +14,18 @@ use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 
 /// Publish a review as a Kind 9807 event on Nostr
-pub async fn publish_review_event(pr_event_id: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
+pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached".to_string());
     }
     let event_id = EventId::from_hex(pr_event_id)
         .map_err(|e| format!("Invalid event ID: {}", e))?;
+    let author_pk = PublicKey::from_hex(pr_author_pubkey)
+        .map_err(|e| format!("Invalid author pubkey: {}", e))?;
     let builder = EventBuilder::new(Kind::Custom(PersistedReview::KIND), content)
         .tag(Tag::event(event_id))
+        .tag(Tag::public_key(author_pk))
         .tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("state")),
             [state.as_str()],
@@ -144,6 +147,7 @@ pub fn PRReviewSection(
     let handle_submit = {
         let pr_id = pr_id.clone();
         let user_pubkey = user_pubkey.clone();
+        let saved_pr_pubkey = pr_pubkey.clone();
         move |_| {
             let state = *selected_state.read();
             let body = review_body.read().clone();
@@ -174,8 +178,9 @@ pub fn PRReviewSection(
             let id = pr_id.clone();
             let saved_content = content.clone();
             let saved_pubkey = user_pubkey.clone();
+            let author_pk = saved_pr_pubkey.clone();
             spawn(async move {
-                if let Err(e) = publish_review_event(&id, review_state, &saved_content).await {
+                if let Err(e) = publish_review_event(&id, &author_pk, review_state, &saved_content).await {
                     publish_error.set(Some(format!("Failed to publish review: {}", e)));
                     // Rollback: remove the optimistic entry
                     let mut current = reviews.write();

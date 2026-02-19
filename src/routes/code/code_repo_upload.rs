@@ -9,6 +9,7 @@ use crate::services::git_hosting::fetch_repository;
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::format::display_server_url;
 use crate::utils::nip34::Repository;
+use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 
 /// A file selected for upload (name, bytes, mime type)
@@ -255,11 +256,35 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                         ondragleave: move |_| {
                             is_dragging.set(false);
                         },
-                        ondrop: move |e| {
-                            e.prevent_default();
+                        ondrop: move |evt: Event<DragData>| async move {
+                            evt.prevent_default();
                             is_dragging.set(false);
-                            // File reading from drop events is handled by the input
-                            // The drop zone is mainly a visual cue; actual file selection uses the input
+                            let files = evt.files();
+                            if files.is_empty() {
+                                return;
+                            }
+                            let mut new_files = Vec::new();
+                            for file in files {
+                                let name = file.name();
+                                let mime_type = file.content_type()
+                                    .unwrap_or_else(|| "application/octet-stream".to_string());
+                                match file.read_bytes().await {
+                                    Ok(bytes) => {
+                                        new_files.push(SelectedFile {
+                                            name,
+                                            data: bytes.to_vec(),
+                                            mime_type,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to read dropped file {}: {:?}", name, e);
+                                    }
+                                }
+                            }
+                            if !new_files.is_empty() {
+                                selected_files.write().extend(new_files);
+                                error_message.set(None);
+                            }
                         },
                         onclick: move |_| {
                             // Programmatically click the hidden file input

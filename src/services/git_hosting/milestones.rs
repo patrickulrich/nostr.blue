@@ -3,8 +3,6 @@
 //! Manages repository milestones stored as custom tags on repository events.
 //! Milestones are stored as `milestone` tags on the Kind 30617 repo announcement:
 //! `["milestone", "<id>", "<name>", "<description>", "<due_date_unix>"]`
-#![allow(dead_code)]
-
 /// A repository milestone
 #[derive(Debug, Clone, PartialEq)]
 pub struct Milestone {
@@ -19,6 +17,7 @@ pub struct Milestone {
 }
 
 /// Parse milestones from repository event tags
+#[allow(dead_code)]
 pub fn parse_milestones(tags: &[Vec<String>]) -> Vec<Milestone> {
     tags.iter()
         .filter(|t| t.first().map(|s| s.as_str()) == Some("milestone") && t.len() >= 3)
