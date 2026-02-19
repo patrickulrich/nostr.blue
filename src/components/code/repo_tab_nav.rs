@@ -73,6 +73,33 @@ pub fn RepoTabNav(
             },
             count: None,
         },
+        TabConfig {
+            id: "discussions",
+            label: "Discussions",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>"#,
+            route: Route::CodeRepoDiscussions {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
+        TabConfig {
+            id: "releases",
+            label: "Releases",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>"#,
+            route: Route::CodeRepoReleases {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
+        TabConfig {
+            id: "insights",
+            label: "Insights",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>"#,
+            route: Route::CodeRepoInsights {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
     ];
     let overflow_tabs = &tabs[3.min(tabs.len())..];
     rsx! {
@@ -219,6 +246,27 @@ pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
             "commits",
             "Commits",
             Route::CodeRepoCommits {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "discussions",
+            "Discussions",
+            Route::CodeRepoDiscussions {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "releases",
+            "Releases",
+            Route::CodeRepoReleases {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "insights",
+            "Insights",
+            Route::CodeRepoInsights {
                 naddr: naddr.clone(),
             },
         ),
