@@ -200,45 +200,41 @@ pub fn CodeSearch(q: String) -> Element {
                 issues.set(Some(Ok(vec![])));
                 prs.set(Some(Ok(vec![])));
             } else {
+                // Only fetch entity types that will be displayed (based on type: filter)
+                let repos_fut = if parsed.show_repos() {
+                    Some(search_repositories(&search_text, 20))
+                } else { None };
+                let snippets_fut = if parsed.show_snippets() {
+                    Some(search_snippets(&search_text, 20))
+                } else { None };
+                let issues_fut = if parsed.show_issues() {
+                    Some(search_issues(&search_text, 20))
+                } else { None };
+                let prs_fut = if parsed.show_prs() {
+                    Some(search_prs(&search_text, 20))
+                } else { None };
+
+                // Use OptionFuture for conditional parallel execution
                 let (repos_res, snippets_res, issues_res, prs_res) = futures::join!(
-                    search_repositories(&search_text, 20),
-                    search_snippets(&search_text, 20),
-                    search_issues(&search_text, 20),
-                    search_prs(&search_text, 20)
+                    async { match repos_fut { Some(f) => Some(f.await), None => None } },
+                    async { match snippets_fut { Some(f) => Some(f.await), None => None } },
+                    async { match issues_fut { Some(f) => Some(f.await), None => None } },
+                    async { match prs_fut { Some(f) => Some(f.await), None => None } }
                 );
                 if *request_gen.peek() != gen { return; }
-                // Apply client-side filters to issues and PRs
-                let issues_res = issues_res.map(|list| {
-                    list.into_iter().filter(|i| parsed.matches_issue(i)).collect()
-                });
-                let prs_res = prs_res.map(|list| {
-                    list.into_iter().filter(|p| parsed.matches_pr(p)).collect()
-                });
-                // Hide entity types filtered out by type: qualifier
-                if parsed.show_repos() {
-                    repos.set(Some(repos_res.map(|list| {
-                        list.into_iter().filter(|r| parsed.matches_repo(r)).collect()
-                    })));
-                } else {
-                    repos.set(Some(Ok(vec![])));
-                }
-                if parsed.show_snippets() {
-                    snippets.set(Some(snippets_res.map(|list| {
-                        list.into_iter().filter(|s| parsed.matches_snippet(s)).collect()
-                    })));
-                } else {
-                    snippets.set(Some(Ok(vec![])));
-                }
-                if parsed.show_issues() {
-                    issues.set(Some(issues_res));
-                } else {
-                    issues.set(Some(Ok(vec![])));
-                }
-                if parsed.show_prs() {
-                    prs.set(Some(prs_res));
-                } else {
-                    prs.set(Some(Ok(vec![])));
-                }
+                // Apply client-side filters and set results
+                repos.set(Some(repos_res
+                    .unwrap_or(Ok(vec![]))
+                    .map(|list| list.into_iter().filter(|r| parsed.matches_repo(r)).collect())));
+                snippets.set(Some(snippets_res
+                    .unwrap_or(Ok(vec![]))
+                    .map(|list| list.into_iter().filter(|s| parsed.matches_snippet(s)).collect())));
+                issues.set(Some(issues_res
+                    .unwrap_or(Ok(vec![]))
+                    .map(|list| list.into_iter().filter(|i| parsed.matches_issue(i)).collect())));
+                prs.set(Some(prs_res
+                    .unwrap_or(Ok(vec![]))
+                    .map(|list| list.into_iter().filter(|p| parsed.matches_pr(p)).collect())));
             }
         });
     }));

@@ -83,9 +83,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     let mut fetch_error = use_signal(|| None::<String>);
 
     // Fetch repo + issues + PRs
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -116,30 +114,20 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
             items.set(all_items);
             loading.set(false);
         });
-    });
+    }));
 
-    // Group by status
+    // Group by status (memoized to avoid recomputing on every render)
+    let grouped = use_memo(move || {
+        let items_read = items.read();
+        let draft: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Draft).cloned().collect();
+        let open: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Open).cloned().collect();
+        let applied: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Applied).cloned().collect();
+        let closed: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Closed).cloned().collect();
+        (draft, open, applied, closed)
+    });
     let items_read = items.read();
-    let draft: Vec<_> = items_read
-        .iter()
-        .filter(|i| i.status() == IssueStatus::Draft)
-        .cloned()
-        .collect();
-    let open: Vec<_> = items_read
-        .iter()
-        .filter(|i| i.status() == IssueStatus::Open)
-        .cloned()
-        .collect();
-    let applied: Vec<_> = items_read
-        .iter()
-        .filter(|i| i.status() == IssueStatus::Applied)
-        .cloned()
-        .collect();
-    let closed: Vec<_> = items_read
-        .iter()
-        .filter(|i| i.status() == IssueStatus::Closed)
-        .cloned()
-        .collect();
+    let grouped_read = grouped.read();
+    let (ref draft, ref open, ref applied, ref closed) = *grouped_read;
 
     rsx! {
         div { class: "min-h-screen",
@@ -217,25 +205,25 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                             title: "Draft",
                             color: "bg-yellow-500",
                             count: draft.len(),
-                            items: draft,
+                            items: draft.clone(),
                         }
                         BoardColumn {
                             title: "Open",
                             color: "bg-green-500",
                             count: open.len(),
-                            items: open,
+                            items: open.clone(),
                         }
                         BoardColumn {
                             title: "Applied",
                             color: "bg-purple-500",
                             count: applied.len(),
-                            items: applied,
+                            items: applied.clone(),
                         }
                         BoardColumn {
                             title: "Closed",
                             color: "bg-red-500",
                             count: closed.len(),
-                            items: closed,
+                            items: closed.clone(),
                         }
                     }
                 }

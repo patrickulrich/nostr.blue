@@ -223,8 +223,10 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     let mut update_error = use_signal(|| None::<String>);
 
     let pr_id_for_comments = pr_id.clone();
+    let mut comments_gen = use_signal(|| 0u32);
     let comments = use_resource(move || {
         let id = pr_id_for_comments.clone();
+        let _gen = *comments_gen.read(); // auto-dependency: reading this triggers refetch on increment
         async move { fetch_pr_comments_by_id(&id).await }
     });
 
@@ -235,8 +237,9 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     use_effect(move || {
         let id = pr_id_for_line_comments.clone();
         spawn(async move {
-            if let Ok(lcs) = fetch_line_comments_by_id(&id).await {
-                line_comments.set(lcs);
+            match fetch_line_comments_by_id(&id).await {
+                Ok(lcs) => line_comments.set(lcs),
+                Err(e) => line_comment_error.set(Some(e)),
             }
         });
     });
@@ -285,6 +288,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                 match publish_pr_comment_by_id(&id, &author, &content).await {
                     Ok(_) => {
                         new_comment.set(String::new());
+                        comments_gen.with_mut(|v| *v = v.wrapping_add(1));
                     }
                     Err(e) => {
                         comment_error.set(Some(e));

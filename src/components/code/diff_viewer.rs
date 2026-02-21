@@ -240,14 +240,10 @@ pub fn DiffViewer(
         };
     }
 
-    // Sync prop into signal via effect, then memoize parsing
-    let mut content_signal = use_signal(|| content.clone());
-    use_effect(use_reactive(&content, move |c| {
-        content_signal.set(c);
+    // Derive parsed diff directly from content prop
+    let parsed = use_memo(use_reactive(&content, |c| {
+        parse_diff_content(&c)
     }));
-    let parsed = use_memo(move || {
-        parse_diff_content(&content_signal.read())
-    });
     let parsed_ref = parsed.read();
     let sections = &parsed_ref.sections;
     let section_hunks = &parsed_ref.section_hunks;

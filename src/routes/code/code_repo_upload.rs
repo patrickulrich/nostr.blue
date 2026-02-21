@@ -370,7 +370,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                     let file_ext = get_file_extension(&file_name);
                                     let file_type = file.mime_type.clone();
                                     rsx! {
-                                        div { class: "p-3 flex items-center gap-3",
+                                        div { key: "{file_id}", class: "p-3 flex items-center gap-3",
                                             // File icon
                                             div { class: "w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0",
                                                 span { class: "text-xs text-muted-foreground font-mono",

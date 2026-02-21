@@ -38,13 +38,6 @@ pub fn Polls() -> Element {
     let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
     let mut all_streamed_ids = use_signal(Vec::<EventId>::new);
     let mut request_id = use_signal(|| 0u64);
-    use_drop(move || {
-        if let Some(handle) = interaction_stream_handle.peek().clone() {
-            spawn(async move {
-                handle.unsubscribe().await;
-            });
-        }
-    });
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -239,7 +232,6 @@ pub fn Polls() -> Element {
                         .with_mut(|current| {
                             current.extend(unique_new);
                         });
-                    loading.set(false);
                     // Fetch interaction counts for new page and extend streaming
                     if !new_event_ids.is_empty() {
                         if let Ok(counts) = fetch_interaction_counts_batch(
@@ -275,7 +267,7 @@ pub fn Polls() -> Element {
                             Some(600),
                         ).await {
                             Ok(handle) => {
-                                if *feed_type.read() == current_feed_type {
+                                if *request_id.peek() == rid && *feed_type.read() == current_feed_type {
                                     interaction_stream_handle.set(Some(handle));
                                 } else {
                                     handle.unsubscribe().await;
@@ -286,6 +278,7 @@ pub fn Polls() -> Element {
                             }
                         }
                     }
+                    loading.set(false);
                 }
                 Err(e) => {
                     if *feed_type.read() != current_feed_type {

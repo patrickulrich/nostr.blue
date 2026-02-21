@@ -173,10 +173,10 @@ pub fn parse_dependencies(filename: &str, content: &str) -> Vec<Dependency> {
 
 #[component]
 pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
-    let runtime: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Runtime).collect();
-    let dev: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Dev).collect();
-    let build: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Build).collect();
-    let optional: Vec<_> = deps.iter().filter(|d| d.dep_type == DepType::Optional).collect();
+    let runtime_count = deps.iter().filter(|d| d.dep_type == DepType::Runtime).count();
+    let dev_count = deps.iter().filter(|d| d.dep_type == DepType::Dev).count();
+    let build_count = deps.iter().filter(|d| d.dep_type == DepType::Build).count();
+    let optional_count = deps.iter().filter(|d| d.dep_type == DepType::Optional).count();
 
     rsx! {
         div { class: "space-y-4",
@@ -190,17 +190,17 @@ pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
 
             // Stats bar
             div { class: "flex gap-4 text-sm",
-                if !runtime.is_empty() {
-                    span { class: "text-blue-500", "{runtime.len()} runtime" }
+                if runtime_count > 0 {
+                    span { class: "text-blue-500", "{runtime_count} runtime" }
                 }
-                if !dev.is_empty() {
-                    span { class: "text-purple-500", "{dev.len()} dev" }
+                if dev_count > 0 {
+                    span { class: "text-purple-500", "{dev_count} dev" }
                 }
-                if !build.is_empty() {
-                    span { class: "text-orange-500", "{build.len()} build" }
+                if build_count > 0 {
+                    span { class: "text-orange-500", "{build_count} build" }
                 }
-                if !optional.is_empty() {
-                    span { class: "text-gray-500", "{optional.len()} optional" }
+                if optional_count > 0 {
+                    span { class: "text-gray-500", "{optional_count} optional" }
                 }
             }
 

@@ -92,7 +92,9 @@ pub fn BountyForm(
                     }
                 }
             }
+            label { class: "sr-only", r#for: "bounty-amount", "Bounty amount in sats" }
             input {
+                id: "bounty-amount",
                 class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-sm",
                 r#type: "number",
                 placeholder: "Amount in sats",

@@ -651,9 +651,11 @@ const methods = {
       throw new Error(`Could not resolve head ref '${head}': ${e.message}`);
     }
 
-    // Get file listings for both refs
-    const baseFiles = await git.listFiles({ fs, dir, ref: baseOid });
-    const headFiles = await git.listFiles({ fs, dir, ref: headOid });
+    // Get file listings for both refs (use Sets for O(1) lookup)
+    const baseFilesList = await git.listFiles({ fs, dir, ref: baseOid });
+    const headFilesList = await git.listFiles({ fs, dir, ref: headOid });
+    const baseFiles = new Set(baseFilesList);
+    const headFiles = new Set(headFilesList);
 
     const allFiles = new Set([...baseFiles, ...headFiles]);
     const diffParts = [];
@@ -662,8 +664,8 @@ const methods = {
       let baseContent = null;
       let headContent = null;
       let skipReason = null;
-      let inBase = baseFiles.includes(filepath);
-      let inHead = headFiles.includes(filepath);
+      let inBase = baseFiles.has(filepath);
+      let inHead = headFiles.has(filepath);
 
       try {
         const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });

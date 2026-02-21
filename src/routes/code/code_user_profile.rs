@@ -24,11 +24,8 @@ enum CodeProfileTab {
     Snippets,
 }
 
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 struct TabData {
-    loaded: bool,
     count: usize,
 }
 
@@ -83,7 +80,14 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
 
     // Phase 1: Load profile metadata + all counts on mount/pubkey change
     let pubkey_for_load = pubkey.clone();
+    let mut prev_pubkey = use_signal(String::new);
     use_effect(use_reactive(&pubkey, move |pk| {
+        // Clear PROFILE_CACHE entry for old pubkey on navigation
+        let old_pk = prev_pubkey.peek().clone();
+        if !old_pk.is_empty() && old_pk != pk {
+            profiles::PROFILE_CACHE.write().pop(&old_pk);
+        }
+        prev_pubkey.set(pk.clone());
         // Reset state
         profile_data.set(None);
         loading.set(true);
@@ -168,10 +172,10 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             }
 
             let mut td = default_tab_data_map();
-            td.insert(CodeProfileTab::Repositories, TabData { loaded: true, count: repo_count });
-            td.insert(CodeProfileTab::Issues, TabData { loaded: true, count: issue_count });
-            td.insert(CodeProfileTab::PullRequests, TabData { loaded: true, count: pr_count });
-            td.insert(CodeProfileTab::Snippets, TabData { loaded: true, count: snippet_count });
+            td.insert(CodeProfileTab::Repositories, TabData { count: repo_count });
+            td.insert(CodeProfileTab::Issues, TabData { count: issue_count });
+            td.insert(CodeProfileTab::PullRequests, TabData { count: pr_count });
+            td.insert(CodeProfileTab::Snippets, TabData { count: snippet_count });
             tab_data.set(td);
 
             loading.set(false);
@@ -179,11 +183,13 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     }));
 
     // Follow/unfollow handler
+    let mut follow_error = use_signal(|| None::<String>);
     let pubkey_for_follow = pubkey.clone();
     let on_follow_click = move |_| {
         let pk = pubkey_for_follow.clone();
         spawn(async move {
             follow_loading.set(true);
+            follow_error.set(None);
             let hex = PublicKey::parse(&pk)
                 .map(|k| k.to_hex())
                 .unwrap_or(pk);
@@ -191,12 +197,18 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             if is_following() {
                 match nostr_client::unfollow_user(hex).await {
                     Ok(()) => is_following.set(false),
-                    Err(e) => log::error!("Failed to unfollow: {}", e),
+                    Err(e) => {
+                        log::error!("Failed to unfollow: {}", e);
+                        follow_error.set(Some(format!("Failed to unfollow: {}", e)));
+                    }
                 }
             } else {
                 match nostr_client::follow_user(hex).await {
                     Ok(()) => is_following.set(true),
-                    Err(e) => log::error!("Failed to follow: {}", e),
+                    Err(e) => {
+                        log::error!("Failed to follow: {}", e);
+                        follow_error.set(Some(format!("Failed to follow: {}", e)));
+                    }
                 }
             }
             follow_loading.set(false);
@@ -359,20 +371,25 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
 
                                     // Follow button (hidden on own profile)
                                     if !is_own_profile && auth_store::is_authenticated() {
-                                        button {
-                                            class: if is_following() {
-                                                "px-4 py-1.5 text-sm rounded-lg border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive transition"
-                                            } else {
-                                                "px-4 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition"
-                                            },
-                                            disabled: follow_loading(),
-                                            onclick: on_follow_click,
-                                            if follow_loading() {
-                                                "..."
-                                            } else if is_following() {
-                                                "Following"
-                                            } else {
-                                                "Follow"
+                                        div { class: "flex flex-col items-end gap-1",
+                                            button {
+                                                class: if is_following() {
+                                                    "px-4 py-1.5 text-sm rounded-lg border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive transition"
+                                                } else {
+                                                    "px-4 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition"
+                                                },
+                                                disabled: follow_loading(),
+                                                onclick: on_follow_click,
+                                                if follow_loading() {
+                                                    "..."
+                                                } else if is_following() {
+                                                    "Following"
+                                                } else {
+                                                    "Follow"
+                                                }
+                                            }
+                                            if let Some(ref err) = *follow_error.read() {
+                                                p { class: "text-xs text-destructive max-w-48 text-right", "{err}" }
                                             }
                                         }
                                     }

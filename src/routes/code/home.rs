@@ -235,12 +235,14 @@ fn RepositoriesTab() -> Element {
                         let mut current = repos.peek().clone();
                         let existing: HashSet<_> =
                             current.iter().map(|r| r.event_id.clone()).collect();
+                        let mut added_count = 0usize;
                         for repo in fetched {
                             if !existing.contains(&repo.event_id) {
                                 current.push(repo);
+                                added_count += 1;
                             }
                         }
-                        has_more.set(raw_count >= PAGE_SIZE);
+                        has_more.set(raw_count >= PAGE_SIZE && added_count > 0);
                         repos.set(current);
                     }
                 }
@@ -569,17 +571,16 @@ fn SnippetsTab() -> Element {
 #[component]
 fn MyReposTab() -> Element {
     use crate::stores::auth_store;
-    let auth = auth_store::AUTH_STATE.read();
     let mut my_repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
     let mut loading = use_signal(|| true);
-    // Snapshot pubkey before async boundary
-    let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
-        let pubkey_hex = pubkey_hex.clone();
+        // Read auth inside effect so it re-runs on account switch
+        let auth = auth_store::AUTH_STATE.read();
+        let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
         if pubkey_hex.is_empty() {
             loading.set(false);
             return;
@@ -600,6 +601,7 @@ fn MyReposTab() -> Element {
             loading.set(false);
         });
     });
+    let auth = auth_store::AUTH_STATE.read();
     if !auth.is_authenticated {
         return rsx! {
             div { class: "text-center py-12",

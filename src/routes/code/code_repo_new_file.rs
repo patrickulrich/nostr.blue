@@ -85,9 +85,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
 
     // Fetch repository data
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -98,7 +96,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
             repo_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
 
     // Auth gate
     if !auth.is_authenticated {

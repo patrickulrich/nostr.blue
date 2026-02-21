@@ -265,12 +265,17 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .map(|url| {
-                    // Normalize SCP-style URLs (git@github.com:user/repo.git) to HTTPS
-                    if url.starts_with("git@") && url.contains(':') && !url.contains("://") {
-                        url.replacen("git@", "https://", 1).replacen(':', "/", 1)
-                    } else {
-                        url
+                    // Normalize SCP-style URLs (user@host:path) to HTTPS
+                    if !url.contains("://") {
+                        if let Some(at_pos) = url.find('@') {
+                            if let Some(colon_pos) = url[at_pos..].find(':') {
+                                let host = &url[at_pos + 1..at_pos + colon_pos];
+                                let path = &url[at_pos + colon_pos + 1..];
+                                return format!("https://{}/{}", host, path);
+                            }
+                        }
                     }
+                    url
                 })
                 .collect();
             if urls.is_empty() {

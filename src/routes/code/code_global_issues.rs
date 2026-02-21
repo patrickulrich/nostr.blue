@@ -33,6 +33,7 @@ pub fn CodeGlobalIssues() -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
+    let mut request_gen = use_signal(|| 0u32);
 
     let user_pubkey = {
         let auth = auth_store::AUTH_STATE.read();
@@ -44,6 +45,8 @@ pub fn CodeGlobalIssues() -> Element {
         if !initialized || pk_hex.is_empty() {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         spawn(async move {
             loading.set(true);
             if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
@@ -52,14 +55,18 @@ pub fn CodeGlobalIssues() -> Element {
                     fetch_issues_assigned_to(&pk, 100),
                     fetch_issues_mentioning(&pk, 100)
                 );
-                if let Ok(fetched) = created_res {
-                    created_issues.set(fetched);
+                if *request_gen.peek() != gen { return; }
+                match created_res {
+                    Ok(fetched) => created_issues.set(fetched),
+                    Err(e) => log::warn!("Failed to fetch created issues: {}", e),
                 }
-                if let Ok(fetched) = assigned_res {
-                    assigned_issues.set(fetched);
+                match assigned_res {
+                    Ok(fetched) => assigned_issues.set(fetched),
+                    Err(e) => log::warn!("Failed to fetch assigned issues: {}", e),
                 }
-                if let Ok(fetched) = mentioned_res {
-                    mentioned_issues.set(fetched);
+                match mentioned_res {
+                    Ok(fetched) => mentioned_issues.set(fetched),
+                    Err(e) => log::warn!("Failed to fetch mentioned issues: {}", e),
                 }
             }
             loading.set(false);
@@ -70,11 +77,14 @@ pub fn CodeGlobalIssues() -> Element {
         return rsx! { NotAuthenticatedState {} };
     }
 
-    let all_issues_for_tab: Vec<Issue> = match *active_tab.read() {
-        FilterTab::Created => created_issues.read().clone(),
-        FilterTab::Assigned => assigned_issues.read().clone(),
-        FilterTab::Mentioned => mentioned_issues.read().clone(),
-    };
+    let all_issues_for_tab = use_memo(move || -> Vec<Issue> {
+        match *active_tab.read() {
+            FilterTab::Created => created_issues.read().clone(),
+            FilterTab::Assigned => assigned_issues.read().clone(),
+            FilterTab::Mentioned => mentioned_issues.read().clone(),
+        }
+    });
+    let all_issues_for_tab = all_issues_for_tab.read();
     let mut all_labels: Vec<String> = all_issues_for_tab
         .iter()
         .flat_map(|i| i.labels.iter().cloned())
@@ -247,13 +257,15 @@ pub fn CodeGlobalIssues() -> Element {
                     for label in all_labels.iter() {
                         {
                             let l = label.clone();
-                            let l2 = label.clone();
                             rsx! {
                                 button {
                                     key: "{l}",
-                                    class: if label_filter.read().as_deref() == Some(&l2) { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-400" } else { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 hover:ring-1 hover:ring-blue-400/50" },
-                                    onclick: move |_| label_filter.set(Some(l.clone())),
-                                    "{l2}"
+                                    class: if label_filter.read().as_deref() == Some(&l) { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-400" } else { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 hover:ring-1 hover:ring-blue-400/50" },
+                                    onclick: {
+                                        let l = l.clone();
+                                        move |_| label_filter.set(Some(l.clone()))
+                                    },
+                                    "{l}"
                                 }
                             }
                         }

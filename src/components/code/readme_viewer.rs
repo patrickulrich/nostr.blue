@@ -17,9 +17,12 @@ export function initMermaidDiagrams() {
 
     if (window.mermaid) {
         try {
-            // Mark divs before rendering to avoid double-processing
-            mermaidDivs.forEach(el => el.setAttribute('data-processed', 'true'));
-            window.mermaid.run({ nodes: Array.from(mermaidDivs) });
+            const nodes = Array.from(mermaidDivs);
+            window.mermaid.run({ nodes }).then(() => {
+                nodes.forEach(el => el.setAttribute('data-processed', 'true'));
+            }).catch(e => {
+                console.warn('Mermaid render error:', e);
+            });
         } catch (e) {
             console.warn('Mermaid render error:', e);
         }
@@ -44,8 +47,12 @@ export function initMermaidDiagrams() {
             // Re-query to catch diagrams added while script was loading
             const freshDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
             if (freshDivs.length === 0) return;
-            freshDivs.forEach(el => el.setAttribute('data-processed', 'true'));
-            window.mermaid.run({ nodes: Array.from(freshDivs) });
+            const freshNodes = Array.from(freshDivs);
+            window.mermaid.run({ nodes: freshNodes }).then(() => {
+                freshNodes.forEach(el => el.setAttribute('data-processed', 'true'));
+            }).catch(e => {
+                console.warn('Mermaid render error:', e);
+            });
         } catch (e) {
             console.warn('Mermaid init error:', e);
         }
@@ -228,13 +235,35 @@ fn NoReadme() -> Element {
     }
 }
 /// Inline README preview (for compact displays)
-/// Uses CSS line-clamp for visual truncation to avoid breaking markdown constructs
+/// Uses CSS line-clamp for visual truncation to avoid breaking markdown constructs.
+/// Mermaid code blocks are replaced with a placeholder since the CDN won't render in previews.
 #[component]
 pub fn ReadmePreview(content: String) -> Element {
+    // Replace mermaid code blocks with a placeholder for preview
+    let preview_content = {
+        let mut result = String::new();
+        let mut in_mermaid = false;
+        for line in content.lines() {
+            if line.trim() == "```mermaid" {
+                in_mermaid = true;
+                result.push_str("[Diagram]\n");
+                continue;
+            }
+            if in_mermaid {
+                if line.trim() == "```" {
+                    in_mermaid = false;
+                }
+                continue;
+            }
+            result.push_str(line);
+            result.push('\n');
+        }
+        result
+    };
     rsx! {
         div {
             class: "text-sm text-muted-foreground line-clamp-3",
-            dangerous_inner_html: "{render_markdown(&content)}",
+            dangerous_inner_html: "{render_markdown(&preview_content)}",
         }
     }
 }

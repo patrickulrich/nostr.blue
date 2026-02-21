@@ -18,6 +18,7 @@ pub fn CodeNotifications() -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut filter = use_signal(|| None::<CodeNotificationType>);
+    let mut request_gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -29,11 +30,19 @@ pub fn CodeNotifications() -> Element {
         if pubkey.is_empty() {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         spawn(async move {
             loading.set(true);
             match fetch_code_notifications(50).await {
-                Ok(notifs) => notifications.set(notifs),
-                Err(e) => error.set(Some(e)),
+                Ok(notifs) => {
+                    if *request_gen.peek() != gen { return; }
+                    notifications.set(notifs);
+                }
+                Err(e) => {
+                    if *request_gen.peek() != gen { return; }
+                    error.set(Some(e));
+                }
             }
             loading.set(false);
         });

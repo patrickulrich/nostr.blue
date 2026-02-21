@@ -72,16 +72,9 @@ pub fn CodePullNew(naddr: String) -> Element {
                     closes_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
                 for id in &closes_list {
-                    if id.len() != 64 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
-                        error_message.set(Some(format!(
-                            "Invalid event ID '{}': must be exactly 64 hex characters",
-                            id
-                        )));
-                        is_publishing.set(false);
-                        return;
-                    }
+                    // EventId::from_hex validates both hex chars and 64-char length
                     if nostr_sdk::EventId::from_hex(id).is_err() {
-                        error_message.set(Some(format!("Invalid event ID: {}", id)));
+                        error_message.set(Some(format!("Invalid event ID '{}': must be exactly 64 hex characters", id)));
                         is_publishing.set(false);
                         return;
                     }

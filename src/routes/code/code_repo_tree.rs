@@ -71,11 +71,9 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     });
 
     // Clear cached file paths when repo or git_ref changes
-    let finder_cache_key = use_memo({
-        let naddr = naddr.clone();
-        let git_ref = git_ref.clone();
-        move || format!("{}:{}", naddr, git_ref)
-    });
+    let finder_cache_key = use_memo(use_reactive((&naddr, &git_ref), |(n, g)| {
+        format!("{}:{}", n, g)
+    }));
     let mut prev_finder_key = use_signal(String::new);
     use_effect(move || {
         let current_key = finder_cache_key.read().clone();

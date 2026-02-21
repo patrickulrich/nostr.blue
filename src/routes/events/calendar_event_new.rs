@@ -96,8 +96,10 @@ pub fn CalendarEventNew() -> Element {
         let loc = location.read().trim().to_string();
         if !loc.is_empty() {
             let mut locs = locations.read().clone();
-            locs.push(loc);
-            locations.set(locs);
+            if !locs.contains(&loc) {
+                locs.push(loc);
+                locations.set(locs);
+            }
             location.set(String::new());
         }
     };
