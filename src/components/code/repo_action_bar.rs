@@ -264,6 +264,14 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 .lines()
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
+                .map(|url| {
+                    // Normalize SCP-style URLs (git@github.com:user/repo.git) to HTTPS
+                    if url.starts_with("git@") && url.contains(':') && !url.contains("://") {
+                        url.replacen("git@", "https://", 1).replacen(':', "/", 1)
+                    } else {
+                        url
+                    }
+                })
                 .collect();
             if urls.is_empty() {
                 toast.error("At least one clone URL is required".to_string(), ToastOptions::new());

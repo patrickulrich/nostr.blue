@@ -152,6 +152,7 @@ pub fn CodeSearch(q: String) -> Element {
     let parsed = ParsedQuery::parse(&query);
     let parsed_for_filter = parsed.clone();
     let query_for_effect = query.clone();
+    let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&query_for_effect, move |q| {
         let parsed = ParsedQuery::parse(&q);
         let search_text = if parsed.text.is_empty() && parsed.has_filters() {
@@ -167,6 +168,8 @@ pub fn CodeSearch(q: String) -> Element {
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         spawn(async move {
             if q.is_empty() {
                 repos.set(Some(Ok(vec![])));
@@ -180,6 +183,7 @@ pub fn CodeSearch(q: String) -> Element {
                     search_issues(&search_text, 20),
                     search_prs(&search_text, 20)
                 );
+                if *request_gen.peek() != gen { return; }
                 // Apply client-side filters to issues and PRs
                 let issues_res = issues_res.map(|list| {
                     list.into_iter().filter(|i| parsed.matches_issue(i)).collect()

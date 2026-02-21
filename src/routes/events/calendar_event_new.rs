@@ -471,7 +471,7 @@ pub fn CalendarEventNew() -> Element {
                     }
                     if *show_ics_selector.read() && !ics_events.read().is_empty() {
                         div {
-                            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
+                            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
                             onclick: move |_| show_ics_selector.set(false),
                             div {
                                 class: "bg-background rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden",
@@ -614,6 +614,7 @@ pub fn CalendarEventNew() -> Element {
                                                 gloo_timers::future::TimeoutFuture::new(300).await;
                                                 if *location_debounce.peek() != current_id { return; }
                                                 if let Ok(results) = geocoding::geocode_suggestions(&val, 10).await {
+                                                    if *location_debounce.peek() != current_id { return; }
                                                     location_suggestions.set(results);
                                                 }
                                             });
@@ -638,12 +639,12 @@ pub fn CalendarEventNew() -> Element {
                             }
                             if *show_location_dropdown.read() && !location_suggestions.read().is_empty() {
                                 div { class: "absolute left-0 right-0 top-full mt-1 z-50 bg-background border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto",
-                                    for (idx , suggestion) in location_suggestions.read().iter().enumerate() {
+                                    for suggestion in location_suggestions.read().iter() {
                                         {
                                             let display = suggestion.display_name.clone();
                                             rsx! {
                                                 button {
-                                                    key: "{idx}",
+                                                    key: "{display}",
                                                     class: "w-full text-left px-4 py-3 hover:bg-accent transition text-sm border-b border-border last:border-b-0",
                                                     onmousedown: move |e| e.prevent_default(),
                                                     onclick: {
@@ -666,7 +667,7 @@ pub fn CalendarEventNew() -> Element {
                             div { class: "mt-2 flex flex-wrap gap-2",
                                 for (idx , loc) in locations.read().iter().enumerate() {
                                     div {
-                                        key: "{idx}",
+                                        key: "{loc}",
                                         class: "flex items-center gap-2 px-3 py-1 bg-muted rounded-full text-sm",
                                         span { "{loc}" }
                                         button {

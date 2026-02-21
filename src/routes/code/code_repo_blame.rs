@@ -33,19 +33,12 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
         .next()
         .unwrap_or(&decoded_path)
         .to_string();
-    let load_key = use_memo({
-        let naddr = naddr.clone();
-        let git_ref = git_ref.clone();
-        let path = path.clone();
-        move || format!("{}:{}:{}", naddr, git_ref, path)
-    });
     let mut gen = use_signal(|| 0u32);
     use_effect({
         let naddr = naddr.clone();
         let git_ref = git_ref.clone();
         let path = path.clone();
         move || {
-            let _key = load_key.read();
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
             if !client_initialized {
                 return;

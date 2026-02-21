@@ -37,11 +37,11 @@ pub fn CodeGlobalPulls() -> Element {
 
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
+    let client_init = *nostr_client::CLIENT_INITIALIZED.read();
     use_effect(
         use_reactive(
-            &user_pubkey,
-            move |pk_hex| {
-                let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+            (&user_pubkey, &client_init),
+            move |(pk_hex, client_initialized)| {
                 if !client_initialized || pk_hex.is_empty() {
                     return;
                 }

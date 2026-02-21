@@ -80,7 +80,10 @@ pub fn BountyForm(
                         class: "px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent/50 transition",
                         onclick: {
                             let val = *preset;
-                            move |_| amount.set(val.to_string())
+                            move |_| {
+                                amount.set(val.to_string());
+                                error.set(None);
+                            }
                         },
                         "{preset / 1_000}k sats"
                     }
@@ -92,7 +95,10 @@ pub fn BountyForm(
                 placeholder: "Amount in sats",
                 min: "1",
                 value: "{amount}",
-                oninput: move |e| amount.set(e.value()),
+                oninput: move |e| {
+                    amount.set(e.value());
+                    error.set(None);
+                },
             }
             if let Some(err) = error.read().as_ref() {
                 p { class: "text-xs text-destructive", "{err}" }

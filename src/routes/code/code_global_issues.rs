@@ -35,13 +35,10 @@ pub fn CodeGlobalIssues() -> Element {
     let mut label_filter = use_signal(|| Option::<String>::None);
 
     let auth = auth_store::AUTH_STATE.read();
-    if !auth.is_authenticated {
-        return rsx! { NotAuthenticatedState {} };
-    }
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
-    let user_pubkey_for_effect = user_pubkey.clone();
+
     use_effect(move || {
-        let pk_hex = user_pubkey_for_effect.clone();
+        let pk_hex = user_pubkey.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized || pk_hex.is_empty() {
             return;
@@ -67,6 +64,10 @@ pub fn CodeGlobalIssues() -> Element {
             loading.set(false);
         });
     });
+
+    if !auth.is_authenticated {
+        return rsx! { NotAuthenticatedState {} };
+    }
 
     let all_issues_for_tab: Vec<Issue> = match *active_tab.read() {
         FilterTab::Created => created_issues.read().clone(),

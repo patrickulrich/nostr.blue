@@ -60,7 +60,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                 let label_list: Vec<&str> = if labels_val.is_empty() {
                     vec![]
                 } else {
-                    labels_val.split(',').map(|s| s.trim()).collect()
+                    labels_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
                 let closes_list: Vec<&str> = if closes_val.is_empty() {
                     vec![]

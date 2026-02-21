@@ -243,10 +243,10 @@ fn is_valid_suggest_cache(cached: &CachedSuggestions) -> bool {
 /// throttle to comply with Nominatim usage policy.
 pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocation>, String> {
     let trimmed = query.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || limit == 0 {
         return Ok(vec![]);
     }
-    let normalized = normalize_query(trimmed);
+    let normalized = format!("{}|{}", normalize_query(trimmed), limit);
     // Check suggestion cache first
     let mut cache = load_suggest_cache();
     if let Some(cached) = cache.entries.get(&normalized) {
@@ -271,7 +271,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
     LAST_NOMINATIM_REQUEST.with(|last| last.set(now_ms));
     let encoded = urlencoding::encode(trimmed);
     let url = format!(
-        "{}?format=json&q={}&limit={}&addressdetails=1",
+        "{}?format=json&q={}&limit={}&addressdetails=1&email=contact@nostr.blue",
         NOMINATIM_API_URL, encoded, limit
     );
     let response = Request::get(&url)

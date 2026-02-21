@@ -144,9 +144,14 @@ pub fn PollCard(
                         }
                     }
                     // Subscribe for real-time vote updates
-                    vote_gen += 1;
-                    let current_vote_gen = *vote_gen.peek();
+                    let next_gen = vote_gen.peek().wrapping_add(1);
+                    vote_gen.set(next_gen);
+                    let current_vote_gen = next_gen;
                     if let Some(client) = nostr_client::get_client() {
+                        // Unsubscribe previous vote subscription before creating a new one
+                        if let Some(old_sub_id) = vote_sub_id.peek().clone() {
+                            client.unsubscribe(&old_sub_id).await;
+                        }
                         // Re-add poll relays for subscription lifetime
                         if !poll_relays_for_sub.is_empty() {
                             let added = relay::add_relays(&client, &poll_relays_for_sub).await;
@@ -657,6 +662,16 @@ pub fn PollCard(
                     class: "flex items-center text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 px-2 py-1.5 rounded transition",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let nevent = Nip19Event::new(event_id).author(event.pubkey);
+                            if let Ok(nevent_str) = nevent.to_bech32() {
+                                let share_url = format!("https://njump.me/{}", nevent_str);
+                                let window = web_sys::window().unwrap();
+                                let clipboard = window.navigator().clipboard();
+                                let _ = clipboard.write_text(&share_url);
+                            }
+                        }
                     },
                     ShareIcon {
                         class: "h-4 w-4".to_string(),

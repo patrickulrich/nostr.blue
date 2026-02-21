@@ -145,9 +145,8 @@ fn AllContent() -> Element {
                 div { class: "flex items-center justify-between mb-3",
                     h3 { class: "font-semibold", "Recent Repositories" }
                     Link {
-                        to: Route::CodeExplore {},
+                        to: Route::CodeRepositories {},
                         class: "text-sm text-primary hover:underline",
-                        onclick: |_| {},
                         "View all"
                     }
                 }

@@ -81,7 +81,7 @@ pub async fn publish_discussion(
 /// Publish a comment on a discussion (NIP-22 Comment, Kind 1111)
 pub async fn publish_discussion_comment(
     discussion_id: EventId,
-    author: PublicKey,
+    discussion_author: PublicKey,
     repository: Option<&Coordinate>,
     content: &str,
 ) -> Result<EventId, String> {
@@ -93,7 +93,7 @@ pub async fn publish_discussion_comment(
     let comment_to = CommentTarget::event(
         discussion_id,
         Kind::Custom(Discussion::KIND),
-        Some(author),
+        Some(discussion_author),
         None,
     );
     let mut builder = EventBuilder::comment(content, comment_to, None);
@@ -137,9 +137,9 @@ pub async fn publish_discussion_comment_by_id(
 ) -> Result<String, String> {
     let event_id = decode_event_id(event_ref)
         .map_err(|e| format!("Invalid event reference: {}", e))?;
-    let author = PublicKey::from_hex(author_hex)
+    let discussion_author = PublicKey::from_hex(author_hex)
         .map_err(|e| format!("Invalid author pubkey: {}", e))?;
-    let result = publish_discussion_comment(event_id, author, None, content).await?;
+    let result = publish_discussion_comment(event_id, discussion_author, None, content).await?;
     Ok(result.to_hex())
 }
 /// Fetch comments for discussion by event ID string

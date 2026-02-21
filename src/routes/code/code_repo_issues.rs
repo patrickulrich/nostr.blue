@@ -200,12 +200,17 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                             }
                         },
                     }
-                    if filtered().is_empty() {
-                        EmptyIssues {}
-                    } else {
-                        div { class: "border border-border rounded-lg divide-y divide-border",
-                            for issue in filtered().iter() {
-                                CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
+                    {
+                        let filtered_issues = filtered();
+                        if filtered_issues.is_empty() {
+                            rsx! { EmptyIssues {} }
+                        } else {
+                            rsx! {
+                                div { class: "border border-border rounded-lg divide-y divide-border",
+                                    for issue in filtered_issues.iter() {
+                                        CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
+                                    }
+                                }
                             }
                         }
                     }

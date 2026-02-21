@@ -153,11 +153,14 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
 
 /// Detect file type and parse
 pub fn parse_dependencies(filename: &str, content: &str) -> Vec<Dependency> {
-    match filename {
-        "Cargo.toml" => parse_cargo_toml(content),
-        "package.json" => parse_package_json(content),
-        "requirements.txt" => parse_requirements_txt(content),
-        _ => Vec::new(),
+    if filename.ends_with("Cargo.toml") {
+        parse_cargo_toml(content)
+    } else if filename.ends_with("package.json") {
+        parse_package_json(content)
+    } else if filename.ends_with("requirements.txt") {
+        parse_requirements_txt(content)
+    } else {
+        Vec::new()
     }
 }
 
@@ -204,7 +207,7 @@ pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
                 }
                 // Rows
                 for dep in deps.iter() {
-                    div { class: "grid grid-cols-3 gap-4 p-3 border-t border-border hover:bg-accent/30 transition text-sm",
+                    div { key: "{dep.name}:{dep.dep_type:?}", class: "grid grid-cols-3 gap-4 p-3 border-t border-border hover:bg-accent/30 transition text-sm",
                         span { class: "font-medium text-foreground truncate", "{dep.name}" }
                         code { class: "text-muted-foreground font-mono text-xs", "{dep.version}" }
                         span {

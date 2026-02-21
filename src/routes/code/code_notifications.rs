@@ -6,6 +6,7 @@ use crate::routes::Route;
 use crate::services::git_hosting::notifications::{
     fetch_code_notifications, CodeNotification, CodeNotificationType,
 };
+use crate::stores::nostr_client;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format::truncate_pubkey;
 use crate::utils::format_relative_time_or;
@@ -17,13 +18,19 @@ pub fn CodeNotifications() -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut filter = use_signal(|| None::<CodeNotificationType>);
-    use_future(move || async move {
-        loading.set(true);
-        match fetch_code_notifications(50).await {
-            Ok(notifs) => notifications.set(notifs),
-            Err(e) => error.set(Some(e)),
+    use_effect(move || {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
         }
-        loading.set(false);
+        spawn(async move {
+            loading.set(true);
+            match fetch_code_notifications(50).await {
+                Ok(notifs) => notifications.set(notifs),
+                Err(e) => error.set(Some(e)),
+            }
+            loading.set(false);
+        });
     });
     let current_filter = filter.read().clone();
     let filtered: Vec<CodeNotification> = notifications

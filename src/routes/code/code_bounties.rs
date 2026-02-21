@@ -111,6 +111,7 @@ pub fn CodeBounties() -> Element {
         if !client_initialized {
             return;
         }
+        error.set(None);
         spawn(async move {
             loading.set(true);
             match fetch_all_bounties().await {

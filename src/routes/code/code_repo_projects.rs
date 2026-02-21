@@ -110,7 +110,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                 Ok(prs) => all_items.extend(prs.into_iter().map(BoardItem::PullRequest)),
                 Err(e) => errors.push(format!("PRs: {}", e)),
             }
-            if !errors.is_empty() && all_items.is_empty() {
+            if !errors.is_empty() {
                 fetch_error.set(Some(errors.join("; ")));
             }
             items.set(all_items);

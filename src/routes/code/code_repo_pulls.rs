@@ -19,16 +19,14 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
     let mut search_query = use_signal(String::new);
     let mut selected_labels = use_signal(Vec::<String>::new);
 
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
         spawn(async move {
             loading.set(true);
-            match fetch_repo_prs(&n).await {
+            match fetch_repo_prs(&naddr).await {
                 Ok(fetched) => {
                     all_prs.set(fetched);
                     error.set(None);
@@ -39,7 +37,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
     let filtered = {
         let prs = all_prs.read();

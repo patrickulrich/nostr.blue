@@ -240,147 +240,17 @@ pub fn DiffViewer(
         };
     }
 
-    // Parse diff into sections
-    let lines: Vec<&str> = content.lines().collect();
-    let mut sections: Vec<DiffSection> = Vec::new();
-    let mut current_file: Option<String> = None;
-    let mut current_lines: Vec<DiffLine> = Vec::new();
-    let mut old_line: usize = 0;
-    let mut new_line: usize = 0;
-    let mut in_header = false;
-
-    for line in &lines {
-        if line.starts_with("diff --git") {
-            // Save previous section
-            if !current_lines.is_empty() {
-                sections.push(DiffSection {
-                    file_path: current_file.clone().unwrap_or_default(),
-                    lines: std::mem::take(&mut current_lines),
-                });
-            }
-            current_file = extract_file_path(line).map(|s| s.to_string());
-            in_header = true;
-            continue;
-        }
-
-        if in_header
-            && (line.starts_with("--- ")
-                || line.starts_with("+++ ")
-                || line.starts_with("index ")
-                || line.starts_with("old mode")
-                || line.starts_with("new mode")
-                || line.starts_with("new file")
-                || line.starts_with("deleted file")
-                || line.starts_with("similarity")
-                || line.starts_with("rename")
-                || line.starts_with("Binary"))
-        {
-            continue;
-        }
-
-        if line.starts_with("@@ ") {
-            in_header = false;
-            if let Some(hunk) = parse_hunk_header(line) {
-                old_line = hunk.old_start;
-                new_line = hunk.new_start;
-                current_lines.push(DiffLine {
-                    kind: LineKind::Hunk,
-                    old_num: None,
-                    new_num: None,
-                    content: line.to_string(),
-                });
-            }
-            continue;
-        }
-
-        if in_header {
-            continue;
-        }
-
-        if let Some(added) = line.strip_prefix('+') {
-            current_lines.push(DiffLine {
-                kind: LineKind::Add,
-                old_num: None,
-                new_num: Some(new_line),
-                content: added.to_string(),
-            });
-            new_line += 1;
-        } else if let Some(removed) = line.strip_prefix('-') {
-            current_lines.push(DiffLine {
-                kind: LineKind::Remove,
-                old_num: Some(old_line),
-                new_num: None,
-                content: removed.to_string(),
-            });
-            old_line += 1;
-        } else if line.starts_with('\\') {
-            // "\ No newline at end of file"
-            current_lines.push(DiffLine {
-                kind: LineKind::Info,
-                old_num: None,
-                new_num: None,
-                content: line.to_string(),
-            });
-        } else {
-            let display = if let Some(stripped) = line.strip_prefix(' ') {
-                stripped.to_string()
-            } else {
-                line.to_string()
-            };
-            current_lines.push(DiffLine {
-                kind: LineKind::Context,
-                old_num: Some(old_line),
-                new_num: Some(new_line),
-                content: display,
-            });
-            old_line += 1;
-            new_line += 1;
-        }
+    // Memoize diff parsing so it only re-runs when content changes
+    let mut content_signal = use_signal(|| content.clone());
+    if *content_signal.peek() != content {
+        content_signal.set(content.clone());
     }
-
-    // Save last section
-    if !current_lines.is_empty() {
-        sections.push(DiffSection {
-            file_path: current_file.unwrap_or_default(),
-            lines: std::mem::take(&mut current_lines),
-        });
-    }
-
-    // Split each section's lines into hunks for collapse support
-    let section_hunks: Vec<Vec<Hunk>> = sections
-        .iter()
-        .map(|section| {
-            let mut hunks: Vec<Hunk> = Vec::new();
-            let mut current_hunk_header: Option<String> = None;
-            let mut current_hunk_lines: Vec<DiffLine> = Vec::new();
-
-            for dl in &section.lines {
-                if matches!(dl.kind, LineKind::Hunk) {
-                    if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {
-                        hunks.push(Hunk {
-                            header: current_hunk_header.take(),
-                            lines: std::mem::take(&mut current_hunk_lines),
-                        });
-                    }
-                    current_hunk_header = Some(dl.content.clone());
-                } else {
-                    current_hunk_lines.push(DiffLine {
-                        kind: dl.kind,
-                        old_num: dl.old_num,
-                        new_num: dl.new_num,
-                        content: dl.content.clone(),
-                    });
-                }
-            }
-            if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {
-                hunks.push(Hunk {
-                    header: current_hunk_header,
-                    lines: current_hunk_lines,
-                });
-            }
-            hunks
-        })
-        .collect();
+    let parsed = use_memo(move || {
+        parse_diff_content(&content_signal.read())
+    });
+    let parsed_ref = parsed.read();
+    let sections = &parsed_ref.sections;
+    let section_hunks = &parsed_ref.section_hunks;
 
     let current_mode = *view_mode.read();
 
@@ -438,7 +308,7 @@ pub fn DiffViewer(
                             tbody {
                                 for (hunk_idx, hunk) in section_hunks[section_idx].iter().enumerate() {
                                     // Hunk header row (clickable for collapse)
-                                    if let Some(ref header) = hunk.header {
+                                    if let Some(header) = &hunk.header {
                                         {
                                             let is_collapsed = collapsed_hunks.read().get(&(section_idx, hunk_idx)).copied().unwrap_or(false);
                                             let header_text = header.clone();
@@ -787,11 +657,13 @@ fn InlineLineComment(comment: LineComment) -> Element {
     }
 }
 
+#[derive(PartialEq)]
 struct DiffSection {
     file_path: String,
     lines: Vec<DiffLine>,
 }
 
+#[derive(PartialEq)]
 struct DiffLine {
     kind: LineKind,
     old_num: Option<usize>,
@@ -808,7 +680,158 @@ enum LineKind {
     Info,
 }
 
+#[derive(PartialEq)]
 struct Hunk {
     header: Option<String>,
     lines: Vec<DiffLine>,
+}
+
+/// Parsed diff result containing sections and their hunks
+#[derive(PartialEq)]
+struct ParsedDiff {
+    sections: Vec<DiffSection>,
+    section_hunks: Vec<Vec<Hunk>>,
+}
+
+/// Parse diff content into sections and hunks
+fn parse_diff_content(content: &str) -> ParsedDiff {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut sections: Vec<DiffSection> = Vec::new();
+    let mut current_file: Option<String> = None;
+    let mut current_lines: Vec<DiffLine> = Vec::new();
+    let mut old_line: usize = 0;
+    let mut new_line: usize = 0;
+    let mut in_header = false;
+
+    for line in &lines {
+        if line.starts_with("diff --git") {
+            if !current_lines.is_empty() {
+                sections.push(DiffSection {
+                    file_path: current_file.clone().unwrap_or_default(),
+                    lines: std::mem::take(&mut current_lines),
+                });
+            }
+            current_file = extract_file_path(line).map(|s| s.to_string());
+            in_header = true;
+            continue;
+        }
+
+        if in_header
+            && (line.starts_with("--- ")
+                || line.starts_with("+++ ")
+                || line.starts_with("index ")
+                || line.starts_with("old mode")
+                || line.starts_with("new mode")
+                || line.starts_with("new file")
+                || line.starts_with("deleted file")
+                || line.starts_with("similarity")
+                || line.starts_with("rename")
+                || line.starts_with("Binary"))
+        {
+            continue;
+        }
+
+        if line.starts_with("@@ ") {
+            in_header = false;
+            if let Some(hunk) = parse_hunk_header(line) {
+                old_line = hunk.old_start;
+                new_line = hunk.new_start;
+                current_lines.push(DiffLine {
+                    kind: LineKind::Hunk,
+                    old_num: None,
+                    new_num: None,
+                    content: line.to_string(),
+                });
+            }
+            continue;
+        }
+
+        if in_header {
+            continue;
+        }
+
+        if let Some(added) = line.strip_prefix('+') {
+            current_lines.push(DiffLine {
+                kind: LineKind::Add,
+                old_num: None,
+                new_num: Some(new_line),
+                content: added.to_string(),
+            });
+            new_line += 1;
+        } else if let Some(removed) = line.strip_prefix('-') {
+            current_lines.push(DiffLine {
+                kind: LineKind::Remove,
+                old_num: Some(old_line),
+                new_num: None,
+                content: removed.to_string(),
+            });
+            old_line += 1;
+        } else if line.starts_with('\\') {
+            current_lines.push(DiffLine {
+                kind: LineKind::Info,
+                old_num: None,
+                new_num: None,
+                content: line.to_string(),
+            });
+        } else {
+            let display = if let Some(stripped) = line.strip_prefix(' ') {
+                stripped.to_string()
+            } else {
+                line.to_string()
+            };
+            current_lines.push(DiffLine {
+                kind: LineKind::Context,
+                old_num: Some(old_line),
+                new_num: Some(new_line),
+                content: display,
+            });
+            old_line += 1;
+            new_line += 1;
+        }
+    }
+
+    if !current_lines.is_empty() {
+        sections.push(DiffSection {
+            file_path: current_file.unwrap_or_default(),
+            lines: std::mem::take(&mut current_lines),
+        });
+    }
+
+    // Split each section's lines into hunks for collapse support
+    let section_hunks: Vec<Vec<Hunk>> = sections
+        .iter()
+        .map(|section| {
+            let mut hunks: Vec<Hunk> = Vec::new();
+            let mut current_hunk_header: Option<String> = None;
+            let mut current_hunk_lines: Vec<DiffLine> = Vec::new();
+
+            for dl in &section.lines {
+                if matches!(dl.kind, LineKind::Hunk) {
+                    if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {
+                        hunks.push(Hunk {
+                            header: current_hunk_header.take(),
+                            lines: std::mem::take(&mut current_hunk_lines),
+                        });
+                    }
+                    current_hunk_header = Some(dl.content.clone());
+                } else {
+                    current_hunk_lines.push(DiffLine {
+                        kind: dl.kind,
+                        old_num: dl.old_num,
+                        new_num: dl.new_num,
+                        content: dl.content.clone(),
+                    });
+                }
+            }
+            if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {
+                hunks.push(Hunk {
+                    header: current_hunk_header,
+                    lines: current_hunk_lines,
+                });
+            }
+            hunks
+        })
+        .collect();
+
+    ParsedDiff { sections, section_hunks }
 }

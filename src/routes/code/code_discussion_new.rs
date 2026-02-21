@@ -43,17 +43,18 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
+            if *is_publishing.peek() { return; }
             let subject_val = subject.read().clone();
             let content_val = content.read().clone();
             let category_val = category.read().clone();
             let naddr = naddr.clone();
+            if content_val.trim().is_empty() {
+                error_message.set(Some("Please provide discussion content".to_string()));
+                return;
+            }
+            is_publishing.set(true);
+            error_message.set(None);
             spawn(async move {
-                if content_val.trim().is_empty() {
-                    error_message.set(Some("Please provide discussion content".to_string()));
-                    return;
-                }
-                is_publishing.set(true);
-                error_message.set(None);
                 let subj = if subject_val.is_empty() {
                     None
                 } else {

@@ -66,12 +66,19 @@ impl Default for CodeSettingsData {
     }
 }
 
+fn settings_storage_key() -> String {
+    match auth_store::get_pubkey() {
+        Some(pk) => format!("{}_{}", CODE_SETTINGS_KEY, pk),
+        None => CODE_SETTINGS_KEY.to_string(),
+    }
+}
+
 fn load_code_settings() -> CodeSettingsData {
-    LocalStorage::get::<CodeSettingsData>(CODE_SETTINGS_KEY).unwrap_or_default()
+    LocalStorage::get::<CodeSettingsData>(&settings_storage_key()).unwrap_or_default()
 }
 
 fn save_code_settings(settings: &CodeSettingsData) -> Result<(), String> {
-    LocalStorage::set(CODE_SETTINGS_KEY, settings)
+    LocalStorage::set(settings_storage_key(), settings)
         .map_err(|e| format!("Failed to save settings: {}", e))
 }
 

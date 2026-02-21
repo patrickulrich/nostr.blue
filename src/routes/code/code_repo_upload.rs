@@ -106,8 +106,8 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 
     // Handle upload
     let handle_upload = move |_| {
-        let files: Vec<SelectedFile> = selected_files.write().drain(..).collect();
-        if files.is_empty() {
+        let files_to_upload: Vec<SelectedFile> = selected_files.read().clone();
+        if files_to_upload.is_empty() {
             return;
         }
         let server_url = selected_server.read().clone();
@@ -117,9 +117,10 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 
         spawn(async move {
             let mut results = upload_results.write().clone();
-            let total = files.len();
+            let total = files_to_upload.len();
+            let mut all_succeeded = true;
 
-            for (i, file) in files.into_iter().enumerate() {
+            for (i, file) in files_to_upload.into_iter().enumerate() {
                 current_file_index.set(i);
                 let quality = 100u8;
                 let file_size = file.data.len();
@@ -142,14 +143,17 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                     Err(e) => {
                         log::error!("Failed to upload {}: {}", file.name, e);
                         error_message.set(Some(format!("Failed to upload '{}': {}", file.name, e)));
+                        all_succeeded = false;
                         break;
                     }
                 }
             }
 
             *upload_results.write() = results;
-            selected_files.write().clear();
-            clear_file_input(input_id);
+            if all_succeeded {
+                selected_files.write().clear();
+                clear_file_input(input_id);
+            }
             uploading.set(false);
         });
     };

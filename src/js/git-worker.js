@@ -109,6 +109,9 @@ function validateRepoDir(dir) {
   if (normalized.includes('..')) {
     throw new Error('Invalid directory path');
   }
+  if (normalized === '' || normalized === '/') {
+    throw new Error('Invalid repository directory path');
+  }
   return normalized;
 }
 
@@ -650,6 +653,8 @@ const methods = {
       let baseContent = null;
       let headContent = null;
       let skipReason = null;
+      let inBase = baseFiles.includes(filepath);
+      let inHead = headFiles.includes(filepath);
 
       try {
         const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });
@@ -662,6 +667,7 @@ const methods = {
         }
       } catch (e) {
         // File doesn't exist in base
+        inBase = false;
       }
 
       if (!skipReason) {
@@ -676,13 +682,14 @@ const methods = {
           }
         } catch (e) {
           // File doesn't exist in head
+          inHead = false;
         }
       }
 
       if (skipReason) {
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
-        diffParts.push(`--- a/${filepath}`);
-        diffParts.push(`+++ b/${filepath}`);
+        diffParts.push(inBase ? `--- a/${filepath}` : `--- /dev/null`);
+        diffParts.push(inHead ? `+++ b/${filepath}` : `+++ /dev/null`);
         diffParts.push(`@@ -0,0 +0,0 @@`);
         diffParts.push(` ${skipReason}`);
         continue;

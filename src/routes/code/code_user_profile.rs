@@ -134,14 +134,13 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 }
             }
 
-            // Load repos (default tab) and counts for all tabs
-            let repos_result = fetch_user_repositories(&parsed, 50).await;
-            if *request_id.peek() != current_id { return; }
-            let issues_result = fetch_user_issues(&parsed, 50).await;
-            if *request_id.peek() != current_id { return; }
-            let prs_result = fetch_user_prs(&parsed, 50).await;
-            if *request_id.peek() != current_id { return; }
-            let snippets_result = fetch_user_snippets(&parsed, 50).await;
+            // Load repos (default tab) and counts for all tabs concurrently
+            let (repos_result, issues_result, prs_result, snippets_result) = futures::join!(
+                fetch_user_repositories(&parsed, 50),
+                fetch_user_issues(&parsed, 50),
+                fetch_user_prs(&parsed, 50),
+                fetch_user_snippets(&parsed, 50)
+            );
 
             // Discard stale results if pubkey changed during async fetch
             if *request_id.peek() != current_id {

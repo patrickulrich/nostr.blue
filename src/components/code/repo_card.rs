@@ -48,9 +48,9 @@ pub fn CodeRepoCard(
             }
             if !repo.topics.is_empty() {
                 div { class: "mt-2 flex flex-wrap gap-1",
-                    for (idx, topic) in repo.topics.iter().enumerate() {
+                    for topic in repo.topics.iter() {
                         span {
-                            key: "{idx}_{topic}",
+                            key: "{topic}",
                             class: "px-2 py-0.5 rounded-full bg-accent text-accent-foreground text-xs",
                             "{topic}"
                         }

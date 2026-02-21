@@ -71,10 +71,8 @@ pub fn ReadmeViewer(
     filename: String,
 ) -> Element {
     // Initialize mermaid.js after the README HTML is rendered into the DOM
-    let content_for_effect = content.clone();
-    use_effect(move || {
-        // Read content inside the effect so Dioxus tracks it as a dependency
-        let has_mermaid = content_for_effect
+    use_effect(use_reactive(&content, move |content| {
+        let has_mermaid = content
             .as_ref()
             .map(|c| c.contains("```mermaid"))
             .unwrap_or(false);
@@ -85,7 +83,7 @@ pub fn ReadmeViewer(
                 initMermaidDiagrams();
             });
         }
-    });
+    }));
 
     rsx! {
         div { class: "border border-border rounded-lg overflow-hidden",

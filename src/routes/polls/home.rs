@@ -58,12 +58,8 @@ pub fn Polls() -> Element {
         oldest_timestamp.set(None);
         last_event_id.set(None);
         has_more.set(true);
-        // Clean up previous interaction stream
-        if let Some(handle) = interaction_stream_handle.peek().clone() {
-            spawn(async move {
-                handle.unsubscribe().await;
-            });
-        }
+        // Clean up previous interaction stream explicitly before assigning new one
+        let old_handle = interaction_stream_handle.peek().clone();
         interaction_stream_handle.set(None);
         interaction_counts.set(HashMap::new());
         all_streamed_ids.set(Vec::new());
@@ -71,6 +67,10 @@ pub fn Polls() -> Element {
         request_id.with_mut(|v| *v += 1);
         let current_id = *request_id.peek();
         spawn(async move {
+            // Unsubscribe old handle at the start of the async context
+            if let Some(handle) = old_handle {
+                handle.unsubscribe().await;
+            }
             // Build the filter based on feed type
             let filter = match current_feed_type {
                 FeedType::Following => {
@@ -305,7 +305,7 @@ pub fn Polls() -> Element {
                 div { class: "px-4 py-3 flex items-center justify-between",
                     div { class: "relative",
                         button {
-                            class: "text-xl font-bold flex items-center gap-2 hover:bg-accent px-3 py-1 rounded-lg transition",
+                            class: "text-xl font-bold flex items-center gap-2 p-2 hover:bg-accent rounded-lg transition",
                             onclick: move |_| {
                                 let current = *show_dropdown.read();
                                 show_dropdown.set(!current);

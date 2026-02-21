@@ -36,9 +36,9 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
             }
             if !issue.labels.is_empty() || !issue.assignees.is_empty() {
                 div { class: "mt-2 flex flex-wrap gap-1 items-center",
-                    for (idx , label) in issue.labels.iter().enumerate() {
+                    for label in issue.labels.iter() {
                         span {
-                            key: "{idx}_{label}",
+                            key: "{label}",
                             class: "px-2 py-0.5 text-xs rounded-full bg-accent text-accent-foreground",
                             "{label}"
                         }

@@ -572,32 +572,6 @@ fn MyReposTab() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut my_repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
     let mut loading = use_signal(|| true);
-    if !auth.is_authenticated {
-        return rsx! {
-            div { class: "text-center py-12",
-                div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
-                    svg {
-                        class: "w-8 h-8 text-muted-foreground",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
-                        circle { cx: "12", cy: "7", r: "4" }
-                    }
-                }
-                h3 { class: "font-semibold text-lg mb-2", "Sign in to view your repositories" }
-                p { class: "text-muted-foreground text-sm max-w-md mx-auto",
-                    "Connect with your Nostr identity to see your repositories and manage your code."
-                }
-            }
-        };
-    }
     // Snapshot pubkey before async boundary
     let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
     use_effect(move || {
@@ -626,6 +600,32 @@ fn MyReposTab() -> Element {
             loading.set(false);
         });
     });
+    if !auth.is_authenticated {
+        return rsx! {
+            div { class: "text-center py-12",
+                div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
+                    svg {
+                        class: "w-8 h-8 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                        circle { cx: "12", cy: "7", r: "4" }
+                    }
+                }
+                h3 { class: "font-semibold text-lg mb-2", "Sign in to view your repositories" }
+                p { class: "text-muted-foreground text-sm max-w-md mx-auto",
+                    "Connect with your Nostr identity to see your repositories and manage your code."
+                }
+            }
+        };
+    }
     rsx! {
         div { class: "space-y-4",
             div { class: "flex items-center justify-between",

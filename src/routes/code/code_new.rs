@@ -14,10 +14,10 @@ pub fn CodeNew() -> Element {
     let mut repo_id = use_signal(String::new);
     let mut name = use_signal(String::new);
     let mut description = use_signal(String::new);
-    let clone_urls = use_signal(|| vec![String::new()]);
-    let web_urls = use_signal(|| vec![String::new()]);
-    let relays = use_signal(|| vec![String::new()]);
-    let maintainer_inputs = use_signal(|| vec![String::new()]);
+    let clone_urls = use_signal(|| vec![(0u64, String::new())]);
+    let web_urls = use_signal(|| vec![(0u64, String::new())]);
+    let relays = use_signal(|| vec![(0u64, String::new())]);
+    let maintainer_inputs = use_signal(|| vec![(0u64, String::new())]);
     let mut topics_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
@@ -56,10 +56,10 @@ pub fn CodeNew() -> Element {
         let id_val = repo_id.read().clone();
         let name_val = name.read().clone();
         let desc_val = description.read().clone();
-        let clone_val = clone_urls.read().clone();
-        let web_val = web_urls.read().clone();
-        let relay_val = relays.read().clone();
-        let maint_val = maintainer_inputs.read().clone();
+        let clone_val: Vec<String> = clone_urls.read().iter().map(|(_, s)| s.clone()).collect();
+        let web_val: Vec<String> = web_urls.read().iter().map(|(_, s)| s.clone()).collect();
+        let relay_val: Vec<String> = relays.read().iter().map(|(_, s)| s.clone()).collect();
+        let maint_val: Vec<String> = maintainer_inputs.read().iter().map(|(_, s)| s.clone()).collect();
         let topics_val = topics_input.read().clone();
 
         spawn(async move {
@@ -348,30 +348,33 @@ pub fn CodeNew() -> Element {
 struct DynamicListFieldProps {
     label: &'static str,
     placeholder: &'static str,
-    values: Signal<Vec<String>>,
+    values: Signal<Vec<(u64, String)>>,
 }
 
 #[component]
 fn DynamicListField(props: DynamicListFieldProps) -> Element {
     let mut values = props.values;
+    let mut next_id = use_signal(|| 1u64);
 
     let add_item = move |_| {
-        values.write().push(String::new());
+        let id = *next_id.peek();
+        next_id.set(id + 1);
+        values.write().push((id, String::new()));
     };
 
-    let mut remove_item = move |index: usize| {
+    let mut remove_item = move |target_id: u64| {
         let mut w = values.write();
         if w.len() > 1 {
-            w.remove(index);
+            w.retain(|(id, _)| *id != target_id);
         } else {
-            w[0] = String::new();
+            w[0].1 = String::new();
         }
     };
 
-    let mut update_item = move |index: usize, value: String| {
+    let mut update_item = move |target_id: u64, value: String| {
         let mut w = values.write();
-        if index < w.len() {
-            w[index] = value;
+        if let Some(entry) = w.iter_mut().find(|(id, _)| *id == target_id) {
+            entry.1 = value;
         }
     };
 
@@ -382,19 +385,25 @@ fn DynamicListField(props: DynamicListFieldProps) -> Element {
                 span { class: "text-muted-foreground font-normal", "(optional)" }
             }
             div { class: "space-y-2",
-                for (i , value) in values.read().iter().enumerate() {
-                    div { key: "item-{i}", class: "flex items-center gap-2",
+                for (id , value) in values.read().iter() {
+                    div { key: "{id}", class: "flex items-center gap-2",
                         input {
                             class: "flex-1 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
                             placeholder: "{props.placeholder}",
                             value: "{value}",
-                            oninput: move |e| update_item(i, e.value()),
+                            oninput: {
+                                let id = *id;
+                                move |e| update_item(id, e.value())
+                            },
                         }
                         button {
                             class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-destructive",
                             r#type: "button",
-                            onclick: move |_| remove_item(i),
+                            onclick: {
+                                let id = *id;
+                                move |_| remove_item(id)
+                            },
                             svg {
                                 class: "w-4 h-4",
                                 xmlns: "http://www.w3.org/2000/svg",

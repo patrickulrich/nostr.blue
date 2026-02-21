@@ -70,6 +70,21 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
         }
     });
 
+    // Clear cached file paths when repo or git_ref changes
+    let finder_cache_key = use_memo({
+        let naddr = naddr.clone();
+        let git_ref = git_ref.clone();
+        move || format!("{}:{}", naddr, git_ref)
+    });
+    let mut prev_finder_key = use_signal(String::new);
+    use_effect(move || {
+        let current_key = finder_cache_key.read().clone();
+        if *prev_finder_key.peek() != current_key {
+            prev_finder_key.set(current_key);
+            all_file_paths.set(Vec::new());
+        }
+    });
+
     // Fetch all file paths when the fuzzy finder is opened
     {
         let git_ref_for_finder = git_ref.clone();

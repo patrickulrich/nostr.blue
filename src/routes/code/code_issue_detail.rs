@@ -22,20 +22,18 @@ pub fn CodeIssueDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut issue_result = use_signal(|| None::<Result<Issue, String>>);
     let mut loading = use_signal(|| true);
-    let note_id_for_effect = note_id.clone();
-    use_effect(move || {
-        let id = note_id_for_effect.clone();
+    use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
         spawn(async move {
             loading.set(true);
-            let result = fetch_issue(&id).await;
+            let result = fetch_issue(&note_id).await;
             issue_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
