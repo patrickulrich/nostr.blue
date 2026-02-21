@@ -14,6 +14,7 @@ use crate::utils::permissions;
 use crate::utils::validation::is_valid_http_url;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr_sdk::prelude::EventId;
 /// Repository releases page component
 #[component]
 pub fn CodeRepoReleases(naddr: String) -> Element {
@@ -268,7 +269,6 @@ fn ReleaseCard(
                             onclick: {
                                 let event_id_hex = release_event_id.clone();
                                 move |_| {
-                                    use nostr_sdk::prelude::EventId;
                                     let eid = event_id_hex.clone();
                                     spawn(async move {
                                         is_deleting.set(true);

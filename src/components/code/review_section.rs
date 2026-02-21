@@ -108,6 +108,10 @@ pub fn PRReviewSection(
             move |id| {
                 let current_gen = gen.read().wrapping_add(1);
                 gen.set(current_gen);
+                reviews.set(Vec::new());
+                publish_error.set(None);
+                show_form.set(false);
+                review_body.set(String::new());
                 spawn(async move {
                     if let Ok(persisted) = fetch_pr_reviews(&id).await {
                         if *gen.read() != current_gen { return; }
@@ -122,17 +126,12 @@ pub fn PRReviewSection(
                                 })
                                 .or_insert(r);
                         }
-                        let deduped: Vec<_> = by_pubkey.into_values().collect();
-                        // Merge: keep optimistic entries not yet confirmed by relays
+                        // Merge: optimistic entries override persisted via insert()
                         let current = reviews.read().clone();
-                        let optimistic: Vec<_> = current
-                            .into_iter()
-                            .filter(|r| r.event_id.is_empty())
-                            .filter(|r| !deduped.iter().any(|p| p.pubkey == r.pubkey && p.created_at >= r.created_at))
-                            .collect();
-                        let mut merged = deduped;
-                        merged.extend(optimistic);
-                        reviews.set(merged);
+                        for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
+                            by_pubkey.insert(r.pubkey.clone(), r);
+                        }
+                        reviews.set(by_pubkey.into_values().collect());
                     }
                 });
             },

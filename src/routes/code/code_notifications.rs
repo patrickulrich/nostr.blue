@@ -34,13 +34,14 @@ pub fn CodeNotifications() -> Element {
         request_gen.set(gen);
         spawn(async move {
             loading.set(true);
+            error.set(None);
             match fetch_code_notifications(50).await {
                 Ok(notifs) => {
-                    if *request_gen.peek() != gen { return; }
+                    if *request_gen.peek() != gen { loading.set(false); return; }
                     notifications.set(notifs);
                 }
                 Err(e) => {
-                    if *request_gen.peek() != gen { return; }
+                    if *request_gen.peek() != gen { loading.set(false); return; }
                     error.set(Some(e));
                 }
             }
@@ -192,7 +193,7 @@ fn NotificationCard(notification: CodeNotification) -> Element {
     rsx! {
         Link {
             to: route,
-            class: "block p-4 border border-border rounded-lg hover:bg-accent/50 transition",
+            class: "block bg-card border border-border rounded-lg p-4 hover:bg-accent/50 transition",
             div { class: "flex items-start gap-3",
                 div { class: "w-8 h-8 rounded-full {icon_bg} flex items-center justify-center shrink-0",
                     svg {
@@ -324,7 +325,7 @@ fn LoadingSkeleton() -> Element {
             for i in 0..5 {
                 div {
                     key: "{i}",
-                    class: "p-4 border border-border rounded-lg",
+                    class: "bg-card border border-border rounded-lg p-4",
                     div { class: "flex items-start gap-3",
                         div { class: "w-8 h-8 rounded-full bg-muted shrink-0" }
                         div { class: "flex-1 space-y-2",
