@@ -95,7 +95,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         snippets.set(Vec::new());
         is_following.set(false);
 
-        let current_id = *request_id.peek() + 1;
+        let current_id = request_id.peek().wrapping_add(1);
         request_id.set(current_id);
 
         spawn(async move {

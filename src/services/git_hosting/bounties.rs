@@ -206,20 +206,13 @@ pub async fn release_bounty(
         .await
         .map_err(|e| format!("Failed to get invoice: {}", e))?;
 
-    // Mark as paid first (prevents double-payment on retry)
-    let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", amount_sats, repository).await?;
+    // Pay via NWC first — if payment fails, no status event is published
+    nwc_store::pay_invoice(invoice)
+        .await
+        .map_err(|e| format!("Payment failed: {}", e))?;
 
-    // Pay via NWC
-    if let Err(e) = nwc_store::pay_invoice(invoice).await {
-        // Rollback: revert status to claimed so it can be retried
-        if let Err(rollback_err) = update_bounty_status(bounty_event_id, issue_event_id, "claimed", amount_sats, repository).await {
-            log::error!("Bounty rollback failed: {rollback_err}");
-            return Err(format!(
-                "Payment failed: {e}. WARNING: Rollback also failed: {rollback_err}. Bounty may be in inconsistent state."
-            ));
-        }
-        return Err(format!("Payment failed: {}", e));
-    }
+    // Payment succeeded — now mark as paid
+    let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", amount_sats, repository).await?;
 
     Ok(new_event_id)
 }

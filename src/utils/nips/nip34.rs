@@ -103,6 +103,8 @@ pub struct Repository {
     pub topics: Vec<String>,
     /// Zap split configuration: (pubkey_hex, relay, weight)
     pub zap_splits: Vec<(String, String, u32)>,
+    /// Milestones parsed from milestone tags
+    pub milestones: Vec<crate::services::git_hosting::milestones::Milestone>,
 }
 impl Repository {
     /// Parse a Repository from a Kind 30617 event
@@ -122,8 +124,14 @@ impl Repository {
         let mut required_approvals = 0u32;
         let mut topics = Vec::new();
         let mut zap_splits = Vec::new();
+        let mut milestone_tags: Vec<Vec<String>> = Vec::new();
         for tag in event.tags.iter() {
             let tag_vec = tag.as_slice();
+            // Collect milestone tags for later parsing
+            if tag_vec.len() >= 3 && tag_vec[0] == "milestone" {
+                milestone_tags.push(tag_vec.iter().map(|s| s.to_string()).collect());
+                continue;
+            }
             // Parse custom tags first
             if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec.get(3).map(|s| s.as_str()) == Some("fork") {
                 fork_of = Some(tag_vec[1].to_string());
@@ -167,6 +175,7 @@ impl Repository {
             }
         }
         let id = id?;
+        let milestones = crate::services::git_hosting::milestones::parse_milestones(&milestone_tags);
         let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, event.pubkey)
             .identifier(&id);
         let naddr = Nip19Coordinate::new(coordinate, vec![])
@@ -192,6 +201,7 @@ impl Repository {
             required_approvals,
             topics,
             zap_splits,
+            milestones,
         })
     }
     /// Get display name (name or id)

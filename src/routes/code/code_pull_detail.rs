@@ -114,7 +114,10 @@ pub fn CodePullDetail(note_id: String) -> Element {
 fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> Element {
     let pr_id = pr.event_id.clone();
     let pr_pubkey = pr.pubkey.clone();
-    let pr_status = pr.status;
+    let mut display_status = use_signal(|| pr.status);
+    use_effect(use_reactive(&pr.status, move |status| {
+        display_status.set(status);
+    }));
     let author_profile = PROFILE_CACHE.read().peek(&pr.pubkey).cloned();
     let author_name = author_profile
         .as_ref()
@@ -243,6 +246,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                 is_updating_status.set(true);
                 match update_pr_status_by_id(&id, new_status).await {
                     Ok(_) => {
+                        display_status.set(new_status);
                         status_error.set(None);
                     }
                     Err(e) => {
@@ -344,7 +348,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "PR #{pr.event_id.chars().take(8).collect::<String>()}"
                         }
                     }
-                    CodeStatusBadge { status: pr_status }
+                    CodeStatusBadge { status: *display_status.read() }
                 }
                 div { class: "flex flex-wrap gap-2",
                     if pr.is_cover_letter {
@@ -356,7 +360,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "Patch"
                         }
                     }
-                    if pr_status == IssueStatus::Applied {
+                    if *display_status.read() == IssueStatus::Applied {
                         span { class: "px-2 py-0.5 text-xs rounded-full bg-purple-500/10 text-purple-500 border border-purple-500/20",
                             "Merged"
                         }
@@ -433,7 +437,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             // Status actions
             if can_update_status || can_merge {
                 div { class: "flex flex-wrap gap-2",
-                    if can_merge && matches!(pr_status, IssueStatus::Open | IssueStatus::Draft) {
+                    if can_merge && matches!(*display_status.read(), IssueStatus::Open | IssueStatus::Draft) {
                         button {
                             class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 flex items-center gap-2",
                             disabled: *is_updating_status.read(),
@@ -455,7 +459,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "Merge Pull Request"
                         }
                     }
-                    if can_update_status && pr_status != IssueStatus::Closed && pr_status != IssueStatus::Applied {
+                    if can_update_status && *display_status.read() != IssueStatus::Closed && *display_status.read() != IssueStatus::Applied {
                         button {
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -466,7 +470,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             "Close PR"
                         }
                     }
-                    if can_update_status && pr_status == IssueStatus::Closed {
+                    if can_update_status && *display_status.read() == IssueStatus::Closed {
                         button {
                             class: "px-3 py-1.5 text-sm bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
@@ -481,7 +485,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             }
 
             // Approval requirement notice
-            if required_approvals > 0 && pr_status != IssueStatus::Applied {
+            if required_approvals > 0 && *display_status.read() != IssueStatus::Applied {
                 {
                     let current_approvals = approval_count.read().as_ref().copied().unwrap_or(0);
                     let met = current_approvals >= required_approvals;
@@ -499,14 +503,14 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             }
 
             // Conflict detection banner
-            if pr_status == IssueStatus::Open || pr_status == IssueStatus::Draft {
+            if *display_status.read() == IssueStatus::Open || *display_status.read() == IssueStatus::Draft {
                 if let Some(parent) = &pr.parent_commit {
                     ConflictBanner { parent_commit: parent.clone() }
                 }
             }
 
             // Update PR button (author only)
-            if is_pr_author && pr_status != IssueStatus::Applied && pr_status != IssueStatus::Closed {
+            if is_pr_author && *display_status.read() != IssueStatus::Applied && *display_status.read() != IssueStatus::Closed {
                 if !*show_update_form.read() {
                     button {
                         class: "px-3 py-1.5 text-sm bg-accent text-foreground rounded-lg hover:bg-accent/80 transition flex items-center gap-1",

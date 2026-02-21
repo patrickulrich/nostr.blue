@@ -55,5 +55,7 @@ pub use repo_header::RepoHeader;
 pub use repo_tab_nav::RepoTabNav;
 pub use snippet_card::CodeSnippetCard;
 #[allow(unused_imports)]
+pub use keyboard_shortcuts::CodeKeyboardShortcuts;
+#[allow(unused_imports)]
 pub use ssh_key_manager::SshKeyManager;
 pub use status_badge::CodeStatusBadge;

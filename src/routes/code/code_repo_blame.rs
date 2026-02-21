@@ -50,8 +50,8 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
             if !client_initialized {
                 return;
             }
-            gen += 1;
-            let current_gen = *gen.read();
+            let current_gen = gen.peek().wrapping_add(1);
+            gen.set(current_gen);
             let naddr = naddr.clone();
             let git_ref = git_ref.clone();
             let path = path.clone();

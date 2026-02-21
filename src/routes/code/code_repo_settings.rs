@@ -66,7 +66,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             } else {
                 zap_splits.set(vec![(r.pubkey.clone(), String::new(), 100)]);
             }
-            // TODO: parse milestone tags from the raw event when Repository carries them
+            milestones.set(r.milestones.clone());
             required_approvals.set(r.required_approvals);
             topics_list.set(r.topics.clone());
             form_initialized.set(true);
