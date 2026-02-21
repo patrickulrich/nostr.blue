@@ -211,6 +211,17 @@ fn feature_to_location(feature: &PhotonFeature) -> GeoLocation {
 /// Nominatim API endpoint (OpenStreetMap — better venue/business name search than Photon)
 const NOMINATIM_API_URL: &str = "https://nominatim.openstreetmap.org/search";
 
+/// Nominatim address details (returned when `addressdetails=1`)
+#[derive(Debug, Deserialize)]
+struct NominatimAddress {
+    city: Option<String>,
+    town: Option<String>,
+    village: Option<String>,
+    state: Option<String>,
+    country: Option<String>,
+    country_code: Option<String>,
+}
+
 /// Nominatim API response item
 #[derive(Debug, Deserialize)]
 struct NominatimResult {
@@ -219,6 +230,7 @@ struct NominatimResult {
     lon: String,
     #[serde(rename = "type")]
     place_type: Option<String>,
+    address: Option<NominatimAddress>,
 }
 
 /// Load suggestion cache from localStorage
@@ -292,14 +304,26 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
         .filter_map(|r| {
             let lat = r.lat.parse::<f64>().ok()?;
             let lon = r.lon.parse::<f64>().ok()?;
+            let (city, state, country, country_code) = match &r.address {
+                Some(addr) => (
+                    addr.city
+                        .clone()
+                        .or_else(|| addr.town.clone())
+                        .or_else(|| addr.village.clone()),
+                    addr.state.clone(),
+                    addr.country.clone(),
+                    addr.country_code.clone(),
+                ),
+                None => (None, None, None, None),
+            };
             Some(GeoLocation {
                 lat,
                 lon,
                 display_name: r.display_name,
-                city: None,
-                state: None,
-                country: None,
-                country_code: None,
+                city,
+                state,
+                country,
+                country_code,
                 place_type: r.place_type,
             })
         })

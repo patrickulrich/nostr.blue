@@ -2,6 +2,7 @@
 //!
 //! Displays a user's code-specific profile at /code/profile/:pubkey
 //! showing their repositories, issues, pull requests, and code snippets.
+use crate::utils::clipboard::copy_to_clipboard;
 use crate::components::{CodeRepoCard, CodeSnippetCard};
 use crate::components::code::{CodeIssueCard, CodePullCard, ContributionGraph};
 use crate::routes::Route;
@@ -205,18 +206,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     // Copy npub to clipboard
     let npub_for_copy = npub_display.clone();
     let on_copy_npub = move |_| {
-        #[allow(unused_variables)]
         let npub = npub_for_copy.clone();
         spawn(async move {
-            #[cfg(target_arch = "wasm32")]
-            {
-                let window = web_sys::window().unwrap();
-                let navigator = window.navigator();
-                let clipboard = navigator.clipboard();
-                let _ = wasm_bindgen_futures::JsFuture::from(
-                    clipboard.write_text(&npub),
-                )
-                .await;
+            if copy_to_clipboard(&npub).await.is_ok() {
                 npub_copied.set(true);
                 gloo_timers::future::TimeoutFuture::new(2000).await;
                 npub_copied.set(false);

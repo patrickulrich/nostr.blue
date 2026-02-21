@@ -279,7 +279,9 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 return;
             }
             for url in &urls {
-                if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("git://") && !url.starts_with("ssh://") && !url.contains('@') {
+                let has_scheme = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("git://") || url.starts_with("ssh://");
+                let is_scp_style = url.contains('@') && url.contains(':') && !url.contains("://");
+                if !has_scheme && !is_scp_style {
                     toast.error(format!("Invalid URL format: {}", url), ToastOptions::new());
                     fork_loading.set(false);
                     return;

@@ -64,7 +64,7 @@ pub fn Polls() -> Element {
         interaction_counts.set(HashMap::new());
         all_streamed_ids.set(Vec::new());
         // Increment request_id for stale detection
-        request_id.with_mut(|v| *v += 1);
+        request_id.with_mut(|v| *v = v.wrapping_add(1));
         let current_id = *request_id.peek();
         spawn(async move {
             // Unsubscribe old handle at the start of the async context

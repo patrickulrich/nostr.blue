@@ -15,6 +15,7 @@ use dioxus::prelude::*;
 /// A file selected for upload (name, bytes, mime type)
 #[derive(Clone, Debug)]
 struct SelectedFile {
+    id: u64,
     name: String,
     data: Vec<u8>,
     mime_type: String,
@@ -22,7 +23,9 @@ struct SelectedFile {
 
 /// Result of a completed upload
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct UploadResult {
+    id: u64,
     name: String,
     url: String,
     size: usize,
@@ -43,6 +46,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
     let mut copied_index = use_signal(|| None::<usize>);
+    let mut next_file_id = use_signal(|| 0u64);
 
     let input_id = "code-repo-upload-file-input";
 
@@ -82,7 +86,12 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                 Ok(files) => {
                     if !files.is_empty() {
                         let mut current = selected_files.write();
-                        current.extend(files);
+                        for mut file in files {
+                            let id = *next_file_id.peek();
+                            file.id = id;
+                            next_file_id.set(id + 1);
+                            current.push(file);
+                        }
                     }
                 }
                 Err(e) => {
@@ -92,9 +101,9 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
         });
     };
 
-    // Handle removing a single file
-    let mut handle_remove_file = move |index: usize| {
-        selected_files.write().remove(index);
+    // Handle removing a single file by its stable ID
+    let mut handle_remove_file = move |file_id: u64| {
+        selected_files.write().retain(|f| f.id != file_id);
     };
 
     // Handle clearing all files
@@ -122,7 +131,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 
             for (i, file) in files_to_upload.into_iter().enumerate() {
                 current_file_index.set(i);
-                let quality = 100u8;
+                let quality = 100u8; // quality=100 bypasses image compression, safe for all file types
                 let file_size = file.data.len();
                 match blossom_store::upload_image(
                     file.data,
@@ -135,6 +144,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                     Ok(url) => {
                         log::info!("Uploaded file {}/{}: {} -> {}", i + 1, total, file.name, url);
                         results.push(UploadResult {
+                            id: file.id,
                             name: file.name.clone(),
                             url,
                             size: file_size,
@@ -274,7 +284,10 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                     .unwrap_or_else(|| "application/octet-stream".to_string());
                                 match file.read_bytes().await {
                                     Ok(bytes) => {
+                                        let id = *next_file_id.peek();
+                                        next_file_id.set(id + 1);
                                         new_files.push(SelectedFile {
+                                            id,
                                             name,
                                             data: bytes.to_vec(),
                                             mime_type,
@@ -349,8 +362,9 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                             }
                         }
                         div { class: "divide-y divide-border",
-                            for (i, file) in selected_files.read().iter().enumerate() {
+                            for file in selected_files.read().iter() {
                                 {
+                                    let file_id = file.id;
                                     let file_name = file.name.clone();
                                     let file_size_display = format_size(file.data.len());
                                     let file_ext = get_file_extension(&file_name);
@@ -374,7 +388,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                             }
                                             button {
                                                 class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded transition",
-                                                onclick: move |_| handle_remove_file(i),
+                                                onclick: move |_| handle_remove_file(file_id),
                                                 svg {
                                                     class: "w-4 h-4",
                                                     xmlns: "http://www.w3.org/2000/svg",
@@ -623,6 +637,7 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
         };
 
         files.push(SelectedFile {
+            id: 0, // Assigned by caller
             name,
             data: bytes,
             mime_type: final_mime,

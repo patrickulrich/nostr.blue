@@ -58,10 +58,13 @@ fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_me
     diff.push_str(&format!("+++ b/{path}\n"));
     if line_count > 0 {
         diff.push_str(&format!("@@ -0,0 +1,{line_count} @@\n"));
-        for line in &lines {
+        for (i, line) in lines.iter().enumerate() {
             diff.push('+');
             diff.push_str(line);
             diff.push('\n');
+            if i == line_count - 1 && !content.ends_with('\n') {
+                diff.push_str("\\ No newline at end of file\n");
+            }
         }
     }
     diff

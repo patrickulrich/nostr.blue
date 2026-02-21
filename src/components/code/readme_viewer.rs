@@ -41,8 +41,11 @@ export function initMermaidDiagrams() {
                 theme: 'dark',
                 securityLevel: 'strict',
             });
-            mermaidDivs.forEach(el => el.setAttribute('data-processed', 'true'));
-            window.mermaid.run({ nodes: Array.from(mermaidDivs) });
+            // Re-query to catch diagrams added while script was loading
+            const freshDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
+            if (freshDivs.length === 0) return;
+            freshDivs.forEach(el => el.setAttribute('data-processed', 'true'));
+            window.mermaid.run({ nodes: Array.from(freshDivs) });
         } catch (e) {
             console.warn('Mermaid init error:', e);
         }

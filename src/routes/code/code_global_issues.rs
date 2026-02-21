@@ -34,13 +34,14 @@ pub fn CodeGlobalIssues() -> Element {
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
 
-    let auth = auth_store::AUTH_STATE.read();
-    let user_pubkey = auth.pubkey.clone().unwrap_or_default();
+    let user_pubkey = {
+        let auth = auth_store::AUTH_STATE.read();
+        auth.pubkey.clone().unwrap_or_default()
+    };
+    let client_init = *nostr_client::CLIENT_INITIALIZED.read();
 
-    use_effect(move || {
-        let pk_hex = user_pubkey.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized || pk_hex.is_empty() {
+    use_effect(use_reactive((&user_pubkey, &client_init), move |(pk_hex, initialized)| {
+        if !initialized || pk_hex.is_empty() {
             return;
         }
         spawn(async move {
@@ -63,9 +64,9 @@ pub fn CodeGlobalIssues() -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
 
-    if !auth.is_authenticated {
+    if !auth_store::AUTH_STATE.read().is_authenticated {
         return rsx! { NotAuthenticatedState {} };
     }
 

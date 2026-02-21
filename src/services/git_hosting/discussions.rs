@@ -11,9 +11,9 @@ use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNE
 use crate::utils::nip34::{decode_event_id, Discussion, GitComment};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-/// Fetch a discussion by its event ID (note1 or nevent1)
+/// Fetch a discussion by its event ID (hex, note1, or nevent1)
 pub async fn fetch_discussion(event_ref: &str) -> Result<Discussion, String> {
-    let event_id = decode_event_id(event_ref)
+    let event_id = EventId::parse(event_ref)
         .map_err(|e| format!("Invalid event reference: {}", e))?;
     let hex_id = event_id.to_hex();
     if let Some(discussion) = get_cached_discussion(&hex_id) {

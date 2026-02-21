@@ -66,13 +66,20 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
             let rest = rest.trim();
             let version = if rest.starts_with('"') {
                 rest.trim_matches('"').to_string()
-            } else if rest.contains("version") {
-                // Parse table format
-                rest.split("version")
-                    .nth(1)
-                    .and_then(|s| s.split('"').nth(1))
-                    .unwrap_or("*")
-                    .to_string()
+            } else if rest.contains('{') {
+                // Parse inline table format, find key=value where key is "version"
+                rest.split(',')
+                    .find_map(|token| {
+                        let token = token.trim().trim_matches('{').trim_matches('}').trim();
+                        token.split_once('=').and_then(|(k, v)| {
+                            if k.trim() == "version" {
+                                Some(v.trim().trim_matches('"').to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or_else(|| "*".to_string())
             } else {
                 "*".to_string()
             };

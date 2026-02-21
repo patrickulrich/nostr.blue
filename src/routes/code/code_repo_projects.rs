@@ -175,31 +175,42 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
 
                 if *loading.read() {
                     LoadingSkeleton {}
-                } else if let Some(err) = fetch_error.read().as_ref() {
-                    div { class: "text-center py-12",
-                        div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
-                            svg {
-                                class: "w-8 h-8 text-destructive",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                width: "24",
-                                height: "24",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                circle { cx: "12", cy: "12", r: "10" }
-                                line { x1: "12", y1: "8", x2: "12", y2: "12" }
-                                line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                } else if let Some(ref err) = *fetch_error.read() {
+                    if items_read.is_empty() {
+                        div { class: "text-center py-12",
+                            div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
+                                svg {
+                                    class: "w-8 h-8 text-destructive",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    circle { cx: "12", cy: "12", r: "10" }
+                                    line { x1: "12", y1: "8", x2: "12", y2: "12" }
+                                    line { x1: "12", y1: "16", x2: "12.01", y2: "16" }
+                                }
                             }
+                            h3 { class: "font-semibold text-lg mb-2", "Failed to load project board" }
+                            p { class: "text-muted-foreground text-sm", "{err}" }
                         }
-                        h3 { class: "font-semibold text-lg mb-2", "Failed to load project board" }
-                        p { class: "text-muted-foreground text-sm", "{err}" }
                     }
                 } else if items_read.is_empty() {
                     EmptyBoard {}
-                } else {
+                }
+                // Show error banner + Kanban board when partial data loaded
+                if !*loading.read() && fetch_error.read().is_some() && !items_read.is_empty() {
+                    if let Some(ref err) = *fetch_error.read() {
+                        div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                            "{err}"
+                        }
+                    }
+                }
+                if !*loading.read() && !items_read.is_empty() {
                     // Kanban columns - horizontal scroll
                     div { class: "flex gap-4 overflow-x-auto pb-4",
                         BoardColumn {

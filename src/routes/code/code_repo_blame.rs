@@ -34,20 +34,13 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
         .unwrap_or(&decoded_path)
         .to_string();
     let mut gen = use_signal(|| 0u32);
-    use_effect({
-        let naddr = naddr.clone();
-        let git_ref = git_ref.clone();
-        let path = path.clone();
-        move || {
+    use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
             let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
             if !client_initialized {
                 return;
             }
             let current_gen = gen.peek().wrapping_add(1);
             gen.set(current_gen);
-            let naddr = naddr.clone();
-            let git_ref = git_ref.clone();
-            let path = path.clone();
             spawn(async move {
                 loading.set(true);
                 error.set(None);
@@ -112,8 +105,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                 }
                 loading.set(false);
             });
-        }
-    });
+    }));
     let github_blame_url = {
         let gh = github_info();
         let dp = decoded_path.clone();

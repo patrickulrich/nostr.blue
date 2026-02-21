@@ -122,6 +122,29 @@ impl ParsedQuery {
         true
     }
 
+    fn matches_repo(&self, repo: &Repository) -> bool {
+        if let Some(ref author) = self.author {
+            if repo.pubkey != *author {
+                return false;
+            }
+        }
+        if !self.labels.is_empty()
+            && !self.labels.iter().all(|l| repo.topics.iter().any(|t| t.eq_ignore_ascii_case(l)))
+        {
+            return false;
+        }
+        true
+    }
+
+    fn matches_snippet(&self, snippet: &DisplaySnippet) -> bool {
+        if let Some(ref author) = self.author {
+            if snippet.pubkey != *author {
+                return false;
+            }
+        }
+        true
+    }
+
     fn show_repos(&self) -> bool {
         self.entity_type.is_none() || self.entity_type.as_deref() == Some("repo")
     }
@@ -193,12 +216,16 @@ pub fn CodeSearch(q: String) -> Element {
                 });
                 // Hide entity types filtered out by type: qualifier
                 if parsed.show_repos() {
-                    repos.set(Some(repos_res));
+                    repos.set(Some(repos_res.map(|list| {
+                        list.into_iter().filter(|r| parsed.matches_repo(r)).collect()
+                    })));
                 } else {
                     repos.set(Some(Ok(vec![])));
                 }
                 if parsed.show_snippets() {
-                    snippets.set(Some(snippets_res));
+                    snippets.set(Some(snippets_res.map(|list| {
+                        list.into_iter().filter(|s| parsed.matches_snippet(s)).collect()
+                    })));
                 } else {
                     snippets.set(Some(Ok(vec![])));
                 }

@@ -47,12 +47,16 @@ pub fn CodePullNew(naddr: String) -> Element {
             let parent_val = parent_commit.read().clone();
             let labels_val = labels.read().clone();
             let closes_val = closes_issues.read().clone();
-            let branch_val = branch_name.read().clone();
+            let branch_val = branch_name.read().trim().to_string();
             let is_cover = *is_cover_letter.read();
             let naddr = naddr.clone();
             spawn(async move {
                 if content_val.trim().is_empty() {
                     error_message.set(Some("Please enter patch content".to_string()));
+                    return;
+                }
+                if !branch_val.is_empty() && (branch_val.contains("..") || branch_val.contains('~') || branch_val.contains('^') || branch_val.contains(':') || branch_val.contains('\\') || branch_val.contains(' ') || branch_val.chars().any(|c| c.is_ascii_control())) {
+                    error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
                     return;
                 }
                 is_publishing.set(true);
@@ -84,11 +88,19 @@ pub fn CodePullNew(naddr: String) -> Element {
                 }
                 let commit_ref = if commit_val.is_empty() {
                     None
+                } else if commit_val.len() < 40 || commit_val.len() > 64 || !commit_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    error_message.set(Some(format!("Invalid commit hash '{}': must be 40-64 hex characters", commit_val)));
+                    is_publishing.set(false);
+                    return;
                 } else {
                     Some(commit_val.as_str())
                 };
                 let parent_ref = if parent_val.is_empty() {
                     None
+                } else if parent_val.len() < 40 || parent_val.len() > 64 || !parent_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    error_message.set(Some(format!("Invalid parent commit hash '{}': must be 40-64 hex characters", parent_val)));
+                    is_publishing.set(false);
+                    return;
                 } else {
                     Some(parent_val.as_str())
                 };

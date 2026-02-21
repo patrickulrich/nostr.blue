@@ -94,13 +94,16 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
             if is_open && paths_empty {
                 if let Some(repo) = repo_signal.read().clone() {
                     let ref_str = git_ref_for_finder.clone();
+                    let cache_key = finder_cache_key.read().clone();
                     spawn(async move {
                         use crate::services::git_hosting::file_fetcher;
                         // Try REST API first (GitHub/GitLab/Codeberg)
                         if let Ok(paths) =
                             file_fetcher::fetch_all_file_paths(&repo, Some(&ref_str)).await
                         {
-                            all_file_paths.set(paths);
+                            if *finder_cache_key.peek() == cache_key {
+                                all_file_paths.set(paths);
+                            }
                             return;
                         }
                         // Fall back to isomorphic-git (works for all sources including GRASP)
@@ -109,7 +112,9 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
                                 .list_all_files(&repo, Some(&ref_str))
                                 .await
                         {
-                            all_file_paths.set(paths);
+                            if *finder_cache_key.peek() == cache_key {
+                                all_file_paths.set(paths);
+                            }
                         } else {
                             log::warn!("Failed to load file paths for fuzzy finder");
                         }

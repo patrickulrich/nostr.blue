@@ -12,6 +12,7 @@ use nostr_sdk::prelude::{Coordinate, Kind, PublicKey};
 pub fn CodeNew() -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut repo_id = use_signal(String::new);
+    let mut repo_id_touched = use_signal(|| false);
     let mut name = use_signal(String::new);
     let mut description = use_signal(String::new);
     let clone_urls = use_signal(|| vec![(0u64, String::new())]);
@@ -23,10 +24,10 @@ pub fn CodeNew() -> Element {
     let mut error_message = use_signal(|| None::<String>);
     let nav = use_navigator();
 
-    // Auto-generate repo_id from name
+    // Auto-generate repo_id from name (only if user hasn't manually edited repo_id)
     use_effect(move || {
         let name_val = name.read().clone();
-        if !name_val.is_empty() && repo_id.read().is_empty() {
+        if !name_val.is_empty() && !*repo_id_touched.peek() {
             let slug = name_val
                 .to_lowercase()
                 .replace(' ', "-")
@@ -272,7 +273,10 @@ pub fn CodeNew() -> Element {
                         r#type: "text",
                         placeholder: "e.g., my-awesome-project",
                         value: "{repo_id}",
-                        oninput: move |e| repo_id.set(e.value()),
+                        oninput: move |e| {
+                            repo_id_touched.set(true);
+                            repo_id.set(e.value());
+                        },
                     }
                     p { class: "text-xs text-muted-foreground mt-1",
                         "Unique identifier (kebab-case). Auto-generated from name."
