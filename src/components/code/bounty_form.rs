@@ -24,6 +24,9 @@ pub fn BountyForm(
         let issue_event_id = issue_event_id.clone();
         let repository_naddr = repository_naddr.clone();
         move |_| {
+            if *is_submitting.peek() {
+                return;
+            }
             let amount_str = amount.read().clone();
             let amount_sats: u64 = match amount_str.trim().parse() {
                 Ok(v) if v > 0 => v,
@@ -34,9 +37,9 @@ pub fn BountyForm(
             };
             let issue_id = issue_event_id.clone();
             let naddr = repository_naddr.clone();
+            is_submitting.set(true);
+            error.set(None);
             spawn(async move {
-                is_submitting.set(true);
-                error.set(None);
                 let eid = match EventId::from_hex(&issue_id) {
                     Ok(id) => id,
                     Err(e) => {

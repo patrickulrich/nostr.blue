@@ -753,6 +753,7 @@ pub fn CalendarEventNew() -> Element {
                                                     gloo_timers::future::TimeoutFuture::new(300).await;
                                                     if *participant_debounce.peek() != current_id { return; }
                                                     if let Ok(results) = search_profiles(&query_snapshot, 8, true).await {
+                                                        if *participant_debounce.peek() != current_id { return; }
                                                         participant_results.set(results);
                                                     }
                                                 });

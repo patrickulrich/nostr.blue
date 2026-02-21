@@ -153,8 +153,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
         .unwrap_or(0);
 
     // Fetch reviews to check approval count
+    // Generation counter bumped when a new review is submitted, causing use_resource to refetch
+    let mut reviews_gen = use_signal(|| 0u64);
     let pr_id_for_reviews = pr_id.clone();
     let approval_count = use_resource(move || {
+        let _ = reviews_gen.read();
         let id = pr_id_for_reviews.clone();
         async move {
             match fetch_pr_reviews(&id).await {
@@ -736,6 +739,9 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                                 maintainers: maintainers.clone(),
                                 user_pubkey: user_pubkey.clone(),
                                 is_authenticated: is_authenticated,
+                                on_review_submitted: move |_| {
+                                    reviews_gen.with_mut(|v| *v = v.wrapping_add(1));
+                                },
                             }
 
                             // Linked issues

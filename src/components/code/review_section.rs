@@ -87,6 +87,8 @@ pub fn PRReviewSection(
     is_authenticated: bool,
     #[props(default = None)]
     required_approvals: Option<u32>,
+    #[props(default = None)]
+    on_review_submitted: Option<EventHandler<()>>,
 ) -> Element {
     let can_review = is_authenticated
         && user_pubkey != pr_pubkey
@@ -179,6 +181,10 @@ pub fn PRReviewSection(
             show_form.set(false);
             review_body.set(String::new());
             publish_error.set(None);
+            // Notify parent that a review was submitted
+            if let Some(handler) = on_review_submitted.as_ref() {
+                handler.call(());
+            }
             // Publish to relays
             let id = pr_id.clone();
             let saved_content = content.clone();

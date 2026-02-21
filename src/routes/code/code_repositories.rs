@@ -13,6 +13,7 @@ use nostr_sdk::PublicKey;
 pub fn CodeRepositories() -> Element {
     // All hooks must be called before any early returns to maintain stable call-order indices.
     let mut repos_result = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut request_gen = use_signal(|| 0u64);
 
     let auth = auth_store::AUTH_STATE.read();
     let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
@@ -24,6 +25,8 @@ pub fn CodeRepositories() -> Element {
                 if !initialized {
                     return;
                 }
+                request_gen.with_mut(|v| *v = v.wrapping_add(1));
+                let captured_gen = *request_gen.peek();
                 spawn(async move {
                     if pk.is_empty() {
                         repos_result.set(Some(Err("No public key".to_string())));
@@ -34,6 +37,9 @@ pub fn CodeRepositories() -> Element {
                     } else {
                         Err("Invalid public key".to_string())
                     };
+                    if *request_gen.peek() != captured_gen {
+                        return;
+                    }
                     repos_result.set(Some(result));
                 });
             },

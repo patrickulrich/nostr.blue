@@ -205,7 +205,7 @@ fn RepositoriesTab() -> Element {
                 Ok(fetched) => {
                     let raw_count = fetched.len();
                     if let Some(oldest) = fetched.iter().min_by_key(|r| r.created_at) {
-                        oldest_timestamp.set(Some(oldest.created_at.saturating_sub(1)));
+                        oldest_timestamp.set(Some(oldest.created_at));
                     }
                     has_more.set(raw_count >= PAGE_SIZE);
                     repos.set(fetched);
@@ -230,7 +230,7 @@ fn RepositoriesTab() -> Element {
                     } else {
                         let raw_count = fetched.len();
                         if let Some(oldest) = fetched.iter().min_by_key(|r| r.created_at) {
-                            oldest_timestamp.set(Some(oldest.created_at.saturating_sub(1)));
+                            oldest_timestamp.set(Some(oldest.created_at));
                         }
                         let mut current = repos.peek().clone();
                         let existing: HashSet<_> =

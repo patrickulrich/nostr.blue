@@ -139,8 +139,17 @@ function computeEdits(oldLines, newLines) {
   // Store trace for backtracking
   const trace = [];
 
+  // OOM guard: track cumulative memory from trace snapshots
+  const SAFE_TRACE_BYTES = 256 * 1024 * 1024;
+  let cumulativeBytes = 0;
+
   outer:
   for (let d = 0; d <= max; d++) {
+    // Check memory before storing trace snapshot
+    cumulativeBytes += vSize * 4;
+    if (cumulativeBytes > SAFE_TRACE_BYTES) {
+      return computeEditsFallback(oldLines, newLines);
+    }
     // Save current v state for backtracking
     trace.push(v.slice());
 

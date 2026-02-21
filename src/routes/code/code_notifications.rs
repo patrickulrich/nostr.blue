@@ -6,7 +6,7 @@ use crate::routes::Route;
 use crate::services::git_hosting::notifications::{
     fetch_code_notifications, CodeNotification, CodeNotificationType,
 };
-use crate::stores::nostr_client;
+use crate::stores::{auth_store, nostr_client};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format::truncate_pubkey;
 use crate::utils::format_relative_time_or;
@@ -21,6 +21,12 @@ pub fn CodeNotifications() -> Element {
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
+            return;
+        }
+        // Track auth pubkey so effect re-runs on account switch
+        let auth = auth_store::AUTH_STATE.read();
+        let pubkey = auth.pubkey.clone().unwrap_or_default();
+        if pubkey.is_empty() {
             return;
         }
         spawn(async move {
