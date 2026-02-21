@@ -24,10 +24,8 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
     let mut repo_data = use_signal(|| None::<Repository>);
     let mut repo_error = use_signal(|| None::<String>);
     let mut refresh_counter = use_signal(|| 0u32);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
+    use_effect(use_reactive(&naddr, move |n| {
         let _counter = *refresh_counter.read();
-        let n = naddr_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -54,7 +52,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
     let is_authenticated = auth.is_authenticated;

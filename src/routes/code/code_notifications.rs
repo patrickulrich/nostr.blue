@@ -47,6 +47,10 @@ pub fn CodeNotifications() -> Element {
             loading.set(false);
         });
     });
+    if !auth_store::AUTH_STATE.read().is_authenticated {
+        return rsx! { NotAuthenticatedState {} };
+    }
+
     let current_filter = filter.read().clone();
     let filtered: Vec<CodeNotification> = notifications
         .read()
@@ -279,6 +283,36 @@ fn EmptyState() -> Element {
             h3 { class: "font-semibold text-lg mb-2", "No Notifications" }
             p { class: "text-muted-foreground text-sm",
                 "You're all caught up! Notifications will appear here when someone mentions you, opens issues or PRs on your repositories, or leaves reviews."
+            }
+        }
+    }
+}
+#[component]
+fn NotAuthenticatedState() -> Element {
+    rsx! {
+        div { class: "min-h-screen flex items-center justify-center p-4",
+            div { class: "text-center max-w-md",
+                div { class: "w-20 h-20 mx-auto mb-6 rounded-full bg-muted flex items-center justify-center",
+                    svg {
+                        class: "w-10 h-10 text-muted-foreground",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                        circle { cx: "12", cy: "7", r: "4" }
+                    }
+                }
+                h2 { class: "font-semibold text-xl mb-2", "Sign In Required" }
+                p { class: "text-muted-foreground mb-6",
+                    "Connect with your Nostr identity to view your notifications."
+                }
+                Link { to: Route::CodeHome {}, class: "text-primary hover:underline", "Back to Code" }
             }
         }
     }

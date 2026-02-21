@@ -128,7 +128,7 @@ pub fn PRReviewSection(
                         let optimistic: Vec<_> = current
                             .into_iter()
                             .filter(|r| r.event_id.is_empty())
-                            .filter(|r| !deduped.iter().any(|p| p.pubkey == r.pubkey))
+                            .filter(|r| !deduped.iter().any(|p| p.pubkey == r.pubkey && p.created_at >= r.created_at))
                             .collect();
                         let mut merged = deduped;
                         merged.extend(optimistic);
