@@ -12,6 +12,12 @@ const PHOTON_API_URL: &str = "https://photon.komoot.io/api";
 const CACHE_KEY: &str = "nostr_blue_geocode_cache";
 /// Cache expiry time (7 days in seconds)
 const CACHE_EXPIRY_SECS: u64 = 7 * 24 * 60 * 60;
+/// Suggestion cache key for localStorage
+const SUGGEST_CACHE_KEY: &str = "nostr_blue_suggest_cache";
+/// Suggestion cache expiry time (1 hour in seconds)
+const SUGGEST_CACHE_EXPIRY_SECS: u64 = 60 * 60;
+/// Minimum interval between Nominatim requests (1 second in ms)
+const NOMINATIM_THROTTLE_MS: f64 = 1000.0;
 /// Geocoding result with coordinates
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GeoLocation {
@@ -70,6 +76,22 @@ struct PhotonProperties {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct GeoCache {
     entries: HashMap<String, CachedGeoResult>,
+}
+/// Cached suggestion results
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CachedSuggestions {
+    locations: Vec<GeoLocation>,
+    cached_at: u64,
+}
+/// Suggestion cache
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct SuggestCache {
+    entries: HashMap<String, CachedSuggestions>,
+}
+/// Track last Nominatim request time (module-level via thread_local)
+use std::cell::Cell;
+thread_local! {
+    static LAST_NOMINATIM_REQUEST: Cell<f64> = const { Cell::new(0.0) };
 }
 /// Load cache from localStorage
 fn load_cache() -> GeoCache {
@@ -199,15 +221,54 @@ struct NominatimResult {
     place_type: Option<String>,
 }
 
+/// Load suggestion cache from localStorage
+fn load_suggest_cache() -> SuggestCache {
+    LocalStorage::get(SUGGEST_CACHE_KEY).unwrap_or_default()
+}
+/// Save suggestion cache to localStorage
+fn save_suggest_cache(cache: &SuggestCache) {
+    if let Err(e) = LocalStorage::set(SUGGEST_CACHE_KEY, cache) {
+        log::warn!("Failed to save suggest cache: {}", e);
+    }
+}
+/// Check if a cached suggestion result is still valid
+fn is_valid_suggest_cache(cached: &CachedSuggestions) -> bool {
+    let age = now_secs().saturating_sub(cached.cached_at);
+    age < SUGGEST_CACHE_EXPIRY_SECS
+}
 /// Search for location suggestions (for autocomplete)
 ///
 /// Uses Nominatim (OpenStreetMap) which handles venue/business name queries
-/// much better than Photon. No caching — autocomplete results are transient.
+/// much better than Photon. Includes caching (1-hour TTL) and 1-second
+/// throttle to comply with Nominatim usage policy.
 pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocation>, String> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return Ok(vec![]);
     }
+    let normalized = normalize_query(trimmed);
+    // Check suggestion cache first
+    let mut cache = load_suggest_cache();
+    if let Some(cached) = cache.entries.get(&normalized) {
+        if is_valid_suggest_cache(cached) {
+            log::debug!("Suggest cache hit for: {}", trimmed);
+            return Ok(cached.locations.clone());
+        }
+    }
+    // Enforce 1-second throttle between Nominatim requests
+    let now_ms = js_sys::Date::now();
+    let elapsed = LAST_NOMINATIM_REQUEST.with(|last| {
+        let prev = last.get();
+        now_ms - prev
+    });
+    if elapsed < NOMINATIM_THROTTLE_MS {
+        // Too soon — return cached stale results if available, or empty
+        if let Some(cached) = cache.entries.get(&normalized) {
+            return Ok(cached.locations.clone());
+        }
+        return Ok(vec![]);
+    }
+    LAST_NOMINATIM_REQUEST.with(|last| last.set(now_ms));
     let encoded = urlencoding::encode(trimmed);
     let url = format!(
         "{}?format=json&q={}&limit={}&addressdetails=1",
@@ -215,7 +276,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
     );
     let response = Request::get(&url)
         .header("Accept-Language", "en-US,en;q=0.9")
-        .header("User-Agent", "nostr.blue/0.7")
+        .header("User-Agent", "nostr.blue/0.8 (https://nostr.blue)")
         .send()
         .await
         .map_err(|e| format!("Failed to fetch suggestions: {}", e))?;
@@ -226,7 +287,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
         .json()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
-    Ok(results
+    let locations: Vec<GeoLocation> = results
         .into_iter()
         .filter_map(|r| {
             let lat = r.lat.parse::<f64>().ok()?;
@@ -242,7 +303,17 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
                 place_type: r.place_type,
             })
         })
-        .collect())
+        .collect();
+    // Cache the results
+    cache.entries.insert(
+        normalized,
+        CachedSuggestions {
+            locations: locations.clone(),
+            cached_at: now_secs(),
+        },
+    );
+    save_suggest_cache(&cache);
+    Ok(locations)
 }
 /// Decode a geohash to coordinates (center point)
 pub fn geohash_to_coords(geohash: &str) -> Option<(f64, f64)> {

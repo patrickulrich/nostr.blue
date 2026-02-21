@@ -101,6 +101,8 @@ pub struct Repository {
     pub required_approvals: u32,
     /// Repository topics/tags (from hashtag tags)
     pub topics: Vec<String>,
+    /// Zap split configuration: (pubkey_hex, relay, weight)
+    pub zap_splits: Vec<(String, String, u32)>,
 }
 impl Repository {
     /// Parse a Repository from a Kind 30617 event
@@ -119,6 +121,7 @@ impl Repository {
         let mut fork_of = None;
         let mut required_approvals = 0u32;
         let mut topics = Vec::new();
+        let mut zap_splits = Vec::new();
         for tag in event.tags.iter() {
             let tag_vec = tag.as_slice();
             // Parse custom tags first
@@ -128,6 +131,16 @@ impl Repository {
             }
             if tag_vec.len() >= 2 && tag_vec[0] == "required-approvals" {
                 required_approvals = tag_vec[1].parse().unwrap_or(0);
+                continue;
+            }
+            // Parse zap split tags: ["zap", pubkey_hex, relay, weight_str]
+            if tag_vec.len() >= 4 && tag_vec[0] == "zap" {
+                let pubkey_hex = tag_vec[1].to_string();
+                let relay = tag_vec[2].to_string();
+                let weight = tag_vec[3].parse::<u32>().unwrap_or(0);
+                if weight > 0 {
+                    zap_splits.push((pubkey_hex, relay, weight));
+                }
                 continue;
             }
             match tag.as_standardized() {
@@ -178,6 +191,7 @@ impl Repository {
             fork_of,
             required_approvals,
             topics,
+            zap_splits,
         })
     }
     /// Get display name (name or id)

@@ -264,11 +264,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
 
     let handle_submit_comment = {
         let pr_id = pr_id.clone();
-        let user_pubkey = user_pubkey.clone();
+        let pr_author = pr_pubkey.clone();
         move |_| {
             let content = new_comment.read().clone();
             let id = pr_id.clone();
-            let author = user_pubkey.clone();
+            let author = pr_author.clone();
             if content.trim().is_empty() {
                 return;
             }
@@ -788,7 +788,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                 },
                 PrTab::FilesChanged => {
                     let pr_id_for_handler = pr_id.clone();
-                    let user_pubkey_for_handler = user_pubkey.clone();
+                    let pr_author_for_handler = pr_pubkey.clone();
                     rsx! {
                         if let Some(err) = line_comment_error.read().as_ref() {
                             div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
@@ -802,7 +802,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             line_comments: line_comments.read().clone(),
                             on_line_comment: move |(file, line_num, text): (String, usize, String)| {
                                 let id = pr_id_for_handler.clone();
-                                let author = user_pubkey_for_handler.clone();
+                                let author = pr_author_for_handler.clone();
                                 line_comment_error.set(None);
                                 spawn(async move {
                                     match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {

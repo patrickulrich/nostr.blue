@@ -44,7 +44,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut save_error = use_signal(|| None::<String>);
     let mut save_success = use_signal(|| false);
     let mut show_delete_confirm = use_signal(|| false);
-    let mut zap_splits = use_signal(Vec::<(String, u32)>::new);
+    let mut zap_splits = use_signal(Vec::<(String, String, u32)>::new);
     let mut new_split_pubkey = use_signal(String::new);
     let mut new_split_weight = use_signal(|| 50u32);
     let mut milestones = use_signal(Vec::<crate::services::git_hosting::milestones::Milestone>::new);
@@ -60,10 +60,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             web_url.set(r.web.first().cloned().unwrap_or_default());
             relay_list.set(r.relays.clone());
             maintainer_list.set(r.maintainers.clone());
-            // zap_splits init - default to repo owner at 100%
-            // TODO: parse zap split tags from the raw event when Repository carries them
-            if zap_splits.read().is_empty() {
-                zap_splits.set(vec![(r.pubkey.clone(), 100)]);
+            // Initialize zap splits from parsed event data, or default to owner at 100%
+            if !r.zap_splits.is_empty() {
+                zap_splits.set(r.zap_splits.clone());
+            } else {
+                zap_splits.set(vec![(r.pubkey.clone(), String::new(), 100)]);
             }
             // TODO: parse milestone tags from the raw event when Repository carries them
             required_approvals.set(r.required_approvals);
@@ -125,8 +126,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                     Some(description.as_str())
                 };
                 // Validate zap split weights total 100%
-                let splits_snapshot: Vec<(String, u32)> = zap_splits.read().clone();
-                let total_weight: u32 = splits_snapshot.iter().map(|(_, w)| *w).sum();
+                let splits_snapshot: Vec<(String, String, u32)> = zap_splits.read().clone();
+                let total_weight: u32 = splits_snapshot.iter().map(|(_, _, w)| *w).sum();
                 if !splits_snapshot.is_empty() && total_weight != 100 {
                     save_error.set(Some(format!("Zap split weights must total 100% (currently {}%)", total_weight)));
                     is_saving.set(false);
@@ -134,15 +135,20 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 }
                 // Build extra tags for zap splits, milestones, required approvals
                 let mut extra_tags: Vec<Tag> = Vec::new();
-                // Zap split tags
+                // Zap split tags — use each split's stored relay, falling back to first repo relay
                 let default_relay = relay_snapshot.first()
                     .map(|r| r.to_string())
                     .unwrap_or_default();
-                for (pubkey, weight) in &splits_snapshot {
+                for (pubkey, relay, weight) in &splits_snapshot {
                     if let Ok(pk) = PublicKey::parse(pubkey) {
+                        let relay_to_use = if relay.is_empty() {
+                            default_relay.clone()
+                        } else {
+                            relay.clone()
+                        };
                         extra_tags.push(Tag::custom(
                             TagKind::Custom(Cow::Borrowed("zap")),
-                            [pk.to_hex(), default_relay.clone(), weight.to_string()],
+                            [pk.to_hex(), relay_to_use, weight.to_string()],
                         ));
                     }
                 }
@@ -663,7 +669,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                             }
                             // Current splits display
                             div { class: "space-y-2",
-                                for (idx, (pubkey, weight)) in zap_splits.read().iter().enumerate() {
+                                for (idx, (pubkey, _relay, weight)) in zap_splits.read().iter().enumerate() {
                                     {
                                         let display_name = {
                                             let cache = PROFILE_CACHE.read();
@@ -741,11 +747,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 match PublicKey::parse(&pk) {
                                                     Ok(parsed) => {
                                                         let hex_key = parsed.to_hex();
-                                                        if zap_splits.read().iter().any(|(pk, _)| pk == &hex_key) {
+                                                        if zap_splits.read().iter().any(|(pk, _, _)| pk == &hex_key) {
                                                             save_error.set(Some("This pubkey is already in the zap split list.".to_string()));
                                                         } else {
                                                             let mut splits = zap_splits.write();
-                                                            splits.push((hex_key, w));
+                                                            splits.push((hex_key, String::new(), w));
                                                             drop(splits);
                                                             new_split_pubkey.set(String::new());
                                                             new_split_weight.set(50);
@@ -781,11 +787,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             match PublicKey::parse(&pk) {
                                                 Ok(parsed) => {
                                                     let hex_key = parsed.to_hex();
-                                                    if zap_splits.read().iter().any(|(pk, _)| pk == &hex_key) {
+                                                    if zap_splits.read().iter().any(|(pk, _, _)| pk == &hex_key) {
                                                         save_error.set(Some("This pubkey is already in the zap split list.".to_string()));
                                                     } else {
                                                         let mut splits = zap_splits.write();
-                                                        splits.push((hex_key, w));
+                                                        splits.push((hex_key, String::new(), w));
                                                         drop(splits);
                                                         new_split_pubkey.set(String::new());
                                                         new_split_weight.set(50);
@@ -802,7 +808,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                             }
                             // Total weight indicator
                             {
-                                let total: u32 = zap_splits.read().iter().map(|(_, w)| w).sum();
+                                let total: u32 = zap_splits.read().iter().map(|(_, _, w)| w).sum();
                                 let color = if total == 100 { "text-green-500" } else { "text-orange-500" };
                                 rsx! {
                                     p { class: "text-xs {color}",
