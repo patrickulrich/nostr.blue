@@ -968,6 +968,11 @@ fn render_sidebar_icon(item: &SidebarItem, class: &str) -> Element {
                 }
             }
         }
+        SidebarItem::Topics => {
+            rsx! {
+                crate::components::icons::HashIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Highlights => {
             rsx! {
                 svg {

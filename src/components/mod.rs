@@ -136,6 +136,12 @@ pub use community::{
     CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline,
     JoinButton, UserRoleBadge,
 };
+pub mod topic;
+#[allow(unused_imports)]
+pub use topic::{
+    ThreadView, TopicBadge, TopicCard, TopicPostCard, TopicPostComposer, TopicSidebar,
+    VoteColumn,
+};
 pub mod pwa_update_banner;
 pub use pwa_update_banner::PwaUpdateBanner;
 

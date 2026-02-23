@@ -50,6 +50,7 @@ pub mod bible {
         }
     }
 }
+pub mod topics;
 pub mod about;
 pub mod bookmarks;
 pub mod cashu_wallet;
@@ -98,6 +99,7 @@ use code::{
 };
 use chats::{ChatDetail, ChatNew, Chats};
 use community::{Communities, CommunityNew, CommunityPage};
+use topics::{TopicFeed, TopicNewPost, TopicPostDetail, TopicsBrowse, TopicsHome, TopicsPopular};
 use cookies::Cookies;
 use dms::DMs;
 use dvm::DVM;
@@ -318,6 +320,18 @@ pub enum Route {
     CommunityNew {},
     #[route("/community/:a_tag")]
     CommunityPage { a_tag: String },
+    #[route("/topics")]
+    TopicsHome {},
+    #[route("/topics/popular")]
+    TopicsPopular {},
+    #[route("/topics/browse")]
+    TopicsBrowse {},
+    #[route("/topics/new")]
+    TopicNewPost {},
+    #[route("/topics/t/:topic")]
+    TopicFeed { topic: String },
+    #[route("/topics/t/:topic/post/:post_id")]
+    TopicPostDetail { topic: String, post_id: String },
     #[route("/recipes")]
     RecipesHome {},
     #[route("/recipes/all")]
@@ -594,6 +608,15 @@ fn Layout() -> Element {
         current_route,
         Route::Communities {} | Route::CommunityPage { .. }
     );
+    let is_topics_page = matches!(
+        current_route,
+        Route::TopicsHome {}
+        | Route::TopicsPopular {}
+        | Route::TopicsBrowse {}
+        | Route::TopicNewPost {}
+        | Route::TopicFeed { .. }
+        | Route::TopicPostDetail { .. }
+    );
     let is_events_page = matches!(
         current_route,
         Route::Events {} | Route::CalendarEventDetail { .. } | Route::Calendar {}
@@ -674,7 +697,7 @@ fn Layout() -> Element {
         || is_packs_page || is_code_page || is_p2p_page || is_chats_page || is_community_page
         || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page
         || is_publications_page || is_shop_page || is_blossom_page || is_bible_page
-        || is_creation_page;
+        || is_creation_page || is_topics_page;
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
         state.is_visible && state.current_track.is_some()

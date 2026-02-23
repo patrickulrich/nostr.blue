@@ -1,0 +1,85 @@
+//! Topic Post Card Component
+//! Reddit-style post card with vote column on left, content on right
+use crate::components::topic::{TopicBadge, VoteColumn};
+use crate::components::RichContent;
+use crate::routes::Route;
+use crate::stores::profiles::get_cached_profile;
+use crate::stores::topic_store::{TopicPost, VoteCounts};
+use crate::utils::format::format_relative_time_or;
+use dioxus::prelude::*;
+
+/// Reddit-style topic post card
+#[component]
+pub fn TopicPostCard(
+    post: TopicPost,
+    #[props(default)]
+    vote_counts: Option<VoteCounts>,
+    #[props(default = false)]
+    show_topic_badge: bool,
+) -> Element {
+    let profile = get_cached_profile(&post.pubkey);
+    let author_name = profile
+        .as_ref()
+        .and_then(|p| p.display_name.clone().or(p.name.clone()))
+        .unwrap_or_else(|| {
+            let truncated: String = post.pubkey.chars().take(8).collect();
+            format!("{}...", truncated)
+        });
+    let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
+    let time_ago = format_relative_time_or(post.created_at, "just now");
+    let counts = vote_counts.clone().unwrap_or_default();
+    let topic_for_link = post.topic.clone();
+    let post_id_for_link = post.id.clone();
+    let post_for_vote = post.clone();
+
+    rsx! {
+        div {
+            class: "flex gap-3 bg-card border border-border rounded-lg p-3 hover:bg-accent/50 transition",
+            // Vote column
+            VoteColumn {
+                post: post_for_vote,
+                vote_counts: counts,
+            }
+            // Content
+            div {
+                class: "flex-1 min-w-0",
+                // Header: topic badge + author + time
+                div {
+                    class: "flex items-center gap-2 text-sm text-muted-foreground mb-1 flex-wrap",
+                    if show_topic_badge {
+                        TopicBadge { topic: post.topic.clone() }
+                    }
+                    Link {
+                        to: Route::Profile { pubkey: post.pubkey.clone() },
+                        class: "flex items-center gap-1.5 hover:text-foreground transition",
+                        if let Some(pic) = &author_picture {
+                            img {
+                                src: "{pic}",
+                                alt: "{author_name}",
+                                class: "w-5 h-5 rounded-full object-cover",
+                            }
+                        }
+                        span { class: "font-medium", "{author_name}" }
+                    }
+                    span { "\u{00B7}" }
+                    span { "{time_ago}" }
+                }
+                // Post content
+                Link {
+                    to: Route::TopicPostDetail {
+                        topic: topic_for_link,
+                        post_id: post_id_for_link,
+                    },
+                    class: "block",
+                    div {
+                        class: "prose prose-sm max-w-none text-foreground",
+                        RichContent {
+                            content: post.content.clone(),
+                            tags: post.event.tags.to_vec(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
