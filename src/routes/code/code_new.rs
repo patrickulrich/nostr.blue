@@ -8,6 +8,7 @@ use crate::stores::auth_store;
 use crate::utils::nips::nip34::encode_repo_naddr;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, Kind, PublicKey};
+use nostr_sdk::RelayUrl;
 
 /// New repository page component
 #[component]
@@ -104,6 +105,14 @@ pub fn CodeNew() -> Element {
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .collect();
+
+            for relay in &relay_list {
+                if RelayUrl::parse(relay).is_err() {
+                    error_message.set(Some(format!("Invalid relay URL: '{}'. Must start with wss:// or ws://", relay)));
+                    is_publishing.set(false);
+                    return;
+                }
+            }
 
             // Parse maintainer pubkeys
             let mut maintainers = Vec::new();

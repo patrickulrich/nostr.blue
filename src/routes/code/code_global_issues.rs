@@ -47,8 +47,12 @@ pub fn CodeGlobalIssues() -> Element {
         }
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
+        created_issues.set(Vec::new());
+        assigned_issues.set(Vec::new());
+        mentioned_issues.set(Vec::new());
+        label_filter.set(None);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
             if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
                 let (created_res, assigned_res, mentioned_res) = futures::join!(
                     fetch_user_issues(&pk, 100),

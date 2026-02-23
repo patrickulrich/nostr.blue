@@ -163,6 +163,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
     let mut claiming_bounty = use_signal(|| Option::<String>::None);
+    let mut bounty_error = use_signal(|| Option::<String>::None);
     let issue_id_for_comments = issue_id.clone();
     let mut comments = use_resource(move || {
         let id = issue_id_for_comments.clone();
@@ -374,6 +375,9 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                 h3 { class: "font-semibold text-sm", "Bounties" }
                             }
                             div { class: "p-4 space-y-3",
+                                if let Some(error) = bounty_error.read().as_ref() {
+                                    span { class: "text-xs text-destructive", "{error}" }
+                                }
                                 for bounty in bounties.read().iter() {
                                     {
                                         let bounty_eid = bounty.event_id.clone();
@@ -419,11 +423,12 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                     if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
                                                                         if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
                                                                             if let Err(e) = claim_bounty(b_id, i_id, b_amount, None).await {
-                                                                                web_sys::console::error_1(
-                                                                                    &format!("Failed to claim bounty: {}", e).into(),
-                                                                                );
-                                                                            } else if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
-                                                                                bounties.set(refreshed);
+                                                                                bounty_error.set(Some(format!("Failed to claim bounty: {}", e)));
+                                                                            } else {
+                                                                                bounty_error.set(None);
+                                                                                if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
+                                                                                    bounties.set(refreshed);
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
@@ -467,15 +472,13 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                         if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
                                                                             match release_bounty(b_id, i_id, &c, amount, None).await {
                                                                                 Ok(_) => {
+                                                                                    bounty_error.set(None);
                                                                                     if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
                                                                                         bounties.set(refreshed);
                                                                                     }
                                                                                 }
                                                                                 Err(e) => {
-                                                                                    log::error!("Failed to release bounty: {}", e);
-                                                                                    web_sys::console::error_1(
-                                                                                        &format!("Failed to release bounty: {}", e).into(),
-                                                                                    );
+                                                                                    bounty_error.set(Some(format!("Failed to release bounty: {}", e)));
                                                                                 }
                                                                             }
                                                                         }
@@ -524,7 +527,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                     naddr: issue.repository_naddr.clone(),
                                 },
                                 class: "text-sm text-primary hover:underline",
-                                "{issue.repository_naddr.chars().take(30).collect::<String>()}..."
+                                {repo.read().as_ref().map(|r| r.name.clone().unwrap_or_else(|| r.id.clone())).unwrap_or_else(|| "View Repository".to_string())}
                             }
                         }
                     }

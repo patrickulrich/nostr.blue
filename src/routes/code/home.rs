@@ -594,6 +594,7 @@ fn MyReposTab() -> Element {
             }
         };
         my_repos.set(None);
+        loading.set(true);
         spawn(async move {
             match fetch_user_repositories(&pubkey, 50).await {
                 Ok(repos) => my_repos.set(Some(Ok(repos))),
@@ -1134,11 +1135,9 @@ fn ActivityRow(activity: Activity) -> Element {
             }
             // Activity text
             div { class: "flex-1 min-w-0",
-                span { class: "text-sm",
-                    span { class: "font-medium", "{author_name}" }
-                    " "
-                    span { class: "text-muted-foreground", "{activity.activity_type}" }
-                    " "
+                div { class: "text-sm flex items-baseline gap-1 min-w-0",
+                    span { class: "font-medium shrink-0", "{author_name}" }
+                    span { class: "text-muted-foreground shrink-0", "{activity.activity_type}" }
                     span { class: "font-medium truncate", "{activity.title}" }
                 }
             }

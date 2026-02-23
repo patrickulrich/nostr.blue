@@ -196,6 +196,8 @@ pub fn CodeSearch(q: String) -> Element {
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         if q.is_empty() {
             repos.set(Some(Ok(vec![])));
             snippets.set(Some(Ok(vec![])));
@@ -203,8 +205,6 @@ pub fn CodeSearch(q: String) -> Element {
             prs.set(Some(Ok(vec![])));
             return;
         }
-        let gen = request_gen.peek().wrapping_add(1);
-        request_gen.set(gen);
         spawn(async move {
             {
                 // Only fetch entity types that will be displayed (based on type: filter)

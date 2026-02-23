@@ -188,6 +188,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     let mut follow_error = use_signal(|| None::<String>);
     let pubkey_for_follow = pubkey.clone();
     let on_follow_click = move |_| {
+        if *follow_loading.peek() { return; }
         let pk = pubkey_for_follow.clone();
         spawn(async move {
             follow_loading.set(true);

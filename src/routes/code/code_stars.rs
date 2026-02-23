@@ -41,12 +41,12 @@ pub fn CodeStars() -> Element {
             // Load stars from relays into STARRED_REPOS
             if let Err(e) = load_user_stars().await {
                 log::warn!("Failed to load user stars: {}", e);
-                if *request_id.peek() != current_id { loading.set(false); return; }
+                if *request_id.peek() != current_id { return; }
                 star_load_error.set(Some(format!("Failed to load stars: {}", e)));
                 loading.set(false);
                 return;
             }
-            if *request_id.peek() != current_id { loading.set(false); return; }
+            if *request_id.peek() != current_id { return; }
             // Hydrate CODE_REPOS_CACHE for starred repos
             let starred_coords: Vec<_> = code_store::STARRED_REPOS.peek().iter().cloned().collect();
             if !starred_coords.is_empty() {
@@ -63,12 +63,12 @@ pub fn CodeStars() -> Element {
                         .kind(Kind::GitRepoAnnouncement)
                         .authors(authors);
                     if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(15)).await {
-                        if *request_id.peek() != current_id { loading.set(false); return; }
+                        if *request_id.peek() != current_id { return; }
                         code_store::cache_repo_events(&events);
                     }
                 }
             }
-            if *request_id.peek() != current_id { loading.set(false); return; }
+            if *request_id.peek() != current_id { return; }
             // Get Repository objects from cache
             let starred = code_store::get_starred_repos();
             repos.set(starred);

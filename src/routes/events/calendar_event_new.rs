@@ -618,6 +618,8 @@ pub fn CalendarEventNew() -> Element {
                                                 if let Ok(results) = geocoding::geocode_suggestions(&val, 10).await {
                                                     if *location_debounce.peek() != current_id { return; }
                                                     location_suggestions.set(results);
+                                                } else {
+                                                    location_suggestions.set(Vec::new());
                                                 }
                                             });
                                         } else {
@@ -742,15 +744,16 @@ pub fn CalendarEventNew() -> Element {
                                     oninput: move |e| {
                                         let val = e.value();
                                         participant_input.set(val.clone());
-                                        if val.trim().len() >= 2 {
+                                        let q = val.trim().to_string();
+                                        if q.len() >= 2 {
                                             show_participant_dropdown.set(true);
                                             let contacts = contact_pubkeys.peek().clone();
-                                            let cached = search_cached_profiles(&val, 8, &contacts, &[]);
+                                            let cached = search_cached_profiles(&q, 8, &contacts, &[]);
                                             participant_results.set(cached.clone());
-                                            if val.trim().len() >= 3 && cached.len() < 5 {
+                                            if q.len() >= 3 && cached.len() < 5 {
                                                 let current_id = *participant_debounce.peek() + 1;
                                                 participant_debounce.set(current_id);
-                                                let query_snapshot = val.clone();
+                                                let query_snapshot = q.clone();
                                                 spawn(async move {
                                                     gloo_timers::future::TimeoutFuture::new(300).await;
                                                     if *participant_debounce.peek() != current_id { return; }

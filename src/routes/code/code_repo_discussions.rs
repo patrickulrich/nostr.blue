@@ -182,14 +182,8 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
         }
     }
 }
-#[component]
-fn DiscussionRow(discussion: Discussion) -> Element {
-    let author_profile = PROFILE_CACHE.read().peek(&discussion.pubkey).cloned();
-    let author_name = author_profile
-        .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-        .unwrap_or_else(|| truncate_pubkey(&discussion.pubkey));
-    let title = discussion
+fn discussion_preview_title(discussion: &Discussion) -> String {
+    discussion
         .subject
         .clone()
         .unwrap_or_else(|| {
@@ -199,14 +193,28 @@ fn DiscussionRow(discussion: Discussion) -> Element {
             } else {
                 preview
             }
-        });
-    let category_label = discussion.category.as_deref().map(|c| match c {
+        })
+}
+
+fn category_display_label(category: &str) -> &'static str {
+    match category {
         "general" => "General",
         "ideas" => "Ideas",
         "q-a" => "Q&A",
         "show-and-tell" => "Show & Tell",
-        other => other,
-    });
+        _ => "Other",
+    }
+}
+
+#[component]
+fn DiscussionRow(discussion: Discussion) -> Element {
+    let author_profile = PROFILE_CACHE.read().peek(&discussion.pubkey).cloned();
+    let author_name = author_profile
+        .as_ref()
+        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+        .unwrap_or_else(|| truncate_pubkey(&discussion.pubkey));
+    let title = discussion_preview_title(&discussion);
+    let category_label = discussion.category.as_deref().map(category_display_label);
     rsx! {
         Link {
             to: Route::CodeDiscussionDetail {

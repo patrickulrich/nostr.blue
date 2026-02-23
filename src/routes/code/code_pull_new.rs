@@ -12,7 +12,7 @@ fn is_valid_git_refname(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
-    if name.starts_with('-') || name.starts_with('.') {
+    if name.starts_with('-') || name.starts_with('.') || name.starts_with('/') {
         return false;
     }
     if name.ends_with(".lock") || name.ends_with('/') || name.ends_with('.') {
@@ -34,6 +34,17 @@ fn is_valid_git_refname(name: &str) -> bool {
     }
     if name.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f) {
         return false;
+    }
+    for component in name.split('/') {
+        if component.is_empty() {
+            return false;
+        }
+        if component.starts_with('.') {
+            return false;
+        }
+        if component.ends_with(".lock") {
+            return false;
+        }
     }
     true
 }
@@ -112,8 +123,8 @@ pub fn CodePullNew(naddr: String) -> Element {
                 }
                 let commit_ref = if commit_val.is_empty() {
                     None
-                } else if commit_val.len() < 40 || commit_val.len() > 64 || !commit_val.chars().all(|c| c.is_ascii_hexdigit()) {
-                    error_message.set(Some(format!("Invalid commit hash '{}': must be 40-64 hex characters", commit_val)));
+                } else if (commit_val.len() != 40 && commit_val.len() != 64) || !commit_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    error_message.set(Some(format!("Invalid commit hash '{}': must be exactly 40 (SHA-1) or 64 (SHA-256) hex characters", commit_val)));
                     is_publishing.set(false);
                     return;
                 } else {
@@ -121,8 +132,8 @@ pub fn CodePullNew(naddr: String) -> Element {
                 };
                 let parent_ref = if parent_val.is_empty() {
                     None
-                } else if parent_val.len() < 40 || parent_val.len() > 64 || !parent_val.chars().all(|c| c.is_ascii_hexdigit()) {
-                    error_message.set(Some(format!("Invalid parent commit hash '{}': must be 40-64 hex characters", parent_val)));
+                } else if (parent_val.len() != 40 && parent_val.len() != 64) || !parent_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    error_message.set(Some(format!("Invalid parent commit hash '{}': must be exactly 40 (SHA-1) or 64 (SHA-256) hex characters", parent_val)));
                     is_publishing.set(false);
                     return;
                 } else {

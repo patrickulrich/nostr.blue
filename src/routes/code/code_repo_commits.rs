@@ -26,15 +26,19 @@ enum CommitData {
 pub fn CodeRepoCommits(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut commits_result = use_signal(|| None::<Result<CommitData, String>>);
+    let mut request_gen = use_signal(|| 0u64);
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         commits_result.set(None);
         repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&n).await;
+            if *request_gen.peek() != gen { return; }
             if let Ok(ref repo) = result {
                 // Try isomorphic-git first (works for ALL repo sources)
                 if git_service::GitService::is_initialized()
@@ -42,6 +46,7 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 {
                     match git_service().get_log(repo, None, 50).await {
                         Ok(entries) if !entries.is_empty() => {
+                            if *request_gen.peek() != gen { return; }
                             commits_result.set(Some(Ok(CommitData::Git(entries))));
                             repo_result.set(Some(result));
                             return;
@@ -58,19 +63,23 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 for url in repo.clone.iter() {
                     if let Some((owner, repo_name)) = parse_github_url(url) {
                         let commits = fetch_commits(&owner, &repo_name, 30).await;
+                        if *request_gen.peek() != gen { return; }
                         commits_result
                             .set(Some(commits.map(CommitData::GitHub)));
                         repo_result.set(Some(result));
                         return;
                     }
                 }
+                if *request_gen.peek() != gen { return; }
                 commits_result.set(Some(Err(
                     "Could not load commits. Try cloning the repository first by browsing its files."
                         .to_string(),
                 )));
             } else if let Err(ref e) = result {
+                if *request_gen.peek() != gen { return; }
                 commits_result.set(Some(Err(format!("Failed to load repository: {}", e))));
             }
+            if *request_gen.peek() != gen { return; }
             repo_result.set(Some(result));
         });
     }));
@@ -375,7 +384,7 @@ fn LoadingSkeleton() -> Element {
     rsx! {
         div { class: "space-y-3 animate-pulse",
             for i in 0..5 {
-                div { key: "{i}", class: "p-4 border border-border rounded-lg",
+                div { key: "{i}", class: "bg-card p-4 border border-border rounded-lg",
                     div { class: "h-4 bg-muted rounded w-3/4 mb-3" }
                     div { class: "flex items-center gap-3",
                         div { class: "h-5 w-5 bg-muted rounded-full" }

@@ -5,9 +5,12 @@
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repository;
+use crate::stores::nostr_client::{get_client, HAS_SIGNER};
 use crate::stores::{auth_store, nostr_client};
-use crate::utils::nip34::Repository;
+use crate::utils::nip34::{decode_repo_naddr, Repository};
 use dioxus::prelude::*;
+use dioxus::signals::ReadableExt;
+use nostr_sdk::prelude::{EventBuilder, Kind, Tag, TagKind};
 
 /// Validate a file path for repository use.
 /// Returns an error message if the path is invalid.
@@ -45,7 +48,8 @@ fn filename_from_path(path: &str) -> &str {
 
 /// Build a unified diff for a new file creation.
 fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_message: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
+    // Use split('\n') instead of lines() to correctly count trailing newlines
+    let lines: Vec<&str> = content.split('\n').collect();
     let line_count = if content.is_empty() { 0 } else { lines.len() };
 
     let mut diff = String::new();
@@ -428,11 +432,6 @@ async fn submit_new_file(
     content: &str,
     commit_message: &str,
 ) -> Result<(), String> {
-    use crate::stores::nostr_client::{get_client, HAS_SIGNER};
-    use crate::utils::nip34::decode_repo_naddr;
-    use dioxus::signals::ReadableExt;
-    use nostr_sdk::prelude::{EventBuilder, Kind, Tag, TagKind};
-
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Please sign in first.".to_string());

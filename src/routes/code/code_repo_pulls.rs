@@ -39,26 +39,30 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         });
     }));
 
-    let filtered = {
+    let filtered = use_memo(move || {
         let prs = all_prs.read();
         let status = *status_filter.read();
         let query = search_query.read().clone();
         let labels = selected_labels.read().clone();
         filter_prs(&prs, status, &query, &labels)
-    };
+    });
 
-    let open_count = all_prs
-        .read()
-        .iter()
-        .filter(|p| p.status == IssueStatus::Open || p.status == IssueStatus::Draft)
-        .count();
-    let closed_count = all_prs
-        .read()
-        .iter()
-        .filter(|p| p.status == IssueStatus::Closed || p.status == IssueStatus::Applied)
-        .count();
+    let open_count = use_memo(move || {
+        all_prs
+            .read()
+            .iter()
+            .filter(|p| p.status == IssueStatus::Open || p.status == IssueStatus::Draft)
+            .count()
+    });
+    let closed_count = use_memo(move || {
+        all_prs
+            .read()
+            .iter()
+            .filter(|p| p.status == IssueStatus::Closed || p.status == IssueStatus::Applied)
+            .count()
+    });
 
-    let available_labels: Vec<String> = {
+    let available_labels = use_memo(move || {
         let mut labels: Vec<String> = all_prs
             .read()
             .iter()
@@ -67,16 +71,16 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         labels.sort();
         labels.dedup();
         labels
-    };
+    });
 
     // Trim selected_labels to only contain labels available in the current repo
     {
         let current_selected = selected_labels.read().clone();
         let trimmed: Vec<String> = current_selected
             .into_iter()
-            .filter(|l| available_labels.contains(l))
+            .filter(|l| available_labels.read().contains(l))
             .collect();
-        if trimmed.len() != selected_labels.peek().len() {
+        if trimmed != *selected_labels.peek() {
             selected_labels.set(trimmed);
         }
     }
@@ -199,9 +203,9 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                         on_status_change: move |s| status_filter.set(s),
                         search_query: search_query.read().clone(),
                         on_search_change: move |q| search_query.set(q),
-                        open_count,
-                        closed_count,
-                        available_labels,
+                        open_count: *open_count.read(),
+                        closed_count: *closed_count.read(),
+                        available_labels: available_labels.read().clone(),
                         selected_labels: selected_labels.read().clone(),
                         on_label_toggle: move |label: String| {
                             let mut labels = selected_labels.write();
@@ -212,11 +216,11 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                             }
                         },
                     }
-                    if filtered.is_empty() {
+                    if filtered.read().is_empty() {
                         EmptyPRs {}
                     } else {
                         div { class: "border border-border rounded-lg divide-y divide-border",
-                            for pr in filtered.iter() {
+                            for pr in filtered.read().iter() {
                                 CodePullRow { key: "{pr.event_id}", pr: pr.clone() }
                             }
                         }

@@ -187,11 +187,19 @@ fn NotificationCard(notification: CodeNotification) -> Element {
         CodeNotificationType::IssueOpened => Route::CodeIssueDetail {
             note_id: notification.event_id.clone(),
         },
-        CodeNotificationType::PullRequestOpened
-        | CodeNotificationType::ReviewReceived => Route::CodePullDetail {
+        CodeNotificationType::PullRequestOpened => Route::CodePullDetail {
             note_id: notification.event_id.clone(),
         },
-        _ => Route::CodeHome {},
+        CodeNotificationType::ReviewReceived => Route::CodePullDetail {
+            note_id: notification.parent_event_id.clone()
+                .unwrap_or(notification.event_id.clone()),
+        },
+        CodeNotificationType::CommentAdded | CodeNotificationType::Mentioned
+        | CodeNotificationType::StatusChanged => {
+            if let Some(ref parent_id) = notification.parent_event_id {
+                Route::CodeIssueDetail { note_id: parent_id.clone() }
+            } else { Route::CodeHome {} }
+        }
     };
     rsx! {
         Link {

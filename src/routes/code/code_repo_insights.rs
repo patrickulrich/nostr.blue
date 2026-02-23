@@ -95,25 +95,30 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let mut data_loading = use_signal(|| true);
 
     use_effect(use_reactive((&naddr, &repo), move |(n, r)| {
+        data_loading.set(true);
+        issues.set(Vec::new());
+        prs.set(Vec::new());
+        commit_count.set(None);
         spawn(async move {
-            data_loading.set(true);
-
             // Fetch issues and PRs in parallel
             let (issues_result, prs_result) = futures::join!(
                 fetch_repo_issues(&n),
                 fetch_repo_prs(&n)
             );
-            if let Ok(fetched) = issues_result {
-                issues.set(fetched);
+            match issues_result {
+                Ok(fetched) => issues.set(fetched),
+                Err(e) => { log::warn!("Failed to fetch issues: {}", e); issues.set(Vec::new()); }
             }
-            if let Ok(fetched) = prs_result {
-                prs.set(fetched);
+            match prs_result {
+                Ok(fetched) => prs.set(fetched),
+                Err(e) => { log::warn!("Failed to fetch PRs: {}", e); prs.set(Vec::new()); }
             }
 
             // For GitHub repos, fetch commit count
             if let Some((owner, repo_name)) = extract_github_info(&r) {
-                if let Ok(commits) = github_import::fetch_commits(&owner, &repo_name, 100).await {
-                    commit_count.set(Some(commits.len()));
+                match github_import::fetch_commits(&owner, &repo_name, 100).await {
+                    Ok(commits) => commit_count.set(Some(commits.len())),
+                    Err(e) => { log::warn!("Failed to fetch commits: {}", e); commit_count.set(None); }
                 }
             }
 

@@ -695,7 +695,7 @@ const methods = {
         }
       } catch (e) {
         // File doesn't exist in base
-        console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`);
+        console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`, e);
         inBase = false;
       }
 
@@ -711,7 +711,7 @@ const methods = {
           }
         } catch (e) {
           // File doesn't exist in head
-          console.warn(`[GitWorker] Could not read head blob for '${filepath}': ${e.message}`);
+          console.warn(`[GitWorker] Could not read head blob for '${filepath}': ${e.message}`, e);
           inHead = false;
         }
       }

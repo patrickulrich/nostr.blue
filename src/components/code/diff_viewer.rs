@@ -520,6 +520,8 @@ pub fn DiffViewer(
                                                         }
                                                     }
                                                 }},
+                                                // TODO: Side-by-side view currently only renders existing comments from comment_map.
+                                                // Add interactive '+' gutter button and inline comment form for parity with unified view.
                                                 DiffViewMode::SideBySide => {
                                                     let rows = build_side_by_side_rows(&hunk.lines);
                                                     rsx! {
@@ -731,12 +733,20 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
         }
 
         if line.starts_with("@@ ") {
-            in_header = false;
             if let Some(hunk) = parse_hunk_header(line) {
+                in_header = false;
                 old_line = hunk.old_start;
                 new_line = hunk.new_start;
                 current_lines.push(DiffLine {
                     kind: LineKind::Hunk,
+                    old_num: None,
+                    new_num: None,
+                    content: line.to_string(),
+                });
+            } else {
+                // Malformed hunk header — treat as info line, don't change counters
+                current_lines.push(DiffLine {
+                    kind: LineKind::Info,
                     old_num: None,
                     new_num: None,
                     content: line.to_string(),

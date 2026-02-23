@@ -32,10 +32,16 @@ pub fn SshKeyManager() -> Element {
                 match PublicKey::from_hex(&pubkey_hex) {
                     Ok(pk) => match ssh_keys::fetch_ssh_keys(&pk).await {
                         Ok(k) => {
+                            if auth_store::get_pubkey() != Some(pubkey_hex.clone()) {
+                                return;
+                            }
                             keys.set(k);
                             loading.set(false);
                         }
                         Err(e) => {
+                            if auth_store::get_pubkey() != Some(pubkey_hex.clone()) {
+                                return;
+                            }
                             error.set(Some(e));
                             loading.set(false);
                         }

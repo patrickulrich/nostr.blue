@@ -182,28 +182,33 @@ pub fn PRReviewSection(
             show_form.set(false);
             review_body.set(String::new());
             publish_error.set(None);
-            // Notify parent that a review was submitted
-            if let Some(handler) = on_review_submitted.as_ref() {
-                handler.call(());
-            }
             // Publish to relays
             let id = pr_id.clone();
             let saved_content = content.clone();
             let saved_pubkey = user_pubkey.clone();
             let author_pk = saved_pr_pubkey.clone();
+            let on_review_submitted = on_review_submitted;
             spawn(async move {
-                if let Err(e) = publish_review_event(&id, &author_pk, review_state, &saved_content).await {
-                    publish_error.set(Some(e.to_string()));
-                    // Rollback: remove the optimistic entry and restore prior review
-                    let mut current = reviews.write();
-                    current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
-                    if let Some(prior) = prior_review {
-                        current.push(prior);
+                match publish_review_event(&id, &author_pk, review_state, &saved_content).await {
+                    Ok(_) => {
+                        // Notify parent only after successful publish
+                        if let Some(handler) = on_review_submitted.as_ref() {
+                            handler.call(());
+                        }
                     }
-                    drop(current);
-                    // Restore form so user can retry
-                    show_form.set(true);
-                    review_body.set(saved_content);
+                    Err(e) => {
+                        publish_error.set(Some(e.to_string()));
+                        // Rollback: remove the optimistic entry and restore prior review
+                        let mut current = reviews.write();
+                        current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
+                        if let Some(prior) = prior_review {
+                            current.push(prior);
+                        }
+                        drop(current);
+                        // Restore form so user can retry
+                        show_form.set(true);
+                        review_body.set(saved_content);
+                    }
                 }
             });
         }

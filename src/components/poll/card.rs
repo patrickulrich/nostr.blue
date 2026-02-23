@@ -87,9 +87,15 @@ pub fn PollCard(
                         repost_count.set(counts.reposts.min(500));
                         zap_amount_sats.set(counts.zap_amount_sats);
                     }
-                    is_reposted.set(counts.user_reposted.unwrap_or(false));
-                    user_repost_id.set(counts.user_repost_id.clone());
-                    is_zapped.set(counts.user_zapped.unwrap_or(false));
+                    if counts.user_reposted.is_some() || !*is_reposted.peek() {
+                        is_reposted.set(counts.user_reposted.unwrap_or(false));
+                    }
+                    if counts.user_repost_id.is_some() || user_repost_id.peek().is_none() {
+                        user_repost_id.set(counts.user_repost_id.clone());
+                    }
+                    if counts.user_zapped.is_some() || !*is_zapped.peek() {
+                        is_zapped.set(counts.user_zapped.unwrap_or(false));
+                    }
                 }
             },
         ),

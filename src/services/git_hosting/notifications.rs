@@ -43,6 +43,7 @@ pub struct CodeNotification {
     pub title: String,
     pub summary: String,
     pub event_id: String,
+    pub parent_event_id: Option<String>,
     pub author_pubkey: String,
     pub repository_naddr: Option<String>,
     pub created_at: u64,
@@ -125,6 +126,9 @@ impl CodeNotification {
             }
         });
 
+        let parent_event_id = event.tags.find(TagKind::e())
+            .and_then(|t| t.content().map(|s| s.to_string()));
+
         let content = event.content.to_string();
         let summary = if content.chars().count() > 100 {
             format!("{}...", content.chars().take(100).collect::<String>())
@@ -137,6 +141,7 @@ impl CodeNotification {
             title,
             summary,
             event_id: event.id.to_hex(),
+            parent_event_id,
             author_pubkey: event.pubkey.to_hex(),
             repository_naddr: repo_naddr,
             created_at: event.created_at.as_secs(),

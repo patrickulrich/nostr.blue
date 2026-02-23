@@ -125,6 +125,13 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 };
                 // Validate zap split weights total 100%
                 let splits_snapshot: Vec<(String, String, u32)> = zap_splits.read().clone();
+                for (pubkey, _, _) in &splits_snapshot {
+                    if PublicKey::parse(pubkey).is_err() {
+                        save_error.set(Some(format!("Invalid pubkey in zap splits: '{}'", pubkey)));
+                        is_saving.set(false);
+                        return;
+                    }
+                }
                 let total_weight: u32 = splits_snapshot.iter().map(|(_, _, w)| *w).sum();
                 if !splits_snapshot.is_empty() && total_weight != 100 {
                     save_error.set(Some(format!("Zap split weights must total 100% (currently {}%)", total_weight)));
@@ -1015,7 +1022,11 @@ fn DeleteConfirmModal(
 ) -> Element {
     rsx! {
         div {
-            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm flex items-center justify-center",
+            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+            onclick: move |e| on_cancel.call(e),
+        }
+        div {
+            class: "fixed inset-0 z-50 flex items-center justify-center",
             onclick: move |e| on_cancel.call(e),
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl",

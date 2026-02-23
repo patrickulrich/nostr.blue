@@ -59,20 +59,24 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
     let input_id = "code-repo-upload-file-input";
 
     // Fetch repository data
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    let mut request_gen = use_signal(|| 0u64);
+    use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        repo_result.set(None);
+        loading.set(true);
+        let n = naddr.clone();
         spawn(async move {
-            loading.set(true);
             let result = fetch_repository(&n).await;
+            if *request_gen.peek() != gen { return; }
             repo_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
 
     // Auth gate
     if !auth.is_authenticated {

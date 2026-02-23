@@ -22,14 +22,19 @@ pub fn CodeDiscussionDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut discussion_result = use_signal(|| None::<Result<Discussion, String>>);
     let mut loading = use_signal(|| true);
+    let mut request_gen = use_signal(|| 0u64);
     use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        discussion_result.set(None);
         spawn(async move {
             loading.set(true);
             let result = fetch_discussion(&note_id).await;
+            if *request_gen.peek() != gen { return; }
             discussion_result.set(Some(result));
             loading.set(false);
         });
@@ -101,12 +106,17 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
         .unwrap_or_else(|| discussion.pubkey_display());
     // Fetch repository for role badges
     let mut repo_data = use_signal(|| None::<Repository>);
+    let mut repo_gen = use_signal(|| 0u64);
     use_effect(use_reactive(&repo_naddr, move |naddr| {
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         if naddr.is_empty() {
+            repo_data.set(None);
             return;
         }
         spawn(async move {
             if let Ok(repo) = fetch_repository(&naddr).await {
+                if *repo_gen.peek() != gen { return; }
                 repo_data.set(Some(repo));
             }
         });
