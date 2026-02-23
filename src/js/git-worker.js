@@ -698,9 +698,9 @@ const methods = {
             baseContent = new TextDecoder().decode(blob);
           }
         } catch (e) {
-          // File doesn't exist in base
+          // Could not read base blob — skip file rather than misclassifying as absent
           console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`, e);
-          inBase = false;
+          skipReason = `Could not read base blob: ${e.message}`;
         }
       }
 
@@ -715,9 +715,9 @@ const methods = {
             headContent = new TextDecoder().decode(blob);
           }
         } catch (e) {
-          // File doesn't exist in head
+          // Could not read head blob — skip file rather than misclassifying as absent
           console.warn(`[GitWorker] Could not read head blob for '${filepath}': ${e.message}`, e);
-          inHead = false;
+          skipReason = `Could not read head blob: ${e.message}`;
         }
       }
 

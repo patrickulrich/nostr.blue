@@ -127,6 +127,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
     // Handle form submission
     let naddr_for_submit = naddr.clone();
     let handle_submit = move |_| {
+        if *submitting.peek() { return; }
         let path = file_path.read().clone();
         let content = file_content.read().clone();
         let msg = commit_message.read().clone();

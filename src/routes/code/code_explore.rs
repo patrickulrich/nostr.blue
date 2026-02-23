@@ -376,7 +376,7 @@ fn SkeletonCards(count: usize) -> Element {
             for i in 0..count {
                 div {
                     key: "{i}",
-                    class: "p-4 border border-border rounded-lg animate-pulse",
+                    class: "p-4 bg-card border border-border rounded-lg animate-pulse",
                     div { class: "flex items-start gap-3",
                         div { class: "w-10 h-10 rounded-lg bg-muted" }
                         div { class: "flex-1",

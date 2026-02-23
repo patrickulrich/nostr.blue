@@ -78,6 +78,10 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         .and_then(|pk| pk.to_bech32().ok())
         .unwrap_or_default();
 
+    // Follow/unfollow error + request tracking (declared before effect so closure can capture)
+    let mut follow_error = use_signal(|| None::<String>);
+    let mut follow_request_id = use_signal(|| 0u64);
+
     // Phase 1: Load profile metadata + all counts on mount/pubkey change
     let pubkey_for_load = pubkey.clone();
     let mut prev_pubkey = use_signal(String::new);
@@ -85,7 +89,8 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         // Clear PROFILE_CACHE entry for old pubkey on navigation
         let old_pk = prev_pubkey.peek().clone();
         if !old_pk.is_empty() && old_pk != pk {
-            profiles::PROFILE_CACHE.write().pop(&old_pk);
+            let normalized = PublicKey::parse(&old_pk).ok().map(|p| p.to_hex()).unwrap_or(old_pk);
+            profiles::PROFILE_CACHE.write().pop(&normalized);
         }
         prev_pubkey.set(pk.clone());
         // Reset state
@@ -99,6 +104,8 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         prs.set(Vec::new());
         snippets.set(Vec::new());
         is_following.set(false);
+        follow_loading.set(false);
+        follow_error.set(None);
 
         let current_id = request_id.peek().wrapping_add(1);
         request_id.set(current_id);
@@ -110,6 +117,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                     break;
                 }
                 gloo_timers::future::TimeoutFuture::new(100).await;
+                if *request_id.peek() != current_id { return; }
             }
             if *request_id.peek() != current_id { return; }
 
@@ -185,11 +193,12 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     }));
 
     // Follow/unfollow handler
-    let mut follow_error = use_signal(|| None::<String>);
     let pubkey_for_follow = pubkey.clone();
     let on_follow_click = move |_| {
         if *follow_loading.peek() { return; }
         let pk = pubkey_for_follow.clone();
+        let captured = follow_request_id.peek().wrapping_add(1);
+        follow_request_id.set(captured);
         spawn(async move {
             follow_loading.set(true);
             follow_error.set(None);
@@ -199,7 +208,10 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
 
             if is_following() {
                 match nostr_client::unfollow_user(hex).await {
-                    Ok(()) => is_following.set(false),
+                    Ok(()) => {
+                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
+                        is_following.set(false);
+                    }
                     Err(e) => {
                         log::error!("Failed to unfollow: {}", e);
                         follow_error.set(Some(format!("Failed to unfollow: {}", e)));
@@ -207,7 +219,10 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 }
             } else {
                 match nostr_client::follow_user(hex).await {
-                    Ok(()) => is_following.set(true),
+                    Ok(()) => {
+                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
+                        is_following.set(true);
+                    }
                     Err(e) => {
                         log::error!("Failed to follow: {}", e);
                         follow_error.set(Some(format!("Failed to follow: {}", e)));

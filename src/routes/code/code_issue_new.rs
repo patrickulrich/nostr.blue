@@ -38,14 +38,18 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         });
     });
     // Fetch existing labels from repo issues for suggestions
+    let mut labels_gen = use_signal(|| 0u64);
     use_effect(move || {
         let n = naddr_for_labels.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = labels_gen.peek().wrapping_add(1);
+        labels_gen.set(gen);
         spawn(async move {
             if let Ok(issues) = fetch_repo_issues(&n).await {
+                if *labels_gen.peek() != gen { return; }
                 let mut labels: Vec<String> = issues
                     .iter()
                     .flat_map(|i| i.labels.clone())

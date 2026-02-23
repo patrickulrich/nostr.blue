@@ -62,9 +62,18 @@ pub fn CodeStars() -> Element {
                     let filter = Filter::new()
                         .kind(Kind::GitRepoAnnouncement)
                         .authors(authors);
-                    if let Ok(events) = fetch_events_aggregated(filter, Duration::from_secs(15)).await {
-                        if *request_id.peek() != current_id { return; }
-                        code_store::cache_repo_events(&events);
+                    match fetch_events_aggregated(filter, Duration::from_secs(15)).await {
+                        Ok(events) => {
+                            if *request_id.peek() != current_id { return; }
+                            code_store::cache_repo_events(&events);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to fetch starred repo events: {}", e);
+                            if *request_id.peek() != current_id { return; }
+                            star_load_error.set(Some(format!("Failed to load repository details: {}", e)));
+                            loading.set(false);
+                            return;
+                        }
                     }
                 }
             }

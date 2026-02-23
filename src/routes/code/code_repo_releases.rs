@@ -144,7 +144,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                         naddr: naddr.clone(),
                         on_published: move |_| {
                             show_new_form.set(false);
-                            refresh_counter += 1;
+                            refresh_counter.with_mut(|v| *v = v.wrapping_add(1));
                         },
                     }
                 }
@@ -168,7 +168,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                                         user_pubkey: user_pubkey.clone(),
                                         is_authenticated: is_authenticated,
                                         on_mutated: move |_| {
-                                            refresh_counter += 1;
+                                            refresh_counter.with_mut(|v| *v = v.wrapping_add(1));
                                         },
                                     }
                                 }

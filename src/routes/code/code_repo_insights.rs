@@ -91,8 +91,11 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let mut prs = use_signal(Vec::<PullRequest>::new);
     let mut commit_count = use_signal(|| None::<usize>);
     let mut data_loading = use_signal(|| true);
+    let mut request_gen = use_signal(|| 0u64);
 
     use_effect(use_reactive((&naddr, &repo), move |(n, r)| {
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         data_loading.set(true);
         issues.set(Vec::new());
         prs.set(Vec::new());
@@ -103,6 +106,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 fetch_repo_issues(&n),
                 fetch_repo_prs(&n)
             );
+            if *request_gen.peek() != gen { return; }
             match issues_result {
                 Ok(fetched) => issues.set(fetched),
                 Err(e) => { log::warn!("Failed to fetch issues: {}", e); issues.set(Vec::new()); }
@@ -115,7 +119,10 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
             // For GitHub repos, fetch commit count
             if let Some((owner, repo_name)) = extract_github_info(&r) {
                 match github_import::fetch_commits(&owner, &repo_name, 100).await {
-                    Ok(commits) => commit_count.set(Some(commits.len())),
+                    Ok(commits) => {
+                        if *request_gen.peek() != gen { return; }
+                        commit_count.set(Some(commits.len()));
+                    }
                     Err(e) => { log::warn!("Failed to fetch commits: {}", e); commit_count.set(None); }
                 }
             }
@@ -330,8 +337,8 @@ fn ActivityTimeline(issues: Vec<Issue>, prs: Vec<PullRequest>) -> Element {
 
     rsx! {
         div { class: "border border-border rounded-lg divide-y divide-border",
-            for (idx, entry) in entries.iter().enumerate() {
-                TimelineRow { key: "{idx}_{entry.kind:?}_{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
+            for entry in entries.iter() {
+                TimelineRow { key: "{entry.kind:?}_{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
             }
         }
     }

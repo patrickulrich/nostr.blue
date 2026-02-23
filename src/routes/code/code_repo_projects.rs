@@ -91,8 +91,8 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
-        gen.set(gen() + 1);
-        let captured_gen = gen();
+        let captured_gen = gen.peek().wrapping_add(1);
+        gen.set(captured_gen);
         repo.set(None);
         items.set(Vec::new());
         fetch_error.set(None);
@@ -100,30 +100,28 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
         spawn(async move {
             let mut errors = Vec::new();
 
-            // Fetch repo metadata
-            match fetch_repository(&n).await {
-                Ok(r) => {
-                    if *gen.peek() != captured_gen { return; }
-                    repo.set(Some(r));
-                }
-                Err(e) => {
-                    if *gen.peek() != captured_gen { return; }
-                    errors.push(format!("Repository: {}", e));
-                }
+            // Fetch repo, issues, and PRs concurrently
+            let (repo_result, issues_result, prs_result) = futures::join!(
+                fetch_repository(&n),
+                fetch_repo_issues(&n),
+                fetch_repo_prs(&n)
+            );
+            if *gen.peek() != captured_gen { return; }
+
+            match repo_result {
+                Ok(r) => repo.set(Some(r)),
+                Err(e) => errors.push(format!("Repository: {}", e)),
             }
 
-            // Fetch issues and PRs
             let mut all_items = Vec::new();
-            match fetch_repo_issues(&n).await {
+            match issues_result {
                 Ok(issues) => all_items.extend(issues.into_iter().map(BoardItem::Issue)),
                 Err(e) => errors.push(format!("Issues: {}", e)),
             }
-            if *gen.peek() != captured_gen { return; }
-            match fetch_repo_prs(&n).await {
+            match prs_result {
                 Ok(prs) => all_items.extend(prs.into_iter().map(BoardItem::PullRequest)),
                 Err(e) => errors.push(format!("PRs: {}", e)),
             }
-            if *gen.peek() != captured_gen { return; }
             if !errors.is_empty() {
                 fetch_error.set(Some(errors.join("; ")));
             }

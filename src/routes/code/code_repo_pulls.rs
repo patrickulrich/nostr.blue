@@ -70,7 +70,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         let mut labels: Vec<String> = all_prs
             .read()
             .iter()
-            .flat_map(|p| p.labels.clone())
+            .flat_map(|p| p.labels.iter().cloned())
             .collect();
         labels.sort();
         labels.dedup();
@@ -222,7 +222,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                         },
                     }
                     if filtered.read().is_empty() {
-                        EmptyPRs { has_filters: !all_prs.read().is_empty() }
+                        EmptyPRs { has_filters: !search_query.read().is_empty() || !selected_labels.read().is_empty() || *status_filter.read() != StatusFilter::Open }
                     } else {
                         div { class: "border border-border rounded-lg divide-y divide-border",
                             for pr in filtered.read().iter() {

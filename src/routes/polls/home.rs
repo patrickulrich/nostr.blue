@@ -242,7 +242,7 @@ pub fn Polls() -> Element {
                             new_event_ids.clone(),
                             Duration::from_secs(5),
                         ).await {
-                            if *request_id.peek() != rid { return; }
+                            if *request_id.peek() != rid { loading.set(false); return; }
                             interaction_counts.with_mut(|existing| {
                                 existing.extend(counts);
                             });
@@ -253,7 +253,7 @@ pub fn Polls() -> Element {
                                 new_event_ids.len()
                             );
                         }
-                        if *request_id.peek() != rid { return; }
+                        if *request_id.peek() != rid { loading.set(false); return; }
                         // Only stream interactions for newly added poll IDs (keep existing streams running)
                         let truly_new_ids: Vec<EventId> = new_event_ids
                             .into_iter()

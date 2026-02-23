@@ -15,6 +15,7 @@ use dioxus::prelude::*;
 pub fn CodeRepo(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
+    let mut request_gen = use_signal(|| 0u64);
     let naddr_for_render = naddr.clone();
     use_effect(use_reactive(&naddr, move |naddr_val| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -22,9 +23,13 @@ pub fn CodeRepo(naddr: String) -> Element {
             log::info!("CodeRepo: Waiting for client initialization...");
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&naddr_val).await;
+            if *request_gen.peek() != gen { return; }
             repo_result.set(Some(result));
             loading.set(false);
         });

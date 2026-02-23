@@ -194,12 +194,15 @@ fn RepositoriesTab() -> Element {
     let mut pagination_loading = use_signal(|| false);
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
+    let mut seen_ids = use_signal(HashSet::<String>::new);
+    let mut fetch_error = use_signal(|| None::<String>);
     // Initial fetch
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        fetch_error.set(None);
         spawn(async move {
             match fetch_recent_repositories(PAGE_SIZE, None).await {
                 Ok(fetched) => {
@@ -208,9 +211,13 @@ fn RepositoriesTab() -> Element {
                         oldest_timestamp.set(Some(oldest.created_at));
                     }
                     has_more.set(raw_count >= PAGE_SIZE);
+                    seen_ids.set(fetched.iter().map(|r| r.event_id.clone()).collect());
                     repos.set(fetched);
                 }
-                Err(e) => log::error!("Failed to fetch repos: {}", e),
+                Err(e) => {
+                    log::error!("Failed to fetch repos: {}", e);
+                    fetch_error.set(Some(format!("Failed to fetch repositories: {}", e)));
+                }
             }
             loading.set(false);
         });
@@ -233,16 +240,16 @@ fn RepositoriesTab() -> Element {
                         if let Some(oldest) = fetched.iter().min_by_key(|r| r.created_at) {
                             oldest_timestamp.set(Some(oldest.created_at));
                         }
-                        let mut current = repos.peek().clone();
-                        let mut existing: HashSet<_> =
-                            current.iter().map(|r| r.event_id.clone()).collect();
-                        for repo in fetched {
-                            if existing.insert(repo.event_id.clone()) {
-                                current.push(repo);
-                            }
-                        }
+                        repos.with_mut(|current| {
+                            seen_ids.with_mut(|existing| {
+                                for repo in fetched {
+                                    if existing.insert(repo.event_id.clone()) {
+                                        current.push(repo);
+                                    }
+                                }
+                            });
+                        });
                         has_more.set(raw_count >= PAGE_SIZE);
-                        repos.set(current);
                     }
                 }
                 Err(e) => log::error!("Failed to load more repos: {}", e),
@@ -349,8 +356,8 @@ fn RepositoriesTab() -> Element {
                         circle { cx: "12", cy: "12", r: "1" }
                     }
                     div {
-                        div { class: "font-medium", "Issues" }
-                        div { class: "text-xs text-muted-foreground", "Your issues" }
+                        div { class: "font-medium", "All Issues" }
+                        div { class: "text-xs text-muted-foreground", "Browse issues" }
                     }
                 }
                 Link {
@@ -373,8 +380,8 @@ fn RepositoriesTab() -> Element {
                         line { x1: "6", y1: "9", x2: "6", y2: "21" }
                     }
                     div {
-                        div { class: "font-medium", "Pull Requests" }
-                        div { class: "text-xs text-muted-foreground", "Your PRs" }
+                        div { class: "font-medium", "All Pull Requests" }
+                        div { class: "text-xs text-muted-foreground", "Browse PRs" }
                     }
                 }
                 Link {
@@ -418,6 +425,37 @@ fn RepositoriesTab() -> Element {
                     div {
                         div { class: "font-medium", "New Snippet" }
                         div { class: "text-xs text-muted-foreground", "Share code" }
+                    }
+                }
+            }
+            if let Some(ref err) = *fetch_error.read() {
+                div { class: "p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center justify-between",
+                    p { class: "text-sm text-destructive", "{err}" }
+                    button {
+                        class: "px-3 py-1 text-sm rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 transition",
+                        onclick: move |_| {
+                            fetch_error.set(None);
+                            loading.set(true);
+                            spawn(async move {
+                                match fetch_recent_repositories(PAGE_SIZE, None).await {
+                                    Ok(fetched) => {
+                                        let raw_count = fetched.len();
+                                        if let Some(oldest) = fetched.iter().min_by_key(|r| r.created_at) {
+                                            oldest_timestamp.set(Some(oldest.created_at));
+                                        }
+                                        has_more.set(raw_count >= PAGE_SIZE);
+                                        seen_ids.set(fetched.iter().map(|r| r.event_id.clone()).collect());
+                                        repos.set(fetched);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to fetch repos: {}", e);
+                                        fetch_error.set(Some(format!("Failed to fetch repositories: {}", e)));
+                                    }
+                                }
+                                loading.set(false);
+                            });
+                        },
+                        "Retry"
                     }
                 }
             }
