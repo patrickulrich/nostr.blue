@@ -164,7 +164,7 @@ function computeEdits(oldLines, newLines) {
   const trace = [];
 
   // OOM guard: track cumulative memory from trace snapshots
-  const SAFE_TRACE_BYTES = 256 * 1024 * 1024;
+  const SAFE_TRACE_BYTES = 64 * 1024 * 1024;
   let cumulativeBytes = 0;
 
   outer:
@@ -206,7 +206,7 @@ function computeEdits(oldLines, newLines) {
   let y = M;
 
   for (let d = trace.length - 1; d > 0; d--) {
-    const prev = trace[d - 1];
+    const prev = trace[d];
     const k = x - y;
 
     let prevK;

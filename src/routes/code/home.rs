@@ -842,7 +842,7 @@ fn DiscoverTab() -> Element {
                     None => rsx! {
                         div { class: "space-y-2",
                             for _ in 0..3 {
-                                div { class: "bg-card p-3 border border-border rounded-lg animate-pulse flex items-center gap-3",
+                                div { class: "bg-card p-4 border border-border rounded-lg animate-pulse flex items-center gap-3",
                                     div { class: "w-10 h-10 rounded-full bg-muted" }
                                     div { class: "flex-1",
                                         div { class: "h-4 bg-muted rounded w-1/3 mb-1" }

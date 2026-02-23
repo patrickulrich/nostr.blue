@@ -88,15 +88,19 @@ pub fn CodeGlobalIssues() -> Element {
             FilterTab::Mentioned => mentioned_issues.read().clone(),
         }
     });
-    let all_issues_for_tab = all_issues_for_tab.read();
-    let mut all_labels: Vec<String> = all_issues_for_tab
-        .iter()
-        .flat_map(|i| i.labels.iter().cloned())
-        .collect();
-    all_labels.sort();
-    all_labels.dedup();
+    let all_labels = use_memo(move || {
+        let issues = all_issues_for_tab.read();
+        let mut labels: Vec<String> = issues
+            .iter()
+            .flat_map(|i| i.labels.iter().cloned())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    });
     let query = search_query.read().to_lowercase();
-    let filtered: Vec<_> = all_issues_for_tab
+    let all_issues_read = all_issues_for_tab.read();
+    let filtered: Vec<_> = all_issues_read
         .iter()
         .filter(|i| {
             // Status filter
@@ -126,11 +130,11 @@ pub fn CodeGlobalIssues() -> Element {
         .cloned()
         .collect();
 
-    let open_count = all_issues_for_tab
+    let open_count = all_issues_read
         .iter()
         .filter(|i| matches!(i.status, IssueStatus::Open | IssueStatus::Draft))
         .count();
-    let closed_count = all_issues_for_tab
+    let closed_count = all_issues_read
         .iter()
         .filter(|i| matches!(i.status, IssueStatus::Closed | IssueStatus::Applied))
         .count();
@@ -251,14 +255,14 @@ pub fn CodeGlobalIssues() -> Element {
                     }
                 }
             }
-            if !all_labels.is_empty() {
+            if !all_labels.read().is_empty() {
                 div { class: "px-4 pb-3 flex flex-wrap gap-2",
                     button {
                         class: if label_filter.read().is_none() { "px-2 py-1 text-xs rounded-full bg-primary text-primary-foreground" } else { "px-2 py-1 text-xs rounded-full bg-accent text-accent-foreground hover:bg-accent/80" },
                         onclick: move |_| label_filter.set(None),
                         "All"
                     }
-                    for label in all_labels.iter() {
+                    for label in all_labels.read().iter() {
                         {
                             let l = label.clone();
                             rsx! {

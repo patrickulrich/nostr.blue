@@ -83,6 +83,10 @@ pub fn SshKeyManager() -> Element {
         }
         // Basic SSH key format validation
         let trimmed = key.trim().to_string();
+        if trimmed.contains('\n') || trimmed.contains('\r') {
+            error.set(Some("Only a single SSH key is allowed".to_string()));
+            return;
+        }
         if !trimmed.starts_with("ssh-rsa")
             && !trimmed.starts_with("ssh-ed25519")
             && !trimmed.starts_with("ecdsa-sha2")
@@ -96,14 +100,19 @@ pub fn SshKeyManager() -> Element {
         }
         adding.set(true);
         error.set(None);
+        let captured_pubkey = auth_store::get_pubkey();
         spawn(async move {
             match ssh_keys::publish_ssh_key(title.trim(), &trimmed).await {
                 Ok(_) => {
+                    if auth_store::get_pubkey() != captured_pubkey { adding.set(false); return; }
                     // Refresh the key list
                     if let Some(pubkey_hex) = auth_store::get_pubkey() {
                         if let Ok(pk) = PublicKey::from_hex(&pubkey_hex) {
                             match ssh_keys::fetch_ssh_keys(&pk).await {
-                                Ok(k) => keys.set(k),
+                                Ok(k) => {
+                                    if auth_store::get_pubkey() != captured_pubkey { adding.set(false); return; }
+                                    keys.set(k);
+                                }
                                 Err(e) => log::warn!("SSH key added but list refresh failed: {e}"),
                             }
                         }
@@ -113,6 +122,7 @@ pub fn SshKeyManager() -> Element {
                     show_add_form.set(false);
                 }
                 Err(e) => {
+                    if auth_store::get_pubkey() != captured_pubkey { adding.set(false); return; }
                     error.set(Some(e));
                 }
             }
@@ -124,14 +134,23 @@ pub fn SshKeyManager() -> Element {
         if deleting_id.peek().as_ref() == Some(&eid_hex) { return; }
         deleting_id.set(Some(eid_hex.clone()));
         error.set(None);
+        let captured_pubkey = auth_store::get_pubkey();
         spawn(async move {
             match EventId::from_hex(&eid_hex) {
                 Ok(eid) => match ssh_keys::delete_ssh_key(eid).await {
                     Ok(()) => {
+                        if auth_store::get_pubkey() != captured_pubkey {
+                            deleting_id.set(None);
+                            return;
+                        }
                         keys.write().retain(|k| k.event_id != eid_hex);
                         confirm_delete.set(None);
                     }
                     Err(e) => {
+                        if auth_store::get_pubkey() != captured_pubkey {
+                            deleting_id.set(None);
+                            return;
+                        }
                         error.set(Some(e));
                     }
                 },
@@ -360,7 +379,6 @@ pub fn SshKeyManager() -> Element {
 }
 
 /// Truncate an SSH public key for display, showing type + first/last few chars
-#[allow(dead_code)]
 fn truncate_key(key: &str) -> String {
     let parts: Vec<&str> = key.split_whitespace().collect();
     if parts.len() >= 2 {

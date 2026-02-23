@@ -464,7 +464,7 @@ async fn submit_new_file(
         .tag(Tag::coordinate(coordinate.clone(), relay_url))
         .tag(Tag::public_key(coordinate.public_key))
         .tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("subject")),
+            TagKind::Subject,
             [commit_message],
         ))
         .tag(Tag::hashtag("new-file"));

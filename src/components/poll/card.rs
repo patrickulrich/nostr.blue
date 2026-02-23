@@ -130,7 +130,7 @@ pub fn PollCard(
         }
     });
     // Cancellation flag for the notification loop; set synchronously in use_drop
-    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled = use_hook(|| Arc::new(AtomicBool::new(false)));
     let cancelled_for_loop = cancelled.clone();
 
     use_effect(use_reactive(&poll_data, move |pd| {
@@ -826,15 +826,16 @@ fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<
     }
     let is_single_choice = matches!(poll.r#type, PollType::SingleChoice);
     for vote_event in vote_events {
-        let mut counted_in_event = false;
+        let mut seen_in_event: HashSet<&str> = HashSet::new();
         for tag in vote_event.tags.iter() {
             if let Some(TagStandard::PollResponse(option_id)) = tag.as_standardized() {
-                if valid_ids.contains(option_id.as_str()) {
-                    if is_single_choice && counted_in_event {
+                if valid_ids.contains(option_id.as_str())
+                    && seen_in_event.insert(option_id.as_str())
+                {
+                    if is_single_choice && seen_in_event.len() > 1 {
                         break;
                     }
                     *counts.get_mut(option_id.as_str()).unwrap() += 1;
-                    counted_in_event = true;
                 }
             }
         }

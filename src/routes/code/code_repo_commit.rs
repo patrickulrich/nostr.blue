@@ -9,7 +9,6 @@ use crate::services::git_hosting::{
     github_import::{parse_github_url, GitHubCommitAuthor, GitHubOwner},
 };
 use crate::stores::nostr_client;
-use crate::utils::nips::nip34::Repository;
 use dioxus::prelude::*;
 use gloo_net::http::Request;
 use serde::Deserialize;
@@ -25,7 +24,6 @@ struct CommitDetail {
     additions: u32,
     deletions: u32,
     files_changed: u32,
-    parents: Vec<String>,
 }
 
 /// GitHub single-commit API response
@@ -66,7 +64,6 @@ struct GitHubCommitFile {
 /// Commit detail page component
 #[component]
 pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
-    let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut commit_result = use_signal(|| None::<Result<CommitDetail, String>>);
 
     let mut request_id = use_signal(|| 0u32);
@@ -82,7 +79,6 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                 let current_id = request_id.peek().wrapping_add(1);
                 request_id.set(current_id);
                 commit_result.set(None);
-                repo_result.set(None);
                 spawn(async move {
                     let result = fetch_repository(&n).await;
                     if *request_id.peek() != current_id {
@@ -114,10 +110,6 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                                 .set(Some(Err(format!("Repository not found: {}", e))));
                         }
                     }
-                    if *request_id.peek() != current_id {
-                        return;
-                    }
-                    repo_result.set(Some(result));
                 });
             },
         ),
@@ -359,6 +351,5 @@ async fn fetch_commit_detail(
         additions: stats.map(|s| s.additions).unwrap_or(0),
         deletions: stats.map(|s| s.deletions).unwrap_or(0),
         files_changed,
-        parents: Vec::new(),
     })
 }

@@ -613,10 +613,11 @@ pub fn CalendarEventNew() -> Element {
                                             show_location_dropdown.set(true);
                                             let current_id = *location_debounce.peek() + 1;
                                             location_debounce.set(current_id);
+                                            let query = val.trim().to_string();
                                             spawn(async move {
                                                 gloo_timers::future::TimeoutFuture::new(300).await;
                                                 if *location_debounce.peek() != current_id { return; }
-                                                if let Ok(results) = geocoding::geocode_suggestions(&val, 10).await {
+                                                if let Ok(results) = geocoding::geocode_suggestions(&query, 10).await {
                                                     if *location_debounce.peek() != current_id { return; }
                                                     location_suggestions.set(results);
                                                 } else {

@@ -21,6 +21,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
     let mut request_gen = use_signal(|| 0u64);
 
     use_effect(use_reactive(&naddr, move |naddr| {
+        error.set(None);
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -28,7 +29,6 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
         loading.set(true);
-        error.set(None);
         spawn(async move {
             let result = fetch_repo_prs(&naddr).await;
             if *request_gen.peek() != gen { return; }
@@ -262,7 +262,13 @@ fn EmptyPRs(has_filters: bool) -> Element {
                     }
                 }
             }
-            h3 { class: "font-semibold text-lg mb-2", "No Pull Requests" }
+            h3 { class: "font-semibold text-lg mb-2",
+                if has_filters {
+                    "No Matching Pull Requests"
+                } else {
+                    "No Pull Requests"
+                }
+            }
             p { class: "text-muted-foreground text-sm",
                 if has_filters {
                     "No pull requests match the current filters."

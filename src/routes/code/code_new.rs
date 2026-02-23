@@ -155,6 +155,7 @@ pub fn CodeNew() -> Element {
             .await
             {
                 Ok(_event_id) => {
+                    is_publishing.set(false);
                     toast.success(
                         "Repository created successfully".to_string(),
                         ToastOptions::new().duration(Duration::from_secs(3)),
@@ -431,8 +432,9 @@ fn DynamicListField(props: DynamicListFieldProps) -> Element {
                             },
                         }
                         button {
-                            class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-destructive",
+                            class: if values.read().len() <= 1 { "p-1 rounded transition text-muted-foreground opacity-30 cursor-not-allowed" } else { "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-destructive" },
                             r#type: "button",
+                            disabled: values.read().len() <= 1,
                             onclick: {
                                 let id = *id;
                                 move |_| remove_item(id)
