@@ -4,13 +4,13 @@
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, publish_repository_with_extras};
-use crate::services::git_hosting::milestones::milestones_to_tags;
+use crate::services::git_hosting::milestones::{milestones_to_tags, Milestone, generate_milestone_id};
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
-use nostr_sdk::PublicKey;
+use nostr_sdk::{PublicKey, RelayUrl};
 use nostr_sdk::prelude::{Tag, TagKind};
 use std::borrow::Cow;
 /// Repository settings page component
@@ -422,7 +422,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                     onkeypress: move |e: KeyboardEvent| {
                                         if e.key() == Key::Enter {
                                             let url = new_relay_url.read().trim().to_string();
-                                            if !url.is_empty() && url.starts_with("wss://") && !relay_list.read().contains(&url) {
+                                            if !url.is_empty() && RelayUrl::parse(&url).is_ok() && !relay_list.read().contains(&url) {
                                                 relay_list.write().push(url);
                                                 new_relay_url.set(String::new());
                                             }
@@ -431,10 +431,10 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                 }
                                 button {
                                     class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm hover:opacity-90 transition disabled:opacity-50",
-                                    disabled: new_relay_url.read().trim().is_empty() || !new_relay_url.read().starts_with("wss://"),
+                                    disabled: new_relay_url.read().trim().is_empty() || RelayUrl::parse(new_relay_url.read().trim()).is_err(),
                                     onclick: move |_| {
                                         let url = new_relay_url.read().trim().to_string();
-                                        if !url.is_empty() && url.starts_with("wss://") && !relay_list.read().contains(&url) {
+                                        if !url.is_empty() && RelayUrl::parse(&url).is_ok() && !relay_list.read().contains(&url) {
                                             relay_list.write().push(url);
                                             new_relay_url.set(String::new());
                                         }
@@ -682,7 +682,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         let can_remove = zap_splits.read().len() > 1;
                                         rsx! {
                                             div {
-                                                key: "{pubkey}_{idx}",
+                                                key: "{pubkey}",
                                                 class: "flex items-center gap-3 p-3 bg-muted/50 rounded-lg group",
                                                 svg {
                                                     class: "w-4 h-4 text-muted-foreground shrink-0",
@@ -908,7 +908,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 if milestones.read().iter().any(|m| m.name == name) {
                                                     return;
                                                 }
-                                                use crate::services::git_hosting::milestones::{Milestone, generate_milestone_id};
+
                                                 let id = generate_milestone_id(&name);
                                                 let ms = Milestone {
                                                     id,
@@ -931,7 +931,6 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             if milestones.read().iter().any(|m| m.name == name) {
                                                 return;
                                             }
-                                            use crate::services::git_hosting::milestones::{Milestone, generate_milestone_id};
                                             let id = generate_milestone_id(&name);
                                             let ms = Milestone {
                                                 id,
@@ -1018,7 +1017,7 @@ fn DeleteConfirmModal(
 ) -> Element {
     rsx! {
         div {
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
+            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm flex items-center justify-center",
             onclick: move |e| on_cancel.call(e),
             div {
                 class: "bg-background border border-border rounded-lg p-6 max-w-md w-full mx-4 shadow-xl",

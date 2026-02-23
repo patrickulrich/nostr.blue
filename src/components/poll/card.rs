@@ -19,6 +19,8 @@ use nostr_sdk::{
     TagStandard, Timestamp, ToBech32,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 #[component]
 pub fn PollCard(
@@ -121,15 +123,23 @@ pub fn PollCard(
             }
         }
     });
+    // Cancellation flag for the notification loop; set synchronously in use_drop
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_for_loop = cancelled.clone();
+
     let _votes_task = use_future(move || {
         let poll_id = event_id;
         let poll = poll_data.read().clone();
+        let cancelled_for_loop = cancelled_for_loop.clone();
         async move {
             loading_votes.set(true);
             let (ends_at, poll_relays) = poll
                 .map(|p| (p.ends_at, p.relays))
                 .unwrap_or((None, Vec::new()));
             let poll_relays_for_sub = poll_relays.clone();
+            // Capture timestamp before fetch so votes created during
+            // the fetch window are not missed on the next poll.
+            let pre_fetch = Timestamp::now();
             match fetch_poll_votes(poll_id, ends_at, poll_relays).await {
                 Ok(vote_events) => {
                     votes.set(vote_events.clone());
@@ -164,7 +174,7 @@ pub fn PollCard(
                             .map(|v| v.created_at)
                             .max()
                             .map(|t| Timestamp::from_secs(t.as_secs().saturating_sub(1)))
-                            .unwrap_or(Timestamp::now());
+                            .unwrap_or(Timestamp::from_secs(pre_fetch.as_secs().saturating_sub(1)));
                         let mut vote_filter = Filter::new()
                             .kind(Kind::PollResponse)
                             .event(poll_id)
@@ -176,9 +186,17 @@ pub fn PollCard(
                             Ok(output) => {
                                 let subscription_id = output.val;
                                 vote_sub_id.set(Some(subscription_id.clone()));
+                                let cancelled_flag = cancelled_for_loop.clone();
                                 spawn(async move {
                                     let mut notifications = client.notifications();
                                     while let Ok(notification) = notifications.recv().await {
+                                        if cancelled_flag.load(Ordering::SeqCst) {
+                                            // Component is being dropped; clean up and exit
+                                            client.unsubscribe(&subscription_id).await;
+                                            let relays = poll_relay_urls.peek().clone();
+                                            relay::remove_relays(&client, &relays).await;
+                                            break;
+                                        }
                                         if *vote_gen.peek() != current_vote_gen { break; }
                                         if let RelayPoolNotification::Event {
                                             subscription_id: sub_id,
@@ -216,8 +234,12 @@ pub fn PollCard(
             loading_votes.set(false);
         }
     });
-    // Cleanup vote subscription and poll relays on unmount
+    // Cleanup vote subscription and poll relays on unmount.
+    // Set cancellation flag synchronously so the notification loop
+    // can perform async cleanup reliably, rather than relying on
+    // spawned tasks from a synchronous Drop context.
     use_drop(move || {
+        cancelled.store(true, Ordering::SeqCst);
         let relays = poll_relay_urls.peek().clone();
         if let Some(sub_id) = vote_sub_id.peek().clone() {
             spawn(async move {

@@ -223,6 +223,12 @@ pub fn DiffViewer(
     // Text content of the inline comment form
     let mut comment_text = use_signal(String::new);
 
+    // Reset comment state when content prop changes
+    use_effect(use_reactive(&content, move |_| {
+        active_comment_line.set(None);
+        comment_text.set(String::new());
+    }));
+
     let has_commenting = pr_event_id.is_some() && on_line_comment.is_some();
 
     if is_cover_letter || !is_diff_content(&content) {

@@ -57,6 +57,7 @@ pub fn CodeGlobalPulls() -> Element {
                         // Check if pubkey changed while we were fetching
                         let current_pk = auth_store::AUTH_STATE.read().pubkey.clone().unwrap_or_default();
                         if current_pk != captured_pk {
+                            loading.set(false);
                             return;
                         }
                         if let Ok(fetched) = created_res {
@@ -174,7 +175,10 @@ pub fn CodeGlobalPulls() -> Element {
                         } else {
                             "text-sm text-muted-foreground hover:text-foreground pb-1"
                         },
-                        onclick: move |_| active_tab.set(FilterTab::Created),
+                        onclick: move |_| {
+                            active_tab.set(FilterTab::Created);
+                            label_filter.set(None);
+                        },
                         "Created"
                     }
                     button {
@@ -183,7 +187,10 @@ pub fn CodeGlobalPulls() -> Element {
                         } else {
                             "text-sm text-muted-foreground hover:text-foreground pb-1"
                         },
-                        onclick: move |_| active_tab.set(FilterTab::Assigned),
+                        onclick: move |_| {
+                            active_tab.set(FilterTab::Assigned);
+                            label_filter.set(None);
+                        },
                         "Assigned"
                     }
                     button {
@@ -192,7 +199,10 @@ pub fn CodeGlobalPulls() -> Element {
                         } else {
                             "text-sm text-muted-foreground hover:text-foreground pb-1"
                         },
-                        onclick: move |_| active_tab.set(FilterTab::Mentioned),
+                        onclick: move |_| {
+                            active_tab.set(FilterTab::Mentioned);
+                            label_filter.set(None);
+                        },
                         "Mentioned"
                     }
                 }

@@ -80,13 +80,11 @@ pub fn ReadmeViewer(
     #[props(default = "README.md".to_string())]
     filename: String,
 ) -> Element {
-    // Initialize mermaid.js after the README HTML is rendered into the DOM
+    // Initialize mermaid.js after the README HTML is rendered into the DOM.
+    // Call initMermaidDiagrams whenever content is present; the JS function
+    // already no-ops if there are no .mermaid nodes in the DOM.
     use_effect(use_reactive(&content, move |content| {
-        let has_mermaid = content
-            .as_ref()
-            .map(|c| c.contains("```mermaid"))
-            .unwrap_or(false);
-        if has_mermaid {
+        if content.is_some() {
             // Small delay to ensure dangerous_inner_html has been applied to the DOM
             spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(100).await;

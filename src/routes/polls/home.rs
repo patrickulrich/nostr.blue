@@ -10,6 +10,9 @@ use dioxus::prelude::*;
 use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+
+const PAGE_SIZE: usize = 50;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
     Following,
@@ -35,7 +38,7 @@ pub fn Polls() -> Element {
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut last_event_id = use_signal(|| None::<nostr_sdk::EventId>);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
-    let mut interaction_stream_handle: Signal<Option<InteractionStreamHandle>> = use_signal(|| None);
+    let mut interaction_stream_handles: Signal<Vec<InteractionStreamHandle>> = use_signal(Vec::new);
     let mut all_streamed_ids = use_signal(Vec::<EventId>::new);
     let mut request_id = use_signal(|| 0u64);
     use_effect(move || {
@@ -51,17 +54,17 @@ pub fn Polls() -> Element {
         oldest_timestamp.set(None);
         last_event_id.set(None);
         has_more.set(true);
-        // Clean up previous interaction stream explicitly before assigning new one
-        let old_handle = interaction_stream_handle.peek().clone();
-        interaction_stream_handle.set(None);
+        // Clean up previous interaction streams explicitly before assigning new ones
+        let old_handles = interaction_stream_handles.peek().clone();
+        interaction_stream_handles.set(Vec::new());
         interaction_counts.set(HashMap::new());
         all_streamed_ids.set(Vec::new());
         // Increment request_id for stale detection
         request_id.with_mut(|v| *v = v.wrapping_add(1));
         let current_id = *request_id.peek();
         spawn(async move {
-            // Unsubscribe old handle at the start of the async context
-            if let Some(handle) = old_handle {
+            // Unsubscribe old handles at the start of the async context
+            for handle in old_handles {
                 handle.unsubscribe().await;
             }
             // Build the filter based on feed type
@@ -91,10 +94,10 @@ pub fn Polls() -> Element {
                         loading.set(false);
                         return;
                     }
-                    Filter::new().kind(Kind::Poll).authors(authors).limit(50)
+                    Filter::new().kind(Kind::Poll).authors(authors).limit(PAGE_SIZE)
                 }
                 FeedType::Global => {
-                    Filter::new().kind(Kind::Poll).limit(50)
+                    Filter::new().kind(Kind::Poll).limit(PAGE_SIZE)
                 }
             };
             // Stream events for fast time-to-first-post
@@ -135,7 +138,8 @@ pub fn Polls() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         last_event_id.set(Some(last_event.id));
                     }
-                    has_more.set(count >= 50);
+                    // May show "load more" even when exhausted due to timeout, but better than hiding available content
+                    has_more.set(count >= PAGE_SIZE);
                     // Fetch interaction counts
                     let event_ids: Vec<EventId> = current_events.iter().map(|e| e.id).collect();
                     drop(current_events);
@@ -161,7 +165,7 @@ pub fn Polls() -> Element {
                         ).await {
                             Ok(handle) => {
                                 if *request_id.peek() == current_id && *feed_type.read() == current_feed_type {
-                                    interaction_stream_handle.set(Some(handle));
+                                    interaction_stream_handles.with_mut(|handles| handles.push(handle));
                                 } else {
                                     handle.unsubscribe().await;
                                 }
@@ -226,7 +230,7 @@ pub fn Polls() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         last_event_id.set(Some(last_event.id));
                     }
-                    has_more.set(raw_count >= 50);
+                    has_more.set(raw_count >= PAGE_SIZE);
                     let new_event_ids: Vec<EventId> = unique_new.iter().map(|e| e.id).collect();
                     events
                         .with_mut(|current| {
@@ -250,31 +254,31 @@ pub fn Polls() -> Element {
                             );
                         }
                         if *request_id.peek() != rid { return; }
-                        // Extend streaming subscription to cover new poll IDs
+                        // Only stream interactions for newly added poll IDs (keep existing streams running)
+                        let already_streaming: HashSet<EventId> = all_streamed_ids.read().iter().copied().collect();
+                        let truly_new_ids: Vec<EventId> = new_event_ids
+                            .into_iter()
+                            .filter(|id| !already_streaming.contains(id))
+                            .collect();
                         all_streamed_ids.with_mut(|ids| {
-                            ids.extend(new_event_ids);
+                            ids.extend(truly_new_ids.iter().copied());
                         });
-                        // Restart interaction stream with all IDs
-                        let old_handle = interaction_stream_handle.peek().clone();
-                        if let Some(handle) = old_handle {
-                            interaction_stream_handle.set(None);
-                            handle.unsubscribe().await;
-                        }
-                        let full_ids = all_streamed_ids.read().clone();
-                        match stream_interaction_counts(
-                            full_ids,
-                            interaction_counts,
-                            Some(600),
-                        ).await {
-                            Ok(handle) => {
-                                if *request_id.peek() == rid && *feed_type.read() == current_feed_type {
-                                    interaction_stream_handle.set(Some(handle));
-                                } else {
-                                    handle.unsubscribe().await;
+                        if !truly_new_ids.is_empty() {
+                            match stream_interaction_counts(
+                                truly_new_ids,
+                                interaction_counts,
+                                Some(600),
+                            ).await {
+                                Ok(handle) => {
+                                    if *request_id.peek() == rid && *feed_type.read() == current_feed_type {
+                                        interaction_stream_handles.with_mut(|handles| handles.push(handle));
+                                    } else {
+                                        handle.unsubscribe().await;
+                                    }
                                 }
-                            }
-                            Err(e) => {
-                                log::error!("Failed to restart interaction stream for polls: {}", e);
+                                Err(e) => {
+                                    log::error!("Failed to start interaction stream for new polls: {}", e);
+                                }
                             }
                         }
                     }
@@ -425,7 +429,7 @@ async fn load_following_polls(
     if authors.is_empty() {
         return Ok(Vec::new());
     }
-    let mut filter = Filter::new().kind(Kind::Poll).authors(authors).limit(50);
+    let mut filter = Filter::new().kind(Kind::Poll).authors(authors).limit(PAGE_SIZE);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -441,7 +445,7 @@ async fn load_global_polls(
     until: Option<u64>,
     _last_event_id: Option<nostr_sdk::EventId>,
 ) -> Result<Vec<Event>, String> {
-    let mut filter = Filter::new().kind(Kind::Poll).limit(50);
+    let mut filter = Filter::new().kind(Kind::Poll).limit(PAGE_SIZE);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }

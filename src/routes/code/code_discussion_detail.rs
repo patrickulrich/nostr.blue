@@ -22,20 +22,18 @@ pub fn CodeDiscussionDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut discussion_result = use_signal(|| None::<Result<Discussion, String>>);
     let mut loading = use_signal(|| true);
-    let note_id_for_effect = note_id.clone();
-    use_effect(move || {
-        let id = note_id_for_effect.clone();
+    use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
         spawn(async move {
             loading.set(true);
-            let result = fetch_discussion(&id).await;
+            let result = fetch_discussion(&note_id).await;
             discussion_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -103,9 +101,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
         .unwrap_or_else(|| discussion.pubkey_display());
     // Fetch repository for role badges
     let mut repo_data = use_signal(|| None::<Repository>);
-    let repo_naddr_for_effect = repo_naddr.clone();
-    use_effect(move || {
-        let naddr = repo_naddr_for_effect.clone();
+    use_effect(use_reactive(&repo_naddr, move |naddr| {
         if naddr.is_empty() {
             return;
         }
@@ -114,7 +110,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
                 repo_data.set(Some(repo));
             }
         });
-    });
+    }));
     let has_signer = *HAS_SIGNER.read();
     let reaction = use_reaction(discussion.event_id.clone(), discussion.pubkey.clone(), None);
     let mut new_comment = use_signal(String::new);
@@ -260,7 +256,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
                             if let Some(error) = comment_error.read().as_ref() {
                                 span { class: "text-xs text-destructive", "{error}" }
                             } else {
-                                span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                                span { class: "text-xs text-muted-foreground", "Text formatting is not supported" }
                             }
                             button {
                                 class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",

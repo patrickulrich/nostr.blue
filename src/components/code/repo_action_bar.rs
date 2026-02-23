@@ -323,7 +323,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let watch_text = if *is_watching.read() { "Unwatch" } else { "Watch" };
     rsx! {
         div { class: "flex items-center gap-2",
-            div { class: "hidden md:flex items-center gap-2",
+            div { class: "hidden lg:flex items-center gap-2",
                 ActionButton {
                     icon: icons::EYE,
                     label: "{watch_text}",
@@ -370,7 +370,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     onclick: handle_share.clone(),
                 }
             }
-            div { class: "md:hidden relative",
+            div { class: "lg:hidden relative",
                 button {
                     class: "flex items-center gap-2 px-3 py-1.5 text-sm border border-border rounded-lg bg-muted hover:bg-accent transition",
                     onclick: move |_| {

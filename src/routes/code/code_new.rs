@@ -3,7 +3,9 @@
 //! Create a new NIP-34 Git repository announcement (Kind 30617).
 use crate::components::icons;
 use crate::routes::Route;
+use crate::services::git_hosting::publish_repository;
 use crate::stores::auth_store;
+use crate::utils::nips::nip34::encode_repo_naddr;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::{Coordinate, Kind, PublicKey};
 
@@ -64,11 +66,20 @@ pub fn CodeNew() -> Element {
         let topics_val = topics_input.read().clone();
 
         spawn(async move {
-            use crate::services::git_hosting::publish_repository;
-            use crate::utils::nips::nip34::encode_repo_naddr;
-
             if id_val.trim().is_empty() {
                 error_message.set(Some("Repository ID is required".to_string()));
+                is_publishing.set(false);
+                return;
+            }
+
+            // Validate kebab-case format
+            let is_valid_kebab = !id_val.is_empty()
+                && !id_val.starts_with('-')
+                && !id_val.ends_with('-')
+                && !id_val.contains("--")
+                && id_val.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+            if !is_valid_kebab {
+                error_message.set(Some("Repository ID must be lowercase alphanumeric with hyphens (kebab-case)".to_string()));
                 is_publishing.set(false);
                 return;
             }

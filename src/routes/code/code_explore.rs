@@ -11,7 +11,6 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeExplore() -> Element {
     let mut filter = use_signal(|| ExploreFilter::All);
-    let mut sort_by = use_signal(|| SortBy::Recent);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -40,19 +39,6 @@ pub fn CodeExplore() -> Element {
                         onclick: move |_| filter.set(ExploreFilter::Snippets),
                     }
                 }
-                div { class: "px-4 pb-3 flex items-center gap-2 text-sm",
-                    span { class: "text-muted-foreground", "Sort by:" }
-                    SortButton {
-                        label: "Recent",
-                        active: *sort_by.read() == SortBy::Recent,
-                        onclick: move |_| sort_by.set(SortBy::Recent),
-                    }
-                    SortButton {
-                        label: "Stars",
-                        active: *sort_by.read() == SortBy::Stars,
-                        onclick: move |_| sort_by.set(SortBy::Stars),
-                    }
-                }
             }
             div { class: "p-4",
                 match *filter.read() {
@@ -76,11 +62,6 @@ enum ExploreFilter {
     Repositories,
     Snippets,
 }
-#[derive(Clone, Copy, PartialEq)]
-enum SortBy {
-    Recent,
-    Stars,
-}
 #[derive(Props, Clone, PartialEq)]
 struct FilterChipProps {
     label: &'static str,
@@ -93,23 +74,6 @@ fn FilterChip(props: FilterChipProps) -> Element {
         "px-3 py-1.5 text-sm rounded-full bg-primary text-primary-foreground"
     } else {
         "px-3 py-1.5 text-sm rounded-full bg-muted text-muted-foreground hover:bg-accent"
-    };
-    rsx! {
-        button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }
-    }
-}
-#[derive(Props, Clone, PartialEq)]
-struct SortButtonProps {
-    label: &'static str,
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-}
-#[component]
-fn SortButton(props: SortButtonProps) -> Element {
-    let class = if props.active {
-        "text-primary font-medium"
-    } else {
-        "text-muted-foreground hover:text-foreground cursor-pointer"
     };
     rsx! {
         button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }

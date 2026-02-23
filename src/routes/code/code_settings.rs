@@ -90,6 +90,14 @@ pub fn CodeSettings() -> Element {
     let mut save_success = use_signal(|| false);
     let mut save_error = use_signal(|| None::<String>);
 
+    // Reload settings when pubkey changes (e.g., switching accounts)
+    use_effect(move || {
+        let _pk = auth_store::AUTH_STATE.read().pubkey.clone();
+        save_success.set(false);
+        save_error.set(None);
+        settings.set(load_code_settings());
+    });
+
     let auth = auth_store::AUTH_STATE.read();
     if !auth.is_authenticated {
         return rsx! {

@@ -16,18 +16,19 @@ const DEFAULT_LABELS: &[&str] = &[
     "duplicate",
 ];
 
-/// Get a deterministic color class for a label based on its name
+/// Get a deterministic color class for a label based on its name.
+/// Uses the project's semantic theme tokens instead of hardcoded colors.
 fn label_color(label: &str) -> &'static str {
     let hash: u32 = label.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     match hash % 8 {
-        0 => "bg-blue-500/10 text-blue-500 border-blue-500/20",
-        1 => "bg-green-500/10 text-green-500 border-green-500/20",
-        2 => "bg-purple-500/10 text-purple-500 border-purple-500/20",
-        3 => "bg-orange-500/10 text-orange-500 border-orange-500/20",
-        4 => "bg-red-500/10 text-red-500 border-red-500/20",
-        5 => "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
-        6 => "bg-pink-500/10 text-pink-500 border-pink-500/20",
-        _ => "bg-teal-500/10 text-teal-500 border-teal-500/20",
+        0 => "bg-primary/10 text-primary border-primary/20",
+        1 => "bg-accent/10 text-accent-foreground border-accent/20",
+        2 => "bg-muted text-muted-foreground border-border",
+        3 => "bg-primary/10 text-primary border-primary/20",
+        4 => "bg-destructive/10 text-destructive border-destructive/20",
+        5 => "bg-accent/10 text-accent-foreground border-accent/20",
+        6 => "bg-muted text-foreground border-border",
+        _ => "bg-primary/10 text-primary border-primary/20",
     }
 }
 

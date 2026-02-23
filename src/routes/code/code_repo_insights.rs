@@ -280,7 +280,7 @@ fn StatCard(
     color: &'static str,
 ) -> Element {
     rsx! {
-        div { class: "bg-card border border-border rounded-lg p-4",
+        div { class: "bg-card border border-border rounded-lg p-3",
             div { class: "flex items-center gap-2 mb-2",
                 span {
                     class: "w-5 h-5 shrink-0 {color}",

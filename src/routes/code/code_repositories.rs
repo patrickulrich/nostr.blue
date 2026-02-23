@@ -29,6 +29,7 @@ pub fn CodeRepositories() -> Element {
                 let captured_gen = *request_gen.peek();
                 spawn(async move {
                     if pk.is_empty() {
+                        if *request_gen.peek() != captured_gen { return; }
                         repos_result.set(Some(Err("No public key".to_string())));
                         return;
                     }

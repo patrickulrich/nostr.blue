@@ -81,6 +81,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut repo = use_signal(|| None);
     let mut fetch_error = use_signal(|| None::<String>);
+    let mut gen = use_signal(|| 0u64);
 
     // Fetch repo + issues + PRs
     use_effect(use_reactive(&naddr, move |n| {
@@ -88,12 +89,15 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        gen.set(gen() + 1);
+        let captured_gen = gen();
         spawn(async move {
             fetch_error.set(None);
             loading.set(true);
 
             // Fetch repo metadata
             if let Ok(r) = fetch_repository(&n).await {
+                if *gen.peek() != captured_gen { return; }
                 repo.set(Some(r));
             }
 
@@ -104,10 +108,12 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                 Ok(issues) => all_items.extend(issues.into_iter().map(BoardItem::Issue)),
                 Err(e) => errors.push(format!("Issues: {}", e)),
             }
+            if *gen.peek() != captured_gen { return; }
             match fetch_repo_prs(&n).await {
                 Ok(prs) => all_items.extend(prs.into_iter().map(BoardItem::PullRequest)),
                 Err(e) => errors.push(format!("PRs: {}", e)),
             }
+            if *gen.peek() != captured_gen { return; }
             if !errors.is_empty() {
                 fetch_error.set(Some(errors.join("; ")));
             }

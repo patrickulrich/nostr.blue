@@ -66,6 +66,26 @@ impl Activity {
     pub fn from_event(event: &Event) -> Option<Self> {
         let kind = event.kind;
 
+        // Single scan for the repo "a" tag (Kind 30617) — used both for
+        // filtering Comment events and for building the repository_naddr.
+        let repo_naddr = event.tags.iter().find_map(|t| {
+            let v = t.as_slice();
+            if v.len() >= 2 && v[0] == "a" {
+                let parts: Vec<&str> = v[1].split(':').collect();
+                if parts.len() >= 3 && parts[0] == "30617" {
+                    if let Ok(pk) = PublicKey::from_hex(parts[1]) {
+                        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
+                            .identifier(parts[2]);
+                        return Nip19Coordinate::new(coordinate, vec![])
+                            .to_bech32()
+                            .ok()
+                            .filter(|s| !s.is_empty());
+                    }
+                }
+            }
+            None
+        });
+
         let (activity_type, title) = if kind == Kind::GitRepoAnnouncement {
             let name = event
                 .tags
@@ -112,13 +132,7 @@ impl Activity {
             (ActivityType::ReviewSubmitted, "Code review".to_string())
         } else if kind == Kind::Comment {
             // Only treat comments with an "a" tag referencing a repo (30617:) as code comments
-            let has_repo_tag = event.tags.iter().any(|t| {
-                let v = t.as_slice();
-                v.len() >= 2 && v[0] == "a" && v[1].starts_with("30617:")
-            });
-            if !has_repo_tag {
-                return None;
-            }
+            repo_naddr.as_ref()?;
             (ActivityType::CommentPosted, "Comment".to_string())
         } else if kind == Kind::GitStatusOpen
             || kind == Kind::GitStatusApplied
@@ -144,24 +158,6 @@ impl Activity {
             return None;
         };
 
-        let repo_naddr = event.tags.iter().find_map(|t| {
-            let v = t.as_slice();
-            if v.len() >= 2 && v[0] == "a" {
-                let parts: Vec<&str> = v[1].split(':').collect();
-                if parts.len() >= 3 && parts[0] == "30617" {
-                    if let Ok(pk) = PublicKey::from_hex(parts[1]) {
-                        let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
-                            .identifier(parts[2]);
-                        return Nip19Coordinate::new(coordinate, vec![])
-                            .to_bech32()
-                            .ok()
-                            .filter(|s| !s.is_empty());
-                    }
-                }
-            }
-            None
-        });
-
         Some(Self {
             activity_type,
             title,
@@ -178,6 +174,10 @@ pub async fn fetch_user_activity(
     pubkey: &PublicKey,
     limit: usize,
 ) -> Result<Vec<Activity>, String> {
+    // Overfetch from the relay because client-side filtering (e.g. Comment
+    // events without a repo tag) may discard some results.
+    let fetch_limit = (limit * 3).max(limit + 10);
+
     let filter = Filter::new()
         .kinds(vec![
             Kind::GitRepoAnnouncement,
@@ -192,7 +192,7 @@ pub async fn fetch_user_activity(
             Kind::CodeSnippet,
         ])
         .author(*pubkey)
-        .limit(limit);
+        .limit(fetch_limit);
 
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
@@ -308,10 +308,10 @@ pub struct PlatformStats {
     pub approximate: bool,
 }
 
-/// Fetch trending repositories (most starred in last 7 days)
+/// Fetch trending repositories (most recently announced in last 7 days)
 ///
 /// Fetches recent repository announcements from the last 7 days and
-/// sorts them by star_count descending to surface popular repos.
+/// sorts them by creation time descending to surface recently announced repos.
 pub async fn fetch_trending_repositories(limit: usize) -> Result<Vec<Repository>, String> {
     let now = Timestamp::now().as_secs();
     let seven_days_ago = now.saturating_sub(7 * 24 * 60 * 60);

@@ -31,23 +31,28 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        let captured_gen = refresh_counter();
         spawn(async move {
             loading.set(true);
             match fetch_repository(&n).await {
                 Ok(repo) => {
+                    if *refresh_counter.peek() != captured_gen { return; }
                     repo_data.set(Some(repo));
                     repo_error.set(None);
                 }
                 Err(e) => {
+                    if *refresh_counter.peek() != captured_gen { return; }
                     repo_error.set(Some(format!("Failed to load repository: {}", e)));
                 }
             }
             match fetch_repo_releases(&n).await {
                 Ok(fetched) => {
+                    if *refresh_counter.peek() != captured_gen { return; }
                     releases.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
+                    if *refresh_counter.peek() != captured_gen { return; }
                     error.set(Some(e));
                 }
             }

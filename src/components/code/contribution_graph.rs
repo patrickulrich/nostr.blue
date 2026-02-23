@@ -103,12 +103,14 @@ fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
     let total: u32 = weeks.iter().flat_map(|w| w.days.iter()).sum();
     let max_count: u32 = weeks.iter().flat_map(|w| w.days.iter()).copied().max().unwrap_or(0);
 
-    // Build month labels: detect when the month changes across weeks
-    // Each week starts on Sunday; we check which month that Sunday belongs to
+    // Build month labels: detect when the month changes across weeks.
+    // Use mid-week date (week_start + 3 days) so the label reflects
+    // whichever month owns the majority of the week's days.
     let mut month_labels: Vec<(usize, &str)> = Vec::new();
     let mut last_month: Option<u32> = None;
     for (col, week) in weeks.iter().enumerate() {
-        let m = month_of(week.week_start);
+        let mid_week_ts = week.week_start + 3 * 86400;
+        let m = month_of(mid_week_ts);
         if last_month != Some(m) {
             if let Some(name) = MONTHS.get(m as usize - 1) {
                 month_labels.push((col, name));

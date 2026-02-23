@@ -11,6 +11,14 @@ use crate::utils::format::display_server_url;
 use crate::utils::nip34::Repository;
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use js_sys::{ArrayBuffer, Uint8Array};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
+use web_sys::{HtmlElement, HtmlInputElement};
 
 /// A file selected for upload (name, bytes, mime type)
 #[derive(Clone, Debug)]
@@ -599,11 +607,6 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 /// Read multiple files from a file input element
 #[cfg(target_arch = "wasm32")]
 async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, String> {
-    use js_sys::{ArrayBuffer, Uint8Array};
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-    use web_sys::HtmlInputElement;
-
     let window = web_sys::window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;
     let input = document
@@ -655,8 +658,6 @@ async fn read_files_from_input(_input_id: &str) -> Result<Vec<SelectedFile>, Str
 /// Programmatically click a file input element
 #[cfg(target_arch = "wasm32")]
 fn trigger_file_input(input_id: &str) {
-    use wasm_bindgen::JsCast;
-    use web_sys::HtmlElement;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(input_id) {
@@ -674,8 +675,6 @@ fn trigger_file_input(_input_id: &str) {}
 /// Clear a file input element's value
 #[cfg(target_arch = "wasm32")]
 fn clear_file_input(input_id: &str) {
-    use wasm_bindgen::JsCast;
-    use web_sys::HtmlInputElement;
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
             if let Some(element) = document.get_element_by_id(input_id) {

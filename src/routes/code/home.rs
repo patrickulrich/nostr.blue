@@ -220,7 +220,8 @@ fn RepositoriesTab() -> Element {
         if *pagination_loading.peek() || !*has_more.peek() {
             return;
         }
-        let until = *oldest_timestamp.peek();
+        // Subtract 1 to make until exclusive (avoid refetching the boundary item)
+        let until = (*oldest_timestamp.peek()).map(|ts| ts.saturating_sub(1));
         pagination_loading.set(true);
         spawn(async move {
             match fetch_recent_repositories(PAGE_SIZE, until).await {
@@ -235,14 +236,12 @@ fn RepositoriesTab() -> Element {
                         let mut current = repos.peek().clone();
                         let existing: HashSet<_> =
                             current.iter().map(|r| r.event_id.clone()).collect();
-                        let mut added_count = 0usize;
                         for repo in fetched {
                             if !existing.contains(&repo.event_id) {
                                 current.push(repo);
-                                added_count += 1;
                             }
                         }
-                        has_more.set(raw_count >= PAGE_SIZE && added_count > 0);
+                        has_more.set(raw_count >= PAGE_SIZE);
                         repos.set(current);
                     }
                 }
@@ -731,7 +730,7 @@ fn DiscoverTab() -> Element {
                     None => rsx! {
                         div { class: "grid grid-cols-2 gap-3",
                             for _ in 0..4 {
-                                div { class: "bg-card p-4 border border-border rounded-lg animate-pulse",
+                                div { class: "bg-card p-3 border border-border rounded-lg animate-pulse",
                                     div { class: "h-4 bg-muted rounded w-1/2 mb-2" }
                                     div { class: "h-6 bg-muted rounded w-1/3" }
                                 }
@@ -911,7 +910,7 @@ enum StatIcon {
 #[component]
 fn StatCard(label: &'static str, value: usize, icon_type: StatIcon) -> Element {
     rsx! {
-        div { class: "p-4 border border-border rounded-lg bg-card",
+        div { class: "p-3 border border-border rounded-lg bg-card",
             div { class: "flex items-center gap-2 mb-2",
                 match icon_type {
                     StatIcon::Repo => rsx! {

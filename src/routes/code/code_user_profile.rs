@@ -111,6 +111,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 }
                 gloo_timers::future::TimeoutFuture::new(100).await;
             }
+            if *request_id.peek() != current_id { return; }
 
             let parsed = match PublicKey::parse(&pk)
             {

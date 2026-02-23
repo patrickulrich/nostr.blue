@@ -403,7 +403,7 @@ pub fn CalendarEventNew() -> Element {
                 div { class: "px-4 py-3 flex items-center justify-between",
                     div { class: "flex items-center gap-3",
                         button {
-                            class: "p-2 -ml-2 hover:bg-accent rounded-lg transition",
+                            class: "p-1 -ml-2 hover:bg-accent rounded-lg transition",
                             onclick: handle_close,
                             svg {
                                 class: "w-5 h-5",

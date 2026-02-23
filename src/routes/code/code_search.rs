@@ -166,6 +166,11 @@ impl ParsedQuery {
 pub fn CodeSearch(q: String) -> Element {
     let query = q.clone();
     let mut search_input = use_signal(|| q.clone());
+    // Sync search_input when the route query parameter changes (e.g., navigating back)
+    let q_for_sync = q.clone();
+    use_effect(use_reactive(&q_for_sync, move |q_val| {
+        search_input.set(q_val);
+    }));
     let mut active_filter = use_signal(|| SearchFilter::All);
     let nav = use_navigator();
     let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);

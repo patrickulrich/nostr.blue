@@ -8,6 +8,8 @@ use std::borrow::Cow;
 use std::time::Duration;
 use crate::stores::code_store::{cache_bounty_events, get_cached_bounties};
 use crate::stores::nostr_client::{fetch_events_aggregated, get_client, HAS_SIGNER};
+use crate::stores::nwc_store;
+use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::{Bounty, BountyStatus};
 /// Default timeout for fetching events
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -74,6 +76,19 @@ pub async fn update_bounty_status(
     amount_sats: u64,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
+    // Validate status against known values
+    const VALID_STATUSES: &[&str] = &["pending", "claimed", "paying", "paid"];
+    if !VALID_STATUSES.contains(&new_status) {
+        return Err(format!(
+            "Invalid bounty status '{}'. Must be one of: {}",
+            new_status,
+            VALID_STATUSES.join(", ")
+        ));
+    }
+    if amount_sats == 0 {
+        return Err("Bounty amount must be greater than 0".into());
+    }
+
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
@@ -114,6 +129,23 @@ pub async fn claim_bounty(
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Cannot publish events.".to_string());
     }
+
+    // Validate current bounty state before claiming
+    let bounty_filter = Filter::new().id(bounty_event_id);
+    let bounty_events = fetch_events_aggregated(bounty_filter, FETCH_TIMEOUT)
+        .await
+        .map_err(|e| format!("Failed to verify bounty state: {e}"))?;
+    if let Some(bounty_event) = bounty_events.first() {
+        if let Some(current) = Bounty::from_event(bounty_event) {
+            if current.status == BountyStatus::Paid {
+                return Err("Cannot claim a bounty that has already been paid".to_string());
+            }
+            if current.status == BountyStatus::Claimed {
+                return Err("Bounty has already been claimed".to_string());
+            }
+        }
+    }
+
     let signer = client.signer().await.map_err(|e| format!("Failed to get signer: {}", e))?;
     let claimer_pubkey = signer.get_public_key().await.map_err(|e| format!("Failed to get public key: {}", e))?;
     let mut builder = EventBuilder::new(Kind::Custom(Bounty::KIND), "")
@@ -153,9 +185,6 @@ pub async fn release_bounty(
     amount_sats: u64,
     repository: Option<&Coordinate>,
 ) -> Result<EventId, String> {
-    use crate::stores::nwc_store;
-    use crate::stores::profiles::PROFILE_CACHE;
-
     // Check NWC is connected
     if !nwc_store::is_connected() {
         return Err("NWC wallet not connected. Connect a wallet in Settings first.".to_string());
@@ -170,6 +199,23 @@ pub async fn release_bounty(
         .ok_or_else(|| "Bounty event not found".to_string())?;
     let current = Bounty::from_event(bounty_event)
         .ok_or_else(|| "Failed to parse bounty event".to_string())?;
+
+    // Idempotency guard: if already paying or paid, return early
+    if current.status == BountyStatus::Paid {
+        return Err("Bounty has already been paid".to_string());
+    }
+    // "paying" is stored as Pending by BountyStatus::from_str, so check the raw tag
+    let raw_status = bounty_event.tags.iter().find_map(|t| {
+        let v = t.as_slice();
+        if v.len() >= 2 && v[0] == "status" {
+            Some(v[1].to_string())
+        } else {
+            None
+        }
+    });
+    if raw_status.as_deref() == Some("paying") {
+        return Err("Bounty payment is already in progress".to_string());
+    }
 
     // Validate bounty is in "claimed" state
     if current.status != BountyStatus::Claimed {
@@ -192,6 +238,10 @@ pub async fn release_bounty(
         ));
     }
 
+    // Step 1: Transition to "paying" state before sending payment to prevent
+    // double-payment from concurrent calls.
+    update_bounty_status(bounty_event_id, issue_event_id, "paying", amount_sats, repository).await?;
+
     // Look up claimer's lightning address
     let lud16 = {
         let cache = PROFILE_CACHE.read();
@@ -201,17 +251,16 @@ pub async fn release_bounty(
         "Could not find claimer's Lightning address. Their profile may not be loaded yet, or they may not have a lud16 set.".to_string()
     })?;
 
-    // Generate invoice from LNURL
+    // Step 2: Generate invoice and pay via NWC
     let invoice = crate::services::payments::lnurl::get_invoice_from_lud16(&lud16, amount_sats, Some("Bounty payment"))
         .await
         .map_err(|e| format!("Failed to get invoice: {}", e))?;
 
-    // Pay via NWC first — if payment fails, no status event is published
     nwc_store::pay_invoice(invoice)
         .await
         .map_err(|e| format!("Payment failed: {}", e))?;
 
-    // Payment succeeded — now mark as paid
+    // Step 3: Payment succeeded — mark as paid
     let new_event_id = update_bounty_status(bounty_event_id, issue_event_id, "paid", amount_sats, repository).await?;
 
     Ok(new_event_id)

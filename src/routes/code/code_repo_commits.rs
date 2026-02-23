@@ -322,8 +322,12 @@ fn GitCommitRow(commit: CommitEntry) -> Element {
     }
 }
 
-/// Format a commit date string to relative time
+/// Format a commit date string (ISO 8601) to relative time
 fn format_commit_date(date_str: &str) -> String {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
+        return format_time_ago(dt.timestamp() as u64);
+    }
+    // Fallback: try parsing as date-only
     if let Some(date_part) = date_str.split('T').next() {
         return date_part.to_string();
     }
@@ -373,9 +377,10 @@ fn LoadingSkeleton() -> Element {
             for i in 0..5 {
                 div { key: "{i}", class: "p-4 border border-border rounded-lg",
                     div { class: "h-4 bg-muted rounded w-3/4 mb-3" }
-                    div { class: "flex items-center gap-3" }
-                    div { class: "h-5 w-5 bg-muted rounded-full" }
-                    div { class: "h-3 bg-muted rounded w-32" }
+                    div { class: "flex items-center gap-3",
+                        div { class: "h-5 w-5 bg-muted rounded-full" }
+                        div { class: "h-3 bg-muted rounded w-32" }
+                    }
                 }
             }
         }

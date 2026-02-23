@@ -712,7 +712,8 @@ const methods = {
       // Generate unified diff header
       if (baseContent === null) {
         // New file
-        const lines = headContent.split('\n');
+        const lines = headContent.replace(/\r\n/g, '\n').split('\n');
+        if (lines[lines.length - 1] === '') lines.pop();
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push('new file mode 100644');
         diffParts.push(`--- /dev/null`);
@@ -723,7 +724,8 @@ const methods = {
         }
       } else if (headContent === null) {
         // Deleted file
-        const lines = baseContent.split('\n');
+        const lines = baseContent.replace(/\r\n/g, '\n').split('\n');
+        if (lines[lines.length - 1] === '') lines.pop();
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push('deleted file mode 100644');
         diffParts.push(`--- a/${filepath}`);
@@ -734,8 +736,10 @@ const methods = {
         }
       } else {
         // Modified file - proper unified diff with LCS algorithm
-        const baseLines = baseContent.split('\n');
-        const headLines = headContent.split('\n');
+        const baseLines = baseContent.replace(/\r\n/g, '\n').split('\n');
+        if (baseLines[baseLines.length - 1] === '') baseLines.pop();
+        const headLines = headContent.replace(/\r\n/g, '\n').split('\n');
+        if (headLines[headLines.length - 1] === '') headLines.pop();
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push(`--- a/${filepath}`);
         diffParts.push(`+++ b/${filepath}`);

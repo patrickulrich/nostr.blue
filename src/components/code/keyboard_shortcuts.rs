@@ -12,6 +12,8 @@
 use crate::routes::Route;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 #[component]
 pub fn CodeKeyboardShortcuts() -> Element {
@@ -27,11 +29,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
     // Set up keyboard event listener once
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
         {
-            use wasm_bindgen::prelude::*;
-            use wasm_bindgen::JsCast;
-
             let window = web_sys::window().expect("no global window");
 
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
@@ -118,7 +116,6 @@ pub fn CodeKeyboardShortcuts() -> Element {
     });
 
     use_drop(move || {
-        #[cfg(target_arch = "wasm32")]
         if let Some((func, win)) = cleanup_fn.peek().as_ref() {
             win.remove_event_listener_with_callback("keydown", func).ok();
         }

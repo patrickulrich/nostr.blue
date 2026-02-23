@@ -131,7 +131,9 @@ pub fn PRReviewSection(
                         for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
                             by_pubkey.insert(r.pubkey.clone(), r);
                         }
-                        reviews.set(by_pubkey.into_values().collect());
+                        let mut sorted: Vec<_> = by_pubkey.into_values().collect();
+                        sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                        reviews.set(sorted);
                     }
                 });
             },
