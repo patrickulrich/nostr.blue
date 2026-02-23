@@ -1138,7 +1138,7 @@ fn ActivityRow(activity: Activity) -> Element {
                 div { class: "text-sm flex items-baseline gap-1 min-w-0",
                     span { class: "font-medium shrink-0", "{author_name}" }
                     span { class: "text-muted-foreground shrink-0", "{activity.activity_type}" }
-                    span { class: "font-medium truncate", "{activity.title}" }
+                    span { class: "font-medium truncate min-w-0", "{activity.title}" }
                 }
             }
             // Timestamp

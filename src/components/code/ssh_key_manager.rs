@@ -28,6 +28,12 @@ pub fn SshKeyManager() -> Element {
             keys.set(Vec::new());
             error.set(None);
             loading.set(true);
+            new_title.set(String::new());
+            new_key.set(String::new());
+            show_add_form.set(false);
+            confirm_delete.set(None);
+            deleting_id.set(None);
+            adding.set(false);
             spawn(async move {
                 match PublicKey::from_hex(&pubkey_hex) {
                     Ok(pk) => match ssh_keys::fetch_ssh_keys(&pk).await {
@@ -55,6 +61,12 @@ pub fn SshKeyManager() -> Element {
         } else {
             keys.set(Vec::new());
             loading.set(false);
+            new_title.set(String::new());
+            new_key.set(String::new());
+            show_add_form.set(false);
+            confirm_delete.set(None);
+            deleting_id.set(None);
+            adding.set(false);
         }
     });
 
@@ -73,12 +85,11 @@ pub fn SshKeyManager() -> Element {
         if !trimmed.starts_with("ssh-rsa")
             && !trimmed.starts_with("ssh-ed25519")
             && !trimmed.starts_with("ecdsa-sha2")
-            && !trimmed.starts_with("ssh-dss")
             && !trimmed.starts_with("sk-ssh-ed25519")
             && !trimmed.starts_with("sk-ecdsa-sha2")
         {
             error.set(Some(
-                "Key must start with ssh-rsa, ssh-ed25519, ecdsa-sha2, or similar".to_string(),
+                "Key must start with ssh-rsa, ssh-ed25519, ecdsa-sha2, sk-ssh-ed25519, or sk-ecdsa-sha2".to_string(),
             ));
             return;
         }

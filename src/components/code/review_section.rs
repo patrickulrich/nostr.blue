@@ -98,6 +98,7 @@ pub fn PRReviewSection(
     let mut review_body = use_signal(String::new);
     let mut reviews = use_signal(Vec::<PersistedReview>::new);
     let mut publish_error = use_signal(|| None::<String>);
+    let mut submitting = use_signal(|| false);
 
     // Fetch persisted reviews from relays on mount, with generation counter
     // to discard stale responses when pr_id changes rapidly
@@ -106,7 +107,7 @@ pub fn PRReviewSection(
         use_reactive(
             &pr_id,
             move |id| {
-                let current_gen = gen.read().wrapping_add(1);
+                let current_gen = gen.peek().wrapping_add(1);
                 gen.set(current_gen);
                 reviews.set(Vec::new());
                 publish_error.set(None);
@@ -114,7 +115,7 @@ pub fn PRReviewSection(
                 review_body.set(String::new());
                 spawn(async move {
                     if let Ok(persisted) = fetch_pr_reviews(&id).await {
-                        if *gen.read() != current_gen { return; }
+                        if *gen.peek() != current_gen { return; }
                         // Dedup persisted reviews: keep latest per pubkey
                         let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
                         for r in persisted {
@@ -152,6 +153,8 @@ pub fn PRReviewSection(
         let user_pubkey = user_pubkey.clone();
         let saved_pr_pubkey = pr_pubkey.clone();
         move |_| {
+            if *submitting.peek() { return; }
+            submitting.set(true);
             let state = *selected_state.read();
             let body = review_body.read().clone();
             let content = if body.trim().is_empty() {
@@ -191,12 +194,14 @@ pub fn PRReviewSection(
             spawn(async move {
                 match publish_review_event(&id, &author_pk, review_state, &saved_content).await {
                     Ok(_) => {
+                        submitting.set(false);
                         // Notify parent only after successful publish
                         if let Some(handler) = on_review_submitted.as_ref() {
                             handler.call(());
                         }
                     }
                     Err(e) => {
+                        submitting.set(false);
                         publish_error.set(Some(e.to_string()));
                         // Rollback: remove the optimistic entry and restore prior review
                         let mut current = reviews.write();
@@ -387,9 +392,10 @@ pub fn PRReviewSection(
                                     "Cancel"
                                 }
                                 button {
-                                    class: "px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition",
+                                    class: "px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
+                                    disabled: *submitting.read(),
                                     onclick: handle_submit,
-                                    "Submit Review"
+                                    if *submitting.read() { "Submitting..." } else { "Submit Review" }
                                 }
                             }
                         }

@@ -7,8 +7,10 @@ use crate::services::git_hosting::publish_repository;
 use crate::stores::auth_store;
 use crate::utils::nips::nip34::encode_repo_naddr;
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use nostr_sdk::prelude::{Coordinate, Kind, PublicKey};
 use nostr_sdk::RelayUrl;
+use std::time::Duration;
 
 /// New repository page component
 #[component]
@@ -25,6 +27,7 @@ pub fn CodeNew() -> Element {
     let mut topics_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
+    let toast = consume_toast();
     let nav = use_navigator();
 
     // Auto-generate repo_id from name (only if user hasn't manually edited repo_id)
@@ -152,6 +155,10 @@ pub fn CodeNew() -> Element {
             .await
             {
                 Ok(_event_id) => {
+                    toast.success(
+                        "Repository created successfully".to_string(),
+                        ToastOptions::new().duration(Duration::from_secs(3)),
+                    );
                     // Navigate to the new repository
                     // Construct the naddr from the coordinate
                     if let Some(pk_hex) = auth_store::get_pubkey() {

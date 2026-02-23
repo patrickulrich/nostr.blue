@@ -331,7 +331,7 @@ fn LoadingSkeleton() -> Element {
     rsx! {
         div { class: "space-y-2 animate-pulse",
             for i in 0..5 {
-                div { key: "{i}", class: "p-4 border border-border rounded-lg",
+                div { key: "{i}", class: "bg-card border border-border rounded-lg p-4",
                     div { class: "h-4 bg-muted rounded w-2/3 mb-3" }
                     div { class: "h-3 bg-muted rounded w-1/3" }
                 }

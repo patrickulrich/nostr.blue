@@ -146,14 +146,15 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                     .unwrap_or_default();
                 for (pubkey, relay, weight) in &splits_snapshot {
                     if let Ok(pk) = PublicKey::parse(pubkey) {
-                        let relay_to_use = if relay.is_empty() {
-                            default_relay.clone()
-                        } else {
-                            relay.clone()
-                        };
+                        let mut tag_values = vec![pk.to_hex()];
+                        let relay_to_use = if relay.is_empty() { default_relay.clone() } else { relay.clone() };
+                        if !relay_to_use.is_empty() {
+                            tag_values.push(relay_to_use);
+                        }
+                        tag_values.push(weight.to_string());
                         extra_tags.push(Tag::custom(
                             TagKind::Custom(Cow::Borrowed("zap")),
-                            [pk.to_hex(), relay_to_use, weight.to_string()],
+                            tag_values,
                         ));
                     }
                 }
@@ -911,6 +912,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             let name = new_milestone_name.read().trim().to_string();
                                             if !name.is_empty() {
                                                 if milestones.read().iter().any(|m| m.name == name) {
+                                                    save_error.set(Some("Milestone name already exists".to_string()));
                                                     return;
                                                 }
 
@@ -923,6 +925,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 };
                                                 milestones.write().push(ms);
                                                 new_milestone_name.set(String::new());
+                                                save_error.set(None);
                                             }
                                         }
                                     },
@@ -934,6 +937,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         let name = new_milestone_name.read().trim().to_string();
                                         if !name.is_empty() {
                                             if milestones.read().iter().any(|m| m.name == name) {
+                                                save_error.set(Some("Milestone name already exists".to_string()));
                                                 return;
                                             }
                                             let id = generate_milestone_id(&name);
@@ -945,6 +949,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                             };
                                             milestones.write().push(ms);
                                             new_milestone_name.set(String::new());
+                                            save_error.set(None);
                                         }
                                     },
                                     "Add"

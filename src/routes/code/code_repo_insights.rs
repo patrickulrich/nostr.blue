@@ -444,16 +444,24 @@ fn ContributorCard(pubkey: String, is_owner: bool) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let picture = profile.as_ref().and_then(|p| p.picture.clone());
     let nip05 = profile.as_ref().and_then(|p| p.nip05.clone());
+    let mut img_failed = use_signal(|| false);
 
     rsx! {
         Link {
             to: Route::Profile { pubkey: pubkey.clone() },
             class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             if let Some(pic) = &picture {
-                img {
-                    class: "w-10 h-10 rounded-full object-cover shrink-0",
-                    src: "{pic}",
-                    alt: "{name}",
+                if !*img_failed.read() {
+                    img {
+                        class: "w-10 h-10 rounded-full object-cover shrink-0",
+                        src: "{pic}",
+                        alt: "{name}",
+                        onerror: move |_| img_failed.set(true),
+                    }
+                } else {
+                    div { class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-muted-foreground font-bold",
+                        "{name.chars().next().unwrap_or('?')}"
+                    }
                 }
             } else {
                 div { class: "w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-muted-foreground font-bold",

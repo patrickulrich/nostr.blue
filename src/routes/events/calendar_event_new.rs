@@ -10,6 +10,7 @@ use crate::services::profile_search::{
 use crate::stores::{auth_store, calendar_store};
 use crate::utils::date_helpers::get_today;
 use crate::utils::ics::{parse_ics, IcsDateTime, IcsEvent};
+use crate::utils::validation::is_valid_http_url;
 use dioxus::events::MouseData;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::ToBech32;
@@ -821,7 +822,7 @@ pub fn CalendarEventNew() -> Element {
                                                             participant_results.set(vec![]);
                                                         }
                                                     },
-                                                    if let Some(ref pic) = picture {
+                                                    if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
                                                         img {
                                                             src: "{pic}",
                                                             alt: "{display}",

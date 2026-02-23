@@ -133,11 +133,11 @@ pub fn PollCard(
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_for_loop = cancelled.clone();
 
-    let _votes_task = use_future(move || {
+    use_effect(use_reactive(&poll_data, move |pd| {
         let poll_id = event_id;
-        let poll = poll_data.read().clone();
+        let poll = pd.read().clone();
         let cancelled_for_loop = cancelled_for_loop.clone();
-        async move {
+        spawn(async move {
             loading_votes.set(true);
             let (ends_at, poll_relays) = poll
                 .map(|p| (p.ends_at, p.relays))
@@ -238,8 +238,8 @@ pub fn PollCard(
                 Err(e) => log::error!("Failed to fetch votes: {}", e),
             }
             loading_votes.set(false);
-        }
-    });
+        });
+    }));
     // Cleanup vote subscription and poll relays on unmount.
     // Set cancellation flag synchronously so the notification loop
     // can perform async cleanup reliably, rather than relying on

@@ -47,20 +47,29 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut active_filter = use_signal(|| CategoryFilter::All);
+    let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         spawn(async move {
             error.set(None);
             loading.set(true);
             match fetch_repo_discussions(&n).await {
                 Ok(fetched) => {
+                    if *request_gen.peek() != gen {
+                        return;
+                    }
                     discussions.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
+                    if *request_gen.peek() != gen {
+                        return;
+                    }
                     error.set(Some(e));
                 }
             }
@@ -300,7 +309,7 @@ fn LoadingSkeleton() -> Element {
     rsx! {
         div { class: "space-y-2 animate-pulse",
             for i in 0..3 {
-                div { key: "{i}", class: "p-4 border border-border rounded-lg",
+                div { key: "{i}", class: "bg-card border border-border rounded-lg p-4",
                     div { class: "h-4 bg-muted rounded w-2/3 mb-3" }
                     div { class: "h-3 bg-muted rounded w-1/3" }
                 }

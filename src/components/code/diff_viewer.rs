@@ -570,26 +570,6 @@ pub fn DiffViewer(
                                                                 }
                                                             }
 
-                                                            // Display existing line comments for the left (old) side line
-                                                            if let Some(left_num) = row.left_num {
-                                                                // Skip if left_num == right_num to avoid duplicate comments
-                                                                if row.right_num != Some(left_num) {
-                                                                    if let Some(comments) = comment_map.get(&(section.file_path.clone(), left_num)) {
-                                                                        for lc in comments.iter() {
-                                                                            tr {
-                                                                                key: "lc-sbs-left-{lc.event_id}",
-                                                                                class: "bg-accent/30",
-                                                                                td {
-                                                                                    colspan: "4",
-                                                                                    class: "px-4 py-2",
-                                                                                    InlineLineComment { comment: lc.clone() }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-
                                                             // Display existing line comments for the right (new) side line
                                                             if let Some(line_num) = row.right_num {
                                                                 if let Some(comments) = comment_map.get(&(section.file_path.clone(), line_num)) {
@@ -745,6 +725,7 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                 });
             } else {
                 // Malformed hunk header — treat as info line, don't change counters
+                in_header = false;
                 current_lines.push(DiffLine {
                     kind: LineKind::Info,
                     old_num: None,

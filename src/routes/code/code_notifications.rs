@@ -197,7 +197,11 @@ fn NotificationCard(notification: CodeNotification) -> Element {
         CodeNotificationType::CommentAdded | CodeNotificationType::Mentioned
         | CodeNotificationType::StatusChanged => {
             if let Some(ref parent_id) = notification.parent_event_id {
-                Route::CodeIssueDetail { note_id: parent_id.clone() }
+                if notification.parent_kind == Some(1617) {
+                    Route::CodePullDetail { note_id: parent_id.clone() }
+                } else {
+                    Route::CodeIssueDetail { note_id: parent_id.clone() }
+                }
             } else { Route::CodeHome {} }
         }
     };

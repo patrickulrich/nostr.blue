@@ -109,6 +109,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                 }
                 Err(e) => {
                     error_message.set(Some(format!("Failed to read files: {}", e)));
+                    clear_file_input(input_id);
                 }
             }
         });

@@ -48,9 +48,8 @@ fn filename_from_path(path: &str) -> &str {
 
 /// Build a unified diff for a new file creation.
 fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_message: &str) -> String {
-    // Use split('\n') instead of lines() to correctly count trailing newlines
-    let lines: Vec<&str> = content.split('\n').collect();
-    let line_count = if content.is_empty() { 0 } else { lines.len() };
+    let lines: Vec<&str> = content.lines().collect();
+    let line_count = lines.len();
 
     let mut diff = String::new();
     diff.push_str(&format!("From: {}\n", author_pubkey));
@@ -442,8 +441,9 @@ async fn submit_new_file(
     }
 
     // Decode the repository coordinate
-    let (coordinate, _relay_hints) =
+    let (coordinate, relay_hints) =
         decode_repo_naddr(naddr).map_err(|e| format!("Invalid repository address: {}", e))?;
+    let relay_url = relay_hints.into_iter().next();
 
     // Get current user's public key for the From header
     let signer = client
@@ -461,7 +461,7 @@ async fn submit_new_file(
 
     // Build and publish the GitPatch event
     let builder = EventBuilder::new(Kind::GitPatch, &diff_content)
-        .tag(Tag::coordinate(coordinate.clone(), None))
+        .tag(Tag::coordinate(coordinate.clone(), relay_url))
         .tag(Tag::public_key(coordinate.public_key))
         .tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("subject")),

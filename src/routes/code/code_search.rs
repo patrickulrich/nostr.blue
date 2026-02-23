@@ -49,8 +49,9 @@ impl ParsedQuery {
                     _ => text_parts.push(token.to_string()),
                 }
             } else if let Some(value) = token.strip_prefix("label:") {
-                if !value.is_empty() {
-                    query.labels.push(value.to_lowercase());
+                let normalized = value.to_lowercase();
+                if !normalized.is_empty() && !query.labels.contains(&normalized) {
+                    query.labels.push(normalized);
                 }
             } else if let Some(value) = token.strip_prefix("type:") {
                 match value.to_lowercase().as_str() {
@@ -205,43 +206,41 @@ pub fn CodeSearch(q: String) -> Element {
             return;
         }
         spawn(async move {
-            {
-                // Only fetch entity types that will be displayed (based on type: filter)
-                let repos_fut = if parsed.show_repos() {
-                    Some(search_repositories(search_text.as_deref(), 20))
-                } else { None };
-                let snippets_fut = if parsed.show_snippets() {
-                    Some(search_snippets(search_text.as_deref(), 20))
-                } else { None };
-                let issues_fut = if parsed.show_issues() {
-                    Some(search_issues(search_text.as_deref(), 20))
-                } else { None };
-                let prs_fut = if parsed.show_prs() {
-                    Some(search_prs(search_text.as_deref(), 20))
-                } else { None };
+            // Only fetch entity types that will be displayed (based on type: filter)
+            let repos_fut = if parsed.show_repos() {
+                Some(search_repositories(search_text.as_deref(), 20))
+            } else { None };
+            let snippets_fut = if parsed.show_snippets() {
+                Some(search_snippets(search_text.as_deref(), 20))
+            } else { None };
+            let issues_fut = if parsed.show_issues() {
+                Some(search_issues(search_text.as_deref(), 20))
+            } else { None };
+            let prs_fut = if parsed.show_prs() {
+                Some(search_prs(search_text.as_deref(), 20))
+            } else { None };
 
-                // Use OptionFuture for conditional parallel execution
-                let (repos_res, snippets_res, issues_res, prs_res) = futures::join!(
-                    async { match repos_fut { Some(f) => Some(f.await), None => None } },
-                    async { match snippets_fut { Some(f) => Some(f.await), None => None } },
-                    async { match issues_fut { Some(f) => Some(f.await), None => None } },
-                    async { match prs_fut { Some(f) => Some(f.await), None => None } }
-                );
-                if *request_gen.peek() != gen { return; }
-                // Apply client-side filters and set results
-                repos.set(Some(repos_res
-                    .unwrap_or(Ok(vec![]))
-                    .map(|list| list.into_iter().filter(|r| parsed.matches_repo(r)).collect())));
-                snippets.set(Some(snippets_res
-                    .unwrap_or(Ok(vec![]))
-                    .map(|list| list.into_iter().filter(|s| parsed.matches_snippet(s)).collect())));
-                issues.set(Some(issues_res
-                    .unwrap_or(Ok(vec![]))
-                    .map(|list| list.into_iter().filter(|i| parsed.matches_issue(i)).collect())));
-                prs.set(Some(prs_res
-                    .unwrap_or(Ok(vec![]))
-                    .map(|list| list.into_iter().filter(|p| parsed.matches_pr(p)).collect())));
-            }
+            // Use OptionFuture for conditional parallel execution
+            let (repos_res, snippets_res, issues_res, prs_res) = futures::join!(
+                async { match repos_fut { Some(f) => Some(f.await), None => None } },
+                async { match snippets_fut { Some(f) => Some(f.await), None => None } },
+                async { match issues_fut { Some(f) => Some(f.await), None => None } },
+                async { match prs_fut { Some(f) => Some(f.await), None => None } }
+            );
+            if *request_gen.peek() != gen { return; }
+            // Apply client-side filters and set results
+            repos.set(Some(repos_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|r| parsed.matches_repo(r)).collect())));
+            snippets.set(Some(snippets_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|s| parsed.matches_snippet(s)).collect())));
+            issues.set(Some(issues_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|i| parsed.matches_issue(i)).collect())));
+            prs.set(Some(prs_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|p| parsed.matches_pr(p)).collect())));
         });
     }));
     let handle_search = move |_| {

@@ -110,8 +110,8 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
     use_effect(use_reactive(&repo_naddr, move |naddr| {
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);
+        repo_data.set(None);
         if naddr.is_empty() {
-            repo_data.set(None);
             return;
         }
         spawn(async move {
