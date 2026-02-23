@@ -14,7 +14,8 @@ use embeds::{
 use mentions::{EventMentionRenderer, MentionRenderer};
 use nostr_blue_renderers::{
     NostrBlueArticleRenderer, NostrBlueBadgeRenderer, NostrBlueCalendarEventRenderer,
-    NostrBlueCodeRepoRenderer, NostrBlueCommunityRenderer, NostrBlueLiveStreamRenderer,
+    NostrBlueChannelRenderer, NostrBlueCodeRepoRenderer, NostrBlueCommunityRenderer,
+    NostrBlueLiveStreamRenderer,
     NostrBlueMusicPlaylistRenderer, NostrBlueNoteRenderer, NostrBluePhotoRenderer,
     NostrBluePinboardRenderer, NostrBluePodcastEpisodeRenderer, NostrBluePodcastShowRenderer,
     NostrBlueProductRenderer, NostrBlueProfileRenderer, NostrBluePublicationRenderer,
@@ -73,6 +74,7 @@ pub fn RichContent(
                     | ContentToken::NostrBlueProfile(_)
                     | ContentToken::NostrBlueCalendarEvent(_)
                     | ContentToken::NostrBlueBadge(_)
+                    | ContentToken::NostrBlueChannel(_)
                     | ContentToken::NostrBlueRssPodcastEpisode(_, _)
                     | ContentToken::NostrBlueRssPodcastShow(_)
                 )
@@ -298,6 +300,9 @@ fn token_key(token: &ContentToken, idx: usize) -> String {
         }
         ContentToken::NostrBlueCommunity(id) => {
             format!("nb-community-{}-{:x}", idx, hash_str(id))
+        }
+        ContentToken::NostrBlueChannel(id) => {
+            format!("nb-channel-{}-{:x}", idx, hash_str(id))
         }
         ContentToken::NostrBlueRssPodcastEpisode(pid, eid) => {
             format!("nb-rss-ep-{}-{:x}-{:x}", idx, hash_str(pid), hash_str(eid))
@@ -647,6 +652,11 @@ fn render_token(token: &ContentToken) -> Element {
                 NostrBlueCommunityRenderer { id: id.clone() }
             }
         }
+        ContentToken::NostrBlueChannel(id) => {
+            rsx! {
+                NostrBlueChannelRenderer { id: id.clone() }
+            }
+        }
         ContentToken::NostrBlueRssPodcastEpisode(podcast_id, episode_id) => {
             rsx! {
                 NostrBlueRssPodcastEpisodeRenderer {
@@ -733,6 +743,7 @@ mod tests {
             ContentToken::NostrBlueProduct("naddr1test".to_string()),
             ContentToken::NostrBlueCodeRepo("naddr1test".to_string()),
             ContentToken::NostrBlueCommunity("34550:pubkey:community-name".to_string()),
+            ContentToken::NostrBlueChannel("channel-id".to_string()),
             ContentToken::NostrBlueRssPodcastEpisode(
                 "podcast123".to_string(),
                 "ep456".to_string(),
@@ -741,7 +752,7 @@ mod tests {
         ];
         assert_eq!(
             test_cases.len(),
-            60,
+            61,
             "Test cases should cover all ContentToken variants. If you added a new variant, add it to this test.",
         );
         for (idx, token) in test_cases.iter().enumerate() {

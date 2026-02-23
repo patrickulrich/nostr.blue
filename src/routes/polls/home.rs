@@ -1,9 +1,18 @@
 use crate::components::{ClientInitializing, PollCard};
 use crate::hooks::use_infinite_scroll;
+use crate::services::aggregation::{
+    fetch_interaction_counts_batch, stream_interaction_counts, InteractionCounts,
+    InteractionStreamHandle,
+};
 use crate::stores::{auth_store, nostr_client};
+use crate::stores::nostr_client::stream_events_immediate;
 use dioxus::prelude::*;
-use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
+use nostr_sdk::{Event, EventId, Filter, Kind, PublicKey, Timestamp};
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+
+const PAGE_SIZE: usize = 50;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
     Following,
@@ -28,6 +37,10 @@ pub fn Polls() -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut last_event_id = use_signal(|| None::<nostr_sdk::EventId>);
+    let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
+    let mut interaction_stream_handles: Signal<Vec<InteractionStreamHandle>> = use_signal(Vec::new);
+    let mut all_streamed_ids = use_signal(HashSet::<EventId>::new);
+    let mut request_id = use_signal(|| 0u64);
     use_effect(move || {
         let _ = refresh_trigger.read();
         let current_feed_type = *feed_type.read();
@@ -37,26 +50,131 @@ pub fn Polls() -> Element {
         }
         loading.set(true);
         error.set(None);
+        events.set(Vec::new());
         oldest_timestamp.set(None);
         last_event_id.set(None);
         has_more.set(true);
+        // Clean up previous interaction streams explicitly before assigning new ones
+        let old_handles = interaction_stream_handles.peek().clone();
+        interaction_stream_handles.set(Vec::new());
+        interaction_counts.set(HashMap::new());
+        all_streamed_ids.set(HashSet::new());
+        // Increment request_id for stale detection
+        request_id.with_mut(|v| *v = v.wrapping_add(1));
+        let current_id = *request_id.peek();
         spawn(async move {
-            let result = match current_feed_type {
-                FeedType::Following => load_following_polls(None, None).await,
-                FeedType::Global => load_global_polls(None, None).await,
+            // Unsubscribe old handles at the start of the async context
+            for handle in old_handles {
+                handle.unsubscribe().await;
+            }
+            // Build the filter based on feed type
+            let filter = match current_feed_type {
+                FeedType::Following => {
+                    let pubkey_str = match auth_store::get_pubkey() {
+                        Some(pk) => pk,
+                        None => {
+                            error.set(Some("Not authenticated. Please sign in to view your following feed.".to_string()));
+                            loading.set(false);
+                            return;
+                        }
+                    };
+                    let contacts = match nostr_client::fetch_contacts(pubkey_str).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            error.set(Some(e));
+                            loading.set(false);
+                            return;
+                        }
+                    };
+                    let authors: Vec<PublicKey> = contacts
+                        .iter()
+                        .filter_map(|c| PublicKey::parse(c).ok())
+                        .collect();
+                    if authors.is_empty() {
+                        loading.set(false);
+                        return;
+                    }
+                    Filter::new().kind(Kind::Poll).authors(authors).limit(PAGE_SIZE)
+                }
+                FeedType::Global => {
+                    Filter::new().kind(Kind::Poll).limit(PAGE_SIZE)
+                }
             };
+            // Stream events for fast time-to-first-post
+            let mut seen_ids = HashSet::new();
+            let result = stream_events_immediate(
+                filter,
+                Duration::from_secs(10),
+                |event| {
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
+                    if seen_ids.insert(event.id) {
+                        events.with_mut(|current| {
+                            // Insert in sorted order (newest first)
+                            let pos = current.iter().position(|e| e.created_at < event.created_at)
+                                .unwrap_or(current.len());
+                            current.insert(pos, event);
+                        });
+                    }
+                },
+            ).await;
+            if *request_id.peek() != current_id {
+                loading.set(false);
+                return;
+            }
             match result {
-                Ok(poll_events) => {
+                Ok(count) => {
                     if *feed_type.read() != current_feed_type {
                         loading.set(false);
                         return;
                     }
-                    if let Some(last_event) = poll_events.last() {
+                    // Sort and update pagination state
+                    events.with_mut(|current| {
+                        current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    });
+                    let current_events = events.read();
+                    if let Some(last_event) = current_events.last() {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         last_event_id.set(Some(last_event.id));
                     }
-                    has_more.set(poll_events.len() >= 50);
-                    events.set(poll_events);
+                    // May show "load more" even when exhausted due to timeout, but better than hiding available content
+                    has_more.set(count >= PAGE_SIZE);
+                    // Fetch interaction counts
+                    let event_ids: Vec<EventId> = current_events.iter().map(|e| e.id).collect();
+                    drop(current_events);
+                    all_streamed_ids.set(event_ids.iter().copied().collect());
+                    if !event_ids.is_empty() {
+                        match fetch_interaction_counts_batch(
+                            event_ids.clone(),
+                            Duration::from_secs(5),
+                        ).await {
+                            Ok(counts) => {
+                                if *request_id.peek() != current_id { loading.set(false); return; }
+                                interaction_counts.set(counts);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to fetch interaction counts: {e}");
+                            }
+                        }
+                        if *request_id.peek() != current_id { loading.set(false); return; }
+                        match stream_interaction_counts(
+                            event_ids,
+                            interaction_counts,
+                            Some(600),
+                        ).await {
+                            Ok(handle) => {
+                                if *request_id.peek() == current_id && *feed_type.read() == current_feed_type {
+                                    interaction_stream_handles.with_mut(|handles| handles.push(handle));
+                                } else {
+                                    handle.unsubscribe().await;
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to start interaction stream for polls: {}", e);
+                            }
+                        }
+                    }
                     loading.set(false);
                 }
                 Err(e) => {
@@ -64,7 +182,7 @@ pub fn Polls() -> Element {
                         loading.set(false);
                         return;
                     }
-                    error.set(Some(e));
+                    error.set(Some(format!("Failed to fetch polls: {}", e)));
                     loading.set(false);
                 }
             }
@@ -78,6 +196,7 @@ pub fn Polls() -> Element {
         let last_id = *last_event_id.read();
         let current_feed_type = *feed_type.read();
         loading.set(true);
+        let rid = *request_id.peek();
         spawn(async move {
             let result = match current_feed_type {
                 FeedType::Following => load_following_polls(until, last_id).await,
@@ -85,6 +204,10 @@ pub fn Polls() -> Element {
             };
             match result {
                 Ok(new_events) => {
+                    if *request_id.peek() != rid {
+                        loading.set(false);
+                        return;
+                    }
                     if *feed_type.read() != current_feed_type {
                         loading.set(false);
                         return;
@@ -107,11 +230,57 @@ pub fn Polls() -> Element {
                         oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                         last_event_id.set(Some(last_event.id));
                     }
-                    has_more.set(raw_count >= 50);
+                    has_more.set(raw_count >= PAGE_SIZE);
+                    let new_event_ids: Vec<EventId> = unique_new.iter().map(|e| e.id).collect();
                     events
                         .with_mut(|current| {
                             current.extend(unique_new);
                         });
+                    // Fetch interaction counts for new page and extend streaming
+                    if !new_event_ids.is_empty() {
+                        if let Ok(counts) = fetch_interaction_counts_batch(
+                            new_event_ids.clone(),
+                            Duration::from_secs(5),
+                        ).await {
+                            if *request_id.peek() != rid { return; }
+                            interaction_counts.with_mut(|existing| {
+                                existing.extend(counts);
+                            });
+                        } else {
+                            log::warn!(
+                                "Failed to fetch interaction counts for load_more (rid={}, events={})",
+                                rid,
+                                new_event_ids.len()
+                            );
+                        }
+                        if *request_id.peek() != rid { return; }
+                        // Only stream interactions for newly added poll IDs (keep existing streams running)
+                        let truly_new_ids: Vec<EventId> = new_event_ids
+                            .into_iter()
+                            .filter(|id| !all_streamed_ids.peek().contains(id))
+                            .collect();
+                        all_streamed_ids.with_mut(|ids| {
+                            ids.extend(truly_new_ids.iter().copied());
+                        });
+                        if !truly_new_ids.is_empty() {
+                            match stream_interaction_counts(
+                                truly_new_ids,
+                                interaction_counts,
+                                Some(600),
+                            ).await {
+                                Ok(handle) => {
+                                    if *request_id.peek() == rid && *feed_type.read() == current_feed_type {
+                                        interaction_stream_handles.with_mut(|handles| handles.push(handle));
+                                    } else {
+                                        handle.unsubscribe().await;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to start interaction stream for new polls: {}", e);
+                                }
+                            }
+                        }
+                    }
                     loading.set(false);
                 }
                 Err(e) => {
@@ -132,7 +301,7 @@ pub fn Polls() -> Element {
                 div { class: "px-4 py-3 flex items-center justify-between",
                     div { class: "relative",
                         button {
-                            class: "text-xl font-bold flex items-center gap-2 hover:bg-accent px-3 py-1 rounded-lg transition",
+                            class: "text-xl font-bold flex items-center gap-2 p-2 hover:bg-accent rounded-lg transition",
                             onclick: move |_| {
                                 let current = *show_dropdown.read();
                                 show_dropdown.set(!current);
@@ -142,13 +311,13 @@ pub fn Polls() -> Element {
                         }
                         if *show_dropdown.read() {
                             div {
-                                class: "fixed inset-0 z-20",
+                                class: "fixed inset-0 z-40",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     show_dropdown.set(false);
                                 },
                             }
-                            div { class: "absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-30 min-w-[150px]",
+                            div { class: "absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-40 min-w-[150px]",
                                 button {
                                     class: "w-full px-4 py-2 text-left hover:bg-accent transition",
                                     onclick: move |_| {
@@ -222,7 +391,11 @@ pub fn Polls() -> Element {
                 } else {
                     div { class: "divide-y divide-border",
                         for event in events.read().iter() {
-                            PollCard { key: "{event.id}", event: event.clone() }
+                            PollCard {
+                            key: "{event.id}",
+                            event: event.clone(),
+                            precomputed_counts: interaction_counts.read().get(&event.id.to_hex()).cloned(),
+                        }
                         }
                     }
                     div { id: "{sentinel_id}", class: "p-8 flex justify-center",
@@ -255,7 +428,7 @@ async fn load_following_polls(
     if authors.is_empty() {
         return Ok(Vec::new());
     }
-    let mut filter = Filter::new().kind(Kind::Poll).authors(authors).limit(50);
+    let mut filter = Filter::new().kind(Kind::Poll).authors(authors).limit(PAGE_SIZE);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }
@@ -271,7 +444,7 @@ async fn load_global_polls(
     until: Option<u64>,
     _last_event_id: Option<nostr_sdk::EventId>,
 ) -> Result<Vec<Event>, String> {
-    let mut filter = Filter::new().kind(Kind::Poll).limit(50);
+    let mut filter = Filter::new().kind(Kind::Poll).limit(PAGE_SIZE);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     }

@@ -18,6 +18,16 @@ impl FileEntry {
         self.entry_type == "tree"
     }
 }
+/// Commit entry from git log
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommitEntry {
+    pub oid: String,
+    pub message: String,
+    pub author: String,
+    pub email: String,
+    pub timestamp: u64,
+    pub parent: Option<String>,
+}
 /// Git Worker manager - follows voice_recorder.rs pattern
 /// Worker is initialized globally via window.gitWorkerManager
 pub struct GitWorkerManager;
@@ -173,6 +183,58 @@ impl GitWorkerManager {
         } else {
             false
         }
+    }
+    /// Get commit log
+    pub async fn get_log(
+        dir: &str,
+        git_ref: &str,
+        depth: u32,
+    ) -> Result<Vec<CommitEntry>, String> {
+        let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
+        let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
+        let script = format!(
+            "window.gitWorkerManager.call('log', {{ dir: '{}', ref: '{}', depth: {} }})",
+            dir_escaped,
+            ref_escaped,
+            depth,
+        );
+        let result = Self::call_worker(&script).await?;
+        serde_wasm_bindgen::from_value(result)
+            .map_err(|e| format!("Parse error: {:?}", e))
+    }
+    /// List all file paths recursively (flat list for fuzzy finder)
+    pub async fn list_all_paths(
+        dir: &str,
+        git_ref: &str,
+    ) -> Result<Vec<String>, String> {
+        let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
+        let ref_escaped = git_ref.replace('\\', "\\\\").replace('\'', "\\'");
+        let script = format!(
+            "window.gitWorkerManager.call('listAllPaths', {{ dir: '{}', ref: '{}' }})",
+            dir_escaped,
+            ref_escaped,
+        );
+        let result = Self::call_worker(&script).await?;
+        serde_wasm_bindgen::from_value(result)
+            .map_err(|e| format!("Parse error: {:?}", e))
+    }
+    /// Compare two refs and generate unified diff
+    pub async fn diff_refs(
+        dir: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<String, String> {
+        let dir_escaped = dir.replace('\\', "\\\\").replace('\'', "\\'");
+        let base_escaped = base.replace('\\', "\\\\").replace('\'', "\\'");
+        let head_escaped = head.replace('\\', "\\\\").replace('\'', "\\'");
+        let script = format!(
+            "window.gitWorkerManager.call('diff', {{ dir: '{}', base: '{}', head: '{}' }})",
+            dir_escaped,
+            base_escaped,
+            head_escaped,
+        );
+        let result = Self::call_worker(&script).await?;
+        result.as_string().ok_or_else(|| "Expected string result".to_string())
     }
     /// Internal: call worker and await result
     async fn call_worker(script: &str) -> Result<JsValue, String> {

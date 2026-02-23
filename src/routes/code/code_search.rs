@@ -1,50 +1,248 @@
 //! Code Search Page
 //!
 //! Search repositories, issues, PRs, and code snippets.
+//! Supports advanced query syntax:
+//! - `is:open` / `is:closed` - filter by status
+//! - `label:bug` - filter by label
+//! - `type:issue` / `type:pr` / `type:repo` / `type:snippet` - filter by entity type
+//! - `author:npub...` - filter by author
+//!
+//! Plain text words are used as the search query.
 use crate::components::{icons, CodeIssueRow, CodePullRow, CodeRepoCard, CodeSnippetCard};
 use crate::routes::Route;
 use crate::services::git_hosting::{
     search_issues, search_prs, search_repositories, search_snippets,
 };
 use crate::stores::nostr_client;
-use crate::utils::nip34::{DisplaySnippet, Issue, PullRequest, Repository};
+use crate::utils::nip34::{DisplaySnippet, Issue, IssueStatus, PullRequest, Repository};
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
+use nostr_sdk::PublicKey;
+
+/// Parsed search query with structured filters
+#[derive(Clone, Debug, Default)]
+struct ParsedQuery {
+    /// Plain text search terms
+    text: String,
+    /// Status filter (open/closed)
+    status: Option<IssueStatus>,
+    /// Label filters
+    labels: Vec<String>,
+    /// Type filter (issue/pr/repo/snippet)
+    entity_type: Option<String>,
+    /// Author filter (pubkey)
+    author: Option<String>,
+}
+
+impl ParsedQuery {
+    fn parse(input: &str) -> Self {
+        let mut text_parts = Vec::new();
+        let mut query = ParsedQuery::default();
+
+        for token in input.split_whitespace() {
+            if let Some(value) = token.strip_prefix("is:") {
+                match value.to_lowercase().as_str() {
+                    "open" => query.status = Some(IssueStatus::Open),
+                    "closed" => query.status = Some(IssueStatus::Closed),
+                    "merged" | "applied" => query.status = Some(IssueStatus::Applied),
+                    "draft" => query.status = Some(IssueStatus::Draft),
+                    _ => text_parts.push(token.to_string()),
+                }
+            } else if let Some(value) = token.strip_prefix("label:") {
+                let normalized = value.to_lowercase();
+                if !normalized.is_empty() && !query.labels.contains(&normalized) {
+                    query.labels.push(normalized);
+                }
+            } else if let Some(value) = token.strip_prefix("type:") {
+                match value.to_lowercase().as_str() {
+                    "issue" | "issues" => query.entity_type = Some("issue".to_string()),
+                    "pr" | "pull" | "prs" => query.entity_type = Some("pr".to_string()),
+                    "repo" | "repository" | "repos" => query.entity_type = Some("repo".to_string()),
+                    "snippet" | "snippets" | "code" => query.entity_type = Some("snippet".to_string()),
+                    _ => text_parts.push(token.to_string()),
+                }
+            } else if let Some(value) = token.strip_prefix("author:") {
+                if !value.is_empty() {
+                    // Normalize npub bech32 to hex; fall back to raw string
+                    let normalized = PublicKey::parse(value)
+                        .map(|pk| pk.to_hex())
+                        .unwrap_or_else(|_| value.to_string());
+                    query.author = Some(normalized);
+                }
+            } else {
+                text_parts.push(token.to_string());
+            }
+        }
+
+        query.text = text_parts.join(" ");
+        query
+    }
+
+    fn has_filters(&self) -> bool {
+        self.status.is_some()
+            || !self.labels.is_empty()
+            || self.entity_type.is_some()
+            || self.author.is_some()
+    }
+
+    fn matches_issue(&self, issue: &Issue) -> bool {
+        if let Some(ref status) = self.status {
+            if issue.status != *status {
+                return false;
+            }
+        }
+        if !self.labels.is_empty()
+            && !self.labels.iter().all(|l| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
+        {
+            return false;
+        }
+        if let Some(ref author) = self.author {
+            if issue.pubkey != *author {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn matches_pr(&self, pr: &PullRequest) -> bool {
+        if let Some(ref status) = self.status {
+            if pr.status != *status {
+                return false;
+            }
+        }
+        if !self.labels.is_empty()
+            && !self.labels.iter().all(|l| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(l)))
+        {
+            return false;
+        }
+        if let Some(ref author) = self.author {
+            if pr.pubkey != *author {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn matches_repo(&self, repo: &Repository) -> bool {
+        if let Some(ref author) = self.author {
+            if repo.pubkey != *author {
+                return false;
+            }
+        }
+        if !self.labels.is_empty()
+            && !self.labels.iter().all(|l| repo.topics.iter().any(|t| t.eq_ignore_ascii_case(l)))
+        {
+            return false;
+        }
+        true
+    }
+
+    fn matches_snippet(&self, snippet: &DisplaySnippet) -> bool {
+        if let Some(ref author) = self.author {
+            if snippet.pubkey != *author {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn show_repos(&self) -> bool {
+        self.entity_type.is_none() || self.entity_type.as_deref() == Some("repo")
+    }
+
+    fn show_snippets(&self) -> bool {
+        self.entity_type.is_none() || self.entity_type.as_deref() == Some("snippet")
+    }
+
+    fn show_issues(&self) -> bool {
+        self.entity_type.is_none() || self.entity_type.as_deref() == Some("issue")
+    }
+
+    fn show_prs(&self) -> bool {
+        self.entity_type.is_none() || self.entity_type.as_deref() == Some("pr")
+    }
+}
 /// Code search page component
 #[component]
 pub fn CodeSearch(q: String) -> Element {
     let query = q.clone();
     let mut search_input = use_signal(|| q.clone());
+    // Sync search_input when the route query parameter changes (e.g., navigating back)
+    let q_for_sync = q.clone();
+    use_effect(use_reactive(&q_for_sync, move |q_val| {
+        search_input.set(q_val);
+    }));
     let mut active_filter = use_signal(|| SearchFilter::All);
     let nav = use_navigator();
     let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
     let mut snippets = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
     let mut issues = use_signal(|| None::<Result<Vec<Issue>, String>>);
     let mut prs = use_signal(|| None::<Result<Vec<PullRequest>, String>>);
+    let parsed = ParsedQuery::parse(&query);
+    let parsed_for_filter = parsed.clone();
     let query_for_effect = query.clone();
-    use_effect(move || {
-        let q = query_for_effect.clone();
+    let mut request_gen = use_signal(|| 0u32);
+    use_effect(use_reactive(&query_for_effect, move |q| {
+        let parsed = ParsedQuery::parse(&q);
+        // When the user specified only structured filters (e.g. `is:open label:bug`)
+        // with no free-text, pass None so the relay returns all events (no .search()
+        // filter). Client-side filters in `matches_issue`/`matches_pr` narrow results.
+        let search_text: Option<String> = if parsed.text.is_empty() {
+            None
+        } else {
+            Some(parsed.text.clone())
+        };
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        if q.is_empty() {
+            repos.set(Some(Ok(vec![])));
+            snippets.set(Some(Ok(vec![])));
+            issues.set(Some(Ok(vec![])));
+            prs.set(Some(Ok(vec![])));
+            return;
+        }
         spawn(async move {
-            if q.is_empty() {
-                repos.set(Some(Ok(vec![])));
-                snippets.set(Some(Ok(vec![])));
-                issues.set(Some(Ok(vec![])));
-                prs.set(Some(Ok(vec![])));
-            } else {
-                let (repos_res, snippets_res, issues_res, prs_res) = futures::join!(
-                    search_repositories(& q, 20), search_snippets(& q, 20),
-                    search_issues(& q, 20), search_prs(& q, 20)
-                );
-                repos.set(Some(repos_res));
-                snippets.set(Some(snippets_res));
-                issues.set(Some(issues_res));
-                prs.set(Some(prs_res));
-            }
+            // Only fetch entity types that will be displayed (based on type: filter)
+            let repos_fut = if parsed.show_repos() {
+                Some(search_repositories(search_text.as_deref(), 20))
+            } else { None };
+            let snippets_fut = if parsed.show_snippets() {
+                Some(search_snippets(search_text.as_deref(), 20))
+            } else { None };
+            let issues_fut = if parsed.show_issues() {
+                Some(search_issues(search_text.as_deref(), 20))
+            } else { None };
+            let prs_fut = if parsed.show_prs() {
+                Some(search_prs(search_text.as_deref(), 20))
+            } else { None };
+
+            // Use OptionFuture for conditional parallel execution
+            let (repos_res, snippets_res, issues_res, prs_res) = futures::join!(
+                async { match repos_fut { Some(f) => Some(f.await), None => None } },
+                async { match snippets_fut { Some(f) => Some(f.await), None => None } },
+                async { match issues_fut { Some(f) => Some(f.await), None => None } },
+                async { match prs_fut { Some(f) => Some(f.await), None => None } }
+            );
+            if *request_gen.peek() != gen { return; }
+            // Apply client-side filters and set results
+            repos.set(Some(repos_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|r| parsed.matches_repo(r)).collect())));
+            snippets.set(Some(snippets_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|s| parsed.matches_snippet(s)).collect())));
+            issues.set(Some(issues_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|i| parsed.matches_issue(i)).collect())));
+            prs.set(Some(prs_res
+                .unwrap_or(Ok(vec![]))
+                .map(|list| list.into_iter().filter(|p| parsed.matches_pr(p)).collect())));
         });
-    });
+    }));
     let handle_search = move |_| {
         let new_query = search_input.read().clone();
         if !new_query.is_empty() {
@@ -123,7 +321,7 @@ pub fn CodeSearch(q: String) -> Element {
                         input {
                             class: "w-full pl-10 pr-4 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                             r#type: "text",
-                            placeholder: "Search repositories, snippets, issues...",
+                            placeholder: "Search... (try is:open label:bug type:issue)",
                             value: "{search_input}",
                             oninput: move |e| search_input.set(e.value()),
                             onkeypress: handle_key_press,
@@ -159,6 +357,43 @@ pub fn CodeSearch(q: String) -> Element {
                 if !query.is_empty() {
                     div { class: "text-sm text-muted-foreground",
                         "{total_count} results for \"{query}\""
+                    }
+                    // Show active search filters
+                    if parsed_for_filter.has_filters() {
+                        div { class: "flex flex-wrap gap-1.5",
+                            if let Some(ref status) = parsed_for_filter.status {
+                                {
+                                    let status_label = match status {
+                                        IssueStatus::Open => "open",
+                                        IssueStatus::Closed => "closed",
+                                        IssueStatus::Applied => "merged",
+                                        IssueStatus::Draft => "draft",
+                                    };
+                                    rsx! {
+                                        span { class: "px-2 py-0.5 rounded-full text-xs bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                                            "is:{status_label}"
+                                        }
+                                    }
+                                }
+                            }
+                            for label in parsed_for_filter.labels.iter() {
+                                span {
+                                    key: "{label}",
+                                    class: "px-2 py-0.5 rounded-full text-xs bg-purple-500/10 text-purple-500 border border-purple-500/20",
+                                    "label:{label}"
+                                }
+                            }
+                            if let Some(ref entity_type) = parsed_for_filter.entity_type {
+                                span { class: "px-2 py-0.5 rounded-full text-xs bg-green-500/10 text-green-500 border border-green-500/20",
+                                    "type:{entity_type}"
+                                }
+                            }
+                            if let Some(ref author) = parsed_for_filter.author {
+                                span { class: "px-2 py-0.5 rounded-full text-xs bg-orange-500/10 text-orange-500 border border-orange-500/20",
+                                    "author:{truncate_pubkey(author)}"
+                                }
+                            }
+                        }
                     }
                 }
                 div { class: "flex gap-2 overflow-x-auto pb-2",

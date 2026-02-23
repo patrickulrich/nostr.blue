@@ -1,39 +1,95 @@
 //! Repository Pull Requests Page
 //!
-//! View pull requests for a repository.
-//! Follows patterns from code_issue_detail.rs and gittr design.
+//! View pull requests for a repository with filtering by status, search, and labels.
+use crate::components::code::{FilterBar, StatusFilter, filter_prs};
 use crate::components::{icons, CodePullRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_prs;
 use crate::stores::nostr_client;
+use crate::utils::nip34::IssueStatus;
 use dioxus::prelude::*;
+
 /// Repository pull requests page component
 #[component]
 pub fn CodeRepoPulls(naddr: String) -> Element {
-    let mut prs = use_signal(Vec::new);
+    let mut all_prs = use_signal(Vec::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    let mut status_filter = use_signal(|| StatusFilter::Open);
+    let mut search_query = use_signal(String::new);
+    let mut selected_labels = use_signal(Vec::<String>::new);
+    let mut request_gen = use_signal(|| 0u64);
+
+    use_effect(use_reactive(&naddr, move |naddr| {
+        error.set(None);
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
-            match fetch_repo_prs(&n).await {
+            let result = fetch_repo_prs(&naddr).await;
+            if *request_gen.peek() != gen { return; }
+            match result {
                 Ok(fetched) => {
-                    prs.set(fetched);
+                    all_prs.set(fetched);
                     error.set(None);
                 }
-                Err(e) => {
-                    error.set(Some(e));
-                }
+                Err(e) => error.set(Some(e)),
             }
             loading.set(false);
         });
+    }));
+
+    let filtered = use_memo(move || {
+        let prs = all_prs.read();
+        let status = *status_filter.read();
+        let query = search_query.read().clone();
+        let labels = selected_labels.read().clone();
+        filter_prs(&prs, status, &query, &labels)
     });
+
+    let open_count = use_memo(move || {
+        all_prs
+            .read()
+            .iter()
+            .filter(|p| p.status == IssueStatus::Open || p.status == IssueStatus::Draft)
+            .count()
+    });
+    let closed_count = use_memo(move || {
+        all_prs
+            .read()
+            .iter()
+            .filter(|p| p.status == IssueStatus::Closed || p.status == IssueStatus::Applied)
+            .count()
+    });
+
+    let available_labels = use_memo(move || {
+        let mut labels: Vec<String> = all_prs
+            .read()
+            .iter()
+            .flat_map(|p| p.labels.clone())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    });
+
+    // Trim selected_labels to only contain labels available in the current repo
+    use_effect(move || {
+        let current_selected = selected_labels.read().clone();
+        let available = available_labels.read();
+        let trimmed: Vec<String> = current_selected
+            .into_iter()
+            .filter(|l| available.contains(l))
+            .collect();
+        if trimmed != *selected_labels.peek() {
+            selected_labels.set(trimmed);
+        }
+    });
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -73,7 +129,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                             }
                             p { class: "text-sm text-muted-foreground",
                                 if !*loading.read() {
-                                    "{prs.read().len()} pull requests"
+                                    "{all_prs.read().len()} pull requests"
                                 }
                             }
                         }
@@ -146,12 +202,32 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                     }
                 } else if *loading.read() {
                     LoadingSkeleton {}
-                } else if prs.read().is_empty() {
-                    EmptyPRs {}
                 } else {
-                    div { class: "border border-border rounded-lg divide-y divide-border",
-                        for pr in prs.read().iter() {
-                            CodePullRow { key: "{pr.event_id}", pr: pr.clone() }
+                    FilterBar {
+                        status_filter: *status_filter.read(),
+                        on_status_change: move |s| status_filter.set(s),
+                        search_query: search_query.read().clone(),
+                        on_search_change: move |q| search_query.set(q),
+                        open_count: *open_count.read(),
+                        closed_count: *closed_count.read(),
+                        available_labels: available_labels.read().clone(),
+                        selected_labels: selected_labels.read().clone(),
+                        on_label_toggle: move |label: String| {
+                            let mut labels = selected_labels.write();
+                            if labels.contains(&label) {
+                                labels.retain(|l| *l != label);
+                            } else {
+                                labels.push(label);
+                            }
+                        },
+                    }
+                    if filtered.read().is_empty() {
+                        EmptyPRs { has_filters: !all_prs.read().is_empty() }
+                    } else {
+                        div { class: "border border-border rounded-lg divide-y divide-border",
+                            for pr in filtered.read().iter() {
+                                CodePullRow { key: "{pr.event_id}", pr: pr.clone() }
+                            }
                         }
                     }
                 }
@@ -160,7 +236,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
     }
 }
 #[component]
-fn EmptyPRs() -> Element {
+fn EmptyPRs(has_filters: bool) -> Element {
     rsx! {
         div { class: "text-center py-12",
             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
@@ -186,8 +262,20 @@ fn EmptyPRs() -> Element {
                     }
                 }
             }
-            h3 { class: "font-semibold text-lg mb-2", "No Pull Requests" }
-            p { class: "text-muted-foreground text-sm", "This repository has no open pull requests." }
+            h3 { class: "font-semibold text-lg mb-2",
+                if has_filters {
+                    "No Matching Pull Requests"
+                } else {
+                    "No Pull Requests"
+                }
+            }
+            p { class: "text-muted-foreground text-sm",
+                if has_filters {
+                    "No pull requests match the current filters."
+                } else {
+                    "No pull requests yet."
+                }
+            }
         }
     }
 }

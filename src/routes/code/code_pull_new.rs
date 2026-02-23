@@ -7,6 +7,48 @@ use crate::services::git_hosting::{fetch_repository, publish_patch_by_naddr};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+/// Validate a git ref name per git-check-ref-format rules
+fn is_valid_git_refname(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    if name.starts_with('-') || name.starts_with('.') || name.starts_with('/') {
+        return false;
+    }
+    if name.ends_with(".lock") || name.ends_with('/') || name.ends_with('.') {
+        return false;
+    }
+    if name.contains("@{")
+        || name.contains("//")
+        || name.contains("..")
+        || name.contains('~')
+        || name.contains('^')
+        || name.contains(':')
+        || name.contains('?')
+        || name.contains('*')
+        || name.contains('\\')
+        || name.contains('[')
+        || name.contains(' ')
+    {
+        return false;
+    }
+    if name.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f) {
+        return false;
+    }
+    for component in name.split('/') {
+        if component.is_empty() {
+            return false;
+        }
+        if component.starts_with('.') {
+            return false;
+        }
+        if component.ends_with(".lock") {
+            return false;
+        }
+    }
+    true
+}
+
 /// New pull request page component
 #[component]
 pub fn CodePullNew(naddr: String) -> Element {
@@ -15,6 +57,8 @@ pub fn CodePullNew(naddr: String) -> Element {
     let mut commit = use_signal(String::new);
     let mut parent_commit = use_signal(String::new);
     let mut labels = use_signal(String::new);
+    let mut closes_issues = use_signal(String::new);
+    let mut branch_name = use_signal(String::new);
     let mut is_cover_letter = use_signal(|| true);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
@@ -41,9 +85,11 @@ pub fn CodePullNew(naddr: String) -> Element {
         let naddr = naddr.clone();
         move |_| {
             let content_val = content.read().clone();
-            let commit_val = commit.read().clone();
-            let parent_val = parent_commit.read().clone();
+            let commit_val = commit.read().trim().to_string();
+            let parent_val = parent_commit.read().trim().to_string();
             let labels_val = labels.read().clone();
+            let closes_val = closes_issues.read().clone();
+            let branch_val = branch_name.read().trim().to_string();
             let is_cover = *is_cover_letter.read();
             let naddr = naddr.clone();
             spawn(async move {
@@ -51,22 +97,52 @@ pub fn CodePullNew(naddr: String) -> Element {
                     error_message.set(Some("Please enter patch content".to_string()));
                     return;
                 }
+                if !branch_val.is_empty() && !is_valid_git_refname(&branch_val) {
+                    error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
+                    return;
+                }
                 is_publishing.set(true);
                 error_message.set(None);
                 let label_list: Vec<&str> = if labels_val.is_empty() {
                     vec![]
                 } else {
-                    labels_val.split(',').map(|s| s.trim()).collect()
+                    labels_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
+                let closes_list: Vec<&str> = if closes_val.is_empty() {
+                    vec![]
+                } else {
+                    closes_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+                };
+                for id in &closes_list {
+                    // EventId::from_hex validates both hex chars and 64-char length
+                    if nostr_sdk::EventId::from_hex(id).is_err() {
+                        error_message.set(Some(format!("Invalid event ID '{}': must be exactly 64 hex characters", id)));
+                        is_publishing.set(false);
+                        return;
+                    }
+                }
                 let commit_ref = if commit_val.is_empty() {
                     None
+                } else if (commit_val.len() != 40 && commit_val.len() != 64) || !commit_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    error_message.set(Some(format!("Invalid commit hash '{}': must be exactly 40 (SHA-1) or 64 (SHA-256) hex characters", commit_val)));
+                    is_publishing.set(false);
+                    return;
                 } else {
                     Some(commit_val.as_str())
                 };
                 let parent_ref = if parent_val.is_empty() {
                     None
+                } else if (parent_val.len() != 40 && parent_val.len() != 64) || !parent_val.chars().all(|c| c.is_ascii_hexdigit()) {
+                    error_message.set(Some(format!("Invalid parent commit hash '{}': must be exactly 40 (SHA-1) or 64 (SHA-256) hex characters", parent_val)));
+                    is_publishing.set(false);
+                    return;
                 } else {
                     Some(parent_val.as_str())
+                };
+                let branch_ref = if branch_val.is_empty() {
+                    None
+                } else {
+                    Some(branch_val.as_str())
                 };
                 match publish_patch_by_naddr(
                         &naddr,
@@ -75,6 +151,8 @@ pub fn CodePullNew(naddr: String) -> Element {
                         parent_ref,
                         is_cover,
                         &label_list,
+                        &closes_list,
+                        branch_ref,
                     )
                     .await
                 {
@@ -231,7 +309,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                             input {
                                 class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
-                                placeholder: "e.g., abc1234",
+                                placeholder: "Full git commit SHA (e.g., a1b2c3d4...)",
                                 value: "{commit}",
                                 oninput: move |e| commit.set(e.value()),
                             }
@@ -244,7 +322,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                             input {
                                 class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
                                 r#type: "text",
-                                placeholder: "e.g., def5678",
+                                placeholder: "Full git commit SHA (e.g., e5f6a7b8...)",
                                 value: "{parent_commit}",
                                 oninput: move |e| parent_commit.set(e.value()),
                             }
@@ -287,6 +365,34 @@ pub fn CodePullNew(naddr: String) -> Element {
                         oninput: move |e| labels.set(e.value()),
                     }
                     p { class: "text-xs text-muted-foreground mt-1", "Comma-separated list of labels" }
+                }
+                div {
+                    label { class: "block text-sm font-medium mb-2",
+                        "Branch Name "
+                        span { class: "text-muted-foreground font-normal", "(optional)" }
+                    }
+                    input {
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        r#type: "text",
+                        placeholder: "e.g., feature/my-branch",
+                        value: "{branch_name}",
+                        oninput: move |e| branch_name.set(e.value()),
+                    }
+                    p { class: "text-xs text-muted-foreground mt-1", "Source branch for this patch" }
+                }
+                div {
+                    label { class: "block text-sm font-medium mb-2",
+                        "Closes Issues "
+                        span { class: "text-muted-foreground font-normal", "(optional)" }
+                    }
+                    input {
+                        class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary",
+                        r#type: "text",
+                        placeholder: "64-char hex event ID (e.g., a1b2c3d4e5f6...)",
+                        value: "{closes_issues}",
+                        oninput: move |e| closes_issues.set(e.value()),
+                    }
+                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated 64-character hex event IDs of issues this PR closes" }
                 }
             }
         }
