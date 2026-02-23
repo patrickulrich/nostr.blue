@@ -4,7 +4,7 @@
 //! Shows issues created by, assigned to, or mentioning the user.
 use crate::components::{icons, CodeIssueRow};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_user_issues, fetch_issues_assigned_to, fetch_issues_mentioning};
+use crate::services::git_hosting::{fetch_user_issues, fetch_issues_assigned_to};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::{Issue, IssueStatus};
 use dioxus::prelude::*;
@@ -14,7 +14,8 @@ use nostr_sdk::prelude::PublicKey;
 enum FilterTab {
     Created,
     Assigned,
-    Mentioned,
+    // NIP-34 uses p-tags for both assignment and mentions with no protocol-level
+    // distinction, so a separate "Mentioned" tab would duplicate "Assigned".
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -27,7 +28,6 @@ enum StatusFilter {
 pub fn CodeGlobalIssues() -> Element {
     let mut created_issues = use_signal(Vec::<Issue>::new);
     let mut assigned_issues = use_signal(Vec::<Issue>::new);
-    let mut mentioned_issues = use_signal(Vec::<Issue>::new);
     let mut loading = use_signal(|| true);
     let mut active_tab = use_signal(|| FilterTab::Created);
     let mut status_filter = use_signal(|| StatusFilter::Open);
@@ -49,15 +49,13 @@ pub fn CodeGlobalIssues() -> Element {
         request_gen.set(gen);
         created_issues.set(Vec::new());
         assigned_issues.set(Vec::new());
-        mentioned_issues.set(Vec::new());
         label_filter.set(None);
         loading.set(true);
         spawn(async move {
             if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
-                let (created_res, assigned_res, mentioned_res) = futures::join!(
+                let (created_res, assigned_res) = futures::join!(
                     fetch_user_issues(&pk, 100),
-                    fetch_issues_assigned_to(&pk, 100),
-                    fetch_issues_mentioning(&pk, 100)
+                    fetch_issues_assigned_to(&pk, 100)
                 );
                 if *request_gen.peek() != gen { return; }
                 match created_res {
@@ -67,10 +65,6 @@ pub fn CodeGlobalIssues() -> Element {
                 match assigned_res {
                     Ok(fetched) => assigned_issues.set(fetched),
                     Err(e) => log::warn!("Failed to fetch assigned issues: {}", e),
-                }
-                match mentioned_res {
-                    Ok(fetched) => mentioned_issues.set(fetched),
-                    Err(e) => log::warn!("Failed to fetch mentioned issues: {}", e),
                 }
             }
             loading.set(false);
@@ -85,7 +79,6 @@ pub fn CodeGlobalIssues() -> Element {
         match *active_tab.read() {
             FilterTab::Created => created_issues.read().clone(),
             FilterTab::Assigned => assigned_issues.read().clone(),
-            FilterTab::Mentioned => mentioned_issues.read().clone(),
         }
     });
     let all_labels = use_memo(move || {
@@ -195,15 +188,6 @@ pub fn CodeGlobalIssues() -> Element {
                         },
                         onclick: move |_| { label_filter.set(None); active_tab.set(FilterTab::Assigned); },
                         "Assigned"
-                    }
-                    button {
-                        class: if *active_tab.read() == FilterTab::Mentioned {
-                            "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
-                        } else {
-                            "text-sm text-muted-foreground hover:text-foreground pb-1"
-                        },
-                        onclick: move |_| { label_filter.set(None); active_tab.set(FilterTab::Mentioned); },
-                        "Mentioned"
                     }
                 }
                 div { class: "px-4 pb-3 flex gap-2",

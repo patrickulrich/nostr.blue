@@ -21,6 +21,7 @@ struct CommitDetail {
     author_avatar: Option<String>,
     date: String,
     diff: String,
+    diff_error: Option<String>,
     additions: u32,
     deletions: u32,
     files_changed: u32,
@@ -160,6 +161,11 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                 match &*commit_result.read() {
                     Some(Ok(detail)) => rsx! {
                         CommitHeader { detail: detail.clone(), sha: sha.clone() }
+                        if let Some(ref err) = detail.diff_error {
+                            div { class: "mt-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                                "{err}"
+                            }
+                        }
                         if !detail.diff.is_empty() {
                             div { class: "mt-4",
                                 DiffViewer { content: detail.diff.clone(), is_cover_letter: false }
@@ -319,13 +325,13 @@ async fn fetch_commit_detail(
         .await
         .map_err(|e| format!("Diff request failed: {}", e))?;
 
-    let diff = if diff_resp.ok() {
-        diff_resp
-            .text()
-            .await
-            .unwrap_or_default()
+    let (diff, diff_error) = if diff_resp.ok() {
+        match diff_resp.text().await {
+            Ok(text) => (text, None),
+            Err(e) => (String::new(), Some(format!("Failed to read diff body: {}", e))),
+        }
     } else {
-        String::new()
+        (String::new(), Some(format!("Failed to fetch diff (HTTP {})", diff_resp.status())))
     };
 
     let author_avatar = json.author.as_ref().map(|a| a.avatar_url.clone());
@@ -348,6 +354,7 @@ async fn fetch_commit_detail(
         author_avatar,
         date: json.commit.author.date,
         diff,
+        diff_error,
         additions: stats.map(|s| s.additions).unwrap_or(0),
         deletions: stats.map(|s| s.deletions).unwrap_or(0),
         files_changed,

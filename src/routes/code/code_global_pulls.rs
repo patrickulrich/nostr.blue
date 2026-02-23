@@ -34,6 +34,7 @@ pub fn CodeGlobalPulls() -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
+    let mut fetch_error = use_signal(|| None::<String>);
 
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
@@ -48,6 +49,7 @@ pub fn CodeGlobalPulls() -> Element {
                 let captured_pk = pk_hex.clone();
                 spawn(async move {
                     loading.set(true);
+                    fetch_error.set(None);
                     if let Ok(pk) = PublicKey::from_hex(&captured_pk) {
                         let (created_res, assigned_res, mentioned_res) = futures::join!(
                             fetch_user_prs(&pk, 100),
@@ -60,14 +62,30 @@ pub fn CodeGlobalPulls() -> Element {
                             loading.set(false);
                             return;
                         }
-                        if let Ok(fetched) = created_res {
-                            created_prs.set(fetched);
+                        let mut errors = Vec::new();
+                        match created_res {
+                            Ok(fetched) => created_prs.set(fetched),
+                            Err(e) => {
+                                errors.push(format!("Created: {}", e));
+                                created_prs.set(Vec::new());
+                            }
                         }
-                        if let Ok(fetched) = assigned_res {
-                            assigned_prs.set(fetched);
+                        match assigned_res {
+                            Ok(fetched) => assigned_prs.set(fetched),
+                            Err(e) => {
+                                errors.push(format!("Assigned: {}", e));
+                                assigned_prs.set(Vec::new());
+                            }
                         }
-                        if let Ok(fetched) = mentioned_res {
-                            mentioned_prs.set(fetched);
+                        match mentioned_res {
+                            Ok(fetched) => mentioned_prs.set(fetched),
+                            Err(e) => {
+                                errors.push(format!("Mentioned: {}", e));
+                                mentioned_prs.set(Vec::new());
+                            }
+                        }
+                        if !errors.is_empty() {
+                            fetch_error.set(Some(errors.join("; ")));
                         }
                     }
                     loading.set(false);
@@ -278,6 +296,11 @@ pub fn CodeGlobalPulls() -> Element {
                             }
                         }
                     }
+                }
+            }
+            if let Some(err) = fetch_error.read().as_ref() {
+                div { class: "mx-4 mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                    "{err}"
                 }
             }
             div { class: "p-4",

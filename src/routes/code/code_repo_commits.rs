@@ -334,7 +334,15 @@ fn GitCommitRow(commit: CommitEntry) -> Element {
 /// Format a commit date string (ISO 8601) to relative time
 fn format_commit_date(date_str: &str) -> String {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
-        return format_time_ago(dt.timestamp() as u64);
+        let ts = dt.timestamp();
+        if ts >= 0 {
+            return format_time_ago(ts as u64);
+        }
+        // Pre-1970 timestamps would wrap when cast to u64; return the original date string instead
+        if let Some(date_part) = date_str.split('T').next() {
+            return date_part.to_string();
+        }
+        return date_str.to_string();
     }
     // Fallback: try parsing as date-only
     if let Some(date_part) = date_str.split('T').next() {

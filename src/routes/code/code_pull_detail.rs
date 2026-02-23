@@ -853,7 +853,7 @@ fn CommentCard(comment: GitComment) -> Element {
         .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&comment.pubkey));
     rsx! {
-        div { class: "p-4 border border-border rounded-lg",
+        div { class: "bg-card border border-border rounded-lg p-4",
             div { class: "flex items-center gap-2 mb-2",
                 Link {
                     to: Route::Profile {

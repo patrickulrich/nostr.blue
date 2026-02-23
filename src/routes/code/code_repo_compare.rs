@@ -141,7 +141,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                         }
                     }
                     if let Some(err) = error.read().as_ref() {
-                        div { class: "text-sm text-red-400", "{err}" }
+                        div { class: "text-sm text-destructive", "{err}" }
                     }
                 }
                 if *loading.read() {

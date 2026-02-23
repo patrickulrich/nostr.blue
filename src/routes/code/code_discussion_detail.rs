@@ -220,7 +220,12 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
             div { class: "space-y-4",
                 h3 { class: "font-semibold flex items-center gap-2",
                     "Comments"
-                    span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{discussion.comment_count}" }
+                    span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted",
+                        {match &*comments.read() {
+                            Some(Ok(list)) => list.len().to_string(),
+                            _ => discussion.comment_count.to_string(),
+                        }}
+                    }
                 }
                 match &*comments.read() {
                     Some(Ok(comment_list)) => rsx! {

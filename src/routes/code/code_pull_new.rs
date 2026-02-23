@@ -12,6 +12,9 @@ fn is_valid_git_refname(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
+    if name == "@" {
+        return false;
+    }
     if name.starts_with('-') || name.starts_with('.') || name.starts_with('/') {
         return false;
     }
