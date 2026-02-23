@@ -118,8 +118,14 @@ pub async fn fetch_issues_mentioning(
     fetch_issues_assigned_to(pubkey, limit).await
 }
 /// Search issues by text (NIP-50)
-pub async fn search_issues(query: &str, limit: usize) -> Result<Vec<Issue>, String> {
-    let filter = Filter::new().kind(Kind::GitIssue).search(query).limit(limit);
+///
+/// When `query` is `None`, no `.search()` filter is applied — the relay returns
+/// all issues up to `limit`, which is useful for filter-only queries.
+pub async fn search_issues(query: Option<&str>, limit: usize) -> Result<Vec<Issue>, String> {
+    let mut filter = Filter::new().kind(Kind::GitIssue).limit(limit);
+    if let Some(q) = query {
+        filter = filter.search(q);
+    }
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to search issues: {}", e))?;

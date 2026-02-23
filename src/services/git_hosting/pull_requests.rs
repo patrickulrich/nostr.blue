@@ -108,8 +108,14 @@ pub async fn fetch_prs_mentioning(
     fetch_prs_assigned_to(pubkey, limit).await
 }
 /// Search PRs by text (NIP-50)
-pub async fn search_prs(query: &str, limit: usize) -> Result<Vec<PullRequest>, String> {
-    let filter = Filter::new().kind(Kind::GitPatch).search(query).limit(limit);
+///
+/// When `query` is `None`, no `.search()` filter is applied — the relay returns
+/// all PRs up to `limit`, which is useful for filter-only queries.
+pub async fn search_prs(query: Option<&str>, limit: usize) -> Result<Vec<PullRequest>, String> {
+    let mut filter = Filter::new().kind(Kind::GitPatch).limit(limit);
+    if let Some(q) = query {
+        filter = filter.search(q);
+    }
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to search pull requests: {}", e))?;

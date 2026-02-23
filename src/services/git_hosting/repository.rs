@@ -62,14 +62,17 @@ pub async fn fetch_recent_repositories(
     Ok(events.iter().filter_map(Repository::from_event).collect())
 }
 /// Search repositories by text
+///
+/// When `query` is `None`, no `.search()` filter is applied — the relay returns
+/// all repositories up to `limit`, which is useful for filter-only queries.
 pub async fn search_repositories(
-    query: &str,
+    query: Option<&str>,
     limit: usize,
 ) -> Result<Vec<Repository>, String> {
-    let filter = Filter::new()
-        .kind(Kind::GitRepoAnnouncement)
-        .search(query)
-        .limit(limit);
+    let mut filter = Filter::new().kind(Kind::GitRepoAnnouncement).limit(limit);
+    if let Some(q) = query {
+        filter = filter.search(q);
+    }
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to search repositories: {}", e))?;

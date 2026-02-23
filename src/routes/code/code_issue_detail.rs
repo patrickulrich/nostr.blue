@@ -426,8 +426,11 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                                 bounty_error.set(Some(format!("Failed to claim bounty: {}", e)));
                                                                             } else {
                                                                                 bounty_error.set(None);
+                                                                                let gen_before = *bounties_gen.peek();
                                                                                 if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
-                                                                                    bounties.set(refreshed);
+                                                                                    if *bounties_gen.peek() == gen_before {
+                                                                                        bounties.set(refreshed);
+                                                                                    }
                                                                                 }
                                                                             }
                                                                         }
@@ -473,8 +476,11 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             match release_bounty(b_id, i_id, &c, amount, None).await {
                                                                                 Ok(_) => {
                                                                                     bounty_error.set(None);
+                                                                                    let gen_before = *bounties_gen.peek();
                                                                                     if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
-                                                                                        bounties.set(refreshed);
+                                                                                        if *bounties_gen.peek() == gen_before {
+                                                                                            bounties.set(refreshed);
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                                 Err(e) => {

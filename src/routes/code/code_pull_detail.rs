@@ -34,16 +34,21 @@ pub fn CodePullDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut pr_result = use_signal(|| None::<Result<PullRequest, String>>);
     let mut loading = use_signal(|| true);
+    let mut pr_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = pr_gen.peek().wrapping_add(1);
+        pr_gen.set(gen);
         spawn(async move {
             loading.set(true);
             let result = fetch_pull_request(&note_id).await;
-            pr_result.set(Some(result));
-            loading.set(false);
+            if *pr_gen.peek() == gen {
+                pr_result.set(Some(result));
+                loading.set(false);
+            }
         });
     }));
     rsx! {

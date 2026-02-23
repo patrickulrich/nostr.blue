@@ -20,6 +20,20 @@ const CORS_PROXY = 'https://cors.isomorphic-git.org';
  * First tries the requested ref, then falls back to main/master local branches,
  * then tries remote branches if no local branches exist.
  */
+/**
+ * Check if a blob appears to be binary by scanning for null bytes
+ * in the first 8 KB of data.
+ * @param {Uint8Array} uint8Array - The blob content to check
+ * @returns {boolean} true if the content appears to be binary
+ */
+function isBinary(uint8Array) {
+  const scanLen = Math.min(uint8Array.length, 8192);
+  for (let i = 0; i < scanLen; i++) {
+    if (uint8Array[i] === 0) return true;
+  }
+  return false;
+}
+
 async function resolveRefWithFallback(dir, ref) {
   // Try direct resolution first
   try {
@@ -644,18 +658,6 @@ const methods = {
     // Maximum blob size to include in diff (2 MB)
     const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
-    /**
-     * Check if a blob appears to be binary by scanning for null bytes
-     * in the first 8 KB of data.
-     */
-    function isBinary(uint8Array) {
-      const scanLen = Math.min(uint8Array.length, 8192);
-      for (let i = 0; i < scanLen; i++) {
-        if (uint8Array[i] === 0) return true;
-      }
-      return false;
-    }
-
     let baseOid, headOid;
     try {
       baseOid = await resolveRefWithFallback(dir, base);
@@ -720,8 +722,7 @@ const methods = {
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push(inBase ? `--- a/${filepath}` : `--- /dev/null`);
         diffParts.push(inHead ? `+++ b/${filepath}` : `+++ /dev/null`);
-        diffParts.push(`@@ -0,0 +0,0 @@`);
-        diffParts.push(` ${skipReason}`);
+        diffParts.push(`Binary files differ: ${skipReason}`);
         continue;
       }
 

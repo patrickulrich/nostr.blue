@@ -183,14 +183,13 @@ pub fn CodeSearch(q: String) -> Element {
     let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&query_for_effect, move |q| {
         let parsed = ParsedQuery::parse(&q);
-        let search_text = if parsed.text.is_empty() && parsed.has_filters() {
-            // When the user specified only structured filters (e.g. `is:open label:bug`)
-            // with no free-text, we still need a non-empty query string to trigger relay
-            // searches. A single space acts as a wildcard that fetches broadly so the
-            // client-side filters in `matches_issue`/`matches_pr` can narrow results.
-            " ".to_string()
+        // When the user specified only structured filters (e.g. `is:open label:bug`)
+        // with no free-text, pass None so the relay returns all events (no .search()
+        // filter). Client-side filters in `matches_issue`/`matches_pr` narrow results.
+        let search_text: Option<String> = if parsed.text.is_empty() {
+            None
         } else {
-            parsed.text.clone()
+            Some(parsed.text.clone())
         };
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -209,16 +208,16 @@ pub fn CodeSearch(q: String) -> Element {
             {
                 // Only fetch entity types that will be displayed (based on type: filter)
                 let repos_fut = if parsed.show_repos() {
-                    Some(search_repositories(&search_text, 20))
+                    Some(search_repositories(search_text.as_deref(), 20))
                 } else { None };
                 let snippets_fut = if parsed.show_snippets() {
-                    Some(search_snippets(&search_text, 20))
+                    Some(search_snippets(search_text.as_deref(), 20))
                 } else { None };
                 let issues_fut = if parsed.show_issues() {
-                    Some(search_issues(&search_text, 20))
+                    Some(search_issues(search_text.as_deref(), 20))
                 } else { None };
                 let prs_fut = if parsed.show_prs() {
-                    Some(search_prs(&search_text, 20))
+                    Some(search_prs(search_text.as_deref(), 20))
                 } else { None };
 
                 // Use OptionFuture for conditional parallel execution
