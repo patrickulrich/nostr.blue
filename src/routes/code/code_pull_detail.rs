@@ -127,14 +127,20 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
 
     // Fetch repository for permission checks
     let mut repo = use_signal(|| None::<Repository>);
+    let mut repo_gen = use_signal(|| 0u64);
     let repo_naddr = pr.repository_naddr.clone();
     use_effect(use_reactive(&repo_naddr, move |naddr| {
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
+        repo.set(None);
         if naddr.is_empty() {
             return;
         }
         spawn(async move {
             if let Ok(r) = fetch_repository(&naddr).await {
-                repo.set(Some(r));
+                if *repo_gen.peek() == gen {
+                    repo.set(Some(r));
+                }
             }
         });
     }));

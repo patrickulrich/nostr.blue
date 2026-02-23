@@ -18,14 +18,20 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut has_compared = use_signal(|| false);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
+    let mut request_gen = use_signal(|| 0u64);
     use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&naddr).await;
-            repo_result.set(Some(result));
+            if *request_gen.peek() == gen {
+                repo_result.set(Some(result));
+            }
         });
     }));
     let handle_compare = move |_| {
