@@ -464,9 +464,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                         Some(ref c) if !c.is_empty() => c.clone(),
                                                                         _ => {
                                                                             log::error!("Cannot release bounty: no claimer found");
-                                                                            web_sys::console::error_1(
-                                                                                &"Cannot release bounty: no claimer found for this bounty".into(),
-                                                                            );
+                                                                            bounty_error.set(Some("Cannot release bounty: no claimer found".to_string()));
                                                                             claiming_bounty.set(None);
                                                                             return;
                                                                         }

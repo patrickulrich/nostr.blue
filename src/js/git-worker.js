@@ -433,8 +433,9 @@ function generateHunks(edits, oldLines, newLines, contextLines) {
     }
 
     // Convert to 1-based line numbers
-    const oldStartLine = oldStart + 1;
-    const newStartLine = newStart + 1;
+    // When count is 0, start line is the anchor (line before change point)
+    const oldStartLine = oldCount === 0 ? oldStart : oldStart + 1;
+    const newStartLine = newCount === 0 ? newStart : newStart + 1;
 
     output.push(`@@ -${oldStartLine},${oldCount} +${newStartLine},${newCount} @@`);
     output.push(...hunkLines);

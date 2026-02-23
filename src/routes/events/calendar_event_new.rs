@@ -762,6 +762,9 @@ pub fn CalendarEventNew() -> Element {
                                                     if let Ok(results) = search_profiles(&query_snapshot, 8, true).await {
                                                         if *participant_debounce.peek() != current_id { return; }
                                                         participant_results.set(results);
+                                                    } else {
+                                                        if *participant_debounce.peek() != current_id { return; }
+                                                        participant_results.set(Vec::new());
                                                     }
                                                 });
                                             }
