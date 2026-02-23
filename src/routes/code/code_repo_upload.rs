@@ -52,7 +52,6 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
     let mut selected_server = use_signal(blossom_store::get_primary_server);
     let upload_progress = blossom_store::UPLOAD_PROGRESS.read();
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut loading = use_signal(|| true);
     let mut copied_index = use_signal(|| None::<usize>);
     let mut next_file_id = use_signal(|| 0u64);
 
@@ -68,13 +67,11 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
         repo_result.set(None);
-        loading.set(true);
         let n = naddr.clone();
         spawn(async move {
             let result = fetch_repository(&n).await;
             if *request_gen.peek() != gen { return; }
             repo_result.set(Some(result));
-            loading.set(false);
         });
     }));
 
@@ -242,7 +239,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 
             div { class: "p-4 space-y-6 max-w-3xl mx-auto",
                 // Repository context
-                if *loading.read() {
+                if repo_result.read().is_none() {
                     div { class: "p-4 bg-muted rounded-lg animate-pulse",
                         div { class: "h-4 bg-muted-foreground/20 rounded w-48" }
                     }

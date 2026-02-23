@@ -33,7 +33,6 @@ enum PrTab {
 pub fn CodePullDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut pr_result = use_signal(|| None::<Result<PullRequest, String>>);
-    let mut loading = use_signal(|| true);
     let mut pr_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -42,12 +41,11 @@ pub fn CodePullDetail(note_id: String) -> Element {
         }
         let gen = pr_gen.peek().wrapping_add(1);
         pr_gen.set(gen);
+        pr_result.set(None);
         spawn(async move {
-            loading.set(true);
             let result = fetch_pull_request(&note_id).await;
             if *pr_gen.peek() == gen {
                 pr_result.set(Some(result));
-                loading.set(false);
             }
         });
     }));
@@ -88,7 +86,7 @@ pub fn CodePullDetail(note_id: String) -> Element {
             }
             div { class: "p-4",
                 if !*nostr_client::CLIENT_INITIALIZED.read()
-                    || (*loading.read() && pr_result.read().is_none())
+                    || pr_result.read().is_none()
                 {
                     LoadingSkeleton {}
                 } else {

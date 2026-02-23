@@ -28,6 +28,7 @@ pub fn FilterBar(
     #[props(default = None)]
     on_label_toggle: Option<EventHandler<String>>,
 ) -> Element {
+    let search_query = search_query.clone();
     rsx! {
         div { class: "space-y-3 mb-4",
             // Search + status tabs row

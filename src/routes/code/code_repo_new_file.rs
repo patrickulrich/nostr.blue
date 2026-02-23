@@ -49,7 +49,7 @@ fn filename_from_path(path: &str) -> &str {
 /// Build a unified diff for a new file creation.
 fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_message: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
-    let line_count = lines.len();
+    let line_count = if content.is_empty() { 0 } else { lines.len().max(1) };
 
     let mut diff = String::new();
     diff.push_str(&format!("From: {}\n", author_pubkey));

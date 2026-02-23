@@ -18,7 +18,6 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeRepoInsights(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut loading = use_signal(|| true);
     let naddr_for_render = naddr.clone();
 
     use_effect(use_reactive(&naddr, move |naddr| {
@@ -26,11 +25,10 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        repo_result.set(None);
         spawn(async move {
-            loading.set(true);
             let result = fetch_repository(&naddr).await;
             repo_result.set(Some(result));
-            loading.set(false);
         });
     }));
 
@@ -65,7 +63,7 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
             }
             div { class: "p-4",
                 if !*nostr_client::CLIENT_INITIALIZED.read()
-                    || (*loading.read() && repo_result.read().is_none())
+                    || repo_result.read().is_none()
                 {
                     LoadingSkeleton {}
                 } else {
