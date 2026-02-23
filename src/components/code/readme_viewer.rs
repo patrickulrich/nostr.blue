@@ -3,8 +3,71 @@
 //! Displays repository README with markdown rendering.
 //! Uses pulldown-cmark for parsing and ammonia for sanitization.
 //! Styled to match gittr's readme-section.tsx pattern.
+//! Supports mermaid diagram rendering via mermaid.js CDN.
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(
+    inline_js = r#"
+export function initMermaidDiagrams() {
+    // Find mermaid divs; skip if none present
+    const mermaidDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
+    if (mermaidDivs.length === 0) return;
+
+    if (window.mermaid) {
+        try {
+            const nodes = Array.from(mermaidDivs);
+            window.mermaid.run({ nodes }).then(() => {
+                nodes.forEach(el => el.setAttribute('data-processed', 'true'));
+            }).catch(e => {
+                console.warn('Mermaid render error:', e);
+            });
+        } catch (e) {
+            console.warn('Mermaid render error:', e);
+        }
+        return;
+    }
+
+    // Load mermaid.js from CDN (skip if already loading/loaded)
+    if (window.__mermaidLoaderStatus === 'loading' || window.__mermaidLoaderStatus === 'loaded') return;
+    window.__mermaidLoaderStatus = 'loading';
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js';
+    script.integrity = 'sha384-6F4Ibv/ylL12O35KFWTeGTHuBKDz5L6yjKsgv3QHQ8s4NTqlDXq7kMlYXGs7MHFc';
+    script.crossOrigin = 'anonymous';
+    script.onload = () => {
+        window.__mermaidLoaderStatus = 'loaded';
+        try {
+            window.mermaid.initialize({
+                startOnLoad: false,
+                theme: 'dark',
+                securityLevel: 'strict',
+            });
+            // Re-query to catch diagrams added while script was loading
+            const freshDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
+            if (freshDivs.length === 0) return;
+            const freshNodes = Array.from(freshDivs);
+            window.mermaid.run({ nodes: freshNodes }).then(() => {
+                freshNodes.forEach(el => el.setAttribute('data-processed', 'true'));
+            }).catch(e => {
+                console.warn('Mermaid render error:', e);
+            });
+        } catch (e) {
+            console.warn('Mermaid init error:', e);
+        }
+    };
+    script.onerror = () => {
+        window.__mermaidLoaderStatus = 'error';
+        console.warn('Failed to load mermaid.js from CDN');
+    };
+    document.head.appendChild(script);
+}
+"#
+)]
+extern "C" {
+    fn initMermaidDiagrams();
+}
 /// README viewer with loading/error states
 #[component]
 pub fn ReadmeViewer(
@@ -17,6 +80,21 @@ pub fn ReadmeViewer(
     #[props(default = "README.md".to_string())]
     filename: String,
 ) -> Element {
+    // Initialize mermaid.js after the README HTML is rendered into the DOM
+    use_effect(use_reactive(&content, move |content| {
+        let has_mermaid = content
+            .as_ref()
+            .map(|c| c.contains("```mermaid"))
+            .unwrap_or(false);
+        if has_mermaid {
+            // Small delay to ensure dangerous_inner_html has been applied to the DOM
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(100).await;
+                initMermaidDiagrams();
+            });
+        }
+    }));
+
     rsx! {
         div { class: "border border-border rounded-lg overflow-hidden",
             div { class: "flex items-center gap-2 px-4 py-3 bg-muted/50 border-b border-border",
@@ -157,13 +235,35 @@ fn NoReadme() -> Element {
     }
 }
 /// Inline README preview (for compact displays)
-/// Uses CSS line-clamp for visual truncation to avoid breaking markdown constructs
+/// Uses CSS line-clamp for visual truncation to avoid breaking markdown constructs.
+/// Mermaid code blocks are replaced with a placeholder since the CDN won't render in previews.
 #[component]
 pub fn ReadmePreview(content: String) -> Element {
+    // Replace mermaid code blocks with a placeholder for preview
+    let preview_content = {
+        let mut result = String::new();
+        let mut in_mermaid = false;
+        for line in content.lines() {
+            if line.trim() == "```mermaid" {
+                in_mermaid = true;
+                result.push_str("[Diagram]\n");
+                continue;
+            }
+            if in_mermaid {
+                if line.trim() == "```" {
+                    in_mermaid = false;
+                }
+                continue;
+            }
+            result.push_str(line);
+            result.push('\n');
+        }
+        result
+    };
     rsx! {
         div {
             class: "text-sm text-muted-foreground line-clamp-3",
-            dangerous_inner_html: "{render_markdown(&content)}",
+            dangerous_inner_html: "{render_markdown(&preview_content)}",
         }
     }
 }

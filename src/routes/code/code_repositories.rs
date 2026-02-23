@@ -11,34 +11,46 @@ use nostr_sdk::PublicKey;
 /// Code repositories page component
 #[component]
 pub fn CodeRepositories() -> Element {
+    // All hooks must be called before any early returns to maintain stable call-order indices.
+    let mut repos_result = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut request_gen = use_signal(|| 0u64);
+
     let auth = auth_store::AUTH_STATE.read();
+    let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
+    let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+    use_effect(
+        use_reactive(
+            &(pubkey_hex, client_initialized),
+            move |(pk, initialized)| {
+                if !initialized {
+                    return;
+                }
+                request_gen.with_mut(|v| *v = v.wrapping_add(1));
+                let captured_gen = *request_gen.peek();
+                spawn(async move {
+                    if pk.is_empty() {
+                        repos_result.set(Some(Err("No public key".to_string())));
+                        return;
+                    }
+                    let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
+                        fetch_user_repositories(&pubkey, 50).await
+                    } else {
+                        Err("Invalid public key".to_string())
+                    };
+                    if *request_gen.peek() != captured_gen {
+                        return;
+                    }
+                    repos_result.set(Some(result));
+                });
+            },
+        ),
+    );
+
     if !auth.is_authenticated {
         return rsx! {
             NotAuthenticatedState {}
         };
     }
-    let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
-    let mut repos_result = use_signal(|| None::<Result<Vec<Repository>, String>>);
-    let pubkey_for_effect = pubkey_hex.clone();
-    use_effect(move || {
-        let pk = pubkey_for_effect.clone();
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        spawn(async move {
-            if pk.is_empty() {
-                repos_result.set(Some(Err("No public key".to_string())));
-                return;
-            }
-            let result = if let Ok(pubkey) = PublicKey::parse(&pk) {
-                fetch_user_repositories(&pubkey, 50).await
-            } else {
-                Err("Invalid public key".to_string())
-            };
-            repos_result.set(Some(result));
-        });
-    });
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

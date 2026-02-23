@@ -168,6 +168,33 @@ pub async fn fetch_commits(
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
 }
+/// Fetch recent commits for a specific file path
+pub async fn fetch_file_commits(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+    limit: usize,
+) -> Result<Vec<GitHubCommit>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/commits?path={}&sha={}&per_page={}",
+        owner,
+        repo,
+        urlencoding::encode(path),
+        urlencoding::encode(git_ref),
+        limit,
+    );
+    let response = Request::get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.ok() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+}
 /// Fetch branches
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);

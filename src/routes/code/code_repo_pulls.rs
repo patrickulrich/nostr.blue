@@ -1,30 +1,34 @@
 //! Repository Pull Requests Page
 //!
-//! View pull requests for a repository.
-//! Follows patterns from code_issue_detail.rs and gittr design.
+//! View pull requests for a repository with filtering by status, search, and labels.
+use crate::components::code::{FilterBar, StatusFilter, filter_prs};
 use crate::components::{icons, CodePullRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_prs;
 use crate::stores::nostr_client;
+use crate::utils::nip34::IssueStatus;
 use dioxus::prelude::*;
+
 /// Repository pull requests page component
 #[component]
 pub fn CodeRepoPulls(naddr: String) -> Element {
-    let mut prs = use_signal(Vec::new);
+    let mut all_prs = use_signal(Vec::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    let mut status_filter = use_signal(|| StatusFilter::Open);
+    let mut search_query = use_signal(String::new);
+    let mut selected_labels = use_signal(Vec::<String>::new);
+
+    use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
         spawn(async move {
             loading.set(true);
-            match fetch_repo_prs(&n).await {
+            match fetch_repo_prs(&naddr).await {
                 Ok(fetched) => {
-                    prs.set(fetched);
+                    all_prs.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
@@ -33,7 +37,38 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
+
+    let filtered = {
+        let prs = all_prs.read();
+        let status = *status_filter.read();
+        let query = search_query.read().clone();
+        let labels = selected_labels.read().clone();
+        filter_prs(&prs, status, &query, &labels)
+    };
+
+    let open_count = all_prs
+        .read()
+        .iter()
+        .filter(|p| p.status == IssueStatus::Open || p.status == IssueStatus::Draft)
+        .count();
+    let closed_count = all_prs
+        .read()
+        .iter()
+        .filter(|p| p.status == IssueStatus::Closed || p.status == IssueStatus::Applied)
+        .count();
+
+    let available_labels: Vec<String> = {
+        let mut labels: Vec<String> = all_prs
+            .read()
+            .iter()
+            .flat_map(|p| p.labels.clone())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    };
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -73,7 +108,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                             }
                             p { class: "text-sm text-muted-foreground",
                                 if !*loading.read() {
-                                    "{prs.read().len()} pull requests"
+                                    "{all_prs.read().len()} pull requests"
                                 }
                             }
                         }
@@ -146,12 +181,32 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                     }
                 } else if *loading.read() {
                     LoadingSkeleton {}
-                } else if prs.read().is_empty() {
-                    EmptyPRs {}
                 } else {
-                    div { class: "border border-border rounded-lg divide-y divide-border",
-                        for pr in prs.read().iter() {
-                            CodePullRow { key: "{pr.event_id}", pr: pr.clone() }
+                    FilterBar {
+                        status_filter: *status_filter.read(),
+                        on_status_change: move |s| status_filter.set(s),
+                        search_query: search_query.read().clone(),
+                        on_search_change: move |q| search_query.set(q),
+                        open_count,
+                        closed_count,
+                        available_labels,
+                        selected_labels: selected_labels.read().clone(),
+                        on_label_toggle: move |label: String| {
+                            let mut labels = selected_labels.write();
+                            if labels.contains(&label) {
+                                labels.retain(|l| *l != label);
+                            } else {
+                                labels.push(label);
+                            }
+                        },
+                    }
+                    if filtered.is_empty() {
+                        EmptyPRs {}
+                    } else {
+                        div { class: "border border-border rounded-lg divide-y divide-border",
+                            for pr in filtered.iter() {
+                                CodePullRow { key: "{pr.event_id}", pr: pr.clone() }
+                            }
                         }
                     }
                 }
@@ -187,7 +242,7 @@ fn EmptyPRs() -> Element {
                 }
             }
             h3 { class: "font-semibold text-lg mb-2", "No Pull Requests" }
-            p { class: "text-muted-foreground text-sm", "This repository has no open pull requests." }
+            p { class: "text-muted-foreground text-sm", "No pull requests match the current filters." }
         }
     }
 }
