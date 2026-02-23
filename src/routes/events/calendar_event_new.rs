@@ -644,12 +644,12 @@ pub fn CalendarEventNew() -> Element {
                             }
                             if *show_location_dropdown.read() && !location_suggestions.read().is_empty() {
                                 div { class: "absolute left-0 right-0 top-full mt-1 z-50 bg-background border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto",
-                                    for suggestion in location_suggestions.read().iter() {
+                                    for (idx, suggestion) in location_suggestions.read().iter().enumerate() {
                                         {
                                             let display = suggestion.display_name.clone();
                                             rsx! {
                                                 button {
-                                                    key: "{display}",
+                                                    key: "{idx}-{display}",
                                                     class: "w-full text-left px-4 py-3 hover:bg-accent transition text-sm border-b border-border last:border-b-0",
                                                     onmousedown: move |e| e.prevent_default(),
                                                     onclick: {

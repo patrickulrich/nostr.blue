@@ -292,6 +292,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                 return;
                             }
                             let mut new_files = Vec::new();
+                            let mut failed_names: Vec<String> = Vec::new();
                             for file in files {
                                 let name = file.name();
                                 let mime_type = file.content_type()
@@ -309,12 +310,18 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to read dropped file {}: {:?}", name, e);
+                                        failed_names.push(name);
                                     }
                                 }
                             }
+                            if !failed_names.is_empty() {
+                                error_message.set(Some(format!("Failed to read: {}", failed_names.join(", "))));
+                            }
                             if !new_files.is_empty() {
                                 selected_files.write().extend(new_files);
-                                error_message.set(None);
+                                if failed_names.is_empty() {
+                                    error_message.set(None);
+                                }
                             }
                         },
                         onclick: move |_| {
@@ -714,16 +721,17 @@ fn format_size(bytes: usize) -> String {
 
 /// Get file extension for display in the file icon
 fn get_file_extension(name: &str) -> String {
-    name.rsplit('.')
-        .next()
-        .map(|ext| {
+    match name.rfind('.') {
+        Some(pos) if pos > 0 && pos < name.len() - 1 => {
+            let ext = &name[pos + 1..];
             if ext.len() <= 4 {
                 ext.to_uppercase()
             } else {
                 ext.chars().take(4).collect::<String>().to_uppercase()
             }
-        })
-        .unwrap_or_else(|| "FILE".to_string())
+        }
+        _ => "FILE".to_string(),
+    }
 }
 
 #[component]

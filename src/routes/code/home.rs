@@ -234,10 +234,10 @@ fn RepositoriesTab() -> Element {
                             oldest_timestamp.set(Some(oldest.created_at));
                         }
                         let mut current = repos.peek().clone();
-                        let existing: HashSet<_> =
+                        let mut existing: HashSet<_> =
                             current.iter().map(|r| r.event_id.clone()).collect();
                         for repo in fetched {
-                            if !existing.contains(&repo.event_id) {
+                            if existing.insert(repo.event_id.clone()) {
                                 current.push(repo);
                             }
                         }
@@ -597,8 +597,18 @@ fn MyReposTab() -> Element {
         loading.set(true);
         spawn(async move {
             match fetch_user_repositories(&pubkey, 50).await {
-                Ok(repos) => my_repos.set(Some(Ok(repos))),
-                Err(e) => my_repos.set(Some(Err(e))),
+                Ok(repos) => {
+                    if auth_store::get_pubkey().as_deref() != Some(pubkey_hex.as_str()) {
+                        return;
+                    }
+                    my_repos.set(Some(Ok(repos)));
+                }
+                Err(e) => {
+                    if auth_store::get_pubkey().as_deref() != Some(pubkey_hex.as_str()) {
+                        return;
+                    }
+                    my_repos.set(Some(Err(e)));
+                }
             }
             loading.set(false);
         });

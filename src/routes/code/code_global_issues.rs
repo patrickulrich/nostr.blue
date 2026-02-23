@@ -120,7 +120,7 @@ pub fn CodeGlobalIssues() -> Element {
                 || i.labels.iter().any(|l| l.to_lowercase().contains(&query))
         })
         .filter(|i| match label_filter.read().as_deref() {
-            Some(filter) => i.labels.contains(&filter.to_string()),
+            Some(filter) => i.labels.iter().any(|l| l.as_str() == filter),
             None => true,
         })
         .cloned()

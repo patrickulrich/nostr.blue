@@ -18,7 +18,7 @@ use nostr_sdk::{
     Event as NostrEvent, EventId, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId,
     TagStandard, Timestamp, ToBech32,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -818,18 +818,24 @@ fn deduplicate_votes(events: Vec<NostrEvent>) -> Vec<NostrEvent> {
     }
     map.into_values().collect()
 }
-fn calculate_poll_results(
-    poll: &Poll,
-    vote_events: Vec<NostrEvent>,
-) -> HashMap<String, usize> {
+fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
+    let valid_ids: HashSet<&str> = poll.options.iter().map(|o| o.id.as_str()).collect();
     for option in &poll.options {
         counts.insert(option.id.clone(), 0);
     }
+    let is_single_choice = matches!(poll.r#type, PollType::SingleChoice);
     for vote_event in vote_events {
+        let mut counted_in_event = false;
         for tag in vote_event.tags.iter() {
             if let Some(TagStandard::PollResponse(option_id)) = tag.as_standardized() {
-                *counts.entry(option_id.clone()).or_insert(0) += 1;
+                if valid_ids.contains(option_id.as_str()) {
+                    if is_single_choice && counted_in_event {
+                        break;
+                    }
+                    *counts.get_mut(option_id.as_str()).unwrap() += 1;
+                    counted_in_event = true;
+                }
             }
         }
     }

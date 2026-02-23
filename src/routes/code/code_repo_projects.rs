@@ -27,7 +27,9 @@ impl BoardItem {
     fn title(&self) -> &str {
         match self {
             Self::Issue(i) => i.subject.as_deref().unwrap_or("Untitled"),
-            Self::PullRequest(p) => p.content.lines().next().unwrap_or("Untitled"),
+            Self::PullRequest(p) => p.content.lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("Untitled"),
         }
     }
 
@@ -96,16 +98,22 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
         fetch_error.set(None);
         loading.set(true);
         spawn(async move {
+            let mut errors = Vec::new();
 
             // Fetch repo metadata
-            if let Ok(r) = fetch_repository(&n).await {
-                if *gen.peek() != captured_gen { return; }
-                repo.set(Some(r));
+            match fetch_repository(&n).await {
+                Ok(r) => {
+                    if *gen.peek() != captured_gen { return; }
+                    repo.set(Some(r));
+                }
+                Err(e) => {
+                    if *gen.peek() != captured_gen { return; }
+                    errors.push(format!("Repository: {}", e));
+                }
             }
 
             // Fetch issues and PRs
             let mut all_items = Vec::new();
-            let mut errors = Vec::new();
             match fetch_repo_issues(&n).await {
                 Ok(issues) => all_items.extend(issues.into_iter().map(BoardItem::Issue)),
                 Err(e) => errors.push(format!("Issues: {}", e)),

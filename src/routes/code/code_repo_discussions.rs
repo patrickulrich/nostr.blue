@@ -197,7 +197,7 @@ fn discussion_preview_title(discussion: &Discussion) -> String {
         .clone()
         .unwrap_or_else(|| {
             let preview: String = discussion.content.chars().take(80).collect();
-            if discussion.content.len() > 80 {
+            if discussion.content.chars().nth(80).is_some() {
                 format!("{}...", preview)
             } else {
                 preview

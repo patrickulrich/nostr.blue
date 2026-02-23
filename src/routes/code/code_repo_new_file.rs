@@ -24,8 +24,8 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.contains('\0') {
         return Some("Path must not contain null bytes".to_string());
     }
-    if path.split('/').any(|segment| segment == "..") {
-        return Some("Path must not contain .. segments".to_string());
+    if path.split('/').any(|segment| segment == ".." || segment == ".") {
+        return Some("Path must not contain . or .. segments".to_string());
     }
     if path.contains('\n') || path.contains('\r') {
         return Some("Path must not contain newline characters".to_string());

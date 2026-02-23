@@ -686,22 +686,24 @@ const methods = {
       let inBase = baseFiles.has(filepath);
       let inHead = headFiles.has(filepath);
 
-      try {
-        const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });
-        if (blob.byteLength > MAX_DIFF_BYTES) {
-          skipReason = 'File too large to diff';
-        } else if (isBinary(blob)) {
-          skipReason = 'Binary file';
-        } else {
-          baseContent = new TextDecoder().decode(blob);
+      if (inBase) {
+        try {
+          const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });
+          if (blob.byteLength > MAX_DIFF_BYTES) {
+            skipReason = 'File too large to diff';
+          } else if (isBinary(blob)) {
+            skipReason = 'Binary file';
+          } else {
+            baseContent = new TextDecoder().decode(blob);
+          }
+        } catch (e) {
+          // File doesn't exist in base
+          console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`, e);
+          inBase = false;
         }
-      } catch (e) {
-        // File doesn't exist in base
-        console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`, e);
-        inBase = false;
       }
 
-      if (!skipReason) {
+      if (!skipReason && inHead) {
         try {
           const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath });
           if (blob.byteLength > MAX_DIFF_BYTES) {

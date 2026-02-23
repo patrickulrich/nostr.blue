@@ -18,22 +18,26 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut selected_labels = use_signal(Vec::<String>::new);
+    let mut request_gen = use_signal(|| 0u64);
 
     use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        loading.set(true);
+        error.set(None);
         spawn(async move {
-            loading.set(true);
-            match fetch_repo_prs(&naddr).await {
+            let result = fetch_repo_prs(&naddr).await;
+            if *request_gen.peek() != gen { return; }
+            match result {
                 Ok(fetched) => {
                     all_prs.set(fetched);
                     error.set(None);
                 }
-                Err(e) => {
-                    error.set(Some(e));
-                }
+                Err(e) => error.set(Some(e)),
             }
             loading.set(false);
         });
@@ -218,7 +222,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
                         },
                     }
                     if filtered.read().is_empty() {
-                        EmptyPRs {}
+                        EmptyPRs { has_filters: !all_prs.read().is_empty() }
                     } else {
                         div { class: "border border-border rounded-lg divide-y divide-border",
                             for pr in filtered.read().iter() {
@@ -232,7 +236,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
     }
 }
 #[component]
-fn EmptyPRs() -> Element {
+fn EmptyPRs(has_filters: bool) -> Element {
     rsx! {
         div { class: "text-center py-12",
             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
@@ -259,7 +263,13 @@ fn EmptyPRs() -> Element {
                 }
             }
             h3 { class: "font-semibold text-lg mb-2", "No Pull Requests" }
-            p { class: "text-muted-foreground text-sm", "No pull requests match the current filters." }
+            p { class: "text-muted-foreground text-sm",
+                if has_filters {
+                    "No pull requests match the current filters."
+                } else {
+                    "No pull requests yet."
+                }
+            }
         }
     }
 }

@@ -385,7 +385,9 @@ struct DynamicListFieldProps {
 #[component]
 fn DynamicListField(props: DynamicListFieldProps) -> Element {
     let mut values = props.values;
-    let mut next_id = use_signal(|| 1u64);
+    let mut next_id = use_signal(|| {
+        values.peek().iter().map(|(id, _)| *id).max().unwrap_or(0) + 1
+    });
 
     let add_item = move |_| {
         let id = *next_id.peek();

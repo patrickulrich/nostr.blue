@@ -413,14 +413,6 @@ fn ContributorsOverview(repo: Repository) -> Element {
         }
     }
 
-    if pubkeys.is_empty() {
-        return rsx! {
-            div { class: "text-center py-8 text-muted-foreground",
-                p { "No maintainer information available." }
-            }
-        };
-    }
-
     rsx! {
         div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3",
             for pubkey in pubkeys.iter() {

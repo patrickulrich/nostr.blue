@@ -60,6 +60,7 @@ pub fn SshKeyManager() -> Element {
             });
         } else {
             keys.set(Vec::new());
+            error.set(None);
             loading.set(false);
             new_title.set(String::new());
             new_key.set(String::new());
