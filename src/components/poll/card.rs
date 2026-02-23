@@ -83,8 +83,8 @@ pub fn PollCard(
                     let new_has_data = counts.replies > 0 || counts.reposts > 0
                         || counts.zap_amount_sats > 0;
                     if new_has_data || !current_has_data {
-                        reply_count.set(counts.replies.min(500));
-                        repost_count.set(counts.reposts.min(500));
+                        reply_count.set(counts.replies.min(501));
+                        repost_count.set(counts.reposts.min(501));
                         zap_amount_sats.set(counts.zap_amount_sats);
                     }
                     if counts.user_reposted.is_some() || !*is_reposted.peek() {

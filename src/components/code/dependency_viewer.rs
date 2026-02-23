@@ -53,11 +53,16 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
             continue;
         }
 
-        let dep_type = match section {
-            "[dependencies]" => DepType::Runtime,
-            "[dev-dependencies]" => DepType::Dev,
-            "[build-dependencies]" => DepType::Build,
-            _ => continue,
+        let dep_type = if section.contains("dependencies") {
+            if section.contains("dev-dependencies") {
+                DepType::Dev
+            } else if section.contains("build-dependencies") {
+                DepType::Build
+            } else {
+                DepType::Runtime
+            }
+        } else {
+            continue;
         };
 
         // Parse "name = version" or "name = { version = "x" }"

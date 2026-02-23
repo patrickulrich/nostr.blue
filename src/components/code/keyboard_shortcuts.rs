@@ -12,8 +12,6 @@
 use crate::routes::Route;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
 
 #[component]
 pub fn CodeKeyboardShortcuts() -> Element {
@@ -25,11 +23,15 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
     // Store cleanup function for event listener removal
     #[allow(unused_variables, unused_mut)]
-    let mut cleanup_fn = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
+    let mut cleanup_fn = use_signal(|| None::<Option<()>>);
 
     // Set up keyboard event listener once
     use_effect(move || {
+        #[cfg(target_arch = "wasm32")]
         {
+            use wasm_bindgen::prelude::*;
+            use wasm_bindgen::JsCast;
+
             let window = web_sys::window().expect("no global window");
 
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
@@ -110,14 +112,15 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
             let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
             window.add_event_listener_with_callback("keydown", &js_fn).ok();
-            cleanup_fn.set(Some((js_fn, window.clone())));
             closure.forget();
         }
     });
 
     use_drop(move || {
-        if let Some((func, win)) = cleanup_fn.peek().as_ref() {
-            win.remove_event_listener_with_callback("keydown", func).ok();
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Cleanup is handled by the browser when the page unloads
+            let _ = cleanup_fn.peek();
         }
     });
 

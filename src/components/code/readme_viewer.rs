@@ -248,7 +248,7 @@ pub fn ReadmePreview(content: String) -> Element {
                 continue;
             }
             if in_mermaid {
-                if line.trim() == "```" {
+                if line.trim().starts_with("```") {
                     in_mermaid = false;
                 }
                 continue;
