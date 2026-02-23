@@ -117,6 +117,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
             {
                 Ok(pk) => pk,
                 Err(e) => {
+                    if *request_id.peek() != current_id { return; }
                     error.set(Some(format!("Invalid public key: {}", e)));
                     loading.set(false);
                     return;

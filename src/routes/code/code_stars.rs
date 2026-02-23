@@ -41,6 +41,7 @@ pub fn CodeStars() -> Element {
             // Load stars from relays into STARRED_REPOS
             if let Err(e) = load_user_stars().await {
                 log::warn!("Failed to load user stars: {}", e);
+                if *request_id.peek() != current_id { loading.set(false); return; }
                 star_load_error.set(Some(format!("Failed to load stars: {}", e)));
                 loading.set(false);
                 return;

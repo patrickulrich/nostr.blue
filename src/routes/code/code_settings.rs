@@ -119,6 +119,7 @@ pub fn CodeSettings() -> Element {
                 });
             }
             Err(e) => {
+                save_success.set(false);
                 save_error.set(Some(e.clone()));
                 web_sys::console::error_1(&format!("Settings save failed: {}", e).into());
                 spawn(async move {
@@ -137,7 +138,7 @@ pub fn CodeSettings() -> Element {
                     div { class: "flex items-center gap-3",
                         Link {
                             to: Route::CodeHome {},
-                            class: "p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
+                            class: "text-muted-foreground hover:text-foreground transition",
                             svg {
                                 class: "w-5 h-5",
                                 xmlns: "http://www.w3.org/2000/svg",

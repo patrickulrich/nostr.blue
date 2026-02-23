@@ -27,7 +27,7 @@ pub mod snippet_card;
 pub mod ssh_key_manager;
 pub mod status_badge;
 #[allow(unused_imports)]
-pub use bounty_badge::BountyBadge;
+pub use bounty_badge::{BountyBadge, BountyStatusBadge};
 #[allow(unused_imports)]
 pub use bounty_form::BountyForm;
 pub use contribution_graph::ContributionGraph;

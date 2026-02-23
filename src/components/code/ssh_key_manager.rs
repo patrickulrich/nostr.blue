@@ -21,9 +21,13 @@ pub fn SshKeyManager() -> Element {
     let mut deleting_id = use_signal(|| None::<String>);
     let mut confirm_delete = use_signal(|| None::<String>);
 
-    // Fetch keys on mount
+    // Fetch keys on mount and when auth changes
     use_effect(move || {
+        let _auth = auth_store::AUTH_STATE.read();
         if let Some(pubkey_hex) = auth_store::get_pubkey() {
+            keys.set(Vec::new());
+            error.set(None);
+            loading.set(true);
             spawn(async move {
                 match PublicKey::from_hex(&pubkey_hex) {
                     Ok(pk) => match ssh_keys::fetch_ssh_keys(&pk).await {
@@ -43,6 +47,7 @@ pub fn SshKeyManager() -> Element {
                 }
             });
         } else {
+            keys.set(Vec::new());
             loading.set(false);
         }
     });

@@ -19,11 +19,9 @@ use dioxus::prelude::*;
 pub fn CodeRepoInsights(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
-    let naddr_for_effect = naddr.clone();
     let naddr_for_render = naddr.clone();
 
-    use_effect(move || {
-        let naddr = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -34,7 +32,7 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
             repo_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
 
     rsx! {
         div { class: "min-h-screen",
@@ -96,12 +94,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let mut commit_count = use_signal(|| None::<usize>);
     let mut data_loading = use_signal(|| true);
 
-    let naddr_for_fetch = naddr.clone();
-    let repo_for_fetch = repo.clone();
-
-    use_effect(move || {
-        let n = naddr_for_fetch.clone();
-        let r = repo_for_fetch.clone();
+    use_effect(use_reactive((&naddr, &repo), move |(n, r)| {
         spawn(async move {
             data_loading.set(true);
 
@@ -126,7 +119,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
 
             data_loading.set(false);
         });
-    });
+    }));
 
     let issues_read = issues.read();
     let prs_read = prs.read();

@@ -196,15 +196,17 @@ pub fn CodeSearch(q: String) -> Element {
         if !client_initialized {
             return;
         }
+        if q.is_empty() {
+            repos.set(Some(Ok(vec![])));
+            snippets.set(Some(Ok(vec![])));
+            issues.set(Some(Ok(vec![])));
+            prs.set(Some(Ok(vec![])));
+            return;
+        }
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
         spawn(async move {
-            if q.is_empty() {
-                repos.set(Some(Ok(vec![])));
-                snippets.set(Some(Ok(vec![])));
-                issues.set(Some(Ok(vec![])));
-                prs.set(Some(Ok(vec![])));
-            } else {
+            {
                 // Only fetch entity types that will be displayed (based on type: filter)
                 let repos_fut = if parsed.show_repos() {
                     Some(search_repositories(&search_text, 20))

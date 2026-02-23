@@ -19,9 +19,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let nav = use_navigator();
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -30,7 +28,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             let result = fetch_repository(&n).await;
             repo_result.set(Some(result));
         });
-    });
+    }));
     let mut repo_name = use_signal(String::new);
     let mut repo_description = use_signal(String::new);
     let mut clone_url = use_signal(String::new);

@@ -581,6 +581,7 @@ fn MyReposTab() -> Element {
         let auth = auth_store::AUTH_STATE.read();
         let pubkey_hex = auth.pubkey.clone().unwrap_or_default();
         if pubkey_hex.is_empty() {
+            my_repos.set(None);
             loading.set(false);
             return;
         }
@@ -592,6 +593,7 @@ fn MyReposTab() -> Element {
                 return;
             }
         };
+        my_repos.set(None);
         spawn(async move {
             match fetch_user_repositories(&pubkey, 50).await {
                 Ok(repos) => my_repos.set(Some(Ok(repos))),

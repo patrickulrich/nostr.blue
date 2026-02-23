@@ -47,9 +47,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut active_filter = use_signal(|| CategoryFilter::All);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -68,7 +66,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
             }
             loading.set(false);
         });
-    });
+    }));
     let all_discussions = discussions.read();
     let filtered: Vec<_> = all_discussions
         .iter()

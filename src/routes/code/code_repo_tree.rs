@@ -11,6 +11,10 @@ use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 #[component]
 pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let mut loading = use_signal(|| true);
@@ -29,9 +33,6 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     use_hook(move || {
         #[cfg(target_arch = "wasm32")]
         {
-            use wasm_bindgen::prelude::*;
-            use wasm_bindgen::JsCast;
-
             let window = web_sys::window().expect("no global window");
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
                 // Skip if typing in an input, textarea, or select

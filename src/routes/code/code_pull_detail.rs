@@ -34,20 +34,18 @@ pub fn CodePullDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut pr_result = use_signal(|| None::<Result<PullRequest, String>>);
     let mut loading = use_signal(|| true);
-    let note_id_for_effect = note_id.clone();
-    use_effect(move || {
-        let id = note_id_for_effect.clone();
+    use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
         spawn(async move {
             loading.set(true);
-            let result = fetch_pull_request(&id).await;
+            let result = fetch_pull_request(&note_id).await;
             pr_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -127,8 +125,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     // Fetch repository for permission checks
     let mut repo = use_signal(|| None::<Repository>);
     let repo_naddr = pr.repository_naddr.clone();
-    use_effect(move || {
-        let naddr = repo_naddr.clone();
+    use_effect(use_reactive(&repo_naddr, move |naddr| {
         if naddr.is_empty() {
             return;
         }
@@ -137,7 +134,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                 repo.set(Some(r));
             }
         });
-    });
+    }));
 
     // Permission checks: can_change_status includes author check; fall back to author-only when repo not loaded
     let can_update_status = is_authenticated
@@ -231,18 +228,18 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     });
 
     // Fetch line-level comments for the Files Changed tab
-    let pr_id_for_line_comments = pr_id.clone();
     let mut line_comments: Signal<Vec<LineComment>> = use_signal(Vec::new);
     let mut line_comment_error = use_signal(|| None::<String>);
-    use_effect(move || {
-        let id = pr_id_for_line_comments.clone();
+    use_effect(use_reactive(&pr_id, move |id| {
+        line_comments.set(Vec::new());
+        line_comment_error.set(None);
         spawn(async move {
             match fetch_line_comments_by_id(&id).await {
                 Ok(lcs) => line_comments.set(lcs),
                 Err(e) => line_comment_error.set(Some(e)),
             }
         });
-    });
+    }));
 
     let handle_status_change = {
         let pr_id = pr_id.clone();
@@ -714,7 +711,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                                         if let Some(error) = comment_error.read().as_ref() {
                                             span { class: "text-xs text-destructive", "{error}" }
                                         } else {
-                                            span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                                            span { class: "text-xs text-muted-foreground", "Plain text" }
                                         }
                                         button {
                                             class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",

@@ -39,7 +39,7 @@ pub fn Polls() -> Element {
     let mut last_event_id = use_signal(|| None::<nostr_sdk::EventId>);
     let mut interaction_counts = use_signal(HashMap::<String, InteractionCounts>::new);
     let mut interaction_stream_handles: Signal<Vec<InteractionStreamHandle>> = use_signal(Vec::new);
-    let mut all_streamed_ids = use_signal(Vec::<EventId>::new);
+    let mut all_streamed_ids = use_signal(HashSet::<EventId>::new);
     let mut request_id = use_signal(|| 0u64);
     use_effect(move || {
         let _ = refresh_trigger.read();
@@ -58,7 +58,7 @@ pub fn Polls() -> Element {
         let old_handles = interaction_stream_handles.peek().clone();
         interaction_stream_handles.set(Vec::new());
         interaction_counts.set(HashMap::new());
-        all_streamed_ids.set(Vec::new());
+        all_streamed_ids.set(HashSet::new());
         // Increment request_id for stale detection
         request_id.with_mut(|v| *v = v.wrapping_add(1));
         let current_id = *request_id.peek();
@@ -143,7 +143,7 @@ pub fn Polls() -> Element {
                     // Fetch interaction counts
                     let event_ids: Vec<EventId> = current_events.iter().map(|e| e.id).collect();
                     drop(current_events);
-                    all_streamed_ids.set(event_ids.clone());
+                    all_streamed_ids.set(event_ids.iter().copied().collect());
                     if !event_ids.is_empty() {
                         match fetch_interaction_counts_batch(
                             event_ids.clone(),
@@ -255,10 +255,9 @@ pub fn Polls() -> Element {
                         }
                         if *request_id.peek() != rid { return; }
                         // Only stream interactions for newly added poll IDs (keep existing streams running)
-                        let already_streaming: HashSet<EventId> = all_streamed_ids.read().iter().copied().collect();
                         let truly_new_ids: Vec<EventId> = new_event_ids
                             .into_iter()
-                            .filter(|id| !already_streaming.contains(id))
+                            .filter(|id| !all_streamed_ids.peek().contains(id))
                             .collect();
                         all_streamed_ids.with_mut(|ids| {
                             ids.extend(truly_new_ids.iter().copied());

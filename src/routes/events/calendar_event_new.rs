@@ -473,7 +473,7 @@ pub fn CalendarEventNew() -> Element {
                     }
                     if *show_ics_selector.read() && !ics_events.read().is_empty() {
                         div {
-                            class: "fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm",
+                            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm",
                             onclick: move |_| show_ics_selector.set(false),
                             div {
                                 class: "bg-background rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-hidden",

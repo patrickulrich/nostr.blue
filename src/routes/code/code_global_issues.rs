@@ -176,7 +176,7 @@ pub fn CodeGlobalIssues() -> Element {
                         } else {
                             "text-sm text-muted-foreground hover:text-foreground pb-1"
                         },
-                        onclick: move |_| active_tab.set(FilterTab::Created),
+                        onclick: move |_| { label_filter.set(None); active_tab.set(FilterTab::Created); },
                         "Created"
                     }
                     button {
@@ -185,7 +185,7 @@ pub fn CodeGlobalIssues() -> Element {
                         } else {
                             "text-sm text-muted-foreground hover:text-foreground pb-1"
                         },
-                        onclick: move |_| active_tab.set(FilterTab::Assigned),
+                        onclick: move |_| { label_filter.set(None); active_tab.set(FilterTab::Assigned); },
                         "Assigned"
                     }
                     button {
@@ -194,7 +194,7 @@ pub fn CodeGlobalIssues() -> Element {
                         } else {
                             "text-sm text-muted-foreground hover:text-foreground pb-1"
                         },
-                        onclick: move |_| active_tab.set(FilterTab::Mentioned),
+                        onclick: move |_| { label_filter.set(None); active_tab.set(FilterTab::Mentioned); },
                         "Mentioned"
                     }
                 }

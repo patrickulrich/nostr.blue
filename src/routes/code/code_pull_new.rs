@@ -7,6 +7,37 @@ use crate::services::git_hosting::{fetch_repository, publish_patch_by_naddr};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+/// Validate a git ref name per git-check-ref-format rules
+fn is_valid_git_refname(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    if name.starts_with('-') || name.starts_with('.') {
+        return false;
+    }
+    if name.ends_with(".lock") || name.ends_with('/') || name.ends_with('.') {
+        return false;
+    }
+    if name.contains("@{")
+        || name.contains("//")
+        || name.contains("..")
+        || name.contains('~')
+        || name.contains('^')
+        || name.contains(':')
+        || name.contains('?')
+        || name.contains('*')
+        || name.contains('\\')
+        || name.contains('[')
+        || name.contains(' ')
+    {
+        return false;
+    }
+    if name.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f) {
+        return false;
+    }
+    true
+}
+
 /// New pull request page component
 #[component]
 pub fn CodePullNew(naddr: String) -> Element {
@@ -43,8 +74,8 @@ pub fn CodePullNew(naddr: String) -> Element {
         let naddr = naddr.clone();
         move |_| {
             let content_val = content.read().clone();
-            let commit_val = commit.read().clone();
-            let parent_val = parent_commit.read().clone();
+            let commit_val = commit.read().trim().to_string();
+            let parent_val = parent_commit.read().trim().to_string();
             let labels_val = labels.read().clone();
             let closes_val = closes_issues.read().clone();
             let branch_val = branch_name.read().trim().to_string();
@@ -55,7 +86,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                     error_message.set(Some("Please enter patch content".to_string()));
                     return;
                 }
-                if !branch_val.is_empty() && (branch_val.contains("..") || branch_val.contains('~') || branch_val.contains('^') || branch_val.contains(':') || branch_val.contains('\\') || branch_val.contains(' ') || branch_val.chars().any(|c| c.is_ascii_control())) {
+                if !branch_val.is_empty() && !is_valid_git_refname(&branch_val) {
                     error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
                     return;
                 }

@@ -66,6 +66,8 @@ fn build_new_file_diff(path: &str, content: &str, author_pubkey: &str, commit_me
                 diff.push_str("\\ No newline at end of file\n");
             }
         }
+    } else {
+        diff.push_str("@@ -0,0 +0,0 @@\n");
     }
     diff
 }

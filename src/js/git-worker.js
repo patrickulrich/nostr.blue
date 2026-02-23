@@ -116,6 +116,16 @@ function validateRepoDir(dir) {
 }
 
 /**
+ * Normalize line endings and split content into lines.
+ * Replaces CRLF with LF, splits on LF, removes trailing empty element.
+ */
+function normalizeAndSplit(content) {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+/**
  * Compute an edit script between two line arrays using an LCS-based algorithm.
  * Returns an array of operations: { type: 'equal'|'delete'|'insert', oldIdx, newIdx }
  */
@@ -254,9 +264,16 @@ function computeEditsFallback(oldLines, newLines) {
           foundOld = oi + look;
           break;
         }
-        if (ni + look < newLines.length && oldLines[oi] === newLines[ni + look]) {
-          foundNew = ni + look;
-          break;
+      }
+
+      // Use newMap for O(1) lookup of oldLines[oi] in newLines
+      const candidates = newMap.get(oldLines[oi]);
+      if (candidates) {
+        for (const idx of candidates) {
+          if (idx > ni) {
+            foundNew = idx;
+            break;
+          }
         }
       }
 
@@ -678,6 +695,7 @@ const methods = {
         }
       } catch (e) {
         // File doesn't exist in base
+        console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`);
         inBase = false;
       }
 
@@ -693,6 +711,7 @@ const methods = {
           }
         } catch (e) {
           // File doesn't exist in head
+          console.warn(`[GitWorker] Could not read head blob for '${filepath}': ${e.message}`);
           inHead = false;
         }
       }
@@ -712,8 +731,7 @@ const methods = {
       // Generate unified diff header
       if (baseContent === null) {
         // New file
-        const lines = headContent.replace(/\r\n/g, '\n').split('\n');
-        if (lines[lines.length - 1] === '') lines.pop();
+        const lines = normalizeAndSplit(headContent);
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push('new file mode 100644');
         diffParts.push(`--- /dev/null`);
@@ -724,8 +742,7 @@ const methods = {
         }
       } else if (headContent === null) {
         // Deleted file
-        const lines = baseContent.replace(/\r\n/g, '\n').split('\n');
-        if (lines[lines.length - 1] === '') lines.pop();
+        const lines = normalizeAndSplit(baseContent);
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push('deleted file mode 100644');
         diffParts.push(`--- a/${filepath}`);
@@ -736,10 +753,8 @@ const methods = {
         }
       } else {
         // Modified file - proper unified diff with LCS algorithm
-        const baseLines = baseContent.replace(/\r\n/g, '\n').split('\n');
-        if (baseLines[baseLines.length - 1] === '') baseLines.pop();
-        const headLines = headContent.replace(/\r\n/g, '\n').split('\n');
-        if (headLines[headLines.length - 1] === '') headLines.pop();
+        const baseLines = normalizeAndSplit(baseContent);
+        const headLines = normalizeAndSplit(headContent);
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push(`--- a/${filepath}`);
         diffParts.push(`+++ b/${filepath}`);

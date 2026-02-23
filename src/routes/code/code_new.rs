@@ -34,7 +34,7 @@ pub fn CodeNew() -> Element {
                 .to_lowercase()
                 .replace(' ', "-")
                 .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '-')
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
                 .collect::<String>()
                 .split('-')
                 .filter(|s| !s.is_empty())

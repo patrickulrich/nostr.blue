@@ -193,7 +193,7 @@ pub fn PRReviewSection(
             let author_pk = saved_pr_pubkey.clone();
             spawn(async move {
                 if let Err(e) = publish_review_event(&id, &author_pk, review_state, &saved_content).await {
-                    publish_error.set(Some(format!("Failed to publish review: {}", e)));
+                    publish_error.set(Some(e.to_string()));
                     // Rollback: remove the optimistic entry and restore prior review
                     let mut current = reviews.write();
                     current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));

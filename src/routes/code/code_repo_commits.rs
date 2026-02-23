@@ -26,13 +26,13 @@ enum CommitData {
 pub fn CodeRepoCommits(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut commits_result = use_signal(|| None::<Result<CommitData, String>>);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        commits_result.set(None);
+        repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&n).await;
             if let Ok(ref repo) = result {
@@ -73,7 +73,7 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
             }
             repo_result.set(Some(result));
         });
-    });
+    }));
     let repo_name = match &*repo_result.read() {
         Some(Ok(r)) => r.name.clone().unwrap_or_else(|| r.id.clone()),
         _ => "Repository".to_string(),

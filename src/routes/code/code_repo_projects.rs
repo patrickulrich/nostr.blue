@@ -91,9 +91,11 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
         }
         gen.set(gen() + 1);
         let captured_gen = gen();
+        repo.set(None);
+        items.set(Vec::new());
+        fetch_error.set(None);
+        loading.set(true);
         spawn(async move {
-            fetch_error.set(None);
-            loading.set(true);
 
             // Fetch repo metadata
             if let Ok(r) = fetch_repository(&n).await {

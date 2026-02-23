@@ -194,10 +194,7 @@ fn build_line_comment_map(comments: &[LineComment]) -> HashMap<(String, usize), 
     map
 }
 
-/// Determine the effective line number for a diff line (prefer new_num, fall back to old_num)
-fn effective_line_number(diff_line: &DiffLine) -> Option<usize> {
-    diff_line.new_num.or(diff_line.old_num)
-}
+
 
 /// Diff viewer component
 ///
@@ -382,10 +379,10 @@ pub fn DiffViewer(
                                                             // Comment gutter "+" button (only in unified mode with commenting enabled)
                                                             if has_commenting {
                                                                 td { class: "w-5 text-center select-none border-r border-border/50",
-                                                                    if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
+                                                                    if diff_line.new_num.is_some() {
                                                                         {
                                                                             let file_for_click = cached_file_path.clone();
-                                                                            let line_num = effective_line_number(diff_line).unwrap_or(0);
+                                                                            let line_num = diff_line.new_num.unwrap();
                                                                             rsx! {
                                                                                 button {
                                                                                     class: "p-1 hover:bg-accent rounded transition text-primary opacity-0 group-hover:opacity-100 text-[10px] font-bold flex items-center justify-center",
@@ -442,7 +439,7 @@ pub fn DiffViewer(
 
                                                         // Display existing line comments for this file + line
                                                         if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
-                                                            if let Some(line_num) = effective_line_number(diff_line) {
+                                                            if let Some(line_num) = diff_line.new_num {
                                                                 if let Some(comments) = comment_map.get(&(cached_file_path.clone(), line_num)) {
                                                                     for lc in comments.iter() {
                                                                         tr {
@@ -461,7 +458,7 @@ pub fn DiffViewer(
 
                                                         // Inline comment form (if this line is selected)
                                                         if has_commenting {
-                                                            if let Some(line_num) = effective_line_number(diff_line) {
+                                                            if let Some(line_num) = diff_line.new_num {
                                                                 {
                                                                     let is_active = active_comment_line.read().as_ref()
                                                                         .map(|(f, l)| f == &cached_file_path && *l == line_num)

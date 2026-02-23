@@ -69,6 +69,18 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         labels
     };
 
+    // Trim selected_labels to only contain labels available in the current repo
+    {
+        let current_selected = selected_labels.read().clone();
+        let trimmed: Vec<String> = current_selected
+            .into_iter()
+            .filter(|l| available_labels.contains(l))
+            .collect();
+        if trimmed.len() != selected_labels.peek().len() {
+            selected_labels.set(trimmed);
+        }
+    }
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",

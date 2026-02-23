@@ -2,7 +2,7 @@ use super::timer::PollTimer;
 use crate::components::icons::{
     BookmarkIcon, MessageCircleIcon, Repeat2Icon, ShareIcon, ZapIcon,
 };
-use crate::components::{ConfirmModal, ReactionButton, RichContent, ZapModal};
+use crate::components::{ConfirmModal, ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
@@ -372,32 +372,27 @@ pub fn PollCard(
                 }
                 span { class: "text-muted-foreground text-sm", "· {time_ago}" }
             }
-            Link {
-                to: Route::PollView {
-                    noteid: event_id_str.clone(),
-                },
-                div { class: "mb-3",
-                    div { class: "text-lg font-medium mb-2",
-                        RichContent {
-                            content: poll_title.clone(),
-                            tags: event.tags.iter().cloned().collect(),
-                            collapsible: false,
-                        }
-                    }
-                    div { class: "flex items-center gap-3 text-sm text-muted-foreground",
-                        span { class: "px-2 py-1 rounded bg-primary/10 text-primary text-xs",
-                            {
-                                match poll_type {
-                                    PollType::SingleChoice => "Single Choice",
-                                    PollType::MultipleChoice => "Multiple Choice",
-                                }
+            div { class: "mb-3",
+                Link {
+                    to: Route::PollView {
+                        noteid: event_id_str.clone(),
+                    },
+                    class: "text-lg font-medium mb-2 block hover:underline",
+                    "{poll_title}"
+                }
+                div { class: "flex items-center gap-3 text-sm text-muted-foreground",
+                    span { class: "px-2 py-1 rounded bg-accent text-foreground text-xs",
+                        {
+                            match poll_type {
+                                PollType::SingleChoice => "Single Choice",
+                                PollType::MultipleChoice => "Multiple Choice",
                             }
                         }
-                        if let Some(ends_at) = poll_ends_at {
-                            PollTimer { ends_at }
-                        }
-                        span { "{total_votes} votes" }
                     }
+                    if let Some(ends_at) = poll_ends_at {
+                        PollTimer { ends_at }
+                    }
+                    span { "{total_votes} votes" }
                 }
             }
             if show_voting_ui {

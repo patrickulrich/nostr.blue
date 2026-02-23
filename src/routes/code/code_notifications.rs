@@ -32,20 +32,23 @@ pub fn CodeNotifications() -> Element {
         }
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
+        notifications.set(Vec::new());
+        error.set(None);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
-            error.set(None);
             match fetch_code_notifications(50).await {
                 Ok(notifs) => {
-                    if *request_gen.peek() != gen { loading.set(false); return; }
+                    if *request_gen.peek() != gen { return; }
                     notifications.set(notifs);
                 }
                 Err(e) => {
-                    if *request_gen.peek() != gen { loading.set(false); return; }
+                    if *request_gen.peek() != gen { return; }
                     error.set(Some(e));
                 }
             }
-            loading.set(false);
+            if *request_gen.peek() == gen {
+                loading.set(false);
+            }
         });
     });
     if !auth_store::AUTH_STATE.read().is_authenticated {

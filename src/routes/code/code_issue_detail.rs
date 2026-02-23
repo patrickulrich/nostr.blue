@@ -119,11 +119,11 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let repo_naddr = issue.repository_naddr.clone();
     use_effect(use_reactive(&repo_naddr, move |naddr| {
         repo.set(None); // clear stale data
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         if naddr.is_empty() {
             return;
         }
-        let gen = repo_gen.peek().wrapping_add(1);
-        repo_gen.set(gen);
         spawn(async move {
             if let Ok(r) = fetch_repository(&naddr).await {
                 if *repo_gen.peek() == gen {

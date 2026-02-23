@@ -116,11 +116,9 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
     let mut new_comment = use_signal(String::new);
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
-    let discussion_id_for_comments = discussion_id.clone();
-    let mut comments = use_resource(move || {
-        let id = discussion_id_for_comments.clone();
+    let mut comments = use_resource(use_reactive(&discussion_id, move |id| {
         async move { fetch_discussion_comments_by_id(&id).await }
-    });
+    }));
     let category_label = discussion.category.as_deref().map(|c| match c {
         "general" => "General",
         "ideas" => "Ideas",
