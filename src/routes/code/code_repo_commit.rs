@@ -114,6 +114,9 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                                 .set(Some(Err(format!("Repository not found: {}", e))));
                         }
                     }
+                    if *request_id.peek() != current_id {
+                        return;
+                    }
                     repo_result.set(Some(result));
                 });
             },
