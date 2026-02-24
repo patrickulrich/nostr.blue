@@ -90,15 +90,21 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
 
     // Fetch repository data
+    let mut repo_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&n).await;
-            repo_result.set(Some(result));
+            if *repo_gen.peek() == gen {
+                repo_result.set(Some(result));
+            }
             loading.set(false);
         });
     }));
@@ -437,8 +443,8 @@ async fn submit_new_file(
         return Err("No signer attached. Please sign in first.".to_string());
     }
 
-    if path.contains('\n') || path.contains('\r') {
-        return Err("File path cannot contain newline characters".to_string());
+    if path.contains('\n') || path.contains('\r') || path.contains('\0') {
+        return Err("File path cannot contain newline or null characters".to_string());
     }
 
     if commit_message.contains('\n') || commit_message.contains('\r') {

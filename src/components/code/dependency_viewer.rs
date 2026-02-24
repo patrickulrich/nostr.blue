@@ -69,35 +69,29 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
         if let Some((name, rest)) = trimmed.split_once('=') {
             let name = name.trim().to_string();
             let rest = rest.trim();
-            let version = if rest.starts_with('"') {
-                rest.trim_matches('"').to_string()
+            let (version, dep_type) = if rest.starts_with('"') {
+                (rest.trim_matches('"').to_string(), dep_type)
             } else if rest.contains('{') {
-                // Parse inline table format: { version = "x", optional = true, ... }
-                let tokens: Vec<(&str, &str)> = rest.split(',')
-                    .filter_map(|token| {
-                        let token = token.trim().trim_matches('{').trim_matches('}').trim();
-                        token.split_once('=').map(|(k, v)| (k.trim(), v.trim()))
-                    })
-                    .collect();
-                // Extract version
-                tokens.iter()
-                    .find(|(k, _)| *k == "version")
-                    .map(|(_, v)| v.trim_matches('"').to_string())
-                    .unwrap_or_else(|| "*".to_string())
-            } else {
-                "*".to_string()
-            };
-            // Override dep_type to Optional if inline table contains `optional = true`
-            let dep_type = if rest.contains('{') {
-                let has_optional = rest.split(',').any(|token| {
+                // Parse inline table format in a single pass: { version = "x", optional = true, features = [...] }
+                let mut ver = None;
+                let mut is_optional = false;
+                for token in rest.split(',') {
                     let token = token.trim().trim_matches('{').trim_matches('}').trim();
-                    token.split_once('=').is_some_and(|(k, v)| {
-                        k.trim() == "optional" && v.trim().trim_matches('"') == "true"
-                    })
-                });
-                if has_optional { DepType::Optional } else { dep_type }
+                    if let Some((k, v)) = token.split_once('=') {
+                        let k = k.trim();
+                        let v = v.trim();
+                        match k {
+                            "version" => ver = Some(v.trim_matches('"').to_string()),
+                            "optional" => is_optional = v.trim_matches('"') == "true",
+                            _ => {}
+                        }
+                    }
+                }
+                let version = ver.unwrap_or_else(|| "*".to_string());
+                let dep_type = if is_optional { DepType::Optional } else { dep_type };
+                (version, dep_type)
             } else {
-                dep_type
+                ("*".to_string(), dep_type)
             };
             deps.push(Dependency {
                 name,
@@ -140,9 +134,30 @@ pub fn parse_package_json(content: &str) -> Vec<Dependency> {
                 });
             }
         }
+        if let Some(obj) = json.get("peerDependencies").and_then(|v| v.as_object()) {
+            for (name, version) in obj {
+                deps.push(Dependency {
+                    name: name.clone(),
+                    version: version.as_str().unwrap_or("*").to_string(),
+                    dep_type: DepType::Runtime,
+                });
+            }
+        }
+        if let Some(obj) = json.get("bundleDependencies").and_then(|v| v.as_object()) {
+            for (name, version) in obj {
+                deps.push(Dependency {
+                    name: name.clone(),
+                    version: version.as_str().unwrap_or("*").to_string(),
+                    dep_type: DepType::Runtime,
+                });
+            }
+        }
     }
     deps
 }
+
+/// PEP 508 version operators, ordered longest-first so multi-char operators match before single-char.
+const PEP508_OPERATORS: &[&str] = &["===", "~=", "!=", "<=", ">=", "==", "<", ">"];
 
 /// Parse dependencies from requirements.txt
 pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
@@ -151,24 +166,27 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
         .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
         .map(|line| {
             let line = line.trim();
-            if let Some((name, version)) = line.split_once("==") {
-                Dependency {
-                    name: name.to_string(),
-                    version: version.to_string(),
-                    dep_type: DepType::Runtime,
+            // Try each PEP 508 operator in order (longest first)
+            let mut found = None;
+            for op in PEP508_OPERATORS {
+                if let Some(pos) = line.find(op) {
+                    let name = line[..pos].trim();
+                    let version = line[pos..].trim();
+                    found = Some((name.to_string(), version.to_string()));
+                    break;
                 }
-            } else if let Some((name, version)) = line.split_once(">=") {
-                Dependency {
-                    name: name.to_string(),
-                    version: format!(">={}", version),
+            }
+            match found {
+                Some((name, version)) => Dependency {
+                    name,
+                    version,
                     dep_type: DepType::Runtime,
-                }
-            } else {
-                Dependency {
+                },
+                None => Dependency {
                     name: line.to_string(),
                     version: "*".to_string(),
                     dep_type: DepType::Runtime,
-                }
+                },
             }
         })
         .collect()

@@ -5,6 +5,7 @@
 use crate::utils::clipboard::copy_to_clipboard;
 use crate::components::{CodeRepoCard, CodeSnippetCard};
 use crate::components::code::{CodeIssueCard, CodePullCard, ContributionGraph};
+use crate::components::icons::GlobeIcon;
 use crate::routes::Route;
 use crate::services::git_hosting::{
     fetch_user_issues, fetch_user_prs, fetch_user_repositories, fetch_user_snippets,
@@ -43,6 +44,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
     let mut profile_data = use_signal(|| None::<profiles::Profile>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut profile_meta_error = use_signal(|| None::<String>);
     let mut active_tab = use_signal(|| CodeProfileTab::Repositories);
     let mut tab_data = use_signal(default_tab_data_map);
 
@@ -106,6 +108,8 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         is_following.set(false);
         follow_loading.set(false);
         follow_error.set(None);
+        follow_request_id.set(follow_request_id.peek().wrapping_add(1));
+        profile_meta_error.set(None);
 
         let current_id = request_id.peek().wrapping_add(1);
         request_id.set(current_id);
@@ -140,7 +144,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 }
                 Err(e) => {
                     if *request_id.peek() == current_id {
-                        error.set(Some(format!("Failed to load profile: {}", e)));
+                        profile_meta_error.set(Some(format!("Failed to load profile: {}", e)));
                     }
                     log::warn!("Failed to load profile: {}", e);
                 }
@@ -375,20 +379,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                                         h1 { class: "text-xl md:text-2xl font-bold text-foreground", "{display_name}" }
                                         if let Some(ref nip05_val) = nip05 {
                                             div { class: "flex items-center gap-1 text-sm text-muted-foreground mt-0.5",
-                                                svg {
-                                                    class: "w-3.5 h-3.5 text-green-500",
-                                                    xmlns: "http://www.w3.org/2000/svg",
-                                                    width: "24",
-                                                    height: "24",
-                                                    view_box: "0 0 24 24",
-                                                    fill: "none",
-                                                    stroke: "currentColor",
-                                                    stroke_width: "2",
-                                                    stroke_linecap: "round",
-                                                    stroke_linejoin: "round",
-                                                    path { d: "M22 11.08V12a10 10 0 1 1-5.93-9.14" }
-                                                    polyline { points: "22 4 12 14.01 9 11.01" }
-                                                }
+                                                GlobeIcon { class: "w-3.5 h-3.5 text-muted-foreground".to_string() }
                                                 span { "{nip05_val}" }
                                             }
                                         }
@@ -525,6 +516,15 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Non-blocking profile metadata warning
+                if let Some(meta_err) = profile_meta_error() {
+                    div { class: "px-4 mt-2",
+                        div { class: "bg-yellow-500/10 text-yellow-500 text-sm rounded-lg px-4 py-2",
+                            "{meta_err}"
                         }
                     }
                 }

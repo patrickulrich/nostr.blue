@@ -47,6 +47,8 @@ pub fn CodePullDetail(note_id: String) -> Element {
         if !client_initialized {
             return;
         }
+        // Read pr_gen so this effect re-runs when on_pr_updated bumps it
+        let _tracked_gen = *pr_gen.read();
         let gen = pr_gen.peek().wrapping_add(1);
         pr_gen.set(gen);
         pr_result.set(None);
@@ -261,13 +263,24 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     // Fetch line-level comments for the Files Changed tab
     let mut line_comments: Signal<Vec<LineComment>> = use_signal(Vec::new);
     let mut line_comment_error = use_signal(|| None::<String>);
+    let mut line_comment_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&pr_id, move |id| {
+        let gen = line_comment_gen.peek().wrapping_add(1);
+        line_comment_gen.set(gen);
         line_comments.set(Vec::new());
         line_comment_error.set(None);
         spawn(async move {
             match fetch_line_comments_by_id(&id).await {
-                Ok(lcs) => line_comments.set(lcs),
-                Err(e) => line_comment_error.set(Some(e)),
+                Ok(lcs) => {
+                    if *line_comment_gen.peek() == gen {
+                        line_comments.set(lcs);
+                    }
+                }
+                Err(e) => {
+                    if *line_comment_gen.peek() == gen {
+                        line_comment_error.set(Some(e));
+                    }
+                }
             }
         });
     }));
@@ -338,6 +351,18 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
             let naddr = repo_naddr.clone();
             if content.trim().is_empty() {
                 update_error.set(Some("Update content is required".to_string()));
+                return;
+            }
+            if !commit.is_empty()
+                && (commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()))
+            {
+                update_error.set(Some("Commit hash must be a 40-character hex string".to_string()));
+                return;
+            }
+            if !parent.is_empty()
+                && (parent.len() != 40 || !parent.chars().all(|c| c.is_ascii_hexdigit()))
+            {
+                update_error.set(Some("Parent commit must be a 40-character hex string".to_string()));
                 return;
             }
             spawn(async move {

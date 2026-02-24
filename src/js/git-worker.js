@@ -120,9 +120,6 @@ function validateRepoDir(dir) {
   // Normalize but preserve leading / for LightningFS absolute paths
   const parts = dir.split('/').filter(p => p && p !== '.');
   const normalized = (dir.startsWith('/') ? '/' : '') + parts.join('/');
-  if (normalized.includes('..')) {
-    throw new Error('Invalid directory path');
-  }
   if (normalized === '' || normalized === '/') {
     throw new Error('Invalid repository directory path');
   }
@@ -226,16 +223,14 @@ function computeEdits(oldLines, newLines) {
       edits.push({ type: 'equal', oldIdx: x, newIdx: y });
     }
 
-    if (d > 0) {
-      if (x === prevX) {
-        // Insert
-        y--;
-        edits.push({ type: 'insert', newIdx: y });
-      } else {
-        // Delete
-        x--;
-        edits.push({ type: 'delete', oldIdx: x });
-      }
+    if (x === prevX) {
+      // Insert
+      y--;
+      edits.push({ type: 'insert', newIdx: y });
+    } else {
+      // Delete
+      x--;
+      edits.push({ type: 'delete', oldIdx: x });
     }
   }
 
@@ -305,7 +300,7 @@ function computeEditsFallback(oldLines, newLines) {
           ni++;
         }
       } else {
-        // No nearby match, emit delete + insert
+        // No nearby match, emit delete
         edits.push({ type: 'delete', oldIdx: oi });
         oi++;
       }
@@ -334,7 +329,7 @@ function computeEditsFallback(oldLines, newLines) {
  * @param {number} contextLines - Number of context lines around changes (default 3)
  * @returns {Array} Array of diff output lines (hunk headers + content)
  */
-function generateHunks(edits, oldLines, newLines, contextLines) {
+function generateHunks(edits, oldLines, newLines, contextLines = 3) {
   if (edits.length === 0) return [];
 
   const output = [];

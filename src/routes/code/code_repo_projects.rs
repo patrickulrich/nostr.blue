@@ -219,8 +219,6 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                             "{err}"
                         }
                     }
-                }
-                if !*loading.read() && !items_read.is_empty() {
                     // Kanban columns - horizontal scroll
                     div { class: "flex gap-4 overflow-x-auto pb-4",
                         BoardColumn {

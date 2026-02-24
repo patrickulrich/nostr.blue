@@ -278,11 +278,11 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                     input {
                         class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
-                        placeholder: "Hex pubkeys of assignees, comma-separated",
+                        placeholder: "Pubkeys (hex or npub), comma separated",
                         value: "{assignees_input}",
                         oninput: move |e| assignees_input.set(e.value()),
                     }
-                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated hex pubkeys of people to assign" }
+                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated pubkeys (hex or npub) of people to assign" }
                 }
             }
         }

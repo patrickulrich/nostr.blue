@@ -129,6 +129,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                             naddr: naddr.clone(),
                         },
                         class: "text-muted-foreground hover:text-foreground",
+                        aria_label: "Go back",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     div {

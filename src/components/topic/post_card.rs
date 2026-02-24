@@ -27,7 +27,7 @@ pub fn TopicPostCard(
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
     let time_ago = format_relative_time_or(post.created_at, "just now");
-    let counts = vote_counts.clone().unwrap_or_default();
+    let counts = vote_counts.unwrap_or_default();
     let topic_for_link = post.topic.clone();
     let post_id_for_link = post.id.clone();
     let post_for_vote = post.clone();
@@ -64,13 +64,15 @@ pub fn TopicPostCard(
                     span { "\u{00B7}" }
                     span { "{time_ago}" }
                 }
-                // Post content
-                Link {
-                    to: Route::TopicPostDetail {
-                        topic: topic_for_link,
-                        post_id: post_id_for_link,
+                // Post content — use div+onclick instead of Link to avoid nested <a> when content contains links
+                div {
+                    class: "block cursor-pointer",
+                    onclick: move |_| {
+                        navigator().push(Route::TopicPostDetail {
+                            topic: topic_for_link.clone(),
+                            post_id: post_id_for_link.clone(),
+                        });
                     },
-                    class: "block",
                     div {
                         class: "prose prose-sm max-w-none text-foreground",
                         RichContent {

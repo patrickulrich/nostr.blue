@@ -13,6 +13,9 @@ use std::rc::Rc;
 /// Maximum visual depth for reply indentation
 const MAX_VISUAL_DEPTH: usize = 6;
 
+/// Maximum recursion depth to prevent stack overflow on deeply nested threads
+const MAX_RECURSION_DEPTH: usize = 20;
+
 /// Display a thread tree with recursive nested replies
 #[component]
 pub fn ThreadView(
@@ -43,6 +46,11 @@ fn ThreadNode(
     #[props(default = 0)]
     depth: usize,
 ) -> Element {
+    // Prevent stack overflow on deeply nested threads
+    if depth > MAX_RECURSION_DEPTH {
+        return rsx! {};
+    }
+
     let profile = get_cached_profile(&thread.post.pubkey);
     let author_name = profile
         .as_ref()
@@ -58,12 +66,12 @@ fn ThreadNode(
 
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {
         0 => "",
-        1 => "ml-4 border-l-2 border-blue-300/30 pl-3",
-        2 => "ml-4 border-l-2 border-purple-300/30 pl-3",
-        3 => "ml-4 border-l-2 border-green-300/30 pl-3",
-        4 => "ml-4 border-l-2 border-orange-300/30 pl-3",
-        5 => "ml-4 border-l-2 border-pink-300/30 pl-3",
-        _ => "ml-4 border-l-2 border-border pl-3",
+        1 => "ml-4 border-l-2 border-border/80 pl-3",
+        2 => "ml-4 border-l-2 border-border/60 pl-3",
+        3 => "ml-4 border-l-2 border-accent pl-3",
+        4 => "ml-4 border-l-2 border-accent/80 pl-3",
+        5 => "ml-4 border-l-2 border-accent/60 pl-3",
+        _ => "ml-4 border-l-2 border-border/40 pl-3",
     };
 
     rsx! {

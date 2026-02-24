@@ -24,35 +24,39 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
     let mut show_new_form = use_signal(|| false);
     let mut repo_data = use_signal(|| None::<Repository>);
     let mut repo_error = use_signal(|| None::<String>);
-    let mut refresh_counter = use_signal(|| 0u32);
+    let mut fetch_trigger = use_signal(|| 0u32);
+    let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |n| {
-        let _counter = *refresh_counter.read();
+        let _trigger = *fetch_trigger.read();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
-        let captured_gen = refresh_counter();
+        let captured_gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(captured_gen);
         spawn(async move {
             loading.set(true);
             match fetch_repository(&n).await {
                 Ok(repo) => {
-                    if *refresh_counter.peek() != captured_gen { return; }
+                    if *request_gen.peek() != captured_gen { return; }
                     repo_data.set(Some(repo));
                     repo_error.set(None);
                 }
                 Err(e) => {
-                    if *refresh_counter.peek() != captured_gen { return; }
+                    if *request_gen.peek() != captured_gen { return; }
                     repo_error.set(Some(format!("Failed to load repository: {}", e)));
                 }
             }
             match fetch_repo_releases(&n).await {
-                Ok(fetched) => {
-                    if *refresh_counter.peek() != captured_gen { return; }
+                Ok(mut fetched) => {
+                    if *request_gen.peek() != captured_gen { return; }
+                    fetched.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    fetched.dedup_by(|a, b| a.tag_name == b.tag_name);
                     releases.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
-                    if *refresh_counter.peek() != captured_gen { return; }
+                    if *request_gen.peek() != captured_gen { return; }
                     error.set(Some(e));
                 }
             }
@@ -144,7 +148,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                         naddr: naddr.clone(),
                         on_published: move |_| {
                             show_new_form.set(false);
-                            refresh_counter.with_mut(|v| *v = v.wrapping_add(1));
+                            fetch_trigger.with_mut(|v| *v = v.wrapping_add(1));
                         },
                     }
                 }
@@ -168,7 +172,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                                         user_pubkey: user_pubkey.clone(),
                                         is_authenticated: is_authenticated,
                                         on_mutated: move |_| {
-                                            refresh_counter.with_mut(|v| *v = v.wrapping_add(1));
+                                            fetch_trigger.with_mut(|v| *v = v.wrapping_add(1));
                                         },
                                     }
                                 }
@@ -486,6 +490,32 @@ fn EditReleaseForm(
                                     urls[i] = e.value();
                                     asset_urls.set(urls);
                                 },
+                            }
+                            button {
+                                class: "px-2 py-2 text-muted-foreground hover:text-destructive transition rounded hover:bg-destructive/10",
+                                r#type: "button",
+                                onclick: move |_| {
+                                    let mut urls = asset_urls.read().clone();
+                                    urls.remove(i);
+                                    if urls.is_empty() {
+                                        urls.push(String::new());
+                                    }
+                                    asset_urls.set(urls);
+                                },
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                    line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                }
                             }
                         }
                     }

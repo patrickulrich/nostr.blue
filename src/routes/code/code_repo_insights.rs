@@ -96,6 +96,9 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let mut commit_count = use_signal(|| None::<usize>);
     let mut data_loading = use_signal(|| true);
     let mut request_gen = use_signal(|| 0u64);
+    let mut issues_error = use_signal(|| None::<String>);
+    let mut prs_error = use_signal(|| None::<String>);
+    let mut commits_error = use_signal(|| None::<String>);
 
     use_effect(use_reactive((&naddr, &repo), move |(n, r)| {
         let gen = request_gen.peek().wrapping_add(1);
@@ -104,6 +107,9 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
         issues.set(Vec::new());
         prs.set(Vec::new());
         commit_count.set(None);
+        issues_error.set(None);
+        prs_error.set(None);
+        commits_error.set(None);
         spawn(async move {
             // Fetch issues and PRs in parallel
             let (issues_result, prs_result) = futures::join!(
@@ -116,6 +122,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 Err(e) => {
                     if *request_gen.peek() != gen { return; }
                     log::warn!("Failed to fetch issues: {}", e);
+                    issues_error.set(Some(format!("Failed to fetch issues: {}", e)));
                     issues.set(Vec::new());
                 }
             }
@@ -124,6 +131,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 Err(e) => {
                     if *request_gen.peek() != gen { return; }
                     log::warn!("Failed to fetch PRs: {}", e);
+                    prs_error.set(Some(format!("Failed to fetch pull requests: {}", e)));
                     prs.set(Vec::new());
                 }
             }
@@ -138,6 +146,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                     Err(e) => {
                         if *request_gen.peek() != gen { return; }
                         log::warn!("Failed to fetch commits: {}", e);
+                        commits_error.set(Some(format!("Failed to fetch commits: {}", e)));
                         commit_count.set(None);
                     }
                 }
@@ -195,6 +204,23 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                     div { class: "h-48 bg-muted rounded-lg" }
                 }
             } else {
+                // Inline fetch errors
+                if let Some(err) = issues_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                        "{err}"
+                    }
+                }
+                if let Some(err) = prs_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                        "{err}"
+                    }
+                }
+                if let Some(err) = commits_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                        "{err}"
+                    }
+                }
+
                 // Stats Cards Grid
                 div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 pt-4",
                     StatCard {

@@ -177,7 +177,9 @@ pub fn PollCard(
                             if !added.is_empty() {
                                 nostr_client::ensure_relays_ready(&client).await;
                             }
-                            let new_set: std::collections::HashSet<&nostr_sdk::RelayUrl> = added.iter().collect();
+                            // Build new_set from the desired set, not just newly-added relays.
+                            // Already-connected relays won't appear in `added` but are still desired.
+                            let new_set: std::collections::HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
                             let removed: Vec<nostr_sdk::RelayUrl> = old_relays
                                 .iter()
                                 .filter(|r| !new_set.contains(r))
@@ -186,7 +188,7 @@ pub fn PollCard(
                             if !removed.is_empty() {
                                 relay::remove_relays(&client, &removed).await;
                             }
-                            poll_relay_urls.set(added);
+                            poll_relay_urls.set(poll_relays_for_sub.clone());
                         } else {
                             // No new poll relays; remove any previously-added ones
                             let old_relays = poll_relay_urls.peek().clone();
@@ -216,10 +218,7 @@ pub fn PollCard(
                                     let mut notifications = client.notifications();
                                     while let Ok(notification) = notifications.recv().await {
                                         if cancelled_flag.load(Ordering::SeqCst) {
-                                            // Component is being dropped; clean up and exit
-                                            client.unsubscribe(&subscription_id).await;
-                                            let relays = poll_relay_urls.peek().clone();
-                                            relay::remove_relays(&client, &relays).await;
+                                            // Component is being dropped; use_drop handles relay cleanup
                                             break;
                                         }
                                         if *vote_gen.peek() != current_vote_gen { break; }
@@ -799,13 +798,10 @@ async fn fetch_poll_votes(
         filter = filter.until(until);
     }
     let events = if !poll_relays.is_empty() {
-        let mut added_relays = Vec::new();
-        for relay_url in &poll_relays {
-            if client.add_relay(relay_url.as_str()).await.is_ok() {
-                added_relays.push(relay_url.clone());
-            }
+        let added_relays = relay::add_relays(&client, &poll_relays).await;
+        if !added_relays.is_empty() {
+            nostr_client::ensure_relays_ready(&client).await;
         }
-        nostr_client::ensure_relays_ready(&client).await;
         let relay_urls: Vec<nostr_sdk::Url> = poll_relays
             .iter()
             .filter_map(|r| nostr_sdk::Url::parse(r.as_str()).ok())
@@ -821,11 +817,7 @@ async fn fetch_poll_votes(
                 .await
                 .map_err(|e| format!("Failed to fetch votes: {}", e))
         };
-        for relay_url in added_relays {
-            if let Err(e) = client.remove_relay(relay_url.as_str()).await {
-                log::debug!("Could not remove poll relay {}: {}", relay_url, e);
-            }
-        }
+        relay::remove_relays(&client, &added_relays).await;
         result?
     } else {
         nostr_client::ensure_relays_ready(&client).await;

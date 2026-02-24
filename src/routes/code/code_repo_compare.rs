@@ -27,6 +27,11 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
         repo_result.set(None);
+        diff_content.set(String::new());
+        has_compared.set(false);
+        error.set(None);
+        loading.set(false);
+        head_branch.set(String::new());
         spawn(async move {
             let result = fetch_repository(&naddr).await;
             if *request_gen.peek() == gen {
