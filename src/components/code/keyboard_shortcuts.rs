@@ -21,9 +21,9 @@ pub fn CodeKeyboardShortcuts() -> Element {
     #[allow(unused_variables)]
     let nav = navigator();
 
-    // Store cleanup function for event listener removal
+    // Store JS function reference for event listener cleanup on unmount
     #[allow(unused_variables, unused_mut)]
-    let mut cleanup_fn = use_signal(|| None::<Option<()>>);
+    let mut cleanup_fn = use_signal(|| None::<js_sys::Function>);
 
     // Set up keyboard event listener once
     use_effect(move || {
@@ -112,6 +112,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
             let js_fn: js_sys::Function = closure.as_ref().unchecked_ref::<js_sys::Function>().clone();
             window.add_event_listener_with_callback("keydown", &js_fn).ok();
+            cleanup_fn.set(Some(js_fn));
             closure.forget();
         }
     });
@@ -119,8 +120,11 @@ pub fn CodeKeyboardShortcuts() -> Element {
     use_drop(move || {
         #[cfg(target_arch = "wasm32")]
         {
-            // Cleanup is handled by the browser when the page unloads
-            let _ = cleanup_fn.peek();
+            if let Some(js_fn) = cleanup_fn.peek().as_ref() {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.remove_event_listener_with_callback("keydown", js_fn);
+                }
+            }
         }
     });
 

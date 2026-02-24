@@ -7,10 +7,13 @@ use dioxus::prelude::*;
 #[component]
 pub fn TopicBadge(topic: String) -> Element {
     rsx! {
-        Link {
-            to: Route::TopicFeed { topic: topic.clone() },
-            class: "inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition",
-            span { "#{topic}" }
+        span {
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            Link {
+                to: Route::TopicFeed { topic: topic.clone() },
+                class: "inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition",
+                span { "#{topic}" }
+            }
         }
     }
 }

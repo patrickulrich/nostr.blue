@@ -18,6 +18,11 @@ pub fn TopicCard(
     let mut subscribing = use_signal(|| false);
     let mut subscribed = use_signal(|| is_subscribed);
 
+    // Keep local signal in sync when the parent prop changes
+    use_effect(use_reactive(&is_subscribed, move |v| {
+        subscribed.set(v);
+    }));
+
     let topic_name = topic_info.name.clone();
     let topic_for_action = topic_info.name.clone();
 

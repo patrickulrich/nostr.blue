@@ -34,7 +34,7 @@ pub fn TopicPostCard(
 
     rsx! {
         div {
-            class: "flex gap-3 bg-card border border-border rounded-lg p-3 hover:bg-accent/50 transition",
+            class: "flex gap-3 bg-card border border-border rounded-lg p-4 hover:bg-accent/50 transition",
             // Vote column
             VoteColumn {
                 post: post_for_vote,

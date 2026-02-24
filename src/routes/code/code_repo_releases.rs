@@ -352,7 +352,7 @@ fn EditReleaseForm(
     on_cancel: EventHandler<()>,
     on_saved: EventHandler<()>,
 ) -> Element {
-    let mut tag_name = use_signal(|| release.tag_name.clone());
+    let tag_name = use_signal(|| release.tag_name.clone());
     let mut title = use_signal(|| release.title.clone().unwrap_or_default());
     let mut description = use_signal(|| release.description.clone());
     let mut asset_urls = use_signal(|| {
@@ -436,11 +436,11 @@ fn EditReleaseForm(
                     span { class: "text-destructive", "*" }
                 }
                 input {
-                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm",
+                    class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground text-sm opacity-60 cursor-not-allowed",
                     r#type: "text",
                     placeholder: "v1.0.0",
                     value: "{tag_name}",
-                    oninput: move |e| tag_name.set(e.value()),
+                    readonly: true,
                 }
             }
             div {

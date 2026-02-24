@@ -6,8 +6,10 @@ use crate::components::code::RepoTabNav;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repo_issues, fetch_repo_prs, fetch_repository};
 use crate::stores::nostr_client;
+use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::{Issue, IssueStatus, PullRequest};
 use crate::utils::time::format_time_ago;
+use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,12 +26,10 @@ impl BoardItem {
         }
     }
 
-    fn title(&self) -> &str {
+    fn title(&self) -> String {
         match self {
-            Self::Issue(i) => i.subject.as_deref().unwrap_or("Untitled"),
-            Self::PullRequest(p) => p.content.lines()
-                .find(|l| !l.trim().is_empty())
-                .unwrap_or("Untitled"),
+            Self::Issue(i) => i.subject.clone().unwrap_or_else(|| "Untitled".to_string()),
+            Self::PullRequest(p) => p.display_title(),
         }
     }
 
@@ -133,10 +133,18 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     // Group by status (memoized to avoid recomputing on every render)
     let grouped = use_memo(move || {
         let items_read = items.read();
-        let draft: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Draft).cloned().collect();
-        let open: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Open).cloned().collect();
-        let applied: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Applied).cloned().collect();
-        let closed: Vec<_> = items_read.iter().filter(|i| i.status() == IssueStatus::Closed).cloned().collect();
+        let mut draft = Vec::new();
+        let mut open = Vec::new();
+        let mut applied = Vec::new();
+        let mut closed = Vec::new();
+        for item in items_read.iter() {
+            match item.status() {
+                IssueStatus::Draft => draft.push(item.clone()),
+                IssueStatus::Open => open.push(item.clone()),
+                IssueStatus::Applied => applied.push(item.clone()),
+                IssueStatus::Closed => closed.push(item.clone()),
+            }
+        }
         (draft, open, applied, closed)
     });
     let items_read = items.read();
@@ -205,7 +213,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                     EmptyBoard {}
                 }
                 // Show error banner + Kanban board when partial data loaded
-                if !*loading.read() && fetch_error.read().is_some() && !items_read.is_empty() {
+                if !*loading.read() && !items_read.is_empty() {
                     if let Some(ref err) = *fetch_error.read() {
                         div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
                             "{err}"
@@ -280,13 +288,13 @@ fn BoardColumn(title: &'static str, color: &'static str, count: usize, items: Ve
 #[component]
 fn BoardCard(item: BoardItem) -> Element {
     let time_ago = format_time_ago(item.created_at());
-    let truncated_author = {
+    let author_display = {
         let pk = item.pubkey();
-        if pk.len() > 12 {
-            format!("{}...{}", &pk[..6], &pk[pk.len() - 4..])
-        } else {
-            pk.to_string()
-        }
+        let profile = PROFILE_CACHE.read().peek(pk).cloned();
+        profile
+            .as_ref()
+            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+            .unwrap_or_else(|| truncate_pubkey(pk))
     };
 
     rsx! {
@@ -349,7 +357,7 @@ fn BoardCard(item: BoardItem) -> Element {
                         "Issue"
                     }
                 }
-                span { class: "truncate", "{truncated_author}" }
+                span { class: "truncate", "{author_display}" }
                 span { class: "ml-auto whitespace-nowrap", "{time_ago}" }
             }
         }

@@ -18,6 +18,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeRepoInsights(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
+    let mut repo_gen = use_signal(|| 0u64);
     let naddr_for_render = naddr.clone();
 
     use_effect(use_reactive(&naddr, move |naddr| {
@@ -25,9 +26,12 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&naddr).await;
+            if *repo_gen.peek() != gen { return; }
             repo_result.set(Some(result));
         });
     }));
@@ -109,11 +113,19 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
             if *request_gen.peek() != gen { return; }
             match issues_result {
                 Ok(fetched) => issues.set(fetched),
-                Err(e) => { log::warn!("Failed to fetch issues: {}", e); issues.set(Vec::new()); }
+                Err(e) => {
+                    if *request_gen.peek() != gen { return; }
+                    log::warn!("Failed to fetch issues: {}", e);
+                    issues.set(Vec::new());
+                }
             }
             match prs_result {
                 Ok(fetched) => prs.set(fetched),
-                Err(e) => { log::warn!("Failed to fetch PRs: {}", e); prs.set(Vec::new()); }
+                Err(e) => {
+                    if *request_gen.peek() != gen { return; }
+                    log::warn!("Failed to fetch PRs: {}", e);
+                    prs.set(Vec::new());
+                }
             }
 
             // For GitHub repos, fetch commit count
@@ -123,10 +135,15 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                         if *request_gen.peek() != gen { return; }
                         commit_count.set(Some(commits.len()));
                     }
-                    Err(e) => { log::warn!("Failed to fetch commits: {}", e); commit_count.set(None); }
+                    Err(e) => {
+                        if *request_gen.peek() != gen { return; }
+                        log::warn!("Failed to fetch commits: {}", e);
+                        commit_count.set(None);
+                    }
                 }
             }
 
+            if *request_gen.peek() != gen { return; }
             data_loading.set(false);
         });
     }));

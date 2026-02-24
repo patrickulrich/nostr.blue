@@ -168,13 +168,32 @@ pub fn PollCard(
                         if let Some(old_sub_id) = vote_sub_id.peek().clone() {
                             client.unsubscribe(&old_sub_id).await;
                         }
-                        // Re-add poll relays for subscription lifetime
+                        // Re-add poll relays for subscription lifetime.
+                        // Remove previously-added relays that are no longer in the new set
+                        // to avoid leaking relay connections across poll_data changes.
                         if !poll_relays_for_sub.is_empty() {
+                            let old_relays = poll_relay_urls.peek().clone();
                             let added = relay::add_relays(&client, &poll_relays_for_sub).await;
                             if !added.is_empty() {
                                 nostr_client::ensure_relays_ready(&client).await;
                             }
+                            let new_set: std::collections::HashSet<&nostr_sdk::RelayUrl> = added.iter().collect();
+                            let removed: Vec<nostr_sdk::RelayUrl> = old_relays
+                                .iter()
+                                .filter(|r| !new_set.contains(r))
+                                .cloned()
+                                .collect();
+                            if !removed.is_empty() {
+                                relay::remove_relays(&client, &removed).await;
+                            }
                             poll_relay_urls.set(added);
+                        } else {
+                            // No new poll relays; remove any previously-added ones
+                            let old_relays = poll_relay_urls.peek().clone();
+                            if !old_relays.is_empty() {
+                                relay::remove_relays(&client, &old_relays).await;
+                                poll_relay_urls.set(Vec::new());
+                            }
                         }
                         let since_ts = votes.read().iter()
                             .map(|v| v.created_at)
@@ -692,7 +711,16 @@ pub fn PollCard(
                                 let share_url = format!("https://njump.me/{}", nevent_str);
                                 let window = web_sys::window().unwrap();
                                 let clipboard = window.navigator().clipboard();
-                                let _ = clipboard.write_text(&share_url);
+                                spawn(async move {
+                                    match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&share_url)).await {
+                                        Ok(_) => {
+                                            log::debug!("Share URL copied to clipboard");
+                                        }
+                                        Err(e) => {
+                                            log::warn!("Clipboard write failed: {:?}", e);
+                                        }
+                                    }
+                                });
                             }
                         }
                     },
@@ -832,6 +860,9 @@ fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<
                 if valid_ids.contains(option_id.as_str())
                     && seen_in_event.insert(option_id.as_str())
                 {
+                    // Lenient handling of multi-vote in single-choice polls: we count the first
+                    // response option and silently drop subsequent ones, rather than rejecting
+                    // the entire event. This allows tallying partial results from non-conforming clients.
                     if is_single_choice && seen_in_event.len() > 1 {
                         break;
                     }

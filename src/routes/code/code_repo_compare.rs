@@ -35,7 +35,6 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
         });
     }));
     let handle_compare = move |_| {
-        diff_content.set(String::new());
         let base = base_branch.read().clone();
         let head = head_branch.read().clone();
         if base.trim().is_empty() || head.trim().is_empty() {
@@ -53,6 +52,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                 return;
             }
         };
+        diff_content.set(String::new());
         loading.set(true);
         error.set(None);
         has_compared.set(true);

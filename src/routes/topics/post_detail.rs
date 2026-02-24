@@ -11,6 +11,7 @@ use crate::stores::topic_store::{
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[component]
 pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
@@ -112,7 +113,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
                         }
                         ThreadView {
                             thread: replies.read().clone(),
-                            vote_counts: vote_counts.read().clone(),
+                            vote_counts: Rc::new(vote_counts.read().clone()),
                         }
                     }
                 } else {

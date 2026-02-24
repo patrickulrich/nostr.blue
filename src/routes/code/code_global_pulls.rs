@@ -131,7 +131,7 @@ pub fn CodeGlobalPulls() -> Element {
                 || p.labels.iter().any(|l| l.to_lowercase().contains(&query))
         })
         .filter(|p| match current_label.as_deref() {
-            Some(filter) => p.labels.contains(&filter.to_string()),
+            Some(filter) => p.labels.iter().any(|l| l == filter),
             None => true,
         })
         .cloned()
@@ -285,13 +285,12 @@ pub fn CodeGlobalPulls() -> Element {
                     for label in all_labels.iter() {
                         {
                             let l = label.clone();
-                            let l2 = label.clone();
                             rsx! {
                                 button {
-                                    key: "{l}",
-                                    class: if label_filter.read().as_deref() == Some(&l2) { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-400" } else { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 hover:ring-1 hover:ring-blue-400/50" },
+                                    key: "{label}",
+                                    class: if label_filter.read().as_deref() == Some(&l) { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-400" } else { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 hover:ring-1 hover:ring-blue-400/50" },
                                     onclick: move |_| label_filter.set(Some(l.clone())),
-                                    "{l2}"
+                                    "{label}"
                                 }
                             }
                         }

@@ -108,7 +108,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                         }
                         Err(e) => {
                             commit_result
-                                .set(Some(Err(format!("Repository not found: {}", e))));
+                                .set(Some(Err(format!("Failed to fetch repository: {}", e))));
                         }
                     }
                 });

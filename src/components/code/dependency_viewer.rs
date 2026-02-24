@@ -72,21 +72,32 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
             let version = if rest.starts_with('"') {
                 rest.trim_matches('"').to_string()
             } else if rest.contains('{') {
-                // Parse inline table format, find key=value where key is "version"
-                rest.split(',')
-                    .find_map(|token| {
+                // Parse inline table format: { version = "x", optional = true, ... }
+                let tokens: Vec<(&str, &str)> = rest.split(',')
+                    .filter_map(|token| {
                         let token = token.trim().trim_matches('{').trim_matches('}').trim();
-                        token.split_once('=').and_then(|(k, v)| {
-                            if k.trim() == "version" {
-                                Some(v.trim().trim_matches('"').to_string())
-                            } else {
-                                None
-                            }
-                        })
+                        token.split_once('=').map(|(k, v)| (k.trim(), v.trim()))
                     })
+                    .collect();
+                // Extract version
+                tokens.iter()
+                    .find(|(k, _)| *k == "version")
+                    .map(|(_, v)| v.trim_matches('"').to_string())
                     .unwrap_or_else(|| "*".to_string())
             } else {
                 "*".to_string()
+            };
+            // Override dep_type to Optional if inline table contains `optional = true`
+            let dep_type = if rest.contains('{') {
+                let has_optional = rest.split(',').any(|token| {
+                    let token = token.trim().trim_matches('{').trim_matches('}').trim();
+                    token.split_once('=').is_some_and(|(k, v)| {
+                        k.trim() == "optional" && v.trim().trim_matches('"') == "true"
+                    })
+                });
+                if has_optional { DepType::Optional } else { dep_type }
+            } else {
+                dep_type
             };
             deps.push(Dependency {
                 name,

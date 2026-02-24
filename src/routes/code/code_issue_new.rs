@@ -87,7 +87,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                     assignees_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
                 for a in &assignee_list {
-                    if nostr_sdk::PublicKey::from_hex(a).is_err() {
+                    if nostr_sdk::PublicKey::parse(a).is_err() {
                         error_message.set(Some(format!("Invalid assignee pubkey: {}", a)));
                         is_publishing.set(false);
                         return;

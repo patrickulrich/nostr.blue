@@ -138,7 +138,12 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                     if *request_id.peek() != current_id { return; }
                     profile_data.set(Some(profile));
                 }
-                Err(e) => log::warn!("Failed to fetch profile: {}", e),
+                Err(e) => {
+                    if *request_id.peek() == current_id {
+                        error.set(Some(format!("Failed to load profile: {}", e)));
+                    }
+                    log::warn!("Failed to load profile: {}", e);
+                }
             }
 
             // Check following status
@@ -199,9 +204,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         let pk = pubkey_for_follow.clone();
         let captured = follow_request_id.peek().wrapping_add(1);
         follow_request_id.set(captured);
+        follow_loading.set(true);
+        follow_error.set(None);
         spawn(async move {
-            follow_loading.set(true);
-            follow_error.set(None);
             let hex = PublicKey::parse(&pk)
                 .map(|k| k.to_hex())
                 .unwrap_or(pk);
@@ -213,6 +218,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                         is_following.set(false);
                     }
                     Err(e) => {
+                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
                         log::error!("Failed to unfollow: {}", e);
                         follow_error.set(Some(format!("Failed to unfollow: {}", e)));
                     }
@@ -224,6 +230,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                         is_following.set(true);
                     }
                     Err(e) => {
+                        if *follow_request_id.peek() != captured { follow_loading.set(false); return; }
                         log::error!("Failed to follow: {}", e);
                         follow_error.set(Some(format!("Failed to follow: {}", e)));
                     }

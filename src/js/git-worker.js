@@ -223,18 +223,18 @@ function computeEdits(oldLines, newLines) {
     while (x > prevX && y > prevY) {
       x--;
       y--;
-      edits.unshift({ type: 'equal', oldIdx: x, newIdx: y });
+      edits.push({ type: 'equal', oldIdx: x, newIdx: y });
     }
 
     if (d > 0) {
       if (x === prevX) {
         // Insert
         y--;
-        edits.unshift({ type: 'insert', newIdx: y });
+        edits.push({ type: 'insert', newIdx: y });
       } else {
         // Delete
         x--;
-        edits.unshift({ type: 'delete', oldIdx: x });
+        edits.push({ type: 'delete', oldIdx: x });
       }
     }
   }
@@ -243,9 +243,10 @@ function computeEdits(oldLines, newLines) {
   while (x > 0 && y > 0) {
     x--;
     y--;
-    edits.unshift({ type: 'equal', oldIdx: x, newIdx: y });
+    edits.push({ type: 'equal', oldIdx: x, newIdx: y });
   }
 
+  edits.reverse();
   return edits;
 }
 
@@ -725,7 +726,7 @@ const methods = {
         diffParts.push(`diff --git a/${filepath} b/${filepath}`);
         diffParts.push(inBase ? `--- a/${filepath}` : `--- /dev/null`);
         diffParts.push(inHead ? `+++ b/${filepath}` : `+++ /dev/null`);
-        diffParts.push(`Binary files differ: ${skipReason}`);
+        diffParts.push(`File skipped: ${skipReason}`);
         continue;
       }
 

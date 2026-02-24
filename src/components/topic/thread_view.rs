@@ -8,6 +8,7 @@ use crate::stores::topic_store::{TopicThread, VoteCounts};
 use crate::utils::format::format_relative_time_or;
 use dioxus::prelude::*;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Maximum visual depth for reply indentation
 const MAX_VISUAL_DEPTH: usize = 6;
@@ -17,7 +18,7 @@ const MAX_VISUAL_DEPTH: usize = 6;
 pub fn ThreadView(
     thread: Vec<TopicThread>,
     #[props(default)]
-    vote_counts: HashMap<String, VoteCounts>,
+    vote_counts: Rc<HashMap<String, VoteCounts>>,
 ) -> Element {
     rsx! {
         div {
@@ -38,7 +39,7 @@ pub fn ThreadView(
 #[component]
 fn ThreadNode(
     thread: TopicThread,
-    vote_counts: HashMap<String, VoteCounts>,
+    vote_counts: Rc<HashMap<String, VoteCounts>>,
     #[props(default = 0)]
     depth: usize,
 ) -> Element {

@@ -21,6 +21,14 @@ use crate::utils::nip34::{GitComment, IssueStatus, PersistedReview, PullRequest,
 use crate::utils::permissions;
 use dioxus::prelude::*;
 
+/// Richer approval status returned by the approval resource
+#[derive(Clone, PartialEq, Default)]
+struct ApprovalStatus {
+    approved: u32,
+    has_changes_requested: bool,
+    fetch_error: bool,
+}
+
 /// PR detail tab
 #[derive(Clone, Copy, PartialEq)]
 enum PrTab {
@@ -96,6 +104,9 @@ pub fn CodePullDetail(note_id: String) -> Element {
                                 pr: pr.clone(),
                                 is_authenticated: auth.is_authenticated,
                                 user_pubkey: auth.pubkey.clone().unwrap_or_default(),
+                                on_pr_updated: move |_| {
+                                    pr_gen.with_mut(|v| *v = v.wrapping_add(1));
+                                },
                             }
                         },
                         Some(Err(e)) => rsx! {
@@ -112,7 +123,7 @@ pub fn CodePullDetail(note_id: String) -> Element {
 }
 
 #[component]
-fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> Element {
+fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr_updated: EventHandler) -> Element {
     let pr_id = pr.event_id.clone();
     let pr_pubkey = pr.pubkey.clone();
     let mut display_status = use_signal(|| pr.status);
@@ -162,7 +173,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
     // Generation counter bumped when a new review is submitted, causing use_resource to refetch
     let mut reviews_gen = use_signal(|| 0u64);
     let pr_id_for_reviews = pr_id.clone();
-    let approval_count = use_resource(move || {
+    let approval_status = use_resource(move || {
         let _ = reviews_gen.read();
         let id = pr_id_for_reviews.clone();
         async move {
@@ -176,20 +187,31 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                             _ => { latest.insert(r.pubkey.as_str(), r); }
                         }
                     }
-                    latest.values()
+                    let approved = latest.values()
                         .filter(|r| r.state == ReviewState::Approved)
-                        .count() as u32
+                        .count() as u32;
+                    let has_changes_requested = latest.values()
+                        .any(|r| r.state == ReviewState::ChangesRequested);
+                    ApprovalStatus {
+                        approved,
+                        has_changes_requested,
+                        fetch_error: false,
+                    }
                 }
-                Err(_) => 0,
+                Err(_) => ApprovalStatus {
+                    approved: 0,
+                    has_changes_requested: false,
+                    fetch_error: true,
+                },
             }
         }
     });
 
     let has_enough_approvals = required_approvals == 0
-        || approval_count
+        || approval_status
             .read()
             .as_ref()
-            .map(|&count| count >= required_approvals)
+            .map(|status| status.approved >= required_approvals && !status.has_changes_requested)
             .unwrap_or(false);
 
     let can_merge = is_authenticated
@@ -329,6 +351,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                         update_content.set(String::new());
                         update_commit.set(String::new());
                         update_parent.set(String::new());
+                        on_pr_updated.call(());
                     }
                     Err(e) => {
                         update_error.set(Some(e));
@@ -500,12 +523,26 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             // Approval requirement notice
             if required_approvals > 0 && *display_status.read() != IssueStatus::Applied {
                 {
-                    let current_approvals = approval_count.read().as_ref().copied().unwrap_or(0);
-                    let met = current_approvals >= required_approvals;
-                    let color_class = if met { "bg-green-500/10 border-green-500/20 text-green-600" } else { "bg-orange-500/10 border-orange-500/20 text-orange-600" };
+                    let status = approval_status.read();
+                    let status_ref = status.as_ref();
+                    let current_approvals = status_ref.map(|s| s.approved).unwrap_or(0);
+                    let changes_requested = status_ref.map(|s| s.has_changes_requested).unwrap_or(false);
+                    let has_fetch_error = status_ref.map(|s| s.fetch_error).unwrap_or(false);
+                    let met = current_approvals >= required_approvals && !changes_requested;
+                    let color_class = if changes_requested {
+                        "bg-destructive/10 border-destructive/20 text-destructive"
+                    } else if met {
+                        "bg-green-500/10 border-green-500/20 text-green-600"
+                    } else {
+                        "bg-orange-500/10 border-orange-500/20 text-orange-600"
+                    };
                     rsx! {
                         div { class: "p-3 rounded-lg border text-sm {color_class}",
-                            if met {
+                            if has_fetch_error {
+                                "Unable to fetch review status. Approval data may be incomplete."
+                            } else if changes_requested {
+                                "Changes requested — resolve feedback before merging ({current_approvals}/{required_approvals} approvals)"
+                            } else if met {
                                 "Approval requirement met ({current_approvals}/{required_approvals})"
                             } else {
                                 "Requires {required_approvals} approval(s) to merge ({current_approvals}/{required_approvals})"
@@ -518,7 +555,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
             // Conflict detection banner
             if *display_status.read() == IssueStatus::Open || *display_status.read() == IssueStatus::Draft {
                 if let Some(parent) = &pr.parent_commit {
-                    ConflictBanner { parent_commit: parent.clone() }
+                    ParentCommitInfo { parent_commit: parent.clone() }
                 }
             }
 
@@ -828,8 +865,12 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String) -> El
                                     match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
                                         Ok(_) => {
                                             // Refresh line comments after publishing
-                                            if let Ok(lcs) = fetch_line_comments_by_id(&id).await {
-                                                line_comments.set(lcs);
+                                            match fetch_line_comments_by_id(&id).await {
+                                                Ok(lcs) => line_comments.set(lcs),
+                                                Err(e) => {
+                                                    log::warn!("Failed to refresh line comments: {}", e);
+                                                    line_comment_error.set(Some(format!("Failed to refresh line comments: {}", e)));
+                                                }
                                             }
                                         }
                                         Err(e) => {
@@ -954,19 +995,18 @@ fn LoadingSkeleton() -> Element {
     }
 }
 
-/// Conflict detection banner for PRs.
+/// Parent commit info banner for PRs.
 ///
-/// Shows a warning when the PR's parent commit may have diverged from the target branch,
-/// indicating potential merge conflicts.
+/// Shows contextual information about the base commit this PR was built on,
+/// so reviewers know which branch state to compare against.
 #[component]
-fn ConflictBanner(parent_commit: String) -> Element {
-    // Only show when we have a parent commit to reference
+fn ParentCommitInfo(parent_commit: String) -> Element {
     let short_parent = truncate_commit(&parent_commit);
     rsx! {
-        div { class: "p-3 rounded-lg border bg-yellow-500/10 border-yellow-500/20 text-sm",
+        div { class: "p-3 rounded-lg border bg-blue-500/10 border-blue-500/20 text-sm",
             div { class: "flex items-start gap-2",
                 svg {
-                    class: "w-4 h-4 text-yellow-500 shrink-0 mt-0.5",
+                    class: "w-4 h-4 text-blue-200 shrink-0 mt-0.5",
                     xmlns: "http://www.w3.org/2000/svg",
                     width: "24",
                     height: "24",
@@ -976,17 +1016,14 @@ fn ConflictBanner(parent_commit: String) -> Element {
                     stroke_width: "2",
                     stroke_linecap: "round",
                     stroke_linejoin: "round",
-                    path { d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" }
-                    line { x1: "12", y1: "9", x2: "12", y2: "13" }
-                    line { x1: "12", y1: "17", x2: "12.01", y2: "17" }
+                    circle { cx: "12", cy: "12", r: "10" }
+                    path { d: "M12 16v-4" }
+                    path { d: "M12 8h.01" }
                 }
-                div {
-                    p { class: "text-yellow-700 dark:text-yellow-400 font-medium", "Check for conflicts before merging" }
-                    p { class: "text-yellow-600 dark:text-yellow-500 mt-1",
-                        "This PR is based on commit "
-                        code { class: "px-1 py-0.5 bg-yellow-500/10 rounded text-xs font-mono", "{short_parent}" }
-                        ". Verify the target branch hasn't diverged to avoid merge conflicts."
-                    }
+                p { class: "text-blue-200",
+                    "This PR is based on commit "
+                    code { class: "px-1 py-0.5 bg-blue-500/10 rounded text-xs font-mono", "{short_parent}" }
+                    ". Review the base branch before merging."
                 }
             }
         }
