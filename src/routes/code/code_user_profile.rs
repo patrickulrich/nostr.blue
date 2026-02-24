@@ -108,7 +108,8 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         is_following.set(false);
         follow_loading.set(false);
         follow_error.set(None);
-        follow_request_id.set(follow_request_id.peek().wrapping_add(1));
+        let next_follow_id = follow_request_id.peek().wrapping_add(1);
+        follow_request_id.set(next_follow_id);
         profile_meta_error.set(None);
 
         let current_id = request_id.peek().wrapping_add(1);
