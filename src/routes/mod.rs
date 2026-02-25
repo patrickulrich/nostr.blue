@@ -89,9 +89,9 @@ use code::{
     CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore,
     CodeGlobalIssues, CodeGlobalPulls, CodeHome, CodeImport,
     CodeIssueDetail, CodeIssueNew, CodeNew, CodeNotifications,
-    CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlame,
+    CodePullDetail, CodePullNew, CodeRepo, CodeRepoArchitecture, CodeRepoBlame,
     CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare,
-    CodeRepoDiscussions, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile,
+    CodeRepoDiscussions, CodeRepoEditFile, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile,
     CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings,
     CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch,
     CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets,
@@ -286,6 +286,10 @@ pub enum Route {
     CodeRepoUpload { naddr: String },
     #[route("/code/repo/:naddr/new-file")]
     CodeRepoNewFile { naddr: String },
+    #[route("/code/repo/:naddr/edit/:git_ref/:..path")]
+    CodeRepoEditFile { naddr: String, git_ref: String, path: Vec<String> },
+    #[route("/code/repo/:naddr/architecture")]
+    CodeRepoArchitecture { naddr: String },
     #[route("/code/repo/:naddr/releases")]
     CodeRepoReleases { naddr: String },
     #[route("/code/repo/:naddr/discussions")]
@@ -585,6 +589,8 @@ fn Layout() -> Element {
         | Route::CodeRepoCompare { .. }
         | Route::CodeRepoUpload { .. }
         | Route::CodeRepoNewFile { .. }
+        | Route::CodeRepoEditFile { .. }
+        | Route::CodeRepoArchitecture { .. }
         | Route::CodeRepoReleases { .. }
         | Route::CodeRepoDiscussions { .. }
         | Route::CodeDiscussionNew { .. }

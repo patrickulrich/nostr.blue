@@ -16,6 +16,26 @@ use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+/// Generate a kebab-case d-tag identifier from the fork name
+fn generate_fork_id(name: &str, fallback_id: &str) -> String {
+    let slug: String = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug: String = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        format!("{}-fork-{}", fallback_id, nostr_sdk::Timestamp::now().as_secs())
+    } else {
+        slug
+    }
+}
+
 /// Repository action bar with Watch, Star, Fork, Zap, Share buttons
 #[allow(clippy::clone_on_copy)]
 #[component]
@@ -246,7 +266,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         let form_desc = fork_form_desc.read().clone();
         let form_urls_raw = fork_form_clone_urls.read().clone();
         spawn(async move {
-            let fork_id = format!("{}-fork-{}", id, nostr_sdk::Timestamp::now().as_secs());
+            let fork_id = generate_fork_id(&form_name, &id);
             let fork_name = if form_name.trim().is_empty() { None } else { Some(form_name.trim().to_string()) };
             let fork_desc = if form_desc.trim().is_empty() { None } else { Some(form_desc.trim().to_string()) };
             let urls: Vec<String> = form_urls_raw
@@ -289,9 +309,24 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 fork_desc.as_deref(),
                 &url_refs,
             ).await {
-                Ok(_) => {
-                    toast.success("Repository forked!".to_string(), ToastOptions::new());
+                Ok(_event_id) => {
+                    toast.success("Repository forked! Redirecting...".to_string(), ToastOptions::new());
                     show_fork_modal.set(false);
+                    // Navigate to the new fork
+                    if let Some(client) = crate::stores::nostr_client::get_client() {
+                        if let Ok(signer) = client.signer().await {
+                            if let Ok(pubkey) = signer.get_public_key().await {
+                                let coordinate = nostr_sdk::prelude::Coordinate::new(
+                                    nostr_sdk::prelude::Kind::GitRepoAnnouncement,
+                                    pubkey,
+                                ).identifier(&fork_id);
+                                if let Ok(naddr) = coordinate.to_bech32() {
+                                    let nav = navigator();
+                                    nav.push(crate::routes::Route::CodeRepo { naddr });
+                                }
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     toast.error(format!("Fork failed: {}", e), ToastOptions::new());

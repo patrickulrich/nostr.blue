@@ -29,6 +29,7 @@ pub mod review_section;
 pub mod snippet_card;
 pub mod ssh_key_manager;
 pub mod status_badge;
+pub mod user_picker;
 #[allow(unused_imports)]
 pub use bounty_badge::{BountyBadge, BountyStatusBadge};
 #[allow(unused_imports)]
@@ -66,3 +67,5 @@ pub use keyboard_shortcuts::CodeKeyboardShortcuts;
 #[allow(unused_imports)]
 pub use ssh_key_manager::SshKeyManager;
 pub use status_badge::CodeStatusBadge;
+#[allow(unused_imports)]
+pub use user_picker::NostrUserPicker;

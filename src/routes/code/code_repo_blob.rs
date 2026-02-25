@@ -7,6 +7,7 @@ use crate::components::{
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
+use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::is_safe_path;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
@@ -188,6 +189,33 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                         }
                     }
                 } else {
+                    if *HAS_SIGNER.read() {
+                        div { class: "flex justify-end mb-2",
+                            Link {
+                                to: Route::CodeRepoEditFile {
+                                    naddr: naddr.clone(),
+                                    git_ref: git_ref.clone(),
+                                    path: split_path(&path),
+                                },
+                                class: "flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border bg-muted hover:bg-accent rounded-lg transition",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }
+                                    path { d: "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" }
+                                }
+                                "Edit"
+                            }
+                        }
+                    }
                     CodeFileViewer {
                         content: content(),
                         filename: filename.clone(),
