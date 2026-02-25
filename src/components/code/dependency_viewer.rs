@@ -42,14 +42,18 @@ impl DepType {
 pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
     let mut deps = Vec::new();
     let mut section = "";
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
 
-    for line in content.lines() {
-        let trimmed = line.trim();
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             section = trimmed;
+            i += 1;
             continue;
         }
         if trimmed.is_empty() || trimmed.starts_with('#') {
+            i += 1;
             continue;
         }
 
@@ -62,20 +66,39 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
                 DepType::Runtime
             }
         } else {
+            i += 1;
             continue;
         };
 
         // Parse "name = version" or "name = { version = "x" }"
         if let Some((name, rest)) = trimmed.split_once('=') {
             let name = name.trim().to_string();
-            let rest = rest.trim();
-            let (version, dep_type) = if rest.starts_with('"') {
-                (rest.trim_matches('"').to_string(), dep_type)
-            } else if rest.contains('{') {
+            let rest_trimmed = rest.trim();
+            let (version, dep_type) = if rest_trimmed.starts_with('"') {
+                (rest_trimmed.trim_matches('"').to_string(), dep_type)
+            } else if rest_trimmed.contains('{') {
+                // Handle multiline inline tables: if '{' is present but '}' is not,
+                // consume subsequent lines until '}' is found
+                let full_rest = if rest_trimmed.starts_with('{') && !rest_trimmed.contains('}') {
+                    let mut combined = rest_trimmed.to_string();
+                    i += 1;
+                    while i < lines.len() {
+                        let next_line = lines[i].trim();
+                        combined.push(' ');
+                        combined.push_str(next_line);
+                        if next_line.contains('}') {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    combined
+                } else {
+                    rest_trimmed.to_string()
+                };
                 // Parse inline table format in a single pass: { version = "x", optional = true, features = [...] }
                 let mut ver = None;
                 let mut is_optional = false;
-                for token in rest.split(',') {
+                for token in full_rest.split(',') {
                     let token = token.trim().trim_matches('{').trim_matches('}').trim();
                     if let Some((k, v)) = token.split_once('=') {
                         let k = k.trim();
@@ -99,6 +122,7 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
                 dep_type,
             });
         }
+        i += 1;
     }
     deps
 }
@@ -248,7 +272,7 @@ pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
                 }
                 // Rows
                 for dep in deps.iter() {
-                    div { key: "{dep.name}:{dep.dep_type:?}", class: "grid grid-cols-3 gap-4 p-3 border-t border-border hover:bg-accent/30 transition text-sm",
+                    div { key: "{dep.name}:{dep.dep_type:?}:{dep.version}", class: "grid grid-cols-3 gap-4 p-3 border-t border-border hover:bg-accent/30 transition text-sm",
                         span { class: "font-medium text-foreground truncate", "{dep.name}" }
                         code { class: "text-muted-foreground font-mono text-xs", "{dep.version}" }
                         span {

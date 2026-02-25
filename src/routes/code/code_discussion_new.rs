@@ -77,6 +77,7 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
                 };
                 match publish_discussion_by_naddr(&naddr, subj, &content_val, cat, &[]).await {
                     Ok(event_id) => {
+                        is_publishing.set(false);
                         nav.push(Route::CodeDiscussionDetail {
                             note_id: event_id,
                         });

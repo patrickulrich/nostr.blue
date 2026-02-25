@@ -68,6 +68,11 @@ pub fn NostrUserPicker(
         if let Ok(pk) = PublicKey::parse(val.trim()) {
             let hex = pk.to_hex();
             if !selected.read().contains(&hex) {
+                // Cancel any in-flight search task
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                is_searching.set(false);
                 let profile = PROFILE_CACHE.read().peek(&hex).cloned();
                 let result = ProfileSearchResult {
                     pubkey: pk,

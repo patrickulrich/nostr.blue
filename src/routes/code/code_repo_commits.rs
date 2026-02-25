@@ -24,7 +24,7 @@ pub(super) fn split_commit_message(message: &str) -> (&str, Option<&str>) {
 
 /// Return the first 7 characters of a hash, or the full string if shorter.
 pub(super) fn short_hash(hash: &str) -> &str {
-    if hash.len() >= 7 { &hash[..7] } else { hash }
+    hash.get(..7).unwrap_or(hash)
 }
 
 /// Unified commit data from either source
@@ -224,7 +224,9 @@ fn GitHubCommitRow(commit: GitHubCommit) -> Element {
             div { class: "flex items-start justify-between gap-4",
                 div { class: "flex-1 min-w-0",
                     a {
-                        href: "{commit.html_url}",
+                        href: if commit.html_url.starts_with("https://") || commit.html_url.starts_with("http://") {
+                            "{commit.html_url}"
+                        } else { "#" },
                         target: "_blank",
                         rel: "noopener noreferrer",
                         class: "font-medium hover:text-primary truncate block",
@@ -259,7 +261,9 @@ fn GitHubCommitRow(commit: GitHubCommit) -> Element {
                     }
                 }
                 a {
-                    href: "{commit.html_url}",
+                    href: if commit.html_url.starts_with("https://") || commit.html_url.starts_with("http://") {
+                        "{commit.html_url}"
+                    } else { "#" },
                     target: "_blank",
                     rel: "noopener noreferrer",
                     class: "flex items-center gap-2 px-2 py-1 bg-muted rounded text-xs font-mono hover:bg-accent transition",

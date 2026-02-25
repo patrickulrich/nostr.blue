@@ -77,7 +77,6 @@ pub fn TopicPostCard(
                         let activate = matches!(evt.key(), Key::Enter)
                             || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
                         if !activate { return; }
-                        evt.prevent_default();
                         // Don't navigate if key event originated from/inside an anchor element
                         if let Some(target) = evt.data.as_web_event().target() {
                             if let Some(element) = target.dyn_ref::<web_sys::Element>() {
@@ -86,6 +85,7 @@ pub fn TopicPostCard(
                                 }
                             }
                         }
+                        evt.prevent_default();
                         navigator().push(Route::TopicPostDetail {
                             topic: topic_for_key.clone(),
                             post_id: post_id_for_key.clone(),

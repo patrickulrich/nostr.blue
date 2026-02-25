@@ -71,7 +71,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 }
                 Err(e) => {
                     if *gen.peek() != current_gen { return; }
-                    if e.contains("tree") || e.contains("is a tree") {
+                    if e.contains("is a tree") || e.contains("is a directory") {
                         is_directory.set(true);
                     } else {
                         error.set(Some(format!("Failed to load file: {}", e)));

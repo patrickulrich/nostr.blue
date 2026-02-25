@@ -142,10 +142,12 @@ pub fn PRReviewSection(
     );
 
     let review_list = reviews.read();
-    let approve_count = review_list.iter().filter(|r| r.state == crate::utils::nip34::ReviewState::Approved).count();
+    let approve_count = review_list.iter()
+        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainers.contains(&r.pubkey))
+        .count();
     let changes_count = review_list
         .iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested)
+        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainers.contains(&r.pubkey))
         .count();
 
     let handle_submit = {
@@ -181,6 +183,7 @@ pub fn PRReviewSection(
             let mut current = reviews.write();
             current.retain(|r| r.pubkey != user_pubkey);
             current.push(local_review);
+            current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             drop(current);
             show_form.set(false);
             review_body.set(String::new());

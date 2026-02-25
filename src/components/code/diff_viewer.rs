@@ -70,28 +70,17 @@ fn is_diff_content(content: &str) -> bool {
 }
 
 /// Extract file path from a "diff --git a/path b/path" line.
-/// Handles git diff quoted paths (surrounded by `"`) and strips `a/` or `b/` prefixes.
+/// Prefers the b/ side (destination) to handle renames correctly.
 fn extract_file_path(line: &str) -> Option<&str> {
-    let raw = if let Some(rest) = line.strip_prefix("diff --git a/") {
-        rest.split(" b/").next()?
-    } else if let Some(rest) = line.strip_prefix("diff --git ") {
-        // Handle quoted paths: diff --git "a/path" "b/path"
-        rest.split(' ').next()?
+    let rest = line.strip_prefix("diff --git ")?;
+    // Try to get the b/ side path (handles renames)
+    if let Some(b_path) = rest.split(" b/").nth(1) {
+        Some(b_path)
     } else {
-        return None;
-    };
-    // Strip surrounding quotes if present
-    let unquoted = if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
-        &raw[1..raw.len() - 1]
-    } else {
-        raw
-    };
-    // Strip a/ or b/ prefix from the path
-    let stripped = unquoted
-        .strip_prefix("a/")
-        .or_else(|| unquoted.strip_prefix("b/"))
-        .unwrap_or(unquoted);
-    Some(stripped)
+        // Fallback: try quoted paths (second token), strip a/ or b/ prefix
+        rest.split(' ').nth(1)
+            .map(|p| p.strip_prefix("b/").or_else(|| p.strip_prefix("a/")).unwrap_or(p))
+    }
 }
 
 /// A single row in side-by-side view

@@ -62,6 +62,7 @@ pub fn FilterBar(
                 // Status tabs
                 div { class: "flex border border-border rounded-lg overflow-hidden",
                     button {
+                        r#type: "button",
                         class: if status_filter == StatusFilter::Open {
                             "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
@@ -75,6 +76,7 @@ pub fn FilterBar(
                         }
                     }
                     button {
+                        r#type: "button",
                         class: if status_filter == StatusFilter::Closed {
                             "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
@@ -88,6 +90,7 @@ pub fn FilterBar(
                         }
                     }
                     button {
+                        r#type: "button",
                         class: if status_filter == StatusFilter::All {
                             "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
@@ -107,6 +110,7 @@ pub fn FilterBar(
                             let label_clone = label.clone();
                             rsx! {
                                 button {
+                                    r#type: "button",
                                     key: "{label}",
                                     class: if is_selected {
                                         "px-2 py-0.5 text-xs rounded-full border border-primary bg-primary/10 text-primary font-medium"

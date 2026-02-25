@@ -8,7 +8,7 @@ fn split_path(path: &str) -> Vec<String> {
     if path.is_empty() {
         Vec::new()
     } else {
-        path.split('/').map(|s| s.to_string()).collect()
+        path.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect()
     }
 }
 

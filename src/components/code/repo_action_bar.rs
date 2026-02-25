@@ -129,6 +129,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 return;
             }
             star_loading.set(true);
+            let current_gen = star_gen.peek().wrapping_add(1);
+            star_gen.set(current_gen);
             if !*HAS_SIGNER.read() {
                 star_loading.set(false);
                 toast
@@ -152,6 +154,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 } else {
                     publish_star(&coord).await.map(|_| ())
                 };
+                // Stale guard: skip state update if a newer star action started
+                if *star_gen.peek() != current_gen {
+                    return;
+                }
                 match result {
                     Ok(_) => {
                         is_starred.set(!currently_starred);

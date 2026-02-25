@@ -6,6 +6,7 @@ use crate::stores::topic_store::{
     subscribe_to_topic, unsubscribe_from_topic, TopicInfo,
 };
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 /// Discovery card for browsing topics
 #[component]
@@ -15,6 +16,7 @@ pub fn TopicCard(
     is_subscribed: bool,
 ) -> Element {
     let has_signer = *HAS_SIGNER.read();
+    let toast = consume_toast();
     let mut subscribing = use_signal(|| false);
     let mut subscribed = use_signal(|| is_subscribed);
 
@@ -65,7 +67,10 @@ pub fn TopicCard(
                                 };
                                 match result {
                                     Ok(()) => subscribed.set(!currently_subscribed),
-                                    Err(e) => log::error!("Subscription change failed: {}", e),
+                                    Err(e) => {
+                                        log::error!("Subscription change failed: {}", e);
+                                        toast.error(format!("Failed to update subscription: {}", e), ToastOptions::new());
+                                    }
                                 }
                                 subscribing.set(false);
                             });

@@ -114,10 +114,13 @@ pub fn CodeNew() -> Element {
             }
 
             for url in &web_list {
-                if url::Url::parse(url).is_err() {
-                    error_message.set(Some(format!("Invalid web URL: '{}'", url)));
-                    is_publishing.set(false);
-                    return;
+                match url::Url::parse(url) {
+                    Ok(parsed) if parsed.scheme() == "http" || parsed.scheme() == "https" => {}
+                    _ => {
+                        error_message.set(Some(format!("Invalid web URL: '{}' (must be http or https)", url)));
+                        is_publishing.set(false);
+                        return;
+                    }
                 }
             }
 

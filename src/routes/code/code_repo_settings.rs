@@ -140,10 +140,18 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 let relay_snapshot: Vec<String> = relay_list.read().clone();
                 let relays: Vec<&str> = relay_snapshot.iter().map(|s| s.as_str()).collect();
                 let maintainer_snapshot: Vec<String> = maintainer_list.read().clone();
-                let maintainer_keys: Vec<PublicKey> = maintainer_snapshot
+                let maintainer_keys: Vec<PublicKey> = match maintainer_snapshot
                     .iter()
-                    .filter_map(|s| PublicKey::parse(s).ok())
-                    .collect();
+                    .map(|s| PublicKey::parse(s))
+                    .collect::<Result<Vec<_>, _>>()
+                {
+                    Ok(keys) => keys,
+                    Err(e) => {
+                        save_error.set(Some(format!("Invalid maintainer key: {}", e)));
+                        is_saving.set(false);
+                        return;
+                    }
+                };
                 let name_opt = if name.is_empty() { None } else { Some(name.as_str()) };
                 let desc_opt = if description.is_empty() {
                     None

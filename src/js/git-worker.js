@@ -9,6 +9,10 @@ import { Buffer } from 'buffer';
 // Required for isomorphic-git
 globalThis.Buffer = Buffer;
 
+function sanitizeFilepath(fp) {
+    return fp.replace(/[\x00-\x1f\x7f]/g, '');
+}
+
 // Initialize virtual filesystem backed by IndexedDB
 const fs = new LightningFS('nostr-blue-git-cache');
 
@@ -518,10 +522,10 @@ const methods = {
     // Validate and normalize directory path to prevent path traversal attacks
     dir = validateRepoDir(dir);
 
-    // Resolve ref to commit OID with fallback
+    // Resolve ref to commit OID (strict - no fallback for user-specified refs)
     let commitOid;
     try {
-      commitOid = await resolveRefWithFallback(dir, ref);
+      commitOid = await git.resolveRef({ fs, dir, ref });
     } catch (e) {
       throw new Error(`Could not resolve ref '${ref}': ${e.message}`);
     }
@@ -569,7 +573,7 @@ const methods = {
 
     let commitOid;
     try {
-      commitOid = await resolveRefWithFallback(dir, ref);
+      commitOid = await git.resolveRef({ fs, dir, ref });
     } catch (e) {
       throw new Error(`Could not resolve ref '${ref}': ${e.message}`);
     }
@@ -579,11 +583,11 @@ const methods = {
         fs,
         dir,
         oid: commitOid,
-        filepath,
+        filepath: sanitizeFilepath(filepath),
       });
       return new TextDecoder().decode(blob);
     } catch (e) {
-      throw new Error(`Could not read file '${filepath}': ${e.message}`);
+      throw new Error(`Could not read file '${sanitizeFilepath(filepath)}': ${e.message}`);
     }
   },
 

@@ -119,6 +119,7 @@ pub fn PollCard(
     let cancelled_for_loop = cancelled.clone();
 
     use_effect(use_reactive(&poll_data, move |pd| {
+        let Some(_poll) = pd.read().as_ref().cloned() else { return; };
         let poll_id = event_id;
         let poll = pd.read().clone();
         let cancelled_for_loop = cancelled_for_loop.clone();
@@ -303,7 +304,7 @@ pub fn PollCard(
             Some(p) => p.clone(),
             None => return,
         };
-        let previous_selected = selected_options.read().clone();
+        let previous_selected = options.clone();
         let previous_show_results = *show_results.read();
         show_results.set(true);
         is_voting.set(true);

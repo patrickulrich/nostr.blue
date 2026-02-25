@@ -147,9 +147,14 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
         let gen = bounties_gen.peek().wrapping_add(1);
         bounties_gen.set(gen);
         spawn(async move {
-            if let Ok(b) = fetch_bounties_for_issue(&id).await {
-                if *bounties_gen.peek() == gen {
-                    bounties.set(b);
+            match fetch_bounties_for_issue(&id).await {
+                Ok(b) => {
+                    if *bounties_gen.peek() == gen {
+                        bounties.set(b);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch bounties: {e}");
                 }
             }
         });
@@ -354,7 +359,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                     if let Some(error) = comment_error.read().as_ref() {
                                         span { class: "text-xs text-destructive", "{error}" }
                                     } else {
-                                        span { class: "text-xs text-muted-foreground", "Markdown supported" }
+                                        span { class: "text-xs text-muted-foreground", "Plain text" }
                                     }
                                     button {
                                         class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",

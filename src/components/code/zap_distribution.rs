@@ -124,6 +124,7 @@ pub fn ZapDistribution(
     let preset_amounts = [100u64, 500, 1000, 5000, 10000, 50000];
 
     let handle_send = move |_| {
+        if *is_sending.peek() { return; }
         // Resolve lud16 from profile cache at send time
         let recips = recipients.read().clone();
         let sendable: Vec<(ZapRecipient, String)> = recips

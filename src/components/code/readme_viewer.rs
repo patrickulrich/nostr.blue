@@ -33,8 +33,7 @@ export function initMermaidDiagrams() {
     if (window.__mermaidLoaderStatus === 'loading' || window.__mermaidLoaderStatus === 'loaded') return;
     window.__mermaidLoaderStatus = 'loading';
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js';
-    script.integrity = 'sha384-6F4Ibv/ylL12O35KFWTeGTHuBKDz5L6yjKsgv3QHQ8s4NTqlDXq7kMlYXGs7MHFc';
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
     script.crossOrigin = 'anonymous';
     script.onload = () => {
         window.__mermaidLoaderStatus = 'loaded';

@@ -179,6 +179,13 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     let approval_status = use_resource(move || {
         let _ = reviews_gen.read();
         let id = pr_id_for_reviews.clone();
+        let maintainer_set: Vec<String> = repo.read().as_ref()
+            .map(|r| {
+                let mut m = r.maintainers.clone();
+                if !m.contains(&r.pubkey) { m.push(r.pubkey.clone()); }
+                m
+            })
+            .unwrap_or_default();
         async move {
             match fetch_pr_reviews(&id).await {
                 Ok(reviews) => {
@@ -191,10 +198,10 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                         }
                     }
                     let approved = latest.values()
-                        .filter(|r| r.state == ReviewState::Approved)
+                        .filter(|r| r.state == ReviewState::Approved && (maintainer_set.is_empty() || maintainer_set.contains(&r.pubkey)))
                         .count() as u32;
                     let has_changes_requested = latest.values()
-                        .any(|r| r.state == ReviewState::ChangesRequested);
+                        .any(|r| r.state == ReviewState::ChangesRequested && (maintainer_set.is_empty() || maintainer_set.contains(&r.pubkey)));
                     ApprovalStatus {
                         approved,
                         has_changes_requested,
@@ -290,9 +297,12 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     let handle_status_change = {
         let pr_id = pr_id.clone();
         move |new_status: IssueStatus| {
+            if *is_updating_status.peek() {
+                return;
+            }
+            is_updating_status.set(true);
             let id = pr_id.clone();
             spawn(async move {
-                is_updating_status.set(true);
                 match update_pr_status_by_id(&id, new_status).await {
                     Ok(_) => {
                         display_status.set(new_status);
@@ -308,7 +318,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     };
 
     let handle_merge = {
-        let handler = handle_status_change.clone();
+        let mut handler = handle_status_change.clone();
         move |_| {
             show_merge_confirm.set(false);
             handler(IssueStatus::Applied);
@@ -320,14 +330,17 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         let pr_author = pr_pubkey.clone();
         move |_| {
             let content = new_comment.read().clone();
-            let id = pr_id.clone();
-            let author = pr_author.clone();
             if content.trim().is_empty() {
                 return;
             }
+            if *is_submitting.peek() {
+                return;
+            }
+            is_submitting.set(true);
+            comment_error.set(None);
+            let id = pr_id.clone();
+            let author = pr_author.clone();
             spawn(async move {
-                is_submitting.set(true);
-                comment_error.set(None);
                 match publish_pr_comment_by_id(&id, &author, &content).await {
                     Ok(_) => {
                         new_comment.set(String::new());
@@ -528,7 +541,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
                             onclick: {
-                                let handler = handle_status_change.clone();
+                                let mut handler = handle_status_change.clone();
                                 move |_| handler(IssueStatus::Closed)
                             },
                             "Close PR"
@@ -539,7 +552,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                             class: "px-3 py-1.5 text-sm bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
                             onclick: {
-                                let handler = handle_status_change.clone();
+                                let mut handler = handle_status_change.clone();
                                 move |_| handler(IssueStatus::Open)
                             },
                             "Reopen PR"
@@ -1059,10 +1072,11 @@ fn ConflictDetectionBanner(
     use_effect(use_reactive(
         (&diff_content, &parent_commit, &repo_key),
         move |(diff, parent, _repo_key)| {
+            conflicts.set(Vec::new());
+            checked.set(false);
             if diff.is_empty() {
                 return;
             }
-            checked.set(false);
             if let Some(r) = repo.as_ref() {
                 let r = r.clone();
                 let gen = detect_gen.peek().wrapping_add(1);

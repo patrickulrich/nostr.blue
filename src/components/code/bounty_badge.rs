@@ -1,6 +1,7 @@
 //! Bounty Badge Component
 //!
 //! Displays a bounty amount with lightning icon in compact or full format.
+use crate::utils::format::format_sats_with_separator;
 use dioxus::prelude::*;
 
 /// Display a bounty amount badge with lightning bolt
@@ -13,7 +14,7 @@ pub fn BountyBadge(amount: u64, #[props(default = false)] compact: bool) -> Elem
             if compact {
                 "{formatted}"
             } else {
-                "{format_with_commas(amount)} sats bounty"
+                "{format_sats_with_separator(amount)} sats bounty"
             }
         }
     }
@@ -30,19 +31,6 @@ fn format_bounty_amount(amount: u64) -> String {
     }
 }
 
-#[allow(dead_code)]
-fn format_with_commas(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
-
 /// Display a bounty amount badge with status indicator
 #[component]
 pub fn BountyStatusBadge(amount: u64, status: crate::utils::nip34::BountyStatus) -> Element {
@@ -55,7 +43,7 @@ pub fn BountyStatusBadge(amount: u64, status: crate::utils::nip34::BountyStatus)
     rsx! {
         span { class: "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full {bg_class} {text_class} text-xs font-medium",
             "\u{26A1}"
-            "{format_with_commas(amount)} sats"
+            "{format_sats_with_separator(amount)} sats"
             span { class: "opacity-70", "\u{2022}" }
             "{label}"
         }

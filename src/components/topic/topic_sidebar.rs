@@ -90,7 +90,11 @@ pub fn TopicSidebar(
             // Trending topics
             {
                 let discovered = DISCOVERED_TOPICS.read();
-                let trending: Vec<_> = discovered.iter().take(10).map(|(name, info)| (name.clone(), info.post_count)).collect();
+                let mut trending: Vec<_> = discovered.iter()
+                    .map(|(name, info)| (name.clone(), info.post_count))
+                    .collect();
+                trending.sort_by(|a, b| b.1.cmp(&a.1));
+                trending.truncate(10);
                 if !trending.is_empty() {
                     rsx! {
                         div {

@@ -55,6 +55,11 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
                 let key = event.key();
 
+                // Skip shortcuts when modifier keys are held
+                if event.ctrl_key() || event.meta_key() || event.alt_key() {
+                    return;
+                }
+
                 // Handle `?` for help
                 if key == "?" {
                     event.prevent_default();
