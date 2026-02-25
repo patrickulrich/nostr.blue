@@ -6,22 +6,27 @@ use dioxus::prelude::*;
 use crate::stores::grasp_servers::is_grasp_server;
 
 /// Extract domain from a relay URL (e.g., "wss://relay.example.com" -> "relay.example.com")
+/// Handles IPv6 addresses in brackets (e.g., "wss://[::1]:8080" -> "[::1]")
 fn extract_domain(url: &str) -> &str {
-    url.trim_start_matches("wss://")
+    let host = url
+        .trim_start_matches("wss://")
         .trim_start_matches("ws://")
         .trim_end_matches('/')
         .split('/')
         .next()
-        .unwrap_or(url)
-        .split(':')
-        .next()
-        .unwrap_or(url)
-        .split('?')
-        .next()
-        .unwrap_or(url)
-        .split('#')
-        .next()
-        .unwrap_or(url)
+        .unwrap_or(url);
+    let host = host.split('?').next().unwrap_or(host);
+    let host = host.split('#').next().unwrap_or(host);
+    if host.starts_with('[') {
+        // IPv6: take up to and including ']'
+        if let Some(end) = host.find(']') {
+            &host[..=end]
+        } else {
+            host
+        }
+    } else {
+        host.split(':').next().unwrap_or(host)
+    }
 }
 
 /// Sidebar widget displaying repository relays categorized by type
@@ -31,8 +36,8 @@ pub fn RelayDisplay(relays: Vec<String>) -> Element {
         return rsx! {};
     }
 
-    let grasp_relays: Vec<&String> = relays.iter().filter(|r| is_grasp_server(extract_domain(r))).collect();
-    let plain_relays: Vec<&String> = relays.iter().filter(|r| !is_grasp_server(extract_domain(r))).collect();
+    let (grasp_relays, plain_relays): (Vec<&String>, Vec<&String>) =
+        relays.iter().partition(|r| is_grasp_server(extract_domain(r)));
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4",

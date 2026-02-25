@@ -94,19 +94,26 @@ pub fn CodeGlobalPulls() -> Element {
         return rsx! { NotAuthenticatedState {} };
     }
 
-    let all_prs_for_tab: Vec<PullRequest> = match *active_tab.read() {
-        FilterTab::Created => created_prs.read().clone(),
-        FilterTab::Assigned => assigned_prs.read().clone(),
-    };
-    let mut all_labels: Vec<String> = all_prs_for_tab
-        .iter()
-        .flat_map(|p| p.labels.iter().cloned())
-        .collect();
-    all_labels.sort();
-    all_labels.dedup();
+    let all_prs_for_tab = use_memo(move || -> Vec<PullRequest> {
+        match *active_tab.read() {
+            FilterTab::Created => created_prs.read().clone(),
+            FilterTab::Assigned => assigned_prs.read().clone(),
+        }
+    });
+    let all_labels = use_memo(move || {
+        let prs = all_prs_for_tab.read();
+        let mut labels: Vec<String> = prs
+            .iter()
+            .flat_map(|p| p.labels.iter().cloned())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    });
     let query = search_query.read().to_lowercase();
     let current_label = label_filter.read().clone();
-    let filtered: Vec<_> = all_prs_for_tab
+    let all_prs_read = all_prs_for_tab.read();
+    let filtered: Vec<_> = all_prs_read
         .iter()
         .filter(|p| match *status_filter.read() {
             StatusFilter::Open => {
@@ -132,11 +139,11 @@ pub fn CodeGlobalPulls() -> Element {
         .cloned()
         .collect();
 
-    let open_count = all_prs_for_tab
+    let open_count = all_prs_read
         .iter()
         .filter(|p| matches!(p.status, IssueStatus::Open | IssueStatus::Draft))
         .count();
-    let closed_count = all_prs_for_tab
+    let closed_count = all_prs_read
         .iter()
         .filter(|p| matches!(p.status, IssueStatus::Closed | IssueStatus::Applied))
         .count();
@@ -185,6 +192,7 @@ pub fn CodeGlobalPulls() -> Element {
                 }
                 div { class: "px-4 pb-3 flex gap-4",
                     button {
+                        r#type: "button",
                         class: if *active_tab.read() == FilterTab::Created {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {
@@ -197,6 +205,7 @@ pub fn CodeGlobalPulls() -> Element {
                         "Created"
                     }
                     button {
+                        r#type: "button",
                         class: if *active_tab.read() == FilterTab::Assigned {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {
@@ -211,6 +220,7 @@ pub fn CodeGlobalPulls() -> Element {
                 }
                 div { class: "px-4 pb-3 flex gap-2",
                     button {
+                        r#type: "button",
                         class: if *status_filter.read() == StatusFilter::Open {
                             "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
                         } else {
@@ -236,6 +246,7 @@ pub fn CodeGlobalPulls() -> Element {
                         "{open_count} Open"
                     }
                     button {
+                        r#type: "button",
                         class: if *status_filter.read() == StatusFilter::Closed {
                             "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
                         } else {
@@ -260,19 +271,21 @@ pub fn CodeGlobalPulls() -> Element {
                     }
                 }
             }
-            if !all_labels.is_empty() {
+            if !all_labels.read().is_empty() {
                 div { class: "px-4 pb-3 flex flex-wrap gap-2",
                     button {
+                        r#type: "button",
                         class: if label_filter.read().is_none() { "px-2 py-1 text-xs rounded-full bg-primary text-primary-foreground" } else { "px-2 py-1 text-xs rounded-full bg-accent text-accent-foreground hover:bg-accent/80" },
                         onclick: move |_| label_filter.set(None),
                         "All"
                     }
-                    for label in all_labels.iter() {
+                    for label in all_labels.read().iter() {
                         {
                             let l = label.clone();
                             rsx! {
                                 button {
                                     key: "{label}",
+                                    r#type: "button",
                                     class: if label_filter.read().as_deref() == Some(&l) { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-400" } else { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 hover:ring-1 hover:ring-blue-400/50" },
                                     onclick: move |_| label_filter.set(Some(l.clone())),
                                     "{label}"

@@ -58,6 +58,7 @@ pub fn QrShareModal(
                     button {
                         class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground",
                         aria_label: "Close share modal",
+                        r#type: "button",
                         onclick: move |_| on_close.call(()),
                         "\u{2715}"
                     }
@@ -79,11 +80,13 @@ pub fn QrShareModal(
                         rsx! {
                             button {
                                 class: nostr_class,
+                                r#type: "button",
                                 onclick: move |_| active_tab.set("nostr"),
                                 "Nostr"
                             }
                             button {
                                 class: web_class,
+                                r#type: "button",
                                 onclick: move |_| active_tab.set("web"),
                                 "Web URL"
                             }
@@ -113,6 +116,7 @@ pub fn QrShareModal(
                             class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
                             title: "Copy to clipboard",
                             aria_label: "Copy URL to clipboard",
+                            r#type: "button",
                             onclick: {
                                 let url_to_copy = current_url.clone();
                                 move |_| {

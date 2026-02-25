@@ -104,7 +104,9 @@ pub fn CodeNew() -> Element {
                 .collect();
 
             for url in &clone_list {
-                if url::Url::parse(url).is_err() {
+                // Accept scp-style SSH URLs (e.g. git@host:org/repo.git)
+                let is_scp_ssh = url.contains('@') && url.contains(':') && !url.contains("://");
+                if !is_scp_ssh && url::Url::parse(url).is_err() {
                     error_message.set(Some(format!("Invalid clone URL: '{}'", url)));
                     is_publishing.set(false);
                     return;
@@ -368,7 +370,7 @@ pub fn CodeNew() -> Element {
 
                 DynamicListField {
                     label: "Clone URLs",
-                    placeholder: "git://example.com/repo.git or https://github.com/user/repo.git",
+                    placeholder: "git@host:org/repo.git or https://github.com/user/repo.git",
                     values: clone_urls,
                 }
 
@@ -452,6 +454,7 @@ fn DynamicListField(props: DynamicListFieldProps) -> Element {
                         button {
                             class: if values.read().len() <= 1 { "p-1 rounded transition text-muted-foreground opacity-30 cursor-not-allowed" } else { "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-destructive" },
                             r#type: "button",
+                            aria_label: "Remove item",
                             disabled: values.read().len() <= 1,
                             onclick: {
                                 let id = *id;

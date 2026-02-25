@@ -26,7 +26,7 @@ pub fn CloneHelpModal(
     rsx! {
         // Backdrop
         div {
-            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
             onclick: move |_| on_close.call(()),
         }
         // Modal
@@ -35,10 +35,13 @@ pub fn CloneHelpModal(
             onclick: move |_| on_close.call(()),
             div {
                 class: "bg-background border border-border rounded-lg p-6 w-full max-w-lg shadow-lg",
+                role: "dialog",
+                aria_modal: "true",
+                aria_labelledby: "clone-help-title",
                 onclick: move |evt| evt.stop_propagation(),
                 // Header
                 div { class: "flex justify-between items-center mb-4",
-                    h2 { class: "text-lg font-bold", "Clone Repository" }
+                    h2 { id: "clone-help-title", class: "text-lg font-bold", "Clone Repository" }
                     button {
                         class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground",
                         aria_label: "Close",
@@ -64,7 +67,7 @@ pub fn CloneHelpModal(
                                 p { class: "text-sm text-muted-foreground py-4 text-center", "No SSH clone URLs available." }
                             } else {
                                 for url in ssh_urls.iter() {
-                                    CloneUrlRow { url: url.to_string() }
+                                    CloneUrlRow { key: "{url}", url: url.to_string() }
                                 }
                             }
                             p { class: "text-xs text-muted-foreground mt-2",
@@ -73,7 +76,7 @@ pub fn CloneHelpModal(
                         },
                         "git" => rsx! {
                             for url in git_urls.iter() {
-                                CloneUrlRow { url: url.to_string() }
+                                CloneUrlRow { key: "{url}", url: url.to_string() }
                             }
                             p { class: "text-xs text-muted-foreground mt-2",
                                 "Git protocol is read-only and unencrypted."
@@ -90,7 +93,7 @@ pub fn CloneHelpModal(
                                 p { class: "text-sm text-muted-foreground py-4 text-center", "No HTTPS clone URLs available." }
                             } else {
                                 for url in https_urls.iter() {
-                                    CloneUrlRow { url: url.to_string() }
+                                    CloneUrlRow { key: "{url}", url: url.to_string() }
                                 }
                             }
                         },

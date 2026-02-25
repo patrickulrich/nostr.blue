@@ -4,7 +4,6 @@
 use crate::components::{
     BranchSelector, CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb,
 };
-use crate::components::code::split_path;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
@@ -15,16 +14,16 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Element {
-    let path = path.join("/");
+    let path_str = path.join("/");
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut content = use_signal(String::new);
     let mut branches = use_signal(Vec::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut is_directory = use_signal(|| false);
-    let filename = path.rsplit('/').next().unwrap_or(&path).to_string();
+    let filename = path_str.rsplit('/').next().unwrap_or(&path_str).to_string();
     let mut gen = use_signal(|| 0u32);
-    use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
+    use_effect(use_reactive((&naddr, &git_ref, &path_str), move |(naddr, git_ref, path_str)| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
@@ -58,13 +57,13 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 }
             }
             if *gen.peek() != current_gen { return; }
-            if !is_safe_path(&path) {
-                log::warn!("Path traversal attempt blocked: {}", path);
+            if !is_safe_path(&path_str) {
+                log::warn!("Path traversal attempt blocked: {}", path_str);
                 error.set(Some("Invalid path".to_string()));
                 loading.set(false);
                 return;
             }
-            match git_service().read_file(&repo, &path, Some(&git_ref)).await
+            match git_service().read_file(&repo, &path_str, Some(&git_ref)).await
             {
                 Ok(file_content) => {
                     if *gen.peek() != current_gen { return; }
@@ -93,14 +92,14 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
             nav.replace(Route::CodeRepoTree {
                 naddr,
                 git_ref,
-                path: split_path(&path),
+                path,
             });
         }
     }));
     let repo_name = repo_signal()
         .map(|r| r.display_name().to_string())
         .unwrap_or_else(|| "Repository".to_string());
-    let parent_path = path
+    let parent_path = path_str
         .rsplit_once('/')
         .map(|(p, _)| p.to_string())
         .unwrap_or_default();
@@ -136,7 +135,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                     FilePathBreadcrumb {
                         naddr: naddr.clone(),
                         git_ref: git_ref.clone(),
-                        path: path.clone(),
+                        path: path_str.clone(),
                     }
                 }
             }
@@ -177,7 +176,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                             to: Route::CodeRepoTree {
                                 naddr: naddr.clone(),
                                 git_ref: git_ref.clone(),
-                                path: split_path(&parent_path),
+                                path: path[..path.len().saturating_sub(1)].to_vec(),
                             },
                             class: "inline-block mt-4 px-4 py-2 bg-muted hover:bg-accent rounded-lg transition",
                             "Back to Directory"
@@ -190,7 +189,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                                 to: Route::CodeRepoEditFile {
                                     naddr: naddr.clone(),
                                     git_ref: git_ref.clone(),
-                                    path: split_path(&path),
+                                    path: path.clone(),
                                 },
                                 class: "flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border bg-muted hover:bg-accent rounded-lg transition",
                                 svg {

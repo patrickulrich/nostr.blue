@@ -200,11 +200,14 @@ pub fn ZapDistribution(
         }
         div {
             class: "fixed inset-x-4 top-[10%] z-50 max-w-lg mx-auto bg-background border border-border rounded-xl shadow-xl max-h-[80vh] overflow-y-auto",
+            role: "dialog",
+            aria_modal: "true",
+            aria_labelledby: "distribute-zaps-title",
             onclick: move |evt| evt.stop_propagation(),
 
             // Header
             div { class: "p-4 border-b border-border flex items-center justify-between",
-                h3 { class: "text-lg font-semibold", "Distribute Zaps" }
+                h3 { id: "distribute-zaps-title", class: "text-lg font-semibold", "Distribute Zaps" }
                 button {
                     class: "p-1 hover:bg-accent rounded-lg transition text-muted-foreground",
                     aria_label: "Close",

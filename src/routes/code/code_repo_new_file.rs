@@ -87,7 +87,6 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
     let mut success = use_signal(|| false);
     let mut path_error = use_signal(|| None::<String>);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut loading = use_signal(|| true);
 
     // Fetch repository data
     let mut repo_gen = use_signal(|| 0u32);
@@ -100,11 +99,9 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
         repo_gen.set(gen);
         repo_result.set(None);
         spawn(async move {
-            loading.set(true);
             let result = fetch_repository(&n).await;
             if *repo_gen.peek() == gen {
                 repo_result.set(Some(result));
-                loading.set(false);
             }
         });
     }));
@@ -261,7 +258,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
 
             div { class: "p-4 space-y-6 max-w-3xl mx-auto",
                 // Repository context
-                if *loading.read() {
+                if repo_result.read().is_none() {
                     div { class: "p-4 bg-muted rounded-lg animate-pulse",
                         div { class: "h-4 bg-muted-foreground/20 rounded w-48" }
                     }

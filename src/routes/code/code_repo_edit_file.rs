@@ -50,6 +50,9 @@ fn build_edit_file_diff(
         diff.push_str(line);
         diff.push('\n');
     }
+    if !old_content.is_empty() && !old_content.ends_with('\n') {
+        diff.push_str("\\ No newline at end of file\n");
+    }
     for line in &new_lines {
         diff.push('+');
         diff.push_str(line);
@@ -91,6 +94,10 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                 }
                 let current_gen = gen.peek().wrapping_add(1);
                 gen.set(current_gen);
+                success.set(false);
+                file_content.set(String::new());
+                original_content.set(String::new());
+                commit_message.set(String::new());
                 repo_result.set(None);
                 error_message.set(None);
                 spawn(async move {
@@ -343,6 +350,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
 
                 div { class: "flex items-center gap-3",
                     button {
+                        r#type: "button",
                         class: if can_submit {
                             "px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium flex items-center gap-2"
                         } else {
@@ -436,7 +444,7 @@ async fn submit_edit_file(
     // Validate path (interpolated into diff header)
     if path.contains('\n') || path.contains('\r') || path.contains('\0')
         || path.split('/').any(|s| s == ".." || s == "." || s.is_empty())
-        || path.starts_with('/') || path.starts_with('\\')
+        || path.starts_with('/') || path.contains('\\')
     {
         return Err("Invalid file path".to_string());
     }

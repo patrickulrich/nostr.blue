@@ -54,28 +54,34 @@ pub fn CodeGlobalIssues() -> Element {
         error_msg.set(None);
         loading.set(true);
         spawn(async move {
-            if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
-                let (created_res, assigned_res) = futures::join!(
-                    fetch_user_issues(&pk, 100),
-                    fetch_issues_assigned_to(&pk, 100)
-                );
-                if *request_gen.peek() != gen { return; }
-                let mut errors = Vec::new();
-                match created_res {
-                    Ok(fetched) => created_issues.set(fetched),
-                    Err(e) => {
-                        errors.push(format!("Created: {}", e));
-                    }
+            let pk = match PublicKey::from_hex(&pk_hex) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    error_msg.set(Some(format!("Invalid public key: {e}")));
+                    loading.set(false);
+                    return;
                 }
-                match assigned_res {
-                    Ok(fetched) => assigned_issues.set(fetched),
-                    Err(e) => {
-                        errors.push(format!("Assigned: {}", e));
-                    }
+            };
+            let (created_res, assigned_res) = futures::join!(
+                fetch_user_issues(&pk, 100),
+                fetch_issues_assigned_to(&pk, 100)
+            );
+            if *request_gen.peek() != gen { return; }
+            let mut errors = Vec::new();
+            match created_res {
+                Ok(fetched) => created_issues.set(fetched),
+                Err(e) => {
+                    errors.push(format!("Created: {}", e));
                 }
-                if !errors.is_empty() {
-                    error_msg.set(Some(errors.join("; ")));
+            }
+            match assigned_res {
+                Ok(fetched) => assigned_issues.set(fetched),
+                Err(e) => {
+                    errors.push(format!("Assigned: {}", e));
                 }
+            }
+            if !errors.is_empty() {
+                error_msg.set(Some(errors.join("; ")));
             }
             loading.set(false);
         });
@@ -177,6 +183,7 @@ pub fn CodeGlobalIssues() -> Element {
                         class: "w-full px-3 py-1.5 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary",
                         r#type: "text",
                         placeholder: "Filter issues...",
+                        aria_label: "Filter issues",
                         value: "{search_query}",
                         oninput: move |e| search_query.set(e.value()),
                     }

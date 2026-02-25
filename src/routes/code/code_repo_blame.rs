@@ -48,6 +48,12 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                 loading.set(true);
                 error.set(None);
                 commits.set(Vec::new());
+                if !is_safe_path(&path) {
+                    log::warn!("Path traversal attempt blocked in blame: {}", path);
+                    error.set(Some("Invalid path".to_string()));
+                    loading.set(false);
+                    return;
+                }
                 let repo = match fetch_repository(&naddr).await {
                     Ok(r) => r,
                     Err(e) => {
@@ -66,12 +72,6 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                         "Blame view is only available for GitHub-hosted repositories."
                             .to_string(),
                     ));
-                    loading.set(false);
-                    return;
-                }
-                if !is_safe_path(&path) {
-                    log::warn!("Path traversal attempt blocked in blame: {}", path);
-                    error.set(Some("Invalid path".to_string()));
                     loading.set(false);
                     return;
                 }

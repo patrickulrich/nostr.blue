@@ -21,6 +21,7 @@ use crate::services::git_hosting::reviews::fetch_pr_reviews;
 use crate::utils::nip34::{GitComment, IssueStatus, PersistedReview, PullRequest, Repository, ReviewState};
 use crate::utils::permissions;
 use dioxus::prelude::*;
+use std::collections::HashMap;
 
 /// Richer approval status returned by the approval resource
 #[derive(Clone, PartialEq, Default)]
@@ -181,8 +182,8 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         async move {
             match fetch_pr_reviews(&id).await {
                 Ok(reviews) => {
-                    let mut latest: std::collections::HashMap<&str, &PersistedReview> =
-                        std::collections::HashMap::new();
+                    let mut latest: HashMap<&str, &PersistedReview> =
+                        HashMap::new();
                     for r in &reviews {
                         match latest.get(r.pubkey.as_str()) {
                             Some(existing) if existing.created_at >= r.created_at => {}
@@ -345,6 +346,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         let pr_id = pr_id.clone();
         let repo_naddr = pr.repository_naddr.clone();
         move |_| {
+            if *is_submitting_update.peek() { return; }
             let content = update_content.read().clone();
             let commit = update_commit.read().trim().to_string();
             let parent = update_parent.read().trim().to_string();

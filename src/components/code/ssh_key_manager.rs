@@ -229,16 +229,16 @@ pub fn SshKeyManager() -> Element {
                     }
                     div { class: "space-y-1",
                         label { class: "text-sm text-muted-foreground", r#for: "ssh-key-value", "Key" }
-                        textarea {
+                        input {
                             id: "ssh-key-value",
-                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground font-mono resize-y focus:outline-none focus:ring-2 focus:ring-ring",
-                            rows: "4",
-                            placeholder: "ssh-ed25519 AAAA...",
+                            class: "w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground font-mono focus:outline-none focus:ring-2 focus:ring-ring",
+                            r#type: "text",
+                            placeholder: "ssh-ed25519 AAAA... (single line)",
                             value: "{new_key}",
                             oninput: move |e| new_key.set(e.value()),
                         }
                         p { class: "text-xs text-muted-foreground",
-                            "Paste your public key. Begins with ssh-rsa, ssh-ed25519, ecdsa-sha2, etc."
+                            "Paste a single public key line. Begins with ssh-rsa, ssh-ed25519, ecdsa-sha2, etc."
                         }
                     }
                     div { class: "flex items-center gap-2 justify-end",
@@ -343,6 +343,7 @@ pub fn SshKeyManager() -> Element {
                                                     button {
                                                         class: "px-3 py-1.5 text-xs font-medium bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition disabled:opacity-50",
                                                         disabled: is_deleting,
+                                                        aria_label: if is_deleting { "Deleting key" } else { "Confirm delete key" },
                                                         onclick: move |_| {
                                                             let eid = eid_for_delete.clone();
                                                             handle_delete(eid);
@@ -352,6 +353,7 @@ pub fn SshKeyManager() -> Element {
                                                     button {
                                                         class: "px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent transition",
                                                         disabled: is_deleting,
+                                                        aria_label: "Cancel delete key",
                                                         onclick: move |_| confirm_delete.set(None),
                                                         "No"
                                                     }
@@ -392,28 +394,21 @@ pub fn SshKeyManager() -> Element {
     }
 }
 
-/// Truncate an SSH public key for display, showing type + first/last few chars
+/// Truncate an SSH public key for display, showing type + first/last few chars.
+/// SSH keys are base64 ASCII, so byte length == char count and byte slicing is safe.
 fn truncate_key(key: &str) -> String {
     let parts: Vec<&str> = key.split_whitespace().collect();
     if parts.len() >= 2 {
         let key_type = parts[0];
         let key_data = parts[1];
-        let char_count = key_data.chars().count();
-        if char_count > 20 {
-            let prefix: String = key_data.chars().take(10).collect();
-            let suffix: String = key_data.chars().skip(char_count - 10).collect();
-            format!("{} {}...{}", key_type, prefix, suffix)
+        if key_data.len() > 20 {
+            format!("{} {}...{}", key_type, &key_data[..10], &key_data[key_data.len()-10..])
         } else {
             key.to_string()
         }
+    } else if key.len() > 40 {
+        format!("{}...{}", &key[..20], &key[key.len()-10..])
     } else {
-        let char_count = key.chars().count();
-        if char_count > 40 {
-            let prefix: String = key.chars().take(20).collect();
-            let suffix: String = key.chars().skip(char_count - 10).collect();
-            format!("{}...{}", prefix, suffix)
-        } else {
-            key.to_string()
-        }
+        key.to_string()
     }
 }

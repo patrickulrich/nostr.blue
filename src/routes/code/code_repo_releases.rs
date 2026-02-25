@@ -40,20 +40,23 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         releases.set(vec![]);
         loading.set(true);
         spawn(async move {
-            match fetch_repository(&n).await {
+            let n_clone = n.clone();
+            let (repo_res, releases_res) = futures::join!(
+                fetch_repository(&n),
+                fetch_repo_releases(&n_clone)
+            );
+            if *request_gen.peek() != captured_gen { return; }
+            match repo_res {
                 Ok(repo) => {
-                    if *request_gen.peek() != captured_gen { return; }
                     repo_data.set(Some(repo));
                     repo_error.set(None);
                 }
                 Err(e) => {
-                    if *request_gen.peek() != captured_gen { return; }
                     repo_error.set(Some(format!("Failed to load repository: {}", e)));
                 }
             }
-            match fetch_repo_releases(&n).await {
+            match releases_res {
                 Ok(fetched) => {
-                    if *request_gen.peek() != captured_gen { return; }
                     // Deduplicate by tag_name, keeping the newest release per tag
                     let mut by_tag: HashMap<String, Release> = HashMap::new();
                     for release in fetched {
@@ -72,13 +75,10 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                     error.set(None);
                 }
                 Err(e) => {
-                    if *request_gen.peek() != captured_gen { return; }
                     error.set(Some(e));
                 }
             }
-            if *request_gen.peek() == captured_gen {
-                loading.set(false);
-            }
+            loading.set(false);
         });
     }));
     let auth = auth_store::AUTH_STATE.read();
@@ -381,7 +381,7 @@ fn EditReleaseForm(
     on_cancel: EventHandler<()>,
     on_saved: EventHandler<()>,
 ) -> Element {
-    let tag_name = use_signal(|| release.tag_name.clone());
+    let tag_name = release.tag_name.clone();
     let mut title = use_signal(|| release.title.clone().unwrap_or_default());
     let mut description = use_signal(|| release.description.clone());
     let mut asset_urls = use_signal(|| {
@@ -396,9 +396,10 @@ fn EditReleaseForm(
     let mut error_message = use_signal(|| None::<String>);
     let handle_submit = {
         let naddr = naddr.clone();
+        let tag_name_for_submit = tag_name.clone();
         move |_| {
             if *is_publishing.peek() { return; }
-            let tag = tag_name.read().clone();
+            let tag = tag_name_for_submit.clone();
             let title_val = title.read().clone();
             let desc = description.read().clone();
             let assets = asset_urls.read().clone();
@@ -411,6 +412,17 @@ fn EditReleaseForm(
             if desc.trim().is_empty() {
                 error_message.set(Some("Description is required".to_string()));
                 return;
+            }
+            let non_empty_assets: Vec<String> = assets
+                .iter()
+                .filter(|a| !a.trim().is_empty())
+                .cloned()
+                .collect();
+            for url in &non_empty_assets {
+                if !is_valid_http_url(url) {
+                    error_message.set(Some(format!("Invalid asset URL: {}", url)));
+                    return;
+                }
             }
             is_publishing.set(true);
             error_message.set(None);
@@ -428,19 +440,8 @@ fn EditReleaseForm(
                 } else {
                     Some(title_val.as_str())
                 };
-                let non_empty_assets: Vec<&str> = assets
-                    .iter()
-                    .filter(|a| !a.trim().is_empty())
-                    .map(|a| a.as_str())
-                    .collect();
-                for url in &non_empty_assets {
-                    if !is_valid_http_url(url) {
-                        error_message.set(Some(format!("Invalid asset URL: {}", url)));
-                        is_publishing.set(false);
-                        return;
-                    }
-                }
-                match publish_release(&coord, &tag, title_opt, &desc, &non_empty_assets, is_pre).await {
+                let asset_refs: Vec<&str> = non_empty_assets.iter().map(|a| a.as_str()).collect();
+                match publish_release(&coord, &tag, title_opt, &desc, &asset_refs, is_pre).await {
                     Ok(_) => {
                         on_saved.call(());
                     }

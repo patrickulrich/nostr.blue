@@ -17,7 +17,9 @@ export function initArchitectureMermaid() {
     if (divs.length === 0) return;
     if (typeof mermaid === 'undefined') {
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
+        script.integrity = 'sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT';
+        script.crossOrigin = 'anonymous';
         script.onload = () => {
             mermaid.initialize({ startOnLoad: false, theme: 'dark' });
             mermaid.run({ nodes: divs });
@@ -347,7 +349,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
                     div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6",
                         for (cat , count) in sorted_cats.iter() {
                             {
-                                let (label, _, tw_color) = category_info(cat);
+                                let (label, hex_color, tw_color) = category_info(cat);
                                 let pct = if total > 0 { (*count as f64 / total as f64 * 100.0) as u32 } else { 0 };
                                 rsx! {
                                     div {
@@ -363,7 +365,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
                                         div { class: "mt-2 h-1.5 bg-muted rounded-full overflow-hidden",
                                             div {
                                                 class: "h-full rounded-full transition-all",
-                                                style: "width: {pct}%; background-color: {category_info(cat).1};",
+                                                style: "width: {pct}%; background-color: {hex_color};",
                                             }
                                         }
                                     }

@@ -143,6 +143,7 @@ pub fn LabelPicker(
                         let selected = selected_labels.clone();
                         move |e: KeyboardEvent| {
                             if e.key() == Key::Enter {
+                                e.prevent_default();
                                 let val = new_label_input.read().trim().to_string();
                                 if !val.is_empty() && !selected.contains(&val) {
                                     let mut updated = selected.clone();
@@ -167,7 +168,7 @@ pub fn LabelPicker(
                                         key: "{suggestion}",
                                         r#type: "button",
                                         class: "w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition flex items-center gap-2",
-                                        onmousedown: move |_| {
+                                        onclick: move |_| {
                                             let mut updated = labels_for_add.clone();
                                             if !updated.contains(&suggestion_clone) {
                                                 updated.push(suggestion_clone.clone());

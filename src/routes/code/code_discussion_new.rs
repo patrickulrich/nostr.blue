@@ -125,6 +125,7 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
                     }
                     button {
                         class: "px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2",
+                        r#type: "button",
                         disabled: *is_publishing.read(),
                         onclick: handle_submit,
                         if *is_publishing.read() {

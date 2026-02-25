@@ -81,6 +81,14 @@ pub fn NostrUserPicker(
                 };
                 results.set(vec![result]);
                 show_dropdown.set(true);
+            } else {
+                // Already selected — clear stale search state
+                if let Some(task) = search_task.take() {
+                    task.cancel();
+                }
+                is_searching.set(false);
+                show_dropdown.set(false);
+                results.set(Vec::new());
             }
             return;
         }
@@ -102,8 +110,11 @@ pub fn NostrUserPicker(
         results.set(filtered);
         show_dropdown.set(true);
 
+        // Use char count for threshold checks (handles multi-byte input)
+        let char_count = val.chars().count();
+
         // Cancel search and clear state when query drops below threshold
-        if val.len() < 3 {
+        if char_count < 3 {
             if let Some(task) = search_task.read().as_ref() {
                 task.cancel();
             }
@@ -111,7 +122,7 @@ pub fn NostrUserPicker(
         }
 
         // Debounced relay search for longer queries
-        if val.len() >= 3 {
+        if char_count >= 3 {
             if let Some(task) = search_task.read().as_ref() {
                 task.cancel();
             }

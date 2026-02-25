@@ -154,8 +154,9 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
                         for filter in filters.iter() {
                             button {
                                 key: "{filter.label()}",
+                                r#type: "button",
                                 class: if *active_filter.read() == *filter {
-                                    "px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
+                                    "px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground font-medium"
                                 } else {
                                     "px-3 py-1.5 text-sm rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition"
                                 },

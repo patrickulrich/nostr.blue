@@ -58,6 +58,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
         new_relay_url.set(String::new());
         maintainer_list.set(Vec::new());
         new_maintainer.set(String::new());
+        is_saving.set(false);
         save_error.set(None);
         save_success.set(false);
         show_delete_confirm.set(false);
