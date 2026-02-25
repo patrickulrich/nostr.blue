@@ -287,13 +287,14 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .map(|url| {
-                    // Normalize SCP-style URLs (user@host:path) to HTTPS
+                    // Normalize SCP-style URLs (user@host:path) to ssh://
                     if !url.contains("://") {
                         if let Some(at_pos) = url.find('@') {
                             if let Some(colon_pos) = url[at_pos..].find(':') {
+                                let user = &url[..at_pos];
                                 let host = &url[at_pos + 1..at_pos + colon_pos];
                                 let path = &url[at_pos + colon_pos + 1..];
-                                return format!("https://{}/{}", host, path);
+                                return format!("ssh://{}@{}/{}", user, host, path);
                             }
                         }
                     }
@@ -307,8 +308,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             }
             for url in &urls {
                 let has_scheme = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("git://") || url.starts_with("ssh://");
-                let is_scp_style = url.contains('@') && url.contains(':') && !url.contains("://");
-                if !has_scheme && !is_scp_style {
+                if !has_scheme {
                     toast.error(format!("Invalid URL format: {}", url), ToastOptions::new());
                     fork_loading.set(false);
                     return;

@@ -115,6 +115,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let handle_save = {
         let _naddr = naddr.clone();
         move |_| {
+            if *is_saving.peek() { return; }
             let repo_data = match repo_result.read().as_ref() {
                 Some(Ok(r)) => r.clone(),
                 _ => return,
@@ -123,10 +124,18 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             let description = repo_description.read().clone();
             let clone = clone_url.read().clone();
             let web = web_url.read().clone();
+            let relay_snapshot: Vec<String> = relay_list.read().clone();
+            // Validate relay URLs before starting save
+            for relay in &relay_snapshot {
+                if RelayUrl::parse(relay).is_err() {
+                    save_error.set(Some(format!("Invalid relay URL: '{}'. Must start with wss:// or ws://", relay)));
+                    return;
+                }
+            }
+            is_saving.set(true);
+            save_error.set(None);
+            save_success.set(false);
             spawn(async move {
-                is_saving.set(true);
-                save_error.set(None);
-                save_success.set(false);
                 let clone_urls: Vec<&str> = if clone.is_empty() {
                     vec![]
                 } else {
@@ -137,7 +146,6 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                 } else {
                     vec![web.as_str()]
                 };
-                let relay_snapshot: Vec<String> = relay_list.read().clone();
                 let relays: Vec<&str> = relay_snapshot.iter().map(|s| s.as_str()).collect();
                 let maintainer_snapshot: Vec<String> = maintainer_list.read().clone();
                 let maintainer_keys: Vec<PublicKey> = match maintainer_snapshot

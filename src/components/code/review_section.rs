@@ -12,6 +12,7 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
+use std::borrow::Cow;
 
 /// Publish a review as a Kind 9807 event on Nostr
 pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
@@ -27,7 +28,7 @@ pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, sta
         .tag(Tag::event(event_id))
         .tag(Tag::public_key(author_pk))
         .tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("state")),
+            TagKind::Custom(Cow::Borrowed("state")),
             [state.as_str()],
         ));
     let output = client.send_event_builder(builder).await
@@ -143,11 +144,11 @@ pub fn PRReviewSection(
 
     let review_list = reviews.read();
     let approve_count = review_list.iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainers.contains(&r.pubkey))
+        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainers.contains(&r.pubkey) && r.pubkey != pr_pubkey)
         .count();
     let changes_count = review_list
         .iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainers.contains(&r.pubkey))
+        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainers.contains(&r.pubkey) && r.pubkey != pr_pubkey)
         .count();
 
     let handle_submit = {

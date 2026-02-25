@@ -81,6 +81,13 @@ pub fn PollCard(
                     is_reposted.set(counts.user_reposted.unwrap_or(false));
                     user_repost_id.set(counts.user_repost_id.clone());
                     is_zapped.set(counts.user_zapped.unwrap_or(false));
+                } else {
+                    reply_count.set(0);
+                    repost_count.set(0);
+                    zap_amount_sats.set(0);
+                    is_reposted.set(false);
+                    user_repost_id.set(None);
+                    is_zapped.set(false);
                 }
             },
         ),
@@ -241,6 +248,13 @@ pub fn PollCard(
                                             .iter()
                                             .any(|e| e.id == new_vote.id);
                                         if !already_exists {
+                                            // Check if this is the current user's vote
+                                            if let Ok(current_user_pk) = nostr_client::get_cached_pubkey() {
+                                                if new_vote.pubkey == current_user_pk {
+                                                    user_vote.set(Some((*new_vote).clone()));
+                                                    show_results.set(true);
+                                                }
+                                            }
                                             votes.with_mut(|current| {
                                                 current.push((*new_vote).clone());
                                                 let deduped = deduplicate_votes(
@@ -291,8 +305,8 @@ pub fn PollCard(
             Some(p) => p,
             None => return HashMap::new(),
         };
-        let vote_events = votes.read().clone();
-        calculate_poll_results(&poll, vote_events)
+        let vote_snapshot = votes.read();
+        calculate_poll_results(&poll, &vote_snapshot)
     });
     let submit_vote = move |_| {
         let options = selected_options.read().clone();
@@ -847,14 +861,14 @@ fn deduplicate_votes(events: Vec<NostrEvent>) -> Vec<NostrEvent> {
     }
     map.into_values().collect()
 }
-fn calculate_poll_results(poll: &Poll, vote_events: Vec<NostrEvent>) -> HashMap<String, usize> {
+fn calculate_poll_results(poll: &Poll, vote_events: &[NostrEvent]) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     let valid_ids: HashSet<&str> = poll.options.iter().map(|o| o.id.as_str()).collect();
     for option in &poll.options {
         counts.insert(option.id.clone(), 0);
     }
     let is_single_choice = matches!(poll.r#type, PollType::SingleChoice);
-    for vote_event in vote_events {
+    for vote_event in vote_events.iter() {
         let mut seen_in_event: HashSet<&str> = HashSet::new();
         for tag in vote_event.tags.iter() {
             if let Some(TagStandard::PollResponse(option_id)) = tag.as_standardized() {

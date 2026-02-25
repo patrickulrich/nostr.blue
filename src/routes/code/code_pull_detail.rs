@@ -1072,6 +1072,8 @@ fn ConflictDetectionBanner(
     use_effect(use_reactive(
         (&diff_content, &parent_commit, &repo_key),
         move |(diff, parent, _repo_key)| {
+            let gen = detect_gen.peek().wrapping_add(1);
+            detect_gen.set(gen);
             conflicts.set(Vec::new());
             checked.set(false);
             if diff.is_empty() {
@@ -1079,8 +1081,6 @@ fn ConflictDetectionBanner(
             }
             if let Some(r) = repo.as_ref() {
                 let r = r.clone();
-                let gen = detect_gen.peek().wrapping_add(1);
-                detect_gen.set(gen);
                 checking.set(true);
                 spawn(async move {
                     let results = detect_conflicts(&r, &diff, &parent).await;

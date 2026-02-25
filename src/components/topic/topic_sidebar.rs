@@ -14,11 +14,30 @@ pub fn TopicSidebar(
 ) -> Element {
     let subscribed = get_subscribed_topic_names();
     let loading = *LOADING_SUBSCRIPTIONS.read();
+    let current_route = use_route::<Route>();
 
     let home_class = if current_topic.is_none() {
         "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
     } else {
         "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
+    };
+
+    let popular_class = if matches!(current_route, Route::TopicsPopular {}) {
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
+    } else {
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
+    };
+
+    let browse_class = if matches!(current_route, Route::TopicsBrowse {}) {
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
+    } else {
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
+    };
+
+    let new_post_class = if matches!(current_route, Route::TopicNewPost {}) {
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent text-primary font-medium"
+    } else {
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition text-primary font-medium"
     };
 
     rsx! {
@@ -37,17 +56,17 @@ pub fn TopicSidebar(
                     }
                     Link {
                         to: Route::TopicsPopular {},
-                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition",
+                        class: "{popular_class}",
                         "Popular"
                     }
                     Link {
                         to: Route::TopicsBrowse {},
-                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition",
+                        class: "{browse_class}",
                         "Browse"
                     }
                     Link {
                         to: Route::TopicNewPost {},
-                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition text-primary font-medium",
+                        class: "{new_post_class}",
                         "+ New Post"
                     }
                 }

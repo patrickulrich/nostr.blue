@@ -75,12 +75,18 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 // Fall back to GitHub API for GitHub-hosted repos
                 for url in repo.clone.iter() {
                     if let Some((owner, repo_name)) = parse_github_url(url) {
-                        let commits = fetch_commits(&owner, &repo_name, 30).await;
-                        if *request_gen.peek() != gen { return; }
-                        commits_result
-                            .set(Some(commits.map(CommitData::GitHub)));
-                        repo_result.set(Some(result));
-                        return;
+                        match fetch_commits(&owner, &repo_name, 30).await {
+                            Ok(commits) => {
+                                if *request_gen.peek() != gen { return; }
+                                commits_result.set(Some(Ok(CommitData::GitHub(commits))));
+                                repo_result.set(Some(result));
+                                return;
+                            }
+                            Err(e) => {
+                                log::warn!("fetch_commits failed for {}/{}: {}", owner, repo_name, e);
+                                continue;
+                            }
+                        }
                     }
                 }
                 if *request_gen.peek() != gen { return; }

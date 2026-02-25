@@ -42,7 +42,7 @@ pub fn QrShareModal(
     rsx! {
         // Backdrop
         div {
-            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
             onclick: move |_| on_close.call(()),
         }
         // Modal

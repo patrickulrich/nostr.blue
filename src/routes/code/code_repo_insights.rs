@@ -227,7 +227,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 // Stats Cards Grid
                 div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 pt-4",
                     StatCard {
-                        label: "Issues",
+                        label: "Issues (latest 50)",
                         value: total_issues.map(|n| n.to_string()).unwrap_or_else(|| "--".to_string()),
                         subtitle: match (open_issues, closed_issues) {
                             (Some(o), Some(c)) => format!("{o} open / {c} closed"),
@@ -237,7 +237,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                         color: "text-green-500",
                     }
                     StatCard {
-                        label: "Pull Requests",
+                        label: "PRs (latest 50)",
                         value: total_prs.map(|n| n.to_string()).unwrap_or_else(|| "--".to_string()),
                         subtitle: match (open_prs, merged_prs) {
                             (Some(o), Some(m)) => format!("{o} open / {m} merged"),

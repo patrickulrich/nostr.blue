@@ -150,6 +150,10 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                             if *gen.peek() != current_gen {
                                 return;
                             }
+                            error_message.set(Some(format!(
+                                "Failed to load repository: {}",
+                                e
+                            )));
                             repo_result.set(Some(Err(e)));
                             loading.set(false);
                             file_loading.set(false);

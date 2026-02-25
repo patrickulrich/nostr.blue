@@ -105,7 +105,14 @@ pub fn CodeNew() -> Element {
 
             for url in &clone_list {
                 // Accept scp-style SSH URLs (e.g. git@host:org/repo.git)
-                let is_scp_ssh = url.contains('@') && url.contains(':') && !url.contains("://");
+                let is_scp_ssh = if !url.contains("://") {
+                    if let Some(at_pos) = url.find('@') {
+                        if let Some(colon_rel) = url[at_pos + 1..].find(':') {
+                            let colon = at_pos + 1 + colon_rel;
+                            at_pos > 0 && colon > at_pos + 1 && colon + 1 < url.len()
+                        } else { false }
+                    } else { false }
+                } else { false };
                 if !is_scp_ssh && url::Url::parse(url).is_err() {
                     error_message.set(Some(format!("Invalid clone URL: '{}'", url)));
                     is_publishing.set(false);
@@ -284,11 +291,11 @@ pub fn CodeNew() -> Element {
                     }
                 }
 
-                div { class: "p-4 bg-blue-500/10 rounded-lg border border-blue-500/20",
+                div { class: "bg-card border border-border rounded-lg p-4",
                     div { class: "flex items-start gap-3",
-                        div { class: "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0",
+                        div { class: "w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0",
                             svg {
-                                class: "w-4 h-4 text-blue-500",
+                                class: "w-4 h-4 text-primary",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 width: "24",
                                 height: "24",

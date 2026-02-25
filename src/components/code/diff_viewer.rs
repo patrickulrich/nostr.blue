@@ -73,6 +73,28 @@ fn is_diff_content(content: &str) -> bool {
 /// Prefers the b/ side (destination) to handle renames correctly.
 fn extract_file_path(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("diff --git ")?;
+    // Handle quoted paths (e.g. "a/old name.rs" "b/new name.rs")
+    if rest.contains('"') {
+        // Extract the second quoted substring (b/ path)
+        let mut in_quote = false;
+        let mut quote_count = 0;
+        let mut start = 0;
+        for (i, c) in rest.char_indices() {
+            if c == '"' {
+                if in_quote {
+                    quote_count += 1;
+                    if quote_count == 2 {
+                        let quoted = &rest[start..i];
+                        return Some(quoted.strip_prefix("b/").unwrap_or(quoted));
+                    }
+                    in_quote = false;
+                } else {
+                    in_quote = true;
+                    start = i + 1;
+                }
+            }
+        }
+    }
     // Try to get the b/ side path (handles renames)
     if let Some(b_path) = rest.split(" b/").nth(1) {
         Some(b_path)

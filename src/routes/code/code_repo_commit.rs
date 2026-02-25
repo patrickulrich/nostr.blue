@@ -91,8 +91,11 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                     match &result {
                         Ok(repo) => {
                             let mut found = false;
+                            let mut parsed_any = false;
+                            let mut last_err = String::new();
                             for url in repo.clone.iter().chain(repo.web.iter()) {
                                 if let Some((owner, repo_name)) = parse_github_url(url) {
+                                    parsed_any = true;
                                     match fetch_commit_detail(&owner, &repo_name, &s).await {
                                         Ok(detail) => {
                                             if *request_id.peek() != current_id {
@@ -102,14 +105,17 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                                             found = true;
                                             break;
                                         }
-                                        Err(_) => continue,
+                                        Err(e) => { last_err = e; continue; }
                                     }
                                 }
                             }
                             if !found {
-                                commit_result.set(Some(Err(
-                                    "No GitHub URL found for this repository".to_string(),
-                                )));
+                                let msg = if parsed_any && !last_err.is_empty() {
+                                    last_err
+                                } else {
+                                    "No GitHub URL found for this repository".to_string()
+                                };
+                                commit_result.set(Some(Err(msg)));
                             }
                         }
                         Err(e) => {

@@ -62,11 +62,16 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
         let issue_filter = Filter::new()
             .ids(issue_ids)
             .kind(Kind::GitIssue);
-        if let Ok(issue_events) = nostr_client::fetch_events_aggregated(issue_filter, FETCH_TIMEOUT).await {
-            for event in &issue_events {
-                if let Some(issue) = Issue::from_event(event) {
-                    issue_map.insert(issue.event_id.clone(), issue);
+        match nostr_client::fetch_events_aggregated(issue_filter, FETCH_TIMEOUT).await {
+            Ok(issue_events) => {
+                for event in &issue_events {
+                    if let Some(issue) = Issue::from_event(event) {
+                        issue_map.insert(issue.event_id.clone(), issue);
+                    }
                 }
+            }
+            Err(e) => {
+                log::warn!("Failed to fetch issue events for bounties: {}", e);
             }
         }
     }
@@ -106,19 +111,22 @@ pub fn CodeBounties() -> Element {
     let mut search_query = use_signal(String::new);
 
     // Fetch all bounties
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
         error.set(None);
         spawn(async move {
             loading.set(true);
             match fetch_all_bounties().await {
-                Ok(b) => bounties.set(b),
-                Err(e) => error.set(Some(e)),
+                Ok(b) => { if *gen.peek() == current_gen { bounties.set(b); } }
+                Err(e) => { if *gen.peek() == current_gen { error.set(Some(e)); } }
             }
-            loading.set(false);
+            if *gen.peek() == current_gen { loading.set(false); }
         });
     });
 

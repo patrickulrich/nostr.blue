@@ -10,7 +10,7 @@ import { Buffer } from 'buffer';
 globalThis.Buffer = Buffer;
 
 function sanitizeFilepath(fp) {
-    return fp.replace(/[\x00-\x1f\x7f]/g, '');
+    return fp.replace(/[\u0000-\u001F\u007F]/g, '');
 }
 
 // Initialize virtual filesystem backed by IndexedDB
@@ -31,6 +31,14 @@ const CORS_PROXY = 'https://cors.isomorphic-git.org';
  * @returns {boolean} true if the content appears to be binary
  */
 function isBinary(uint8Array) {
+  // Detect UTF-32 BOM before UTF-16 (UTF-32 LE starts with 0xFF 0xFE like UTF-16 LE)
+  if (uint8Array.length >= 4) {
+    if ((uint8Array[0] === 0xFF && uint8Array[1] === 0xFE && uint8Array[2] === 0x00 && uint8Array[3] === 0x00) ||
+        (uint8Array[0] === 0x00 && uint8Array[1] === 0x00 && uint8Array[2] === 0xFE && uint8Array[3] === 0xFF)) {
+      return false; // UTF-32 text, not binary
+    }
+  }
+
   // Detect UTF-16 BOM — these files are text, not binary,
   // but their encoding contains null bytes that would trip the scan below.
   if (uint8Array.length >= 2) {
@@ -256,6 +264,10 @@ function computeEdits(oldLines, newLines) {
     y--;
     edits.push({ type: 'equal', oldIdx: x, newIdx: y });
   }
+
+  // Handle remaining deletes/inserts at the beginning
+  while (x > 0) { x--; edits.push({ type: 'delete', oldIdx: x }); }
+  while (y > 0) { y--; edits.push({ type: 'insert', newIdx: y }); }
 
   edits.reverse();
   return edits;
@@ -571,6 +583,11 @@ const methods = {
     // Validate and normalize directory path to prevent path traversal attacks
     dir = validateRepoDir(dir);
 
+    // Reject filepaths containing control characters before sanitization
+    if (/[\u0000-\u001F\u007F]/.test(filepath)) {
+      throw new Error(`Filepath contains control characters: ${filepath.replace(/[\u0000-\u001F\u007F]/g, '?')}`);
+    }
+
     let commitOid;
     try {
       commitOid = await git.resolveRef({ fs, dir, ref });
@@ -683,12 +700,12 @@ const methods = {
 
     let baseOid, headOid;
     try {
-      baseOid = await resolveRefWithFallback(dir, base);
+      baseOid = await git.resolveRef({ fs, dir, ref: base });
     } catch (e) {
       throw new Error(`Could not resolve base ref '${base}': ${e.message}`);
     }
     try {
-      headOid = await resolveRefWithFallback(dir, head);
+      headOid = await git.resolveRef({ fs, dir, ref: head });
     } catch (e) {
       throw new Error(`Could not resolve head ref '${head}': ${e.message}`);
     }
@@ -703,6 +720,7 @@ const methods = {
     const diffParts = [];
 
     for (const filepath of allFiles) {
+      const safePath = sanitizeFilepath(filepath);
       let baseContent = null;
       let headContent = null;
       let skipReason = null;
@@ -744,9 +762,9 @@ const methods = {
       }
 
       if (skipReason) {
-        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
-        diffParts.push(inBase ? `--- a/${filepath}` : `--- /dev/null`);
-        diffParts.push(inHead ? `+++ b/${filepath}` : `+++ /dev/null`);
+        diffParts.push(`diff --git a/${safePath} b/${safePath}`);
+        diffParts.push(inBase ? `--- a/${safePath}` : `--- /dev/null`);
+        diffParts.push(inHead ? `+++ b/${safePath}` : `+++ /dev/null`);
         diffParts.push(`File skipped: ${skipReason}`);
         continue;
       }
@@ -758,10 +776,10 @@ const methods = {
       if (baseContent === null) {
         // New file
         const lines = normalizeAndSplit(headContent);
-        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push(`diff --git a/${safePath} b/${safePath}`);
         diffParts.push('new file mode 100644');
         diffParts.push(`--- /dev/null`);
-        diffParts.push(`+++ b/${filepath}`);
+        diffParts.push(`+++ b/${safePath}`);
         diffParts.push(`@@ -0,0 +1,${lines.length} @@`);
         for (const line of lines) {
           diffParts.push(`+${line}`);
@@ -769,9 +787,9 @@ const methods = {
       } else if (headContent === null) {
         // Deleted file
         const lines = normalizeAndSplit(baseContent);
-        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+        diffParts.push(`diff --git a/${safePath} b/${safePath}`);
         diffParts.push('deleted file mode 100644');
-        diffParts.push(`--- a/${filepath}`);
+        diffParts.push(`--- a/${safePath}`);
         diffParts.push(`+++ /dev/null`);
         diffParts.push(`@@ -1,${lines.length} +0,0 @@`);
         for (const line of lines) {
@@ -787,9 +805,9 @@ const methods = {
         // Generate unified diff hunks with 3 lines of context
         const hunks = generateHunks(edits, baseLines, headLines, 3);
         if (hunks.length > 0) {
-          diffParts.push(`diff --git a/${filepath} b/${filepath}`);
-          diffParts.push(`--- a/${filepath}`);
-          diffParts.push(`+++ b/${filepath}`);
+          diffParts.push(`diff --git a/${safePath} b/${safePath}`);
+          diffParts.push(`--- a/${safePath}`);
+          diffParts.push(`+++ b/${safePath}`);
           for (const hunk of hunks) {
             diffParts.push(hunk);
           }
