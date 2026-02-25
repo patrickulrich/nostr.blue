@@ -9,6 +9,7 @@ use crate::services::git_hosting::{
     fetch_pr_comments_by_id, fetch_pull_request, fetch_repository, publish_pr_comment_by_id,
     publish_pr_update_by_id, update_pr_status_by_id,
 };
+use crate::services::git_hosting::conflict_detection::{detect_conflicts, ConflictInfo, ConflictType};
 use crate::services::git_hosting::pull_requests::{
     fetch_line_comments_by_id, publish_line_comment_by_id, LineComment,
 };
@@ -580,7 +581,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
             // Conflict detection banner
             if *display_status.read() == IssueStatus::Open || *display_status.read() == IssueStatus::Draft {
                 if let Some(parent) = &pr.parent_commit {
-                    ParentCommitInfo { parent_commit: parent.clone() }
+                    ConflictDetectionBanner {
+                        parent_commit: parent.clone(),
+                        diff_content: pr.content.clone(),
+                        repo: repo().clone(),
+                    }
                 }
             }
 
@@ -1030,18 +1035,60 @@ fn LoadingSkeleton() -> Element {
     }
 }
 
-/// Parent commit info banner for PRs.
+/// Conflict detection banner for PRs.
 ///
-/// Shows contextual information about the base commit this PR was built on,
-/// so reviewers know which branch state to compare against.
+/// Shows the parent commit info and runs heuristic conflict detection
+/// against the current state of the repository.
 #[component]
-fn ParentCommitInfo(parent_commit: String) -> Element {
+fn ConflictDetectionBanner(
+    parent_commit: String,
+    diff_content: String,
+    repo: Option<Repository>,
+) -> Element {
     let short_parent = truncate_commit(&parent_commit);
+    let mut conflicts = use_signal(Vec::<ConflictInfo>::new);
+    let mut checking = use_signal(|| false);
+    let mut checked = use_signal(|| false);
+    let mut show_details = use_signal(|| false);
+
+    // Run conflict detection when repo is available
+    use_effect(use_reactive(
+        (&diff_content, &parent_commit),
+        move |(diff, parent)| {
+            if diff.is_empty() || checked() {
+                return;
+            }
+            if let Some(r) = repo.as_ref() {
+                let r = r.clone();
+                checking.set(true);
+                spawn(async move {
+                    let results = detect_conflicts(&r, &diff, &parent).await;
+                    conflicts.set(results);
+                    checking.set(false);
+                    checked.set(true);
+                });
+            }
+        },
+    ));
+
+    let conflict_count = conflicts.read().len();
+    let (banner_class, icon_class) = if conflict_count > 0 {
+        (
+            "p-3 rounded-lg border bg-orange-500/10 border-orange-500/20 text-sm",
+            "w-4 h-4 text-orange-400 shrink-0 mt-0.5",
+        )
+    } else {
+        (
+            "p-3 rounded-lg border bg-blue-500/10 border-blue-500/20 text-sm",
+            "w-4 h-4 text-blue-200 shrink-0 mt-0.5",
+        )
+    };
+
     rsx! {
-        div { class: "p-3 rounded-lg border bg-blue-500/10 border-blue-500/20 text-sm",
+        div { class: "{banner_class}",
             div { class: "flex items-start gap-2",
                 svg {
-                    class: "w-4 h-4 text-blue-200 shrink-0 mt-0.5",
+                    class: "{icon_class}",
                     xmlns: "http://www.w3.org/2000/svg",
                     width: "24",
                     height: "24",
@@ -1055,10 +1102,53 @@ fn ParentCommitInfo(parent_commit: String) -> Element {
                     path { d: "M12 16v-4" }
                     path { d: "M12 8h.01" }
                 }
-                p { class: "text-blue-200",
-                    "This PR is based on commit "
-                    code { class: "px-1 py-0.5 bg-blue-500/10 rounded text-xs font-mono", "{short_parent}" }
-                    ". Review the base branch before merging."
+                div { class: "flex-1",
+                    p { class: if conflict_count > 0 { "text-orange-400" } else { "text-blue-200" },
+                        "Based on commit "
+                        code { class: "px-1 py-0.5 bg-blue-500/10 rounded text-xs font-mono", "{short_parent}" }
+                        if checking() {
+                            " — checking for conflicts..."
+                        } else if conflict_count > 0 {
+                            " — {conflict_count} potential conflict(s) detected"
+                        }
+                    }
+                    // Conflict details
+                    if conflict_count > 0 && !checking() {
+                        button {
+                            class: "text-xs text-orange-400/80 hover:text-orange-400 mt-1 underline",
+                            onclick: move |_| {
+                                let current = *show_details.read();
+                                show_details.set(!current);
+                            },
+                            if *show_details.read() { "Hide details" } else { "Show details" }
+                        }
+                        if *show_details.read() {
+                            div { class: "mt-2 space-y-1",
+                                for conflict in conflicts.read().iter() {
+                                    {
+                                        let (type_label, type_class) = match conflict.conflict_type {
+                                            ConflictType::ContextMismatch => ("Changed", "text-orange-400"),
+                                            ConflictType::FileDeleted => ("Deleted", "text-red-400"),
+                                            ConflictType::FileAlreadyExists => ("Exists", "text-yellow-400"),
+                                        };
+                                        rsx! {
+                                            div {
+                                                key: "{conflict.file_path}-{type_label}",
+                                                class: "flex items-start gap-2 text-xs",
+                                                span { class: "px-1.5 py-0.5 rounded bg-muted font-medium shrink-0 {type_class}",
+                                                    "{type_label}"
+                                                }
+                                                div {
+                                                    code { class: "font-mono text-muted-foreground", "{conflict.file_path}" }
+                                                    p { class: "text-muted-foreground/70 mt-0.5", "{conflict.details}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -4,6 +4,7 @@
 //! Handles fetching, publishing, and caching of git-related events.
 pub mod activity;
 pub mod bounties;
+pub mod conflict_detection;
 pub mod discussions;
 pub mod file_fetcher;
 pub mod git_service;

@@ -30,6 +30,7 @@ pub mod snippet_card;
 pub mod ssh_key_manager;
 pub mod status_badge;
 pub mod user_picker;
+pub mod zap_distribution;
 #[allow(unused_imports)]
 pub use bounty_badge::{BountyBadge, BountyStatusBadge};
 #[allow(unused_imports)]
@@ -69,3 +70,5 @@ pub use ssh_key_manager::SshKeyManager;
 pub use status_badge::CodeStatusBadge;
 #[allow(unused_imports)]
 pub use user_picker::NostrUserPicker;
+#[allow(unused_imports)]
+pub use zap_distribution::ZapDistribution;

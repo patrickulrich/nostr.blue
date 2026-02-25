@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 use crate::components::code::qr_share_modal::QrShareModal;
+use crate::components::code::zap_distribution::ZapDistribution;
 use crate::components::icons;
 use crate::components::ZapModal;
 use crate::services::git_hosting::repository::publish_fork;
@@ -454,21 +455,29 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 }
             }
             if *show_zap_modal.read() {
-                {
-                    let profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
-                    let recipient_name = profile
-                        .as_ref()
-                        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-                        .unwrap_or_else(|| truncate_pubkey(&repo.pubkey));
-                    let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
-                    rsx! {
-                        ZapModal {
-                            recipient_pubkey: repo.pubkey.clone(),
-                            recipient_name: recipient_name,
-                            lud16: lud16,
-                            lud06: None::<String>,
-                            event_id: Some(repo.event_id.clone()),
-                            on_close: move |_| show_zap_modal.set(false),
+                if !repo.zap_splits.is_empty() {
+                    ZapDistribution {
+                        zap_splits: repo.zap_splits.clone(),
+                        repo_event_id: repo.event_id.clone(),
+                        on_close: move |_| show_zap_modal.set(false),
+                    }
+                } else {
+                    {
+                        let profile = PROFILE_CACHE.read().peek(&repo.pubkey).cloned();
+                        let recipient_name = profile
+                            .as_ref()
+                            .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+                            .unwrap_or_else(|| truncate_pubkey(&repo.pubkey));
+                        let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
+                        rsx! {
+                            ZapModal {
+                                recipient_pubkey: repo.pubkey.clone(),
+                                recipient_name: recipient_name,
+                                lud16: lud16,
+                                lud06: None::<String>,
+                                event_id: Some(repo.event_id.clone()),
+                                on_close: move |_| show_zap_modal.set(false),
+                            }
                         }
                     }
                 }
