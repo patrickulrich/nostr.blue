@@ -684,14 +684,32 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
     let mut new_line: usize = 0;
     let mut in_header = false;
 
+    let mut binary_hint: Option<String> = None;
+
     for line in &lines {
         if line.starts_with("diff --git") {
-            if !current_lines.is_empty() {
+            // Flush previous section — even if current_lines is empty (header-only/binary diff)
+            if let Some(ref file) = current_file {
+                if current_lines.is_empty() {
+                    let info_text = binary_hint.take().unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
+                    current_lines.push(DiffLine {
+                        kind: LineKind::Info,
+                        old_num: None,
+                        new_num: None,
+                        content: info_text,
+                    });
+                }
                 sections.push(DiffSection {
-                    file_path: current_file.clone().unwrap_or_default(),
+                    file_path: file.clone(),
+                    lines: std::mem::take(&mut current_lines),
+                });
+            } else if !current_lines.is_empty() {
+                sections.push(DiffSection {
+                    file_path: String::new(),
                     lines: std::mem::take(&mut current_lines),
                 });
             }
+            binary_hint = None;
             current_file = extract_file_path(line).map(|s| s.to_string());
             in_header = true;
             continue;
@@ -706,9 +724,13 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                 || line.starts_with("new file")
                 || line.starts_with("deleted file")
                 || line.starts_with("similarity")
-                || line.starts_with("rename")
-                || line.starts_with("Binary"))
+                || line.starts_with("rename"))
         {
+            continue;
+        }
+
+        if in_header && line.starts_with("Binary") {
+            binary_hint = Some(line.to_string());
             continue;
         }
 
@@ -780,9 +802,24 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
         }
     }
 
-    if !current_lines.is_empty() {
+    // Flush final section — handle header-only/binary diffs
+    if let Some(ref file) = current_file {
+        if current_lines.is_empty() {
+            let info_text = binary_hint.take().unwrap_or_else(|| "(Binary file or file metadata changed)".to_string());
+            current_lines.push(DiffLine {
+                kind: LineKind::Info,
+                old_num: None,
+                new_num: None,
+                content: info_text,
+            });
+        }
         sections.push(DiffSection {
-            file_path: current_file.unwrap_or_default(),
+            file_path: file.clone(),
+            lines: std::mem::take(&mut current_lines),
+        });
+    } else if !current_lines.is_empty() {
+        sections.push(DiffSection {
+            file_path: String::new(),
             lines: std::mem::take(&mut current_lines),
         });
     }

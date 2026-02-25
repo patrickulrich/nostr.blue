@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 use gloo_net::http::Request;
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// Single commit detail with diff
 #[derive(Debug, Clone, PartialEq)]
@@ -284,8 +284,11 @@ fn LoadingSkeleton() -> Element {
     }
 }
 
+const COMMIT_CACHE_MAX: usize = 50;
+
 thread_local! {
     static COMMIT_CACHE: RefCell<HashMap<String, CommitDetail>> = RefCell::new(HashMap::new());
+    static COMMIT_CACHE_ORDER: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
 }
 
 /// Fetch commit detail from GitHub API
@@ -374,8 +377,22 @@ async fn fetch_commit_detail(
         files_changed,
     };
 
-    // Store in cache
-    COMMIT_CACHE.with(|c| c.borrow_mut().insert(cache_key, detail.clone()));
+    // Store in cache with bounded eviction
+    COMMIT_CACHE.with(|c| {
+        COMMIT_CACHE_ORDER.with(|order| {
+            let mut cache = c.borrow_mut();
+            let mut order = order.borrow_mut();
+            if !cache.contains_key(&cache_key) {
+                if order.len() >= COMMIT_CACHE_MAX {
+                    if let Some(oldest) = order.pop_front() {
+                        cache.remove(&oldest);
+                    }
+                }
+                order.push_back(cache_key.clone());
+            }
+            cache.insert(cache_key, detail.clone());
+        });
+    });
 
     Ok(detail)
 }

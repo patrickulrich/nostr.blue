@@ -19,14 +19,19 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let nav = use_navigator();
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
+    let mut repo_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         spawn(async move {
             let result = fetch_repository(&n).await;
-            repo_result.set(Some(result));
+            if *repo_gen.peek() == gen {
+                repo_result.set(Some(result));
+            }
         });
     }));
     let mut repo_name = use_signal(String::new);

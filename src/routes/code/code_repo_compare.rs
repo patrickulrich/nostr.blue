@@ -19,6 +19,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
     let mut has_compared = use_signal(|| false);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut request_gen = use_signal(|| 0u64);
+    let mut compare_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -26,6 +27,8 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
         }
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
+        let cg = compare_gen.peek().wrapping_add(1);
+        compare_gen.set(cg);
         repo_result.set(None);
         diff_content.set(String::new());
         has_compared.set(false);
@@ -39,7 +42,6 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
             }
         });
     }));
-    let mut compare_gen = use_signal(|| 0u32);
     let handle_compare = move |_| {
         let base = base_branch.read().trim().to_string();
         let head = head_branch.read().trim().to_string();

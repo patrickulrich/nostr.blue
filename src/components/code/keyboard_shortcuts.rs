@@ -76,17 +76,16 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
                     // Reset after 1 second timeout, storing the ID for cleanup
                     let Some(window_clone) = web_sys::window() else { return; };
-                    let callback = Closure::once(move || {
+                    let callback = Closure::wrap(Box::new(move || {
                         pending_g.set(false);
                         timeout_id.set(None);
-                    });
+                    }) as Box<dyn FnMut()>);
                     if let Ok(id) = window_clone.set_timeout_with_callback_and_timeout_and_arguments_0(
-                        callback.as_ref().unchecked_ref(),
+                        callback.into_js_value().as_ref().unchecked_ref(),
                         1000
                     ) {
                         timeout_id.set(Some(id));
                     }
-                    callback.forget();
                     return;
                 }
 
@@ -94,6 +93,14 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 if *pending_g.read() {
                     event.prevent_default();
                     pending_g.set(false);
+                    // Clear the pending timeout to prevent stale firing
+                    let pending_timeout = *timeout_id.peek();
+                    if let Some(id) = pending_timeout {
+                        if let Some(w) = web_sys::window() {
+                            w.clear_timeout_with_handle(id);
+                        }
+                        timeout_id.set(None);
+                    }
 
                     match key.as_str() {
                         "i" => {

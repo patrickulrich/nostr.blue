@@ -72,7 +72,9 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                     error.set(Some(e));
                 }
             }
-            loading.set(false);
+            if *request_gen.peek() == captured_gen {
+                loading.set(false);
+            }
         });
     }));
     let auth = auth_store::AUTH_STATE.read();
@@ -584,14 +586,15 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
-            let tag = tag_name.read().clone();
+            if *is_publishing.peek() { return; }
+            let tag = tag_name.read().trim().to_string();
             let title_val = title.read().clone();
             let desc = description.read().clone();
             let assets = asset_urls.read().clone();
             let is_pre = *prerelease.read();
             let naddr = naddr.clone();
             spawn(async move {
-                if tag.trim().is_empty() {
+                if tag.is_empty() {
                     error_message.set(Some("Tag name is required".to_string()));
                     return;
                 }
