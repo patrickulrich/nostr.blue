@@ -31,8 +31,8 @@ pub fn QrShareModal(
         .map(|code| {
             code.render::<svg::Color>()
                 .min_dimensions(200, 200)
-                .dark_color(svg::Color("#ffffff"))
-                .light_color(svg::Color("#000000"))
+                .dark_color(svg::Color("#000000"))
+                .light_color(svg::Color("#ffffff"))
                 .build()
         });
 
@@ -54,6 +54,7 @@ pub fn QrShareModal(
                     h2 { class: "text-lg font-bold", "Share {repo_name}" }
                     button {
                         class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground",
+                        aria_label: "Close share modal",
                         onclick: move |_| on_close.call(()),
                         "\u{2715}"
                     }

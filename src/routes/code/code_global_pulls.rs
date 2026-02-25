@@ -4,7 +4,7 @@
 //! Shows PRs created by the user with status filtering and search.
 use crate::components::{icons, CodePullRow};
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_user_prs, fetch_prs_assigned_to, fetch_prs_mentioning};
+use crate::services::git_hosting::{fetch_user_prs, fetch_prs_assigned_to};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::{IssueStatus, PullRequest};
 use dioxus::prelude::*;
@@ -14,7 +14,8 @@ use nostr_sdk::prelude::PublicKey;
 enum FilterTab {
     Created,
     Assigned,
-    Mentioned,
+    // NIP-34 uses p-tags for both assignment and mentions with no protocol-level
+    // distinction, so a separate "Mentioned" tab would duplicate "Assigned".
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -28,7 +29,6 @@ pub fn CodeGlobalPulls() -> Element {
     // All hooks must be called before any early returns to maintain stable call-order indices.
     let mut created_prs = use_signal(Vec::<PullRequest>::new);
     let mut assigned_prs = use_signal(Vec::<PullRequest>::new);
-    let mut mentioned_prs = use_signal(Vec::<PullRequest>::new);
     let mut loading = use_signal(|| true);
     let mut active_tab = use_signal(|| FilterTab::Created);
     let mut status_filter = use_signal(|| StatusFilter::Open);
@@ -51,16 +51,14 @@ pub fn CodeGlobalPulls() -> Element {
                 fetch_gen.set(gen);
                 created_prs.set(Vec::new());
                 assigned_prs.set(Vec::new());
-                mentioned_prs.set(Vec::new());
                 loading.set(true);
                 fetch_error.set(None);
                 let captured_pk = pk_hex.clone();
                 spawn(async move {
                     if let Ok(pk) = PublicKey::from_hex(&captured_pk) {
-                        let (created_res, assigned_res, mentioned_res) = futures::join!(
+                        let (created_res, assigned_res) = futures::join!(
                             fetch_user_prs(&pk, 100),
-                            fetch_prs_assigned_to(&pk, 100),
-                            fetch_prs_mentioning(&pk, 100)
+                            fetch_prs_assigned_to(&pk, 100)
                         );
                         if *fetch_gen.peek() != gen { return; }
                         let mut errors = Vec::new();
@@ -76,13 +74,6 @@ pub fn CodeGlobalPulls() -> Element {
                             Err(e) => {
                                 errors.push(format!("Assigned: {}", e));
                                 assigned_prs.set(Vec::new());
-                            }
-                        }
-                        match mentioned_res {
-                            Ok(fetched) => mentioned_prs.set(fetched),
-                            Err(e) => {
-                                errors.push(format!("Mentioned: {}", e));
-                                mentioned_prs.set(Vec::new());
                             }
                         }
                         if !errors.is_empty() {
@@ -102,7 +93,6 @@ pub fn CodeGlobalPulls() -> Element {
     let all_prs_for_tab: Vec<PullRequest> = match *active_tab.read() {
         FilterTab::Created => created_prs.read().clone(),
         FilterTab::Assigned => assigned_prs.read().clone(),
-        FilterTab::Mentioned => mentioned_prs.read().clone(),
     };
     let mut all_labels: Vec<String> = all_prs_for_tab
         .iter()
@@ -211,18 +201,6 @@ pub fn CodeGlobalPulls() -> Element {
                             label_filter.set(None);
                         },
                         "Assigned"
-                    }
-                    button {
-                        class: if *active_tab.read() == FilterTab::Mentioned {
-                            "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
-                        } else {
-                            "text-sm text-muted-foreground hover:text-foreground pb-1"
-                        },
-                        onclick: move |_| {
-                            active_tab.set(FilterTab::Mentioned);
-                            label_filter.set(None);
-                        },
-                        "Mentioned"
                     }
                 }
                 div { class: "px-4 pb-3 flex gap-2",

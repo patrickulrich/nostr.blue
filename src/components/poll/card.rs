@@ -77,15 +77,9 @@ pub fn PollCard(
                     reply_count.set(counts.replies.min(501));
                     repost_count.set(counts.reposts.min(501));
                     zap_amount_sats.set(counts.zap_amount_sats);
-                    if counts.user_reposted.is_some() || !*is_reposted.peek() {
-                        is_reposted.set(counts.user_reposted.unwrap_or(false));
-                    }
-                    if counts.user_repost_id.is_some() || user_repost_id.peek().is_none() {
-                        user_repost_id.set(counts.user_repost_id.clone());
-                    }
-                    if counts.user_zapped.is_some() || !*is_zapped.peek() {
-                        is_zapped.set(counts.user_zapped.unwrap_or(false));
-                    }
+                    is_reposted.set(counts.user_reposted.unwrap_or(false));
+                    user_repost_id.set(counts.user_repost_id.clone());
+                    is_zapped.set(counts.user_zapped.unwrap_or(false));
                 }
             },
         ),
@@ -159,32 +153,42 @@ pub fn PollCard(
                         if let Some(old_sub_id) = vote_sub_id.peek().clone() {
                             client.unsubscribe(&old_sub_id).await;
                         }
-                        // Re-add poll relays for subscription lifetime.
-                        // Remove previously-added relays that are no longer in the new set
-                        // to avoid leaking relay connections across poll_data changes.
+                        // Track only component-owned relays (those we actually added).
+                        // On unmount we must only remove relays we added, not ones that
+                        // were already connected before this component mounted.
                         if !poll_relays_for_sub.is_empty() {
-                            let old_relays = poll_relay_urls.peek().clone();
+                            let old_owned = poll_relay_urls.peek().clone();
                             let added = relay::add_relays(&client, &poll_relays_for_sub).await;
                             if !added.is_empty() {
                                 nostr_client::ensure_relays_ready(&client).await;
                             }
-                            // Build new_set from the desired set, not just newly-added relays.
-                            // Already-connected relays won't appear in `added` but are still desired.
-                            let new_set: std::collections::HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
-                            let removed: Vec<nostr_sdk::RelayUrl> = old_relays
+                            // New owned set = previously owned relays still in desired set + newly added
+                            let desired: std::collections::HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
+                            let mut new_owned: Vec<nostr_sdk::RelayUrl> = old_owned
                                 .iter()
-                                .filter(|r| !new_set.contains(r))
+                                .filter(|r| desired.contains(r))
                                 .cloned()
                                 .collect();
-                            if !removed.is_empty() {
-                                relay::remove_relays(&client, &removed).await;
+                            for r in &added {
+                                if !new_owned.contains(r) {
+                                    new_owned.push(r.clone());
+                                }
                             }
-                            poll_relay_urls.set(poll_relays_for_sub.clone());
+                            // Remove previously-owned relays no longer in the desired set
+                            let stale: Vec<nostr_sdk::RelayUrl> = old_owned
+                                .iter()
+                                .filter(|r| !desired.contains(r))
+                                .cloned()
+                                .collect();
+                            if !stale.is_empty() {
+                                relay::remove_relays(&client, &stale).await;
+                            }
+                            poll_relay_urls.set(new_owned);
                         } else {
-                            // No new poll relays; remove any previously-added ones
-                            let old_relays = poll_relay_urls.peek().clone();
-                            if !old_relays.is_empty() {
-                                relay::remove_relays(&client, &old_relays).await;
+                            // No new poll relays; remove any previously-owned ones
+                            let old_owned = poll_relay_urls.peek().clone();
+                            if !old_owned.is_empty() {
+                                relay::remove_relays(&client, &old_owned).await;
                                 poll_relay_urls.set(Vec::new());
                             }
                         }
@@ -203,6 +207,10 @@ pub fn PollCard(
                         match client.subscribe(vote_filter, None).await {
                             Ok(output) => {
                                 let subscription_id = output.val;
+                                if *vote_gen.peek() != current_vote_gen {
+                                    client.unsubscribe(&subscription_id).await;
+                                    return;
+                                }
                                 vote_sub_id.set(Some(subscription_id.clone()));
                                 let cancelled_flag = cancelled_for_loop.clone();
                                 spawn(async move {

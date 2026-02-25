@@ -368,7 +368,7 @@ function generateHunks(edits, oldLines, newLines, contextLines = 3) {
     for (let j = changes[i - 1] + 1; j < changes[i]; j++) {
       if (edits[j].type === 'equal') equalCount++;
     }
-    if (equalCount <= contextLines * 2) {
+    if (equalCount < contextLines * 2) {
       // Merge into current hunk
       currentGroup.push(changes[i]);
     } else {
@@ -646,8 +646,7 @@ const methods = {
    * List all file paths recursively (flat list for fuzzy finder)
    */
   async listAllPaths({ dir, ref: gitRef = 'HEAD' }) {
-    // TODO: validateRepoDir returns a normalized path — all RPC handlers should use
-    // the normalized return value instead of the raw dir parameter
+    // Validate and normalize directory path to prevent path traversal attacks
     dir = validateRepoDir(dir);
 
     let commitOid;

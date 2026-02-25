@@ -15,7 +15,10 @@ pub fn CloneHelpModal(
     let active_tab = use_signal(|| "https");
 
     // Categorize URLs
-    let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| u.starts_with("ssh://") || u.contains('@')).collect();
+    let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| {
+        u.starts_with("ssh://")
+            || (u.contains('@') && u.contains(':') && !u.contains("://"))
+    }).collect();
     let https_urls: Vec<&String> = clone_urls.iter().filter(|u| u.starts_with("https://") || u.starts_with("http://")).collect();
     let git_urls: Vec<&String> = clone_urls.iter().filter(|u| u.starts_with("git://")).collect();
     let nostr_url = format!("nostr:{}", naddr);

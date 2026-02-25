@@ -57,7 +57,7 @@ pub fn RelayDisplay(relays: Vec<String>) -> Element {
                         }
                         div { class: "space-y-1",
                             for relay in grasp_relays.iter() {
-                                RelayItem { url: relay.to_string(), is_grasp: true }
+                                RelayItem { key: "{relay}", url: relay.to_string(), is_grasp: true }
                             }
                         }
                     }
@@ -70,7 +70,7 @@ pub fn RelayDisplay(relays: Vec<String>) -> Element {
                         }
                         div { class: "space-y-1",
                             for relay in plain_relays.iter() {
-                                RelayItem { url: relay.to_string(), is_grasp: false }
+                                RelayItem { key: "{relay}", url: relay.to_string(), is_grasp: false }
                             }
                         }
                     }
