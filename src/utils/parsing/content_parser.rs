@@ -116,6 +116,7 @@ pub enum ContentToken {
     NostrBlueProduct(String),
     NostrBlueCodeRepo(String),
     NostrBlueCommunity(String),
+    NostrBlueChannel(String),
     NostrBlueRssPodcastEpisode(String, String),
     NostrBlueRssPodcastShow(String),
 }
@@ -904,6 +905,11 @@ fn extract_nostr_blue(url: &str) -> Option<ContentToken> {
     if path.starts_with("/community/") {
         return extract_id_from_path(path, "/community/")
             .map(ContentToken::NostrBlueCommunity);
+    }
+    if path.starts_with("/chats/") && !path.starts_with("/chats/new") {
+        return extract_id_from_path(path, "/chats/").and_then(|id| {
+            EventId::from_hex(&id).ok().map(|_| ContentToken::NostrBlueChannel(id))
+        });
     }
     None
 }

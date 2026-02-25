@@ -62,6 +62,7 @@ pub enum SidebarItem {
     Wallet,
     P2PTrading,
     Communities,
+    Topics,
     Events,
     Calendar,
     Recipes,
@@ -108,7 +109,7 @@ impl SidebarItem {
     /// Items temporarily hidden from sidebar and customizer.
     /// Routes remain accessible via direct navigation.
     pub fn is_hidden(&self) -> bool {
-        matches!(self, SidebarItem::Code | SidebarItem::Citations | SidebarItem::WebBookmarks)
+        matches!(self, SidebarItem::Citations | SidebarItem::WebBookmarks)
     }
     /// Human-readable display label
     pub fn label(&self) -> &'static str {
@@ -133,6 +134,7 @@ impl SidebarItem {
             SidebarItem::Wallet => "Wallet",
             SidebarItem::P2PTrading => "P2P Trading",
             SidebarItem::Communities => "Communities",
+            SidebarItem::Topics => "Topics",
             SidebarItem::Events => "Events",
             SidebarItem::Calendar => "Calendar",
             SidebarItem::Recipes => "Recipes",
@@ -183,6 +185,7 @@ impl SidebarItem {
             SidebarItem::Wallet => Some(Route::CashuWallet {}),
             SidebarItem::P2PTrading => Some(Route::P2PHome {}),
             SidebarItem::Communities => Some(Route::Communities {}),
+            SidebarItem::Topics => Some(Route::TopicsHome {}),
             SidebarItem::Events => Some(Route::Events {}),
             SidebarItem::Calendar => Some(Route::Calendar {}),
             SidebarItem::Recipes => Some(Route::RecipesHome {}),
@@ -285,9 +288,11 @@ pub fn default_sidebar_items() -> Vec<SidebarItem> {
         SidebarItem::Polls,
         SidebarItem::Chats,
         SidebarItem::Communities,
+        SidebarItem::Topics,
         SidebarItem::Radio,
         SidebarItem::PinBoards,
         SidebarItem::Wiki,
+        SidebarItem::Code,
         SidebarItem::Recipes,
         SidebarItem::Shop,
         SidebarItem::Settings,

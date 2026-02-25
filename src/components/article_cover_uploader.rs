@@ -64,7 +64,7 @@ pub fn ArticleCoverUploader(props: ArticleCoverUploaderProps) -> Element {
                 if props.show_url_input {
                     input {
                         id: "{cover_input_id}",
-                        class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
+                        class: "flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                         r#type: "url",
                         placeholder: "https://example.com/image.jpg",
                         value: "{props.cover_url}",

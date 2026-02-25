@@ -50,6 +50,7 @@ pub mod bible {
         }
     }
 }
+pub mod topics;
 pub mod about;
 pub mod bookmarks;
 pub mod cashu_wallet;
@@ -84,9 +85,21 @@ use blossom::BlossomPage;
 use bookmarks::Bookmarks;
 use cashu_wallet::CashuWallet;
 use citations::{CitationDetail, CitationsHome};
-use code::{CodeExplore, CodeHome, CodeImport, CodeIssueDetail, CodeIssueNew, CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlob, CodeRepoCommits, CodeRepoIssues, CodeRepoPulls, CodeRepoSettings, CodeRepoTree, CodeRepositories, CodeSearch, CodeSnippetDetail, CodeSnippetNew, CodeSnippets};
+use code::{
+    CodeBounties, CodeDiscussionDetail, CodeDiscussionNew, CodeExplore,
+    CodeGlobalIssues, CodeGlobalPulls, CodeHome, CodeImport,
+    CodeIssueDetail, CodeIssueNew, CodeNew, CodeNotifications,
+    CodePullDetail, CodePullNew, CodeRepo, CodeRepoBlame,
+    CodeRepoBlob, CodeRepoCommit, CodeRepoCommits, CodeRepoCompare,
+    CodeRepoDiscussions, CodeRepoInsights, CodeRepoIssues, CodeRepoNewFile,
+    CodeRepoProjects, CodeRepoPulls, CodeRepoReleases, CodeRepoSettings,
+    CodeRepoTree, CodeRepoUpload, CodeRepositories, CodeSearch,
+    CodeSettings, CodeSnippetDetail, CodeSnippetNew, CodeSnippets,
+    CodeStars, CodeUserProfile,
+};
 use chats::{ChatDetail, ChatNew, Chats};
 use community::{Communities, CommunityNew, CommunityPage};
+use topics::{TopicFeed, TopicNewPost, TopicPostDetail, TopicsBrowse, TopicsHome, TopicsPopular};
 use cookies::Cookies;
 use dms::DMs;
 use dvm::DVM;
@@ -217,6 +230,20 @@ pub enum Route {
     CitationDetail { naddr: String },
     #[route("/code")]
     CodeHome {},
+    #[route("/code/new")]
+    CodeNew {},
+    #[route("/code/stars")]
+    CodeStars {},
+    #[route("/code/bounties")]
+    CodeBounties {},
+    #[route("/code/settings")]
+    CodeSettings {},
+    #[route("/code/issues")]
+    CodeGlobalIssues {},
+    #[route("/code/pulls")]
+    CodeGlobalPulls {},
+    #[route("/code/notifications")]
+    CodeNotifications {},
     #[route("/code/explore")]
     CodeExplore {},
     #[route("/code/repositories")]
@@ -235,6 +262,8 @@ pub enum Route {
     CodeRepo { naddr: String },
     #[route("/code/repo/:naddr/commits")]
     CodeRepoCommits { naddr: String },
+    #[route("/code/repo/:naddr/commit/:sha")]
+    CodeRepoCommit { naddr: String, sha: String },
     #[route("/code/repo/:naddr/issues")]
     CodeRepoIssues { naddr: String },
     #[route("/code/repo/:naddr/issues/new")]
@@ -245,6 +274,24 @@ pub enum Route {
     CodePullNew { naddr: String },
     #[route("/code/repo/:naddr/settings")]
     CodeRepoSettings { naddr: String },
+    #[route("/code/repo/:naddr/insights")]
+    CodeRepoInsights { naddr: String },
+    #[route("/code/repo/:naddr/projects")]
+    CodeRepoProjects { naddr: String },
+    #[route("/code/repo/:naddr/blame/:git_ref/*path")]
+    CodeRepoBlame { naddr: String, git_ref: String, path: String },
+    #[route("/code/repo/:naddr/compare")]
+    CodeRepoCompare { naddr: String },
+    #[route("/code/repo/:naddr/upload")]
+    CodeRepoUpload { naddr: String },
+    #[route("/code/repo/:naddr/new-file")]
+    CodeRepoNewFile { naddr: String },
+    #[route("/code/repo/:naddr/releases")]
+    CodeRepoReleases { naddr: String },
+    #[route("/code/repo/:naddr/discussions")]
+    CodeRepoDiscussions { naddr: String },
+    #[route("/code/repo/:naddr/discussions/new")]
+    CodeDiscussionNew { naddr: String },
     #[route("/code/repo/:naddr/tree/:git_ref/*path")]
     CodeRepoTree { naddr: String, git_ref: String, path: String },
     #[route("/code/repo/:naddr/blob/:git_ref/*path")]
@@ -253,6 +300,10 @@ pub enum Route {
     CodeIssueDetail { note_id: String },
     #[route("/code/pull/:note_id")]
     CodePullDetail { note_id: String },
+    #[route("/code/discussion/:note_id")]
+    CodeDiscussionDetail { note_id: String },
+    #[route("/code/profile/:pubkey")]
+    CodeUserProfile { pubkey: String },
     #[route("/p2p")]
     P2PHome {},
     #[route("/p2p/order/:naddr")]
@@ -269,6 +320,18 @@ pub enum Route {
     CommunityNew {},
     #[route("/community/:a_tag")]
     CommunityPage { a_tag: String },
+    #[route("/topics")]
+    TopicsHome {},
+    #[route("/topics/popular")]
+    TopicsPopular {},
+    #[route("/topics/browse")]
+    TopicsBrowse {},
+    #[route("/topics/new")]
+    TopicNewPost {},
+    #[route("/topics/t/:topic")]
+    TopicFeed { topic: String },
+    #[route("/topics/t/:topic/post/:post_id")]
+    TopicPostDetail { topic: String, post_id: String },
     #[route("/recipes")]
     RecipesHome {},
     #[route("/recipes/all")]
@@ -495,6 +558,12 @@ fn Layout() -> Element {
     let is_code_page = matches!(
         current_route,
         Route::CodeHome {}
+        | Route::CodeNew {}
+        | Route::CodeStars {}
+        | Route::CodeBounties {}
+        | Route::CodeSettings {}
+        | Route::CodeGlobalIssues {}
+        | Route::CodeGlobalPulls {}
         | Route::CodeExplore {}
         | Route::CodeRepositories {}
         | Route::CodeSnippets {}
@@ -503,16 +572,29 @@ fn Layout() -> Element {
         | Route::CodeImport {}
         | Route::CodeSearch { .. }
         | Route::CodeRepo { .. }
+        | Route::CodeRepoCommit { .. }
         | Route::CodeRepoCommits { .. }
         | Route::CodeRepoIssues { .. }
         | Route::CodeRepoPulls { .. }
         | Route::CodeIssueNew { .. }
         | Route::CodePullNew { .. }
         | Route::CodeRepoSettings { .. }
+        | Route::CodeRepoInsights { .. }
+        | Route::CodeRepoProjects { .. }
+        | Route::CodeRepoBlame { .. }
+        | Route::CodeRepoCompare { .. }
+        | Route::CodeRepoUpload { .. }
+        | Route::CodeRepoNewFile { .. }
+        | Route::CodeRepoReleases { .. }
+        | Route::CodeRepoDiscussions { .. }
+        | Route::CodeDiscussionNew { .. }
+        | Route::CodeDiscussionDetail { .. }
         | Route::CodeIssueDetail { .. }
         | Route::CodePullDetail { .. }
         | Route::CodeRepoTree { .. }
         | Route::CodeRepoBlob { .. }
+        | Route::CodeUserProfile { .. }
+        | Route::CodeNotifications {}
     );
     let is_p2p_page = matches!(
         current_route,
@@ -525,6 +607,15 @@ fn Layout() -> Element {
     let is_community_page = matches!(
         current_route,
         Route::Communities {} | Route::CommunityPage { .. }
+    );
+    let is_topics_page = matches!(
+        current_route,
+        Route::TopicsHome {}
+        | Route::TopicsPopular {}
+        | Route::TopicsBrowse {}
+        | Route::TopicNewPost {}
+        | Route::TopicFeed { .. }
+        | Route::TopicPostDetail { .. }
     );
     let is_events_page = matches!(
         current_route,
@@ -606,7 +697,7 @@ fn Layout() -> Element {
         || is_packs_page || is_code_page || is_p2p_page || is_chats_page || is_community_page
         || is_events_page || is_recipes_page || is_pin_boards_page || is_wiki_page
         || is_publications_page || is_shop_page || is_blossom_page || is_bible_page
-        || is_creation_page;
+        || is_creation_page || is_topics_page;
     let music_player_visible = {
         let state = MUSIC_PLAYER.read();
         state.is_visible && state.current_track.is_some()

@@ -115,10 +115,11 @@ pub mod modal;
 pub use modal::{Modal, ModalBody, ModalFooter, ModalHeader};
 pub mod toast;
 pub use external_content_card::ExternalContentList;
+#[allow(unused_imports)]
 pub use code::{
     BranchSelector, CodeFileTree, CodeFileViewer, CodeFileViewerSkeleton, CodeIssueRow,
-    CodePullRow, CodeRepoCard, CodeSnippetCard, CodeStatusBadge, FilePathBreadcrumb,
-    FileTreeSkeleton,
+    CodePullRow, CodeReactions, CodeRepoCard, CodeSnippetCard, CodeStatusBadge,
+    FilePathBreadcrumb, FileTreeSkeleton, LabelPicker, PRReviewSection,
 };
 pub use nip_card::{CustomNipCard, DocSpecCard, NipCardSkeleton, OfficialNipCard};
 pub use citation::{CitationPickerModal, CitationSelection};
@@ -134,6 +135,12 @@ pub use community::{
     CommunityCard, CommunityCardSkeleton, CommunityCardWithMembership, CommunityPostCard,
     CommunityPostCardSkeleton, CommunityPostComposer, CommunityPostComposerInline,
     JoinButton, UserRoleBadge,
+};
+pub mod topic;
+#[allow(unused_imports)]
+pub use topic::{
+    ThreadView, TopicBadge, TopicCard, TopicPostCard, TopicPostComposer, TopicSidebar,
+    VoteColumn,
 };
 pub mod pwa_update_banner;
 pub use pwa_update_banner::PwaUpdateBanner;

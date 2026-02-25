@@ -2,37 +2,38 @@
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
-use crate::components::code::{ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
+use crate::components::code::{ContributorsList, ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_readme, fetch_repository};
 use crate::stores::nostr_client;
-use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::Repository;
-use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 /// Repository detail page component
 #[component]
 pub fn CodeRepo(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
-    let naddr_for_effect = naddr.clone();
+    let mut request_gen = use_signal(|| 0u64);
     let naddr_for_render = naddr.clone();
-    use_effect(move || {
-        let naddr = naddr_for_effect.clone();
+    use_effect(use_reactive(&naddr, move |naddr_val| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             log::info!("CodeRepo: Waiting for client initialization...");
             return;
         }
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             loading.set(true);
-            let result = fetch_repository(&naddr).await;
+            let result = fetch_repository(&naddr_val).await;
+            if *request_gen.peek() != gen { return; }
             repo_result.set(Some(result));
             loading.set(false);
         });
-    });
+    }));
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -94,6 +95,35 @@ fn RepoContent(repo: Repository, naddr: String) -> Element {
             if let Some(desc) = &repo.description {
                 p { class: "text-muted-foreground", "{desc}" }
             }
+            if let Some(fork_ref) = &repo.fork_of {
+                div { class: "flex items-center gap-2 text-sm text-muted-foreground",
+                    svg {
+                        class: "w-4 h-4",
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: "24",
+                        height: "24",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        circle { cx: "12", cy: "18", r: "3" }
+                        circle { cx: "6", cy: "6", r: "3" }
+                        circle { cx: "18", cy: "6", r: "3" }
+                        path { d: "M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" }
+                        line { x1: "12", y1: "12", x2: "12", y2: "15" }
+                    }
+                    span { "Forked from " }
+                    code { class: "px-1.5 py-0.5 bg-muted rounded text-xs font-mono",
+                        if fork_ref.chars().count() > 12 {
+                            "{fork_ref.chars().take(12).collect::<String>()}..."
+                        } else {
+                            "{fork_ref}"
+                        }
+                    }
+                }
+            }
             RepoTabNav {
                 naddr: naddr.clone(),
                 active_tab: "overview".to_string(),
@@ -113,123 +143,140 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
         let r = repo_for_fetch.clone();
         async move { fetch_readme(&r, None).await }
     });
+    // Log readme fetch errors once via effect instead of in the render path
+    use_effect(move || {
+        if let Some(Err(e)) = &*readme_resource.read() {
+            log::warn!("Failed to fetch readme: {}", e);
+        }
+    });
     rsx! {
-        div { class: "space-y-6",
-            div { class: "flex flex-col lg:flex-row gap-4",
-                if !repo.clone.is_empty() {
-                    div { class: "flex gap-3",
-                        Link {
-                            to: Route::CodeRepoTree {
-                                naddr: naddr.clone(),
-                                git_ref: "HEAD".to_string(),
-                                path: "".to_string(),
-                            },
-                            class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
-                            svg {
-                                class: "w-4 h-4",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                width: "24",
-                                height: "24",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }
+        div { class: "flex flex-col lg:flex-row gap-6",
+            // Main column
+            div { class: "flex-1 min-w-0 space-y-6",
+                div { class: "flex flex-col lg:flex-row gap-4",
+                    if !repo.clone.is_empty() {
+                        div { class: "flex gap-3",
+                            Link {
+                                to: Route::CodeRepoTree {
+                                    naddr: naddr.clone(),
+                                    git_ref: "HEAD".to_string(),
+                                    path: "".to_string(),
+                                },
+                                class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }
+                                }
+                                "Browse Files"
                             }
-                            "Browse Files"
+                        }
+                    }
+                    if !repo.clone.is_empty() {
+                        div { class: "flex-1 p-3 bg-muted rounded-lg",
+                            p { class: "text-xs text-muted-foreground mb-2", "Clone" }
+                            code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
+                                "{repo.clone.first().map(String::as_str).unwrap_or(\"\")}"
+                            }
                         }
                     }
                 }
-                if !repo.clone.is_empty() {
-                    div { class: "flex-1 p-3 bg-muted rounded-lg",
-                        p { class: "text-xs text-muted-foreground mb-2", "Clone" }
-                        code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
-                            "{repo.clone.first().unwrap_or(&String::new())}"
-                        }
-                    }
+                match &*readme_resource.read() {
+                    Some(Ok(content)) => rsx! {
+                        ReadmeViewer { content: Some(content.clone()), loading: false }
+                    },
+                    Some(Err(e)) => rsx! {
+                        ReadmeViewer { content: None, loading: false, error: Some(e.clone()) }
+                    },
+                    None => rsx! {
+                        ReadmeViewer { loading: true }
+                    },
                 }
             }
-            match &*readme_resource.read() {
-                Some(Ok(content)) => rsx! {
-                    ReadmeViewer { content: Some(content.clone()), loading: false }
-                },
-                Some(Err(_)) => rsx! {
-                    ReadmeViewer { content: None, loading: false }
-                },
-                None => rsx! {
-                    ReadmeViewer { loading: true }
-                },
-            }
-            if !repo.maintainers.is_empty() {
-                div {
-                    h3 { class: "font-semibold mb-3", "Maintainers" }
-                    div { class: "flex flex-wrap gap-2",
-                        for pubkey in repo.maintainers.iter() {
-                            MaintainerBadge { key: "{pubkey}", pubkey: pubkey.clone() }
-                        }
+            // Sidebar
+            div { class: "lg:w-72 space-y-4",
+                // Contributors card
+                div { class: "bg-card border border-border rounded-lg p-4",
+                    ContributorsList {
+                        owner: repo.pubkey.clone(),
+                        maintainers: repo.maintainers.clone(),
+                        issue_count: Some(repo.issue_count),
+                        pr_count: Some(repo.pr_count),
                     }
                 }
-            }
-            if !repo.web.is_empty() {
-                div { class: "flex flex-wrap gap-2",
-                    for url in repo.web.iter() {
-                        a {
-                            key: "{url}",
-                            href: "{url}",
-                            target: "_blank",
-                            rel: "noopener noreferrer",
-                            class: "text-sm text-primary hover:underline flex items-center gap-1",
-                            svg {
-                                class: "w-3 h-3",
-                                xmlns: "http://www.w3.org/2000/svg",
-                                width: "24",
-                                height: "24",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
-                                polyline { points: "15 3 21 3 21 9" }
-                                line {
-                                    x1: "10",
-                                    y1: "14",
-                                    x2: "21",
-                                    y2: "3",
+                // Web links card
+                if !repo.web.is_empty() {
+                    div { class: "bg-card border border-border rounded-lg p-4",
+                        h3 { class: "text-sm font-semibold text-foreground mb-3", "Links" }
+                        div { class: "space-y-2",
+                            for url in repo.web.iter().filter(|u| u.starts_with("http://") || u.starts_with("https://")) {
+                                a {
+                                    key: "{url}",
+                                    href: "{url}",
+                                    target: "_blank",
+                                    rel: "noopener noreferrer",
+                                    class: "text-sm text-primary hover:underline flex items-center gap-1",
+                                    svg {
+                                        class: "w-3 h-3",
+                                        xmlns: "http://www.w3.org/2000/svg",
+                                        width: "24",
+                                        height: "24",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
+                                        polyline { points: "15 3 21 3 21 9" }
+                                        line {
+                                            x1: "10",
+                                            y1: "14",
+                                            x2: "21",
+                                            y2: "3",
+                                        }
+                                    }
+                                    "{url}"
                                 }
                             }
-                            "{url}"
+                        }
+                    }
+                }
+                // Topics card
+                if !repo.topics.is_empty() {
+                    div { class: "bg-card border border-border rounded-lg p-4",
+                        h3 { class: "text-sm font-semibold text-foreground mb-3", "Topics" }
+                        div { class: "flex flex-wrap gap-1",
+                            for topic in repo.topics.iter() {
+                                span {
+                                    key: "{topic}",
+                                    class: "px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs",
+                                    "{topic}"
+                                }
+                            }
+                        }
+                    }
+                }
+                // Metadata card
+                div { class: "bg-card border border-border rounded-lg p-4",
+                    h3 { class: "text-sm font-semibold text-foreground mb-3", "About" }
+                    div { class: "text-sm text-muted-foreground space-y-1",
+                        p { "Event ID: {repo.event_id}" }
+                        p {
+                            "Created: "
+                            {format_relative_time_or(repo.created_at, "Unknown")}
                         }
                     }
                 }
             }
-            div { class: "text-sm text-muted-foreground space-y-1",
-                p { "Event ID: {repo.event_id}" }
-                p {
-                    "Created: "
-                    {format_relative_time_or(repo.created_at, "Unknown")}
-                }
-            }
-        }
-    }
-}
-#[component]
-fn MaintainerBadge(pubkey: String) -> Element {
-    let profile = PROFILE_CACHE.read().peek(&pubkey).cloned();
-    let name = profile
-        .as_ref()
-        .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-        .unwrap_or_else(|| truncate_pubkey(&pubkey));
-    rsx! {
-        Link {
-            to: Route::Profile {
-                pubkey: pubkey.clone(),
-            },
-            class: "px-3 py-1 bg-muted rounded-full text-sm hover:bg-accent transition",
-            "{name}"
         }
     }
 }
