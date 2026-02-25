@@ -4,6 +4,7 @@
 //! issues, pull requests, code snippets, and file browsing.
 pub mod bounty_badge;
 pub mod bounty_form;
+pub mod clone_help_modal;
 pub mod contribution_graph;
 pub mod contributors_list;
 pub mod filter_bar;
@@ -16,8 +17,10 @@ pub mod issue_card;
 pub mod keyboard_shortcuts;
 pub mod label_picker;
 pub mod pull_card;
+pub mod qr_share_modal;
 pub mod reactions;
 pub mod readme_viewer;
+pub mod relay_display;
 pub mod repo_action_bar;
 pub mod repo_card;
 pub mod repo_header;
@@ -31,6 +34,7 @@ pub use bounty_badge::{BountyBadge, BountyStatusBadge};
 #[allow(unused_imports)]
 pub use bounty_form::BountyForm;
 pub use contribution_graph::ContributionGraph;
+pub use clone_help_modal::CloneHelpModal;
 pub use contributors_list::ContributorsList;
 #[allow(unused_imports)]
 pub use dependency_viewer::DependencyViewer;
@@ -43,8 +47,11 @@ pub use fuzzy_finder::FuzzyFinder;
 pub use label_picker::LabelPicker;
 pub use issue_card::{CodeIssueCard, CodeIssueRow};
 pub use pull_card::{CodePullCard, CodePullRow};
+#[allow(unused_imports)]
+pub use qr_share_modal::QrShareModal;
 pub use reactions::CodeReactions;
 pub use readme_viewer::ReadmeViewer;
+pub use relay_display::RelayDisplay;
 pub use repo_action_bar::RepoActionBar;
 #[allow(unused_imports)]
 pub use review_section::PRReviewSection;

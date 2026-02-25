@@ -5,6 +5,7 @@
 //! Styled to match gittr's layout-client.tsx action bar pattern.
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
+use crate::components::code::qr_share_modal::QrShareModal;
 use crate::components::icons;
 use crate::components::ZapModal;
 use crate::services::git_hosting::repository::publish_fork;
@@ -12,7 +13,6 @@ use crate::services::git_hosting::stars::{check_user_star, publish_star, remove_
 use crate::stores::code_store::is_repo_starred;
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::profiles::PROFILE_CACHE;
-use crate::utils::clipboard::copy_to_clipboard;
 use crate::utils::nip34::Repository;
 use crate::utils::truncate_pubkey;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -183,20 +183,9 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             }
         }
     };
-    let handle_share = {
-        let naddr = naddr.clone();
-        move |_| {
-            let naddr = naddr.clone();
-            spawn(async move {
-                let share_text = format!("nostr:{}", naddr);
-                if copy_to_clipboard(&share_text).await.is_ok() {
-                    toast
-                        .success("Copied to clipboard".to_string(), ToastOptions::new());
-                } else {
-                    toast.error("Failed to copy".to_string(), ToastOptions::new());
-                }
-            });
-        }
+    let mut show_share_modal = use_signal(|| false);
+    let handle_share = move |_| {
+        show_share_modal.set(true);
     };
     let mut fork_loading = use_signal(|| false);
     let mut show_fork_modal = use_signal(|| false);
@@ -565,6 +554,13 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             }
                         }
                     }
+                }
+            }
+            if *show_share_modal.read() {
+                QrShareModal {
+                    naddr: naddr.clone(),
+                    repo_name: repo.name.clone().unwrap_or_else(|| repo.id.clone()),
+                    on_close: move |_| show_share_modal.set(false),
                 }
             }
         }

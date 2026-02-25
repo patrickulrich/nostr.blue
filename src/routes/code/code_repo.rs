@@ -2,7 +2,7 @@
 //!
 //! View a single NIP-34 Git repository with README, issues, and PRs.
 //! Styled to match gittr's layout-client.tsx pattern.
-use crate::components::code::{ContributorsList, ReadmeViewer, RepoActionBar, RepoHeader, RepoTabNav};
+use crate::components::code::{CloneHelpModal, ContributorsList, ReadmeViewer, RelayDisplay, RepoActionBar, RepoHeader, RepoTabNav};
 use crate::components::icons;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_readme, fetch_repository};
@@ -138,6 +138,7 @@ fn RepoContent(repo: Repository, naddr: String) -> Element {
 }
 #[component]
 fn OverviewTab(repo: Repository, naddr: String) -> Element {
+    let mut show_clone_modal = use_signal(|| false);
     let repo_for_fetch = repo.clone();
     let readme_resource: Resource<Result<String, String>> = use_resource(move || {
         let r = repo_for_fetch.clone();
@@ -182,7 +183,14 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                     }
                     if !repo.clone.is_empty() {
                         div { class: "flex-1 p-3 bg-muted rounded-lg",
-                            p { class: "text-xs text-muted-foreground mb-2", "Clone" }
+                            div { class: "flex items-center justify-between mb-2",
+                                p { class: "text-xs text-muted-foreground", "Clone" }
+                                button {
+                                    class: "text-xs text-primary hover:underline",
+                                    onclick: move |_| show_clone_modal.set(true),
+                                    "More options"
+                                }
+                            }
                             code { class: "text-xs font-mono bg-background px-2 py-1 rounded overflow-x-auto block",
                                 "{repo.clone.first().map(String::as_str).unwrap_or(\"\")}"
                             }
@@ -211,6 +219,10 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                         issue_count: Some(repo.issue_count),
                         pr_count: Some(repo.pr_count),
                     }
+                }
+                // GRASP relay display
+                if !repo.relays.is_empty() {
+                    RelayDisplay { relays: repo.relays.clone() }
                 }
                 // Web links card
                 if !repo.web.is_empty() {
@@ -276,6 +288,13 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                         }
                     }
                 }
+            }
+        }
+        if *show_clone_modal.read() {
+            CloneHelpModal {
+                clone_urls: repo.clone.clone(),
+                naddr: naddr.clone(),
+                on_close: move |_| show_clone_modal.set(false),
             }
         }
     }

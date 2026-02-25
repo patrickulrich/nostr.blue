@@ -63,10 +63,39 @@ export function initMermaidDiagrams() {
     };
     document.head.appendChild(script);
 }
+
+export function injectCodeBlockCopyButtons() {
+    document.querySelectorAll('pre:not([data-copy-injected])').forEach(pre => {
+        const code = pre.querySelector('code');
+        if (!code) return;
+        pre.setAttribute('data-copy-injected', 'true');
+        pre.style.position = 'relative';
+        const btn = document.createElement('button');
+        btn.className = 'code-copy-btn';
+        btn.setAttribute('aria-label', 'Copy code');
+        btn.style.cssText = 'position:absolute;top:8px;right:8px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);color:rgba(255,255,255,0.7);cursor:pointer;opacity:0;transition:opacity 0.2s;font-size:12px;display:flex;align-items:center;gap:4px;backdrop-filter:blur(4px);z-index:1';
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(code.innerText).then(() => {
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+                btn.style.color = '#22c55e';
+                setTimeout(() => {
+                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+                    btn.style.color = 'rgba(255,255,255,0.7)';
+                }, 2000);
+            });
+        });
+        pre.addEventListener('mouseenter', () => btn.style.opacity = '1');
+        pre.addEventListener('mouseleave', () => btn.style.opacity = '0');
+        pre.appendChild(btn);
+    });
+}
 "#
 )]
 extern "C" {
     fn initMermaidDiagrams();
+    fn injectCodeBlockCopyButtons();
 }
 /// README viewer with loading/error states
 #[component]
@@ -89,6 +118,7 @@ pub fn ReadmeViewer(
             spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(100).await;
                 initMermaidDiagrams();
+                injectCodeBlockCopyButtons();
             });
         }
     }));
