@@ -24,17 +24,22 @@ pub fn CodeIssueNew(naddr: String) -> Element {
     let nav = use_navigator();
     let naddr_for_effect = naddr.clone();
     let naddr_for_labels = naddr.clone();
+    let mut repo_gen = use_signal(|| 0u32);
     use_effect(move || {
         let n = naddr_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&n).await;
-            repo_result.set(Some(result));
-            loading.set(false);
+            if *repo_gen.peek() == gen {
+                repo_result.set(Some(result));
+                loading.set(false);
+            }
         });
     });
     // Fetch existing labels from repo issues for suggestions

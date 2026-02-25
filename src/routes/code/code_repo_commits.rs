@@ -10,7 +10,7 @@ use crate::services::git_hosting::{
 };
 use crate::services::git_worker::CommitEntry;
 use crate::stores::nostr_client;
-use crate::utils::format_time_ago;
+use crate::utils::{format_commit_date, format_time_ago};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 
@@ -329,26 +329,6 @@ fn GitCommitRow(commit: CommitEntry) -> Element {
             }
         }
     }
-}
-
-/// Format a commit date string (ISO 8601) to relative time
-fn format_commit_date(date_str: &str) -> String {
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
-        let ts = dt.timestamp();
-        if ts >= 0 {
-            return format_time_ago(ts as u64);
-        }
-        // Pre-1970 timestamps would wrap when cast to u64; return the original date string instead
-        if let Some(date_part) = date_str.split('T').next() {
-            return date_part.to_string();
-        }
-        return date_str.to_string();
-    }
-    // Fallback: try parsing as date-only
-    if let Some(date_part) = date_str.split('T').next() {
-        return date_part.to_string();
-    }
-    date_str.to_string()
 }
 
 #[component]

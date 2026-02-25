@@ -137,6 +137,9 @@ pub fn PollCard(
         let poll_id = event_id;
         let poll = pd.read().clone();
         let cancelled_for_loop = cancelled_for_loop.clone();
+        // Increment generation counter before spawn to guard all mutations
+        let current_vote_gen = vote_gen.peek().wrapping_add(1);
+        vote_gen.set(current_vote_gen);
         spawn(async move {
             loading_votes.set(true);
             let (ends_at, poll_relays) = poll
@@ -148,6 +151,7 @@ pub fn PollCard(
             let pre_fetch = Timestamp::now();
             match fetch_poll_votes(poll_id, ends_at, poll_relays).await {
                 Ok(vote_events) => {
+                    if *vote_gen.peek() != current_vote_gen { return; }
                     votes.set(vote_events.clone());
                     if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
                         let user_pubkey_str = user_pubkey.to_string();
@@ -160,9 +164,6 @@ pub fn PollCard(
                         }
                     }
                     // Subscribe for real-time vote updates
-                    let next_gen = vote_gen.peek().wrapping_add(1);
-                    vote_gen.set(next_gen);
-                    let current_vote_gen = next_gen;
                     if let Some(client) = nostr_client::get_client() {
                         // Unsubscribe previous vote subscription before creating a new one
                         if let Some(old_sub_id) = vote_sub_id.peek().clone() {
@@ -255,7 +256,9 @@ pub fn PollCard(
                 }
                 Err(e) => log::error!("Failed to fetch votes: {}", e),
             }
-            loading_votes.set(false);
+            if *vote_gen.peek() == current_vote_gen {
+                loading_votes.set(false);
+            }
         });
     }));
     // Cleanup vote subscription and poll relays on unmount.

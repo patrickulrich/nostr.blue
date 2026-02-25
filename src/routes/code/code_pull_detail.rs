@@ -345,8 +345,8 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         let repo_naddr = pr.repository_naddr.clone();
         move |_| {
             let content = update_content.read().clone();
-            let commit = update_commit.read().clone();
-            let parent = update_parent.read().clone();
+            let commit = update_commit.read().trim().to_string();
+            let parent = update_parent.read().trim().to_string();
             let id = pr_id.clone();
             let naddr = repo_naddr.clone();
             if content.trim().is_empty() {
@@ -354,15 +354,15 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                 return;
             }
             if !commit.is_empty()
-                && (commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()))
+                && (!matches!(commit.len(), 40 | 64) || !commit.chars().all(|c| c.is_ascii_hexdigit()))
             {
-                update_error.set(Some("Commit hash must be a 40-character hex string".to_string()));
+                update_error.set(Some("Commit hash must be a 40 or 64-character hex string".to_string()));
                 return;
             }
             if !parent.is_empty()
-                && (parent.len() != 40 || !parent.chars().all(|c| c.is_ascii_hexdigit()))
+                && (!matches!(parent.len(), 40 | 64) || !parent.chars().all(|c| c.is_ascii_hexdigit()))
             {
-                update_error.set(Some("Parent commit must be a 40-character hex string".to_string()));
+                update_error.set(Some("Parent commit must be a 40 or 64-character hex string".to_string()));
                 return;
             }
             spawn(async move {

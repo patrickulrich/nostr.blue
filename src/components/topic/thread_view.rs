@@ -48,7 +48,11 @@ fn ThreadNode(
 ) -> Element {
     // Prevent stack overflow on deeply nested threads
     if depth > MAX_RECURSION_DEPTH {
-        return rsx! {};
+        return rsx! {
+            div { class: "py-2 px-3 text-xs text-muted-foreground italic",
+                "Thread continues ({thread.replies.len()} more replies hidden)"
+            }
+        };
     }
 
     let profile = get_cached_profile(&thread.post.pubkey);
@@ -98,6 +102,7 @@ fn ThreadNode(
                                     src: "{pic}",
                                     alt: "{author_name}",
                                     class: "w-4 h-4 rounded-full object-cover",
+                                    loading: "lazy",
                                 }
                             }
                             span { class: "font-medium", "{author_name}" }

@@ -160,13 +160,16 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let issues_read = issues.read();
     let prs_read = prs.read();
 
-    let total_issues = issues_read.len();
-    let open_issues = issues_read.iter().filter(|i| i.status == IssueStatus::Open).count();
-    let closed_issues = issues_read.iter().filter(|i| i.status == IssueStatus::Closed).count();
+    let has_issues_error = issues_error.read().is_some();
+    let has_prs_error = prs_error.read().is_some();
 
-    let total_prs = prs_read.len();
-    let open_prs = prs_read.iter().filter(|p| p.status == IssueStatus::Open).count();
-    let merged_prs = prs_read.iter().filter(|p| p.status == IssueStatus::Applied).count();
+    let total_issues: Option<usize> = if has_issues_error { None } else { Some(issues_read.len()) };
+    let open_issues: Option<usize> = if has_issues_error { None } else { Some(issues_read.iter().filter(|i| i.status == IssueStatus::Open).count()) };
+    let closed_issues: Option<usize> = if has_issues_error { None } else { Some(issues_read.iter().filter(|i| i.status == IssueStatus::Closed).count()) };
+
+    let total_prs: Option<usize> = if has_prs_error { None } else { Some(prs_read.len()) };
+    let open_prs: Option<usize> = if has_prs_error { None } else { Some(prs_read.iter().filter(|p| p.status == IssueStatus::Open).count()) };
+    let merged_prs: Option<usize> = if has_prs_error { None } else { Some(prs_read.iter().filter(|p| p.status == IssueStatus::Applied).count()) };
 
     let maintainer_count = {
         let mut unique = std::collections::HashSet::new();
@@ -225,15 +228,21 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 pt-4",
                     StatCard {
                         label: "Issues",
-                        value: total_issues.to_string(),
-                        subtitle: format!("{open_issues} open / {closed_issues} closed"),
+                        value: total_issues.map(|n| n.to_string()).unwrap_or_else(|| "--".to_string()),
+                        subtitle: match (open_issues, closed_issues) {
+                            (Some(o), Some(c)) => format!("{o} open / {c} closed"),
+                            _ => "not available".to_string(),
+                        },
                         icon_svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/></svg>"#,
                         color: "text-green-500",
                     }
                     StatCard {
                         label: "Pull Requests",
-                        value: total_prs.to_string(),
-                        subtitle: format!("{open_prs} open / {merged_prs} merged"),
+                        value: total_prs.map(|n| n.to_string()).unwrap_or_else(|| "--".to_string()),
+                        subtitle: match (open_prs, merged_prs) {
+                            (Some(o), Some(m)) => format!("{o} open / {m} merged"),
+                            _ => "not available".to_string(),
+                        },
                         icon_svg: r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>"#,
                         color: "text-purple-500",
                     }
@@ -379,7 +388,7 @@ fn ActivityTimeline(issues: Vec<Issue>, prs: Vec<PullRequest>) -> Element {
     }
 
     rsx! {
-        div { class: "border border-border rounded-lg divide-y divide-border",
+        div { class: "bg-card border border-border rounded-lg divide-y divide-border",
             for entry in entries.iter() {
                 TimelineRow { key: "{entry.kind:?}_{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
             }
@@ -491,7 +500,7 @@ fn ContributorCard(pubkey: String, is_owner: bool) -> Element {
     rsx! {
         Link {
             to: Route::Profile { pubkey: pubkey.clone() },
-            class: "flex items-center gap-3 p-3 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
+            class: "flex items-center gap-3 p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
             if let Some(pic) = &picture {
                 if !*img_failed.read() {
                     img {

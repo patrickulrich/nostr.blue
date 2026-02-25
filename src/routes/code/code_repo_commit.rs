@@ -12,6 +12,8 @@ use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use gloo_net::http::Request;
 use serde::Deserialize;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// Single commit detail with diff
 #[derive(Debug, Clone, PartialEq)]
@@ -215,7 +217,7 @@ fn CommitHeader(detail: CommitDetail, sha: String) -> Element {
         ),
         None => (detail.message.clone(), None),
     };
-    let formatted_date = format_commit_date(&detail.date);
+    let formatted_date = crate::utils::format_commit_date(&detail.date);
     let short_sha = if sha.len() >= 7 { &sha[..7] } else { &sha };
 
     rsx! {
@@ -282,12 +284,8 @@ fn LoadingSkeleton() -> Element {
     }
 }
 
-/// Format a commit date string to a date part
-fn format_commit_date(date_str: &str) -> String {
-    if let Some(date_part) = date_str.split('T').next() {
-        return date_part.to_string();
-    }
-    date_str.to_string()
+thread_local! {
+    static COMMIT_CACHE: RefCell<HashMap<String, CommitDetail>> = RefCell::new(HashMap::new());
 }
 
 /// Fetch commit detail from GitHub API
@@ -296,12 +294,28 @@ async fn fetch_commit_detail(
     repo: &str,
     sha: &str,
 ) -> Result<CommitDetail, String> {
+    // Validate SHA: must be 7-64 hex characters, no path traversal
+    if sha.len() < 7
+        || sha.len() > 64
+        || !sha.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err(format!("Invalid commit SHA: {}", sha));
+    }
+
+    let cache_key = format!("{}/{}/{}", owner, repo, sha);
+
+    // Check cache first
+    let cached = COMMIT_CACHE.with(|c| c.borrow().get(&cache_key).cloned());
+    if let Some(detail) = cached {
+        return Ok(detail);
+    }
+
     let api_url = format!(
         "https://api.github.com/repos/{}/{}/commits/{}",
         owner, repo, sha,
     );
 
-    // Fetch JSON metadata
+    // Fetch JSON metadata (includes files[].patch for diff)
     let meta_resp = Request::get(&api_url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -318,21 +332,20 @@ async fn fetch_commit_detail(
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    // Fetch the diff separately
-    let diff_resp = Request::get(&api_url)
-        .header("Accept", "application/vnd.github.v3.diff")
-        .header("User-Agent", "nostr-blue")
-        .send()
-        .await
-        .map_err(|e| format!("Diff request failed: {}", e))?;
-
-    let (diff, diff_error) = if diff_resp.ok() {
-        match diff_resp.text().await {
-            Ok(text) => (text, None),
-            Err(e) => (String::new(), Some(format!("Failed to read diff body: {}", e))),
+    // Build diff from files[].patch (avoids a second API request)
+    let (diff, diff_error) = if let Some(ref files) = json.files {
+        let mut parts = Vec::new();
+        for file in files {
+            parts.push(format!("diff --git a/{f} b/{f}", f = file.filename));
+            parts.push(format!("--- a/{}", file.filename));
+            parts.push(format!("+++ b/{}", file.filename));
+            if let Some(ref patch) = file.patch {
+                parts.push(patch.clone());
+            }
         }
+        (parts.join("\n"), None)
     } else {
-        (String::new(), Some(format!("Failed to fetch diff (HTTP {})", diff_resp.status())))
+        (String::new(), Some("No file patches available".to_string()))
     };
 
     let author_avatar = json.author.as_ref().map(|a| a.avatar_url.clone());
@@ -349,7 +362,7 @@ async fn fetch_commit_detail(
         .map(|f| f.len() as u32)
         .unwrap_or(0);
 
-    Ok(CommitDetail {
+    let detail = CommitDetail {
         message: json.commit.message,
         author_name,
         author_avatar,
@@ -359,5 +372,10 @@ async fn fetch_commit_detail(
         additions: stats.map(|s| s.additions).unwrap_or(0),
         deletions: stats.map(|s| s.deletions).unwrap_or(0),
         files_changed,
-    })
+    };
+
+    // Store in cache
+    COMMIT_CACHE.with(|c| c.borrow_mut().insert(cache_key, detail.clone()));
+
+    Ok(detail)
 }

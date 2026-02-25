@@ -7,6 +7,8 @@ use crate::stores::profiles::get_cached_profile;
 use crate::stores::topic_store::{TopicPost, VoteCounts};
 use crate::utils::format::format_relative_time_or;
 use dioxus::prelude::*;
+use dioxus::web::WebEventExt;
+use wasm_bindgen::JsCast;
 
 /// Reddit-style topic post card
 #[component]
@@ -67,7 +69,15 @@ pub fn TopicPostCard(
                 // Post content — use div+onclick instead of Link to avoid nested <a> when content contains links
                 div {
                     class: "block cursor-pointer",
-                    onclick: move |_| {
+                    onclick: move |evt| {
+                        // Don't navigate if click originated from/inside an anchor element
+                        if let Some(target) = evt.data.as_web_event().target() {
+                            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                                if element.closest("a").ok().flatten().is_some() {
+                                    return;
+                                }
+                            }
+                        }
                         navigator().push(Route::TopicPostDetail {
                             topic: topic_for_link.clone(),
                             post_id: post_id_for_link.clone(),

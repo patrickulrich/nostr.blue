@@ -75,7 +75,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     pending_g.set(true);
 
                     // Reset after 1 second timeout, storing the ID for cleanup
-                    let window_clone = web_sys::window().unwrap();
+                    let Some(window_clone) = web_sys::window() else { return; };
                     let callback = Closure::once(move || {
                         pending_g.set(false);
                         timeout_id.set(None);

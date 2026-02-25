@@ -104,8 +104,8 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
             let result = fetch_repository(&n).await;
             if *repo_gen.peek() == gen {
                 repo_result.set(Some(result));
+                loading.set(false);
             }
-            loading.set(false);
         });
     }));
 

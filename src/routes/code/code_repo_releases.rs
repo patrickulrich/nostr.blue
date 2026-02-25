@@ -48,11 +48,23 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                 }
             }
             match fetch_repo_releases(&n).await {
-                Ok(mut fetched) => {
+                Ok(fetched) => {
                     if *request_gen.peek() != captured_gen { return; }
-                    fetched.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                    fetched.dedup_by(|a, b| a.tag_name == b.tag_name);
-                    releases.set(fetched);
+                    // Deduplicate by tag_name, keeping the newest release per tag
+                    let mut by_tag: std::collections::HashMap<String, Release> = std::collections::HashMap::new();
+                    for release in fetched {
+                        by_tag
+                            .entry(release.tag_name.clone())
+                            .and_modify(|existing| {
+                                if release.created_at > existing.created_at {
+                                    *existing = release.clone();
+                                }
+                            })
+                            .or_insert(release);
+                    }
+                    let mut deduped: Vec<Release> = by_tag.into_values().collect();
+                    deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    releases.set(deduped);
                     error.set(None);
                 }
                 Err(e) => {
@@ -695,6 +707,32 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                                     urls[i] = e.value();
                                     asset_urls.set(urls);
                                 },
+                            }
+                            button {
+                                class: "px-2 py-2 text-muted-foreground hover:text-destructive transition rounded hover:bg-destructive/10",
+                                r#type: "button",
+                                onclick: move |_| {
+                                    let mut urls = asset_urls.read().clone();
+                                    urls.remove(i);
+                                    if urls.is_empty() {
+                                        urls.push(String::new());
+                                    }
+                                    asset_urls.set(urls);
+                                },
+                                svg {
+                                    class: "w-4 h-4",
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "24",
+                                    height: "24",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    line { x1: "18", y1: "6", x2: "6", y2: "18" }
+                                    line { x1: "6", y1: "6", x2: "18", y2: "18" }
+                                }
                             }
                         }
                     }

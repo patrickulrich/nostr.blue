@@ -241,7 +241,9 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                     }
                 }
             }
-            follow_loading.set(false);
+            if *follow_request_id.peek() == captured {
+                follow_loading.set(false);
+            }
         });
     };
 
@@ -524,7 +526,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 // Non-blocking profile metadata warning
                 if let Some(meta_err) = profile_meta_error() {
                     div { class: "px-4 mt-2",
-                        div { class: "bg-yellow-500/10 text-yellow-500 text-sm rounded-lg px-4 py-2",
+                        div { class: "bg-accent text-foreground text-sm rounded-lg px-4 py-2",
                             "{meta_err}"
                         }
                     }

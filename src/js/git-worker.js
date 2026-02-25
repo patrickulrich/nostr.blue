@@ -131,7 +131,7 @@ function validateRepoDir(dir) {
  * Replaces CRLF with LF, splits on LF, removes trailing empty element.
  */
 function normalizeAndSplit(content) {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const lines = content.replace(/\r\n?/g, '\n').split('\n');
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
   return lines;
 }
@@ -143,6 +143,9 @@ function normalizeAndSplit(content) {
 function computeEdits(oldLines, newLines) {
   const N = oldLines.length;
   const M = newLines.length;
+
+  // Both arrays empty — nothing to diff
+  if (N === 0 && M === 0) return [];
 
   // For very large files, fall back to simple line-by-line to avoid memory issues
   if (N + M > 20000) {
@@ -453,8 +456,8 @@ const methods = {
    * @param {number} [options.timeout=60000] - Timeout in milliseconds (default 60s)
    */
   async clone({ url, dir, depth = 1, timeout = 60000 }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
 
     console.log(`[GitWorker] Cloning ${url} to ${dir} (depth: ${depth}, timeout: ${timeout}ms)`);
 
@@ -501,8 +504,8 @@ const methods = {
    * List files in a directory at a given ref
    */
   async listFiles({ dir, ref = 'HEAD', path = '' }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
 
     // Resolve ref to commit OID with fallback
     let commitOid;
@@ -550,8 +553,8 @@ const methods = {
    * Read file content at a given ref
    */
   async readFile({ dir, ref = 'HEAD', filepath }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
 
     let commitOid;
     try {
@@ -577,8 +580,8 @@ const methods = {
    * Get commit log
    */
   async log({ dir, ref = 'HEAD', depth = 50 }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
 
     let commits;
     try {
@@ -600,8 +603,8 @@ const methods = {
    * List branches
    */
   async branches({ dir }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
     return await git.listBranches({ fs, dir });
   },
 
@@ -609,8 +612,8 @@ const methods = {
    * Get current branch
    */
   async currentBranch({ dir }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
     return await git.currentBranch({ fs, dir });
   },
 
@@ -618,8 +621,8 @@ const methods = {
    * Check if repo exists in cache
    */
   async status({ dir }) {
-    // Validate directory path to prevent path traversal attacks
-    validateRepoDir(dir);
+    // Validate and normalize directory path to prevent path traversal attacks
+    dir = validateRepoDir(dir);
     try {
       await git.currentBranch({ fs, dir });
       return { exists: true };
@@ -632,7 +635,7 @@ const methods = {
    * List all file paths recursively (flat list for fuzzy finder)
    */
   async listAllPaths({ dir, ref: gitRef = 'HEAD' }) {
-    validateRepoDir(dir);
+    dir = validateRepoDir(dir);
 
     let commitOid;
     try {
@@ -650,7 +653,7 @@ const methods = {
    * Walks both trees and compares file contents
    */
   async diff({ dir, base, head }) {
-    validateRepoDir(dir);
+    dir = validateRepoDir(dir);
 
     // Maximum blob size to include in diff (2 MB)
     const MAX_DIFF_BYTES = 2 * 1024 * 1024;
@@ -776,9 +779,9 @@ const methods = {
    * Delete a cached repo
    */
   async deleteRepo({ dir }) {
-    // Validate directory path to prevent path traversal attacks
+    // Validate and normalize directory path to prevent path traversal attacks
     try {
-      validateRepoDir(dir);
+      dir = validateRepoDir(dir);
     } catch (e) {
       return { success: false, error: e.message };
     }
