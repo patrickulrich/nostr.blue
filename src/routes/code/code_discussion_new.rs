@@ -20,6 +20,7 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
     let mut error_message = use_signal(|| None::<String>);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
+    let mut fetch_gen = use_signal(|| 0u32);
     let nav = use_navigator();
     let naddr_for_effect = naddr.clone();
     use_effect(move || {
@@ -28,9 +29,13 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        let gen = fetch_gen.peek().wrapping_add(1);
+        fetch_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&n).await;
+            if *fetch_gen.peek() != gen { return; }
             repo_result.set(Some(result));
             loading.set(false);
         });

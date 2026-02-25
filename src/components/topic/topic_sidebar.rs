@@ -16,9 +16,9 @@ pub fn TopicSidebar(
     let loading = *LOADING_SUBSCRIPTIONS.read();
 
     let home_class = if current_topic.is_none() {
-        "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition bg-accent font-medium"
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
     } else {
-        "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition"
+        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
     };
 
     rsx! {
@@ -37,17 +37,17 @@ pub fn TopicSidebar(
                     }
                     Link {
                         to: Route::TopicsPopular {},
-                        class: "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition",
+                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition",
                         "Popular"
                     }
                     Link {
                         to: Route::TopicsBrowse {},
-                        class: "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition",
+                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition",
                         "Browse"
                     }
                     Link {
                         to: Route::TopicNewPost {},
-                        class: "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition text-primary font-medium",
+                        class: "px-4 py-2 text-sm rounded-full hover:bg-accent transition text-primary font-medium",
                         "+ New Post"
                     }
                 }
@@ -69,9 +69,9 @@ pub fn TopicSidebar(
                                 {
                                     let is_active = current_topic.as_ref() == Some(topic);
                                     let link_class = if is_active {
-                                        "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition bg-accent font-medium"
+                                        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
                                     } else {
-                                        "px-3 py-1.5 text-sm rounded-md hover:bg-accent transition"
+                                        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
                                     };
                                     rsx! {
                                         Link {
@@ -102,7 +102,7 @@ pub fn TopicSidebar(
                                     Link {
                                         key: "{name}",
                                         to: Route::TopicFeed { topic: name.clone() },
-                                        class: "flex items-center justify-between px-3 py-1.5 text-sm rounded-md hover:bg-accent transition",
+                                        class: "flex items-center justify-between px-4 py-2 text-sm rounded-full hover:bg-accent transition",
                                         span { "#{name}" }
                                         span { class: "text-xs text-muted-foreground", "{count} posts" }
                                     }

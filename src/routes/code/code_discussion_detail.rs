@@ -140,15 +140,16 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
         let discussion_id = discussion_id.clone();
         let discussion_pubkey = discussion_pubkey.clone();
         move |_| {
+            if *is_submitting.peek() { return; }
             let content = new_comment.read().clone();
             let id = discussion_id.clone();
             let author = discussion_pubkey.clone();
             if content.trim().is_empty() {
                 return;
             }
+            is_submitting.set(true);
+            comment_error.set(None);
             spawn(async move {
-                is_submitting.set(true);
-                comment_error.set(None);
                 match publish_discussion_comment_by_id(&id, &author, &content).await {
                     Ok(_) => {
                         new_comment.set(String::new());

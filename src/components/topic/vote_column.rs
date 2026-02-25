@@ -43,6 +43,8 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
             // Upvote button
             button {
                 class: "p-1 rounded transition {up_class}",
+                aria_label: "Upvote",
+                title: "Upvote",
                 disabled: !has_signer || *voting.read(),
                 onclick: move |_| {
                     if !has_signer { return; }
@@ -77,6 +79,8 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
             // Downvote button
             button {
                 class: "p-1 rounded transition {down_class}",
+                aria_label: "Downvote",
+                title: "Downvote",
                 disabled: !has_signer || *voting.read(),
                 onclick: move |_| {
                     if !has_signer { return; }

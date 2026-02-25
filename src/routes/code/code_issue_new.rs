@@ -53,6 +53,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         }
         let gen = labels_gen.peek().wrapping_add(1);
         labels_gen.set(gen);
+        existing_labels.set(vec![]);
         spawn(async move {
             if let Ok(issues) = fetch_repo_issues(&n).await {
                 if *labels_gen.peek() != gen { return; }

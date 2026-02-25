@@ -42,6 +42,7 @@ pub fn LabelPicker(
 ) -> Element {
     let mut new_label_input = use_signal(String::new);
     let mut show_suggestions = use_signal(|| false);
+    let mut focus_gen = use_signal(|| 0u32);
 
     // Build suggestion list: existing labels + defaults, excluding already selected
     let suggestions: Vec<String> = {
@@ -122,12 +123,19 @@ pub fn LabelPicker(
                         new_label_input.set(e.value());
                         show_suggestions.set(true);
                     },
-                    onfocusin: move |_| show_suggestions.set(true),
+                    onfocusin: move |_| {
+                        let next = focus_gen.peek().wrapping_add(1);
+                        focus_gen.set(next);
+                        show_suggestions.set(true);
+                    },
                     onfocusout: move |_| {
-                        // Delay hiding to allow click on suggestion
+                        // Delay hiding to check if focus moved within the component
+                        let gen = *focus_gen.peek();
                         spawn(async move {
                             gloo_timers::future::TimeoutFuture::new(200).await;
-                            show_suggestions.set(false);
+                            if *focus_gen.peek() == gen {
+                                show_suggestions.set(false);
+                            }
                         });
                     },
                     onkeypress: {

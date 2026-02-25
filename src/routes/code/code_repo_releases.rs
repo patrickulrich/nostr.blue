@@ -34,8 +34,10 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         }
         let captured_gen = request_gen.peek().wrapping_add(1);
         request_gen.set(captured_gen);
+        repo_data.set(None);
+        releases.set(vec![]);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
             match fetch_repository(&n).await {
                 Ok(repo) => {
                     if *request_gen.peek() != captured_gen { return; }
@@ -292,10 +294,11 @@ fn ReleaseCard(
                             onclick: {
                                 let event_id_hex = release_event_id.clone();
                                 move |_| {
+                                    if *is_deleting.peek() { return; }
+                                    is_deleting.set(true);
+                                    delete_error.set(None);
                                     let eid = event_id_hex.clone();
                                     spawn(async move {
-                                        is_deleting.set(true);
-                                        delete_error.set(None);
                                         match EventId::from_hex(&eid) {
                                             Ok(event_id) => {
                                                 match delete_release(event_id).await {
@@ -386,23 +389,24 @@ fn EditReleaseForm(
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
+            if *is_publishing.peek() { return; }
             let tag = tag_name.read().clone();
             let title_val = title.read().clone();
             let desc = description.read().clone();
             let assets = asset_urls.read().clone();
             let is_pre = *prerelease.read();
             let naddr = naddr.clone();
+            if tag.trim().is_empty() {
+                error_message.set(Some("Tag name is required".to_string()));
+                return;
+            }
+            if desc.trim().is_empty() {
+                error_message.set(Some("Description is required".to_string()));
+                return;
+            }
+            is_publishing.set(true);
+            error_message.set(None);
             spawn(async move {
-                if tag.trim().is_empty() {
-                    error_message.set(Some("Tag name is required".to_string()));
-                    return;
-                }
-                if desc.trim().is_empty() {
-                    error_message.set(Some("Description is required".to_string()));
-                    return;
-                }
-                is_publishing.set(true);
-                error_message.set(None);
                 let coord = match decode_naddr(&naddr) {
                     Ok(c) => c,
                     Err(e) => {
@@ -593,17 +597,17 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
             let assets = asset_urls.read().clone();
             let is_pre = *prerelease.read();
             let naddr = naddr.clone();
+            if tag.is_empty() {
+                error_message.set(Some("Tag name is required".to_string()));
+                return;
+            }
+            if desc.trim().is_empty() {
+                error_message.set(Some("Description is required".to_string()));
+                return;
+            }
+            is_publishing.set(true);
+            error_message.set(None);
             spawn(async move {
-                if tag.is_empty() {
-                    error_message.set(Some("Tag name is required".to_string()));
-                    return;
-                }
-                if desc.trim().is_empty() {
-                    error_message.set(Some("Description is required".to_string()));
-                    return;
-                }
-                is_publishing.set(true);
-                error_message.set(None);
                 let coord = match decode_naddr(&naddr) {
                     Ok(c) => c,
                     Err(e) => {

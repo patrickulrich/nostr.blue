@@ -103,6 +103,22 @@ pub fn CodeNew() -> Element {
                 .filter(|s| !s.is_empty())
                 .collect();
 
+            for url in &clone_list {
+                if url::Url::parse(url).is_err() {
+                    error_message.set(Some(format!("Invalid clone URL: '{}'", url)));
+                    is_publishing.set(false);
+                    return;
+                }
+            }
+
+            for url in &web_list {
+                if url::Url::parse(url).is_err() {
+                    error_message.set(Some(format!("Invalid web URL: '{}'", url)));
+                    is_publishing.set(false);
+                    return;
+                }
+            }
+
             let relay_list: Vec<&str> = relay_val
                 .iter()
                 .map(|s| s.trim())

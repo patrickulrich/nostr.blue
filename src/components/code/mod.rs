@@ -42,7 +42,7 @@ pub use contributors_list::ContributorsList;
 pub use dependency_viewer::DependencyViewer;
 pub use diff_viewer::DiffViewer;
 pub use filter_bar::{FilterBar, StatusFilter, filter_issues, filter_prs};
-pub use file_tree::{BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton};
+pub use file_tree::{split_path, BranchSelector, CodeFileTree, FilePathBreadcrumb, FileTreeSkeleton};
 pub use file_viewer::{CodeFileViewer, CodeFileViewerSkeleton};
 #[allow(unused_imports)]
 pub use fuzzy_finder::FuzzyFinder;

@@ -74,19 +74,9 @@ pub fn PollCard(
             &precomputed_counts,
             move |counts_opt| {
                 if let Some(counts) = counts_opt {
-                    let current_has_data = {
-                        let reply = *reply_count.peek();
-                        let repost = *repost_count.peek();
-                        let zap = *zap_amount_sats.peek();
-                        reply > 0 || repost > 0 || zap > 0
-                    };
-                    let new_has_data = counts.replies > 0 || counts.reposts > 0
-                        || counts.zap_amount_sats > 0;
-                    if new_has_data || !current_has_data {
-                        reply_count.set(counts.replies.min(501));
-                        repost_count.set(counts.reposts.min(501));
-                        zap_amount_sats.set(counts.zap_amount_sats);
-                    }
+                    reply_count.set(counts.replies.min(501));
+                    repost_count.set(counts.reposts.min(501));
+                    zap_amount_sats.set(counts.zap_amount_sats);
                     if counts.user_reposted.is_some() || !*is_reposted.peek() {
                         is_reposted.set(counts.user_reposted.unwrap_or(false));
                     }

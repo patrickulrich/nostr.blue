@@ -27,6 +27,7 @@ pub fn CodeRepositories() -> Element {
                 }
                 request_gen.with_mut(|v| *v = v.wrapping_add(1));
                 let captured_gen = *request_gen.peek();
+                repos_result.set(None);
                 spawn(async move {
                     if pk.is_empty() {
                         if *request_gen.peek() != captured_gen { return; }

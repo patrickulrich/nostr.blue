@@ -47,6 +47,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let mut star_count = use_signal(|| repo.star_count);
     let mut is_watching = use_signal(|| false);
     let mut star_loading = use_signal(|| false);
+    let mut star_gen = use_signal(|| 0u32);
     let mut show_actions_menu = use_signal(|| false);
     let mut repo_pubkey_signal = use_signal(|| repo.pubkey.clone());
     let mut repo_id_signal = use_signal(|| repo.id.clone());
@@ -74,6 +75,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     });
     use_effect(move || {
         is_starred.set(false);
+        let gen = star_gen.peek().wrapping_add(1);
+        star_gen.set(gen);
         let coord = coordinate.read().clone();
         if let Some(coord) = coord {
             let coord_str = format!(
@@ -87,7 +90,10 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             } else {
                 spawn(async move {
                     match check_user_star(&coord).await {
-                        Ok(starred) => is_starred.set(starred),
+                        Ok(starred) => {
+                            if *star_gen.peek() != gen { return; }
+                            is_starred.set(starred);
+                        }
                         Err(e) => log::debug!("Failed to check star status: {}", e),
                     }
                 });

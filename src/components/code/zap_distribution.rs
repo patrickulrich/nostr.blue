@@ -14,8 +14,6 @@ use dioxus_primitives::toast::{consume_toast, ToastOptions};
 #[derive(Clone, Debug)]
 struct ZapRecipient {
     pubkey: String,
-    display_name: String,
-    lud16: Option<String>,
     weight: u32,
     /// Calculated amount in sats
     amount: u64,
@@ -36,11 +34,13 @@ enum PaymentStatus {
 pub fn ZapDistribution(
     /// Repository zap_splits: (pubkey_hex, relay, weight)
     zap_splits: Vec<(String, String, u32)>,
-    /// Repository event ID for zap tags
+    /// Repository event ID for NIP-57 zap receipt tags (TODO: wire into zap request)
     repo_event_id: String,
     /// Close callback
     on_close: EventHandler<()>,
 ) -> Element {
+    // TODO: wire repo_event_id into NIP-57 zap request for proper zap receipts
+    let _repo_event_id = repo_event_id;
     let toast = consume_toast();
     let mut total_amount = use_signal(|| 1000u64);
     let mut custom_amount = use_signal(String::new);
@@ -54,65 +54,86 @@ pub fn ZapDistribution(
         zap_splits.iter().map(|(pk, _, _)| pk.clone()).collect::<Vec<String>>()
     });
 
-    // Build recipients from zap_splits + any additional picks
-    let build_recipients = move |amount: u64| {
-        let pubkeys = selected_pubkeys.read().clone();
-        // Find weights for known splits, default weight 1 for newly added
-        let total_weight: u32 = pubkeys
-            .iter()
-            .map(|pk| {
-                zap_splits
-                    .iter()
-                    .find(|(p, _, _)| p == pk)
-                    .map(|(_, _, w)| *w)
-                    .unwrap_or(1)
-            })
-            .sum();
-
-        let recips: Vec<ZapRecipient> = pubkeys
-            .iter()
-            .map(|pk| {
-                let weight = zap_splits
-                    .iter()
-                    .find(|(p, _, _)| p == pk)
-                    .map(|(_, _, w)| *w)
-                    .unwrap_or(1);
-                let profile = PROFILE_CACHE.read().peek(pk).cloned();
-                let display_name = profile
-                    .as_ref()
-                    .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
-                    .unwrap_or_else(|| truncate_pubkey(pk));
-                let lud16 = profile.as_ref().and_then(|p| p.lud16.clone());
-                let per_amount = if total_weight > 0 {
-                    (amount as f64 * weight as f64 / total_weight as f64).round() as u64
-                } else {
-                    0
-                };
-                ZapRecipient {
-                    pubkey: pk.clone(),
-                    display_name,
-                    lud16,
-                    weight,
-                    amount: per_amount,
-                    status: PaymentStatus::Pending,
-                }
-            })
-            .collect();
-        recips
+    // Pure allocation: largest-remainder method to avoid rounding loss
+    let compute_allocations = {
+        let zap_splits = zap_splits.clone();
+        move |pubkeys: &[String], amount: u64| -> Vec<(String, u32, u64)> {
+            let weights: Vec<u32> = pubkeys
+                .iter()
+                .map(|pk| {
+                    zap_splits
+                        .iter()
+                        .find(|(p, _, _)| p == pk)
+                        .map(|(_, _, w)| *w)
+                        .unwrap_or(1)
+                })
+                .collect();
+            let total_weight: u32 = weights.iter().sum();
+            if total_weight == 0 || pubkeys.is_empty() {
+                return pubkeys.iter().map(|pk| (pk.clone(), 0, 0)).collect();
+            }
+            // Compute exact shares and take floors
+            let exact: Vec<f64> = weights
+                .iter()
+                .map(|w| amount as f64 * *w as f64 / total_weight as f64)
+                .collect();
+            let mut floors: Vec<u64> = exact.iter().map(|e| *e as u64).collect();
+            let allocated: u64 = floors.iter().sum();
+            let remainder = amount.saturating_sub(allocated) as usize;
+            // Distribute remainder to entries with largest fractional parts
+            let mut indices: Vec<usize> = (0..exact.len()).collect();
+            indices.sort_by(|&a, &b| {
+                let frac_a = exact[a] - exact[a].floor();
+                let frac_b = exact[b] - exact[b].floor();
+                frac_b.partial_cmp(&frac_a).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for &i in indices.iter().take(remainder) {
+                floors[i] += 1;
+            }
+            pubkeys
+                .iter()
+                .enumerate()
+                .map(|(i, pk)| (pk.clone(), weights[i], floors[i]))
+                .collect()
+        }
     };
 
     // Recalculate when amount or selection changes
     use_effect(move || {
+        // Guard: don't reset recipients mid-send; .read() subscribes so
+        // effect re-runs when send completes (true→false) to rebuild list
+        if *is_sending.read() {
+            return;
+        }
         let amount = *total_amount.read();
-        let _sel = selected_pubkeys.read();
-        recipients.set(build_recipients(amount));
+        let pubkeys = selected_pubkeys.read().clone();
+        let allocations = compute_allocations(&pubkeys, amount);
+        recipients.set(
+            allocations
+                .into_iter()
+                .map(|(pk, weight, amt)| ZapRecipient {
+                    pubkey: pk,
+                    weight,
+                    amount: amt,
+                    status: PaymentStatus::Pending,
+                })
+                .collect(),
+        );
     });
 
     let preset_amounts = [100u64, 500, 1000, 5000, 10000, 50000];
 
     let handle_send = move |_| {
+        // Resolve lud16 from profile cache at send time
         let recips = recipients.read().clone();
-        let sendable: Vec<ZapRecipient> = recips.into_iter().filter(|r| r.lud16.is_some() && r.amount > 0).collect();
+        let sendable: Vec<(ZapRecipient, String)> = recips
+            .into_iter()
+            .filter(|r| r.amount > 0)
+            .filter_map(|r| {
+                let lud16 = PROFILE_CACHE.read().peek(&r.pubkey).and_then(|p| p.lud16.clone())?;
+                Some((r, lud16))
+            })
+            .collect();
         if sendable.is_empty() {
             toast.warning("No recipients with Lightning addresses found".to_string(), ToastOptions::new());
             return;
@@ -123,7 +144,7 @@ pub fn ZapDistribution(
         spawn(async move {
             let mut success_count = 0usize;
             let mut fail_count = 0usize;
-            for (i, recip) in sendable.iter().enumerate() {
+            for (i, (recip, lud16)) in sendable.iter().enumerate() {
                 send_progress.set(i + 1);
                 // Update status to sending
                 {
@@ -132,7 +153,6 @@ pub fn ZapDistribution(
                         r.status = PaymentStatus::Sending;
                     }
                 }
-                let lud16 = recip.lud16.as_deref().unwrap_or("");
                 match lnurl::get_invoice_from_lud16(lud16, recip.amount, None).await {
                     Ok(invoice) => {
                         match nwc_store::pay_invoice(invoice).await {
@@ -175,7 +195,7 @@ pub fn ZapDistribution(
     rsx! {
         // Backdrop
         div {
-            class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
             onclick: move |_| on_close.call(()),
         }
         div {
@@ -268,33 +288,34 @@ pub fn ZapDistribution(
                                     PaymentStatus::Success => "",
                                     PaymentStatus::Failed(_) => "",
                                 };
-                                let has_lud16 = recip.lud16.is_some();
+                                // Resolve profile in RSX path (appropriate place for PROFILE_CACHE.read())
+                                let profile = PROFILE_CACHE.read().peek(&recip.pubkey).cloned();
+                                let display_name = profile
+                                    .as_ref()
+                                    .and_then(|p| p.display_name.clone().or_else(|| p.name.clone()))
+                                    .unwrap_or_else(|| truncate_pubkey(&recip.pubkey));
+                                let has_lud16 = profile.as_ref().and_then(|p| p.lud16.clone()).is_some();
+                                let pic = profile.as_ref().and_then(|p| p.picture.clone());
                                 rsx! {
                                     div {
                                         key: "{recip.pubkey}",
                                         class: "flex items-center gap-3 p-2 bg-muted rounded-lg {status_class}",
                                         // Avatar
-                                        {
-                                            let profile = PROFILE_CACHE.read().peek(&recip.pubkey).cloned();
-                                            let pic = profile.as_ref().and_then(|p| p.picture.clone());
-                                            rsx! {
-                                                if let Some(ref pic_url) = pic {
-                                                    img {
-                                                        src: "{pic_url}",
-                                                        class: "w-8 h-8 rounded-full shrink-0",
-                                                        alt: "{recip.display_name}",
-                                                        loading: "lazy",
-                                                    }
-                                                } else {
-                                                    div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-bold shrink-0",
-                                                        {recip.display_name.chars().next().unwrap_or('?').to_string()}
-                                                    }
-                                                }
+                                        if let Some(ref pic_url) = pic {
+                                            img {
+                                                src: "{pic_url}",
+                                                class: "w-8 h-8 rounded-full shrink-0",
+                                                alt: "{display_name}",
+                                                loading: "lazy",
+                                            }
+                                        } else {
+                                            div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-bold shrink-0",
+                                                {display_name.chars().next().unwrap_or('?').to_string()}
                                             }
                                         }
                                         // Name + weight
                                         div { class: "flex-1 min-w-0",
-                                            div { class: "text-sm font-medium truncate", "{recip.display_name}" }
+                                            div { class: "text-sm font-medium truncate", "{display_name}" }
                                             div { class: "text-xs text-muted-foreground",
                                                 if has_lud16 {
                                                     "Weight: {recip.weight} · {recip.amount} sats"

@@ -264,21 +264,22 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     // Fetch line-level comments for the Files Changed tab
     let mut line_comments: Signal<Vec<LineComment>> = use_signal(Vec::new);
     let mut line_comment_error = use_signal(|| None::<String>);
-    let mut line_comment_gen = use_signal(|| 0u32);
+    let mut line_load_gen = use_signal(|| 0u32);
+    let mut line_publish_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&pr_id, move |id| {
-        let gen = line_comment_gen.peek().wrapping_add(1);
-        line_comment_gen.set(gen);
+        let gen = line_load_gen.peek().wrapping_add(1);
+        line_load_gen.set(gen);
         line_comments.set(Vec::new());
         line_comment_error.set(None);
         spawn(async move {
             match fetch_line_comments_by_id(&id).await {
                 Ok(lcs) => {
-                    if *line_comment_gen.peek() == gen {
+                    if *line_load_gen.peek() == gen {
                         line_comments.set(lcs);
                     }
                 }
                 Err(e) => {
-                    if *line_comment_gen.peek() == gen {
+                    if *line_load_gen.peek() == gen {
                         line_comment_error.set(Some(e));
                     }
                 }
@@ -891,20 +892,20 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                 let id = pr_id_for_handler.clone();
                                 let author = pr_author_for_handler.clone();
                                 line_comment_error.set(None);
-                                let gen = line_comment_gen.peek().wrapping_add(1);
-                                line_comment_gen.set(gen);
+                                let gen = line_publish_gen.peek().wrapping_add(1);
+                                line_publish_gen.set(gen);
                                 spawn(async move {
                                     match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
                                         Ok(_) => {
                                             // Refresh line comments after publishing
                                             match fetch_line_comments_by_id(&id).await {
                                                 Ok(lcs) => {
-                                                    if *line_comment_gen.peek() == gen {
+                                                    if *line_publish_gen.peek() == gen {
                                                         line_comments.set(lcs);
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    if *line_comment_gen.peek() == gen {
+                                                    if *line_publish_gen.peek() == gen {
                                                         log::warn!("Failed to refresh line comments: {}", e);
                                                         line_comment_error.set(Some(format!("Failed to refresh line comments: {}", e)));
                                                     }
@@ -912,7 +913,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                             }
                                         }
                                         Err(e) => {
-                                            if *line_comment_gen.peek() == gen {
+                                            if *line_publish_gen.peek() == gen {
                                                 line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
                                             }
                                         }

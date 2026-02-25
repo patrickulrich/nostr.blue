@@ -80,6 +80,7 @@ pub fn BountyForm(
                 for preset in PRESET_AMOUNTS.iter() {
                     button {
                         key: "{preset}",
+                        r#type: "button",
                         class: "px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent/50 transition",
                         onclick: {
                             let val = *preset;
@@ -110,12 +111,14 @@ pub fn BountyForm(
             }
             div { class: "flex items-center gap-2 justify-end",
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 text-sm border border-border rounded-lg hover:bg-accent transition",
                     disabled: *is_submitting.read(),
                     onclick: move |_| on_cancel.call(()),
                     "Cancel"
                 }
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
                     disabled: *is_submitting.read() || amount.read().trim().is_empty(),
                     onclick: handle_submit,

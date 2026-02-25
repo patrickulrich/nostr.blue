@@ -45,6 +45,12 @@ yarn-error.log*
 # Worktrees
 .worktrees/
 
+# Playwright MCP
+.playwright-mcp/
+
+# Screenshots
+*.png
+
 # Generated assets
 /assets/tailwind.css
 /public/tailwind.css

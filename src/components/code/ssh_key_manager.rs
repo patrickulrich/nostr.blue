@@ -8,6 +8,9 @@ use crate::utils::format_time_ago;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::*;
 
+/// Maximum allowed length for an SSH public key string
+const MAX_KEY_LEN: usize = 4096;
+
 /// SSH key management panel for user settings
 #[component]
 pub fn SshKeyManager() -> Element {
@@ -83,6 +86,10 @@ pub fn SshKeyManager() -> Element {
         }
         // Basic SSH key format validation
         let trimmed = key.trim().to_string();
+        if trimmed.len() > MAX_KEY_LEN {
+            error.set(Some("SSH key exceeds maximum length".to_string()));
+            return;
+        }
         if trimmed.contains('\n') || trimmed.contains('\r') {
             error.set(Some("Only a single SSH key is allowed".to_string()));
             return;
@@ -347,6 +354,7 @@ pub fn SshKeyManager() -> Element {
                                                 button {
                                                     class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-destructive",
                                                     title: "Delete key",
+                                                    aria_label: "Delete SSH key",
                                                     onclick: move |_| confirm_delete.set(Some(eid_for_confirm.clone())),
                                                     svg {
                                                         class: "w-4 h-4",

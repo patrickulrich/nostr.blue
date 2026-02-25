@@ -134,13 +134,12 @@ pub fn CodeNotifications() -> Element {
                         onclick: move |_| filter.set(Some(CodeNotificationType::StatusChanged)),
                     }
                 }
-                if let Some(err) = error.read().as_ref() {
+                if *loading.read() {
+                    LoadingSkeleton {}
+                } else if let Some(err) = error.read().as_ref() {
                     div { class: "p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm",
                         "{err}"
                     }
-                }
-                if *loading.read() {
-                    LoadingSkeleton {}
                 } else if filtered.is_empty() {
                     EmptyState {}
                 } else {
@@ -202,7 +201,10 @@ fn NotificationCard(notification: CodeNotification) -> Element {
                 } else {
                     Route::CodeIssueDetail { note_id: parent_id.clone() }
                 }
-            } else { Route::CodeHome {} }
+            } else {
+                // Fall back to using the notification's own event_id
+                Route::CodeIssueDetail { note_id: notification.event_id.clone() }
+            }
         }
     };
     rsx! {

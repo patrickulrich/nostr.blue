@@ -20,6 +20,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let nav = use_navigator();
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut repo_gen = use_signal(|| 0u32);
+    let mut form_initialized = use_signal(|| false);
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
@@ -27,6 +28,8 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
         }
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);
+        repo_result.set(None);
+        form_initialized.set(false);
         spawn(async move {
             let result = fetch_repository(&n).await;
             if *repo_gen.peek() == gen {
@@ -42,7 +45,6 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut new_relay_url = use_signal(String::new);
     let mut maintainer_list = use_signal(Vec::<String>::new);
     let mut new_maintainer = use_signal(String::new);
-    let mut form_initialized = use_signal(|| false);
     let mut is_saving = use_signal(|| false);
     let mut save_error = use_signal(|| None::<String>);
     let mut save_success = use_signal(|| false);

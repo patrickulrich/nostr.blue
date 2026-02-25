@@ -22,14 +22,19 @@ pub fn CodeIssueDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut issue_result = use_signal(|| None::<Result<Issue, String>>);
     let mut loading = use_signal(|| true);
+    let mut fetch_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = fetch_gen.peek().wrapping_add(1);
+        fetch_gen.set(gen);
+        issue_result.set(None);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
             let result = fetch_issue(&note_id).await;
+            if *fetch_gen.peek() != gen { return; }
             issue_result.set(Some(result));
             loading.set(false);
         });
@@ -162,6 +167,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let mut is_submitting = use_signal(|| false);
     let mut comment_error = use_signal(|| None::<String>);
     let mut is_updating_status = use_signal(|| false);
+    let mut status_error = use_signal(|| None::<String>);
     let mut claiming_bounty = use_signal(|| Option::<String>::None);
     let mut bounty_error = use_signal(|| Option::<String>::None);
     let issue_id_for_comments = issue_id.clone();
@@ -175,14 +181,13 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
             let id = issue_id.clone();
             spawn(async move {
                 is_updating_status.set(true);
+                status_error.set(None);
                 match update_issue_status_by_id(&id, new_status).await {
                     Ok(_) => {
                         display_status.set(new_status);
                     }
                     Err(e) => {
-                        web_sys::console::error_1(
-                            &format!("Failed to update status: {}", e).into(),
-                        );
+                        status_error.set(Some(format!("Failed to update status: {}", e)));
                     }
                 }
                 is_updating_status.set(false);
@@ -257,6 +262,11 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
 
             // Status actions
             if can_update_status {
+                if let Some(err) = status_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm",
+                        "{err}"
+                    }
+                }
                 div { class: "flex flex-wrap gap-2",
                     if display_status() != IssueStatus::Closed {
                         button {
@@ -420,18 +430,30 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
                                                                 spawn(async move {
-                                                                    if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
-                                                                        if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
-                                                                            if let Err(e) = claim_bounty(b_id, i_id, b_amount, None).await {
-                                                                                bounty_error.set(Some(format!("Failed to claim bounty: {}", e)));
-                                                                            } else {
-                                                                                bounty_error.set(None);
-                                                                                let gen_before = *bounties_gen.peek();
-                                                                                if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
-                                                                                    if *bounties_gen.peek() == gen_before {
-                                                                                        bounties.set(refreshed);
-                                                                                    }
-                                                                                }
+                                                                    let b_id = match nostr_sdk::EventId::from_hex(&b) {
+                                                                        Ok(id) => id,
+                                                                        Err(e) => {
+                                                                            bounty_error.set(Some(format!("Invalid bounty event ID: {}", e)));
+                                                                            claiming_bounty.set(None);
+                                                                            return;
+                                                                        }
+                                                                    };
+                                                                    let i_id = match nostr_sdk::EventId::from_hex(&i) {
+                                                                        Ok(id) => id,
+                                                                        Err(e) => {
+                                                                            bounty_error.set(Some(format!("Invalid issue event ID: {}", e)));
+                                                                            claiming_bounty.set(None);
+                                                                            return;
+                                                                        }
+                                                                    };
+                                                                    if let Err(e) = claim_bounty(b_id, i_id, b_amount, None).await {
+                                                                        bounty_error.set(Some(format!("Failed to claim bounty: {}", e)));
+                                                                    } else {
+                                                                        bounty_error.set(None);
+                                                                        let gen_before = *bounties_gen.peek();
+                                                                        if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
+                                                                            if *bounties_gen.peek() == gen_before {
+                                                                                bounties.set(refreshed);
                                                                             }
                                                                         }
                                                                     }
@@ -469,22 +491,34 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             return;
                                                                         }
                                                                     };
-                                                                    if let Ok(b_id) = nostr_sdk::EventId::from_hex(&b) {
-                                                                        if let Ok(i_id) = nostr_sdk::EventId::from_hex(&i) {
-                                                                            match release_bounty(b_id, i_id, &c, amount, None).await {
-                                                                                Ok(_) => {
-                                                                                    bounty_error.set(None);
-                                                                                    let gen_before = *bounties_gen.peek();
-                                                                                    if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
-                                                                                        if *bounties_gen.peek() == gen_before {
-                                                                                            bounties.set(refreshed);
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => {
-                                                                                    bounty_error.set(Some(format!("Failed to release bounty: {}", e)));
+                                                                    let b_id = match nostr_sdk::EventId::from_hex(&b) {
+                                                                        Ok(id) => id,
+                                                                        Err(e) => {
+                                                                            bounty_error.set(Some(format!("Invalid bounty event ID: {}", e)));
+                                                                            claiming_bounty.set(None);
+                                                                            return;
+                                                                        }
+                                                                    };
+                                                                    let i_id = match nostr_sdk::EventId::from_hex(&i) {
+                                                                        Ok(id) => id,
+                                                                        Err(e) => {
+                                                                            bounty_error.set(Some(format!("Invalid issue event ID: {}", e)));
+                                                                            claiming_bounty.set(None);
+                                                                            return;
+                                                                        }
+                                                                    };
+                                                                    match release_bounty(b_id, i_id, &c, amount, None).await {
+                                                                        Ok(_) => {
+                                                                            bounty_error.set(None);
+                                                                            let gen_before = *bounties_gen.peek();
+                                                                            if let Ok(refreshed) = fetch_bounties_for_issue(&i).await {
+                                                                                if *bounties_gen.peek() == gen_before {
+                                                                                    bounties.set(refreshed);
                                                                                 }
                                                                             }
+                                                                        }
+                                                                        Err(e) => {
+                                                                            bounty_error.set(Some(format!("Failed to release bounty: {}", e)));
                                                                         }
                                                                     }
                                                                     claiming_bounty.set(None);

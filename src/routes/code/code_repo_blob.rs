@@ -4,6 +4,7 @@
 use crate::components::{
     BranchSelector, CodeFileViewer, CodeFileViewerSkeleton, FilePathBreadcrumb,
 };
+use crate::components::code::split_path;
 use crate::routes::Route;
 use crate::services::git_hosting::{fetch_repository, git_service};
 use crate::stores::nostr_client;
@@ -11,15 +12,6 @@ use crate::stores::nostr_client::HAS_SIGNER;
 use crate::utils::is_safe_path;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
-
-/// Split a slash-separated path string into route segments
-fn split_path(path: &str) -> Vec<String> {
-    if path.is_empty() {
-        Vec::new()
-    } else {
-        path.split('/').map(|s| s.to_string()).collect()
-    }
-}
 
 #[component]
 pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Element {
@@ -38,6 +30,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
             return;
         }
         is_directory.set(false);
+        repo_signal.set(None);
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
         spawn(async move {

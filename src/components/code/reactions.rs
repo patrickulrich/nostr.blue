@@ -17,11 +17,13 @@ pub fn CodeReactions(event_id: String, event_author: String) -> Element {
     rsx! {
         div { class: "flex items-center gap-3",
             button {
+                r#type: "button",
                 class: if is_liked {
                     "flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-primary/10 text-primary border border-primary/20 transition"
                 } else {
                     "flex items-center gap-1 px-2 py-1 text-xs rounded-lg text-muted-foreground hover:bg-accent/50 border border-transparent hover:border-border transition"
                 },
+                aria_label: if is_liked { "Unlike" } else { "Like" },
                 disabled: !has_signer,
                 onclick: move |_| {
                     if is_liked {

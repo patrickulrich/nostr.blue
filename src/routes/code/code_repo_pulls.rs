@@ -28,6 +28,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
         }
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
+        all_prs.set(vec![]);
         loading.set(true);
         spawn(async move {
             let result = fetch_repo_prs(&naddr).await;

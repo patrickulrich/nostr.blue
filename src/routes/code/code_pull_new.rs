@@ -90,6 +90,7 @@ pub fn CodePullNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
+            if *is_publishing.peek() { return; }
             let content_val = content.read().clone();
             let commit_val = commit.read().trim().to_string();
             let parent_val = parent_commit.read().trim().to_string();
@@ -98,17 +99,17 @@ pub fn CodePullNew(naddr: String) -> Element {
             let branch_val = branch_name.read().trim().to_string();
             let is_cover = *is_cover_letter.read();
             let naddr = naddr.clone();
+            if content_val.trim().is_empty() {
+                error_message.set(Some("Please enter patch content".to_string()));
+                return;
+            }
+            if !branch_val.is_empty() && !is_valid_git_refname(&branch_val) {
+                error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
+                return;
+            }
+            is_publishing.set(true);
+            error_message.set(None);
             spawn(async move {
-                if content_val.trim().is_empty() {
-                    error_message.set(Some("Please enter patch content".to_string()));
-                    return;
-                }
-                if !branch_val.is_empty() && !is_valid_git_refname(&branch_val) {
-                    error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
-                    return;
-                }
-                is_publishing.set(true);
-                error_message.set(None);
                 let label_list: Vec<&str> = if labels_val.is_empty() {
                     vec![]
                 } else {

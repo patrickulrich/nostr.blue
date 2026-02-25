@@ -304,9 +304,17 @@ async fn fetch_commit_detail(
 
     let cache_key = format!("{}/{}/{}", owner, repo, sha);
 
-    // Check cache first
+    // Check cache first (with LRU promotion on hit)
     let cached = COMMIT_CACHE.with(|c| c.borrow().get(&cache_key).cloned());
     if let Some(detail) = cached {
+        // Promote to most-recently-used by moving to back of order queue
+        COMMIT_CACHE_ORDER.with(|order| {
+            let mut order = order.borrow_mut();
+            if let Some(pos) = order.iter().position(|k| k == &cache_key) {
+                order.remove(pos);
+                order.push_back(cache_key.clone());
+            }
+        });
         return Ok(detail);
     }
 
@@ -355,7 +363,11 @@ async fn fetch_commit_detail(
                 parts.push(patch.clone());
             }
         }
-        (parts.join("\n"), None)
+        if parts.is_empty() {
+            (String::new(), Some("No patch data found in commit".to_string()))
+        } else {
+            (parts.join("\n"), None)
+        }
     } else {
         (String::new(), Some("No file patches available".to_string()))
     };

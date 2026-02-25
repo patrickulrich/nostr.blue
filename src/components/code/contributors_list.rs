@@ -89,10 +89,14 @@ fn ContributorRow(pk: String, role: String, role_class: String) -> Element {
             class: "flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition",
             div { class: "w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden",
                 if let Some(pic) = &picture {
-                    img {
-                        class: "w-full h-full object-cover",
-                        src: "{pic}",
-                        alt: "{display_name}",
+                    if pic.starts_with("http://") || pic.starts_with("https://") {
+                        img {
+                            class: "w-full h-full object-cover",
+                            src: "{pic}",
+                            alt: "{display_name}",
+                        }
+                    } else {
+                        span { class: "text-xs text-muted-foreground", "{initial}" }
                     }
                 } else {
                     span { class: "text-xs text-muted-foreground", "{initial}" }

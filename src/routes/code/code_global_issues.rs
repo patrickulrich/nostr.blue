@@ -34,6 +34,7 @@ pub fn CodeGlobalIssues() -> Element {
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
     let mut request_gen = use_signal(|| 0u32);
+    let mut error_msg = use_signal(|| None::<String>);
 
     let user_pubkey = {
         let auth = auth_store::AUTH_STATE.read();
@@ -50,6 +51,7 @@ pub fn CodeGlobalIssues() -> Element {
         created_issues.set(Vec::new());
         assigned_issues.set(Vec::new());
         label_filter.set(None);
+        error_msg.set(None);
         loading.set(true);
         spawn(async move {
             if let Ok(pk) = PublicKey::from_hex(&pk_hex) {
@@ -58,13 +60,21 @@ pub fn CodeGlobalIssues() -> Element {
                     fetch_issues_assigned_to(&pk, 100)
                 );
                 if *request_gen.peek() != gen { return; }
+                let mut errors = Vec::new();
                 match created_res {
                     Ok(fetched) => created_issues.set(fetched),
-                    Err(e) => log::warn!("Failed to fetch created issues: {}", e),
+                    Err(e) => {
+                        errors.push(format!("Created: {}", e));
+                    }
                 }
                 match assigned_res {
                     Ok(fetched) => assigned_issues.set(fetched),
-                    Err(e) => log::warn!("Failed to fetch assigned issues: {}", e),
+                    Err(e) => {
+                        errors.push(format!("Assigned: {}", e));
+                    }
+                }
+                if !errors.is_empty() {
+                    error_msg.set(Some(errors.join("; ")));
                 }
             }
             loading.set(false);
@@ -262,6 +272,11 @@ pub fn CodeGlobalIssues() -> Element {
                             }
                         }
                     }
+                }
+            }
+            if let Some(err) = error_msg.read().as_ref() {
+                div { class: "mx-4 mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                    "{err}"
                 }
             }
             div { class: "p-4",

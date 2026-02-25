@@ -12,6 +12,10 @@
 use crate::routes::Route;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 #[component]
 pub fn CodeKeyboardShortcuts() -> Element {
@@ -32,9 +36,6 @@ pub fn CodeKeyboardShortcuts() -> Element {
     use_effect(move || {
         #[cfg(target_arch = "wasm32")]
         {
-            use wasm_bindgen::prelude::*;
-            use wasm_bindgen::JsCast;
-
             let Some(window) = web_sys::window() else { return; };
 
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {

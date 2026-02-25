@@ -20,6 +20,9 @@ use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{HtmlElement, HtmlInputElement};
 
+/// Maximum file size: 50 MB
+const MAX_FILE_SIZE: usize = 50_000_000;
+
 /// A file selected for upload (name, bytes, mime type)
 #[derive(Clone, Debug)]
 struct SelectedFile {
@@ -296,14 +299,23 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                                     .unwrap_or_else(|| "application/octet-stream".to_string());
                                 match file.read_bytes().await {
                                     Ok(bytes) => {
-                                        let id = *next_file_id.peek();
-                                        next_file_id.set(id + 1);
-                                        new_files.push(SelectedFile {
-                                            id,
-                                            name,
-                                            data: bytes.to_vec(),
-                                            mime_type,
-                                        });
+                                        if bytes.len() > MAX_FILE_SIZE {
+                                            failed_names.push(format!(
+                                                "{} ({:.1} MB exceeds {} MB limit)",
+                                                name,
+                                                bytes.len() as f64 / 1_000_000.0,
+                                                MAX_FILE_SIZE / 1_000_000,
+                                            ));
+                                        } else {
+                                            let id = *next_file_id.peek();
+                                            next_file_id.set(id + 1);
+                                            new_files.push(SelectedFile {
+                                                id,
+                                                name,
+                                                data: bytes.to_vec(),
+                                                mime_type,
+                                            });
+                                        }
                                     }
                                     Err(e) => {
                                         log::warn!("Failed to read dropped file {}: {:?}", name, e);
@@ -631,6 +643,15 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
     for i in 0..count {
         let file = file_list.get(i).ok_or("Failed to get file")?;
         let name = file.name();
+        let file_size = file.size() as usize;
+        if file_size > MAX_FILE_SIZE {
+            return Err(format!(
+                "File '{}' is too large ({:.1} MB). Maximum size is {} MB.",
+                name,
+                file_size as f64 / 1_000_000.0,
+                MAX_FILE_SIZE / 1_000_000,
+            ));
+        }
         let mime_type = file.type_();
         let promise = file.array_buffer();
         let array_buffer = JsFuture::from(promise)

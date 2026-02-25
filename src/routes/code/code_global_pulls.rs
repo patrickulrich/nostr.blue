@@ -35,6 +35,7 @@ pub fn CodeGlobalPulls() -> Element {
     let mut search_query = use_signal(String::new);
     let mut label_filter = use_signal(|| Option::<String>::None);
     let mut fetch_error = use_signal(|| None::<String>);
+    let mut fetch_gen = use_signal(|| 0u32);
 
     let auth = auth_store::AUTH_STATE.read();
     let user_pubkey = auth.pubkey.clone().unwrap_or_default();
@@ -46,22 +47,22 @@ pub fn CodeGlobalPulls() -> Element {
                 if !client_initialized || pk_hex.is_empty() {
                     return;
                 }
+                let gen = fetch_gen.peek().wrapping_add(1);
+                fetch_gen.set(gen);
+                created_prs.set(Vec::new());
+                assigned_prs.set(Vec::new());
+                mentioned_prs.set(Vec::new());
+                loading.set(true);
+                fetch_error.set(None);
                 let captured_pk = pk_hex.clone();
                 spawn(async move {
-                    loading.set(true);
-                    fetch_error.set(None);
                     if let Ok(pk) = PublicKey::from_hex(&captured_pk) {
                         let (created_res, assigned_res, mentioned_res) = futures::join!(
                             fetch_user_prs(&pk, 100),
                             fetch_prs_assigned_to(&pk, 100),
                             fetch_prs_mentioning(&pk, 100)
                         );
-                        // Check if pubkey changed while we were fetching
-                        let current_pk = auth_store::AUTH_STATE.read().pubkey.clone().unwrap_or_default();
-                        if current_pk != captured_pk {
-                            loading.set(false);
-                            return;
-                        }
+                        if *fetch_gen.peek() != gen { return; }
                         let mut errors = Vec::new();
                         match created_res {
                             Ok(fetched) => created_prs.set(fetched),

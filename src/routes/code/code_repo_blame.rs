@@ -3,16 +3,9 @@
 //! Displays file content with commit attribution from GitHub.
 //! Shows the most recent commits that touched the file and the file content
 //! with line numbers. Links to the full blame view on GitHub.
+use crate::components::code::split_path;
 use crate::components::icons;
 use crate::routes::Route;
-/// Split a slash-separated path string into route segments
-fn split_path(path: &str) -> Vec<String> {
-    if path.is_empty() {
-        Vec::new()
-    } else {
-        path.split('/').map(|s| s.to_string()).collect()
-    }
-}
 use crate::services::git_hosting::{
     fetch_repository,
     file_fetcher,

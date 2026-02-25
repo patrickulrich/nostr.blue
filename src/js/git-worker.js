@@ -27,6 +27,15 @@ const CORS_PROXY = 'https://cors.isomorphic-git.org';
  * @returns {boolean} true if the content appears to be binary
  */
 function isBinary(uint8Array) {
+  // Detect UTF-16 BOM — these files are text, not binary,
+  // but their encoding contains null bytes that would trip the scan below.
+  if (uint8Array.length >= 2) {
+    if ((uint8Array[0] === 0xFF && uint8Array[1] === 0xFE) ||
+        (uint8Array[0] === 0xFE && uint8Array[1] === 0xFF)) {
+      return false; // UTF-16 text, not binary
+    }
+  }
+
   const scanLen = Math.min(uint8Array.length, 8192);
   for (let i = 0; i < scanLen; i++) {
     if (uint8Array[i] === 0) return true;
@@ -303,9 +312,11 @@ function computeEditsFallback(oldLines, newLines) {
           ni++;
         }
       } else {
-        // No nearby match, emit delete
+        // No nearby match, emit paired delete+insert and advance both indices
         edits.push({ type: 'delete', oldIdx: oi });
+        edits.push({ type: 'insert', newIdx: ni });
         oi++;
+        ni++;
       }
     }
   }
@@ -635,6 +646,8 @@ const methods = {
    * List all file paths recursively (flat list for fuzzy finder)
    */
   async listAllPaths({ dir, ref: gitRef = 'HEAD' }) {
+    // TODO: validateRepoDir returns a normalized path — all RPC handlers should use
+    // the normalized return value instead of the raw dir parameter
     dir = validateRepoDir(dir);
 
     let commitOid;
@@ -690,8 +703,8 @@ const methods = {
       let baseContent = null;
       let headContent = null;
       let skipReason = null;
-      let inBase = baseFiles.has(filepath);
-      let inHead = headFiles.has(filepath);
+      const inBase = baseFiles.has(filepath);
+      const inHead = headFiles.has(filepath);
 
       if (inBase) {
         try {

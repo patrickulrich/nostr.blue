@@ -18,20 +18,26 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut selected_labels = use_signal(Vec::<String>::new);
+    let mut fetch_gen = use_signal(|| 0u32);
 
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = fetch_gen.peek().wrapping_add(1);
+        fetch_gen.set(gen);
+        all_issues.set(Vec::new());
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
             match fetch_repo_issues(&n).await {
                 Ok(fetched) => {
+                    if *fetch_gen.peek() != gen { return; }
                     all_issues.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
+                    if *fetch_gen.peek() != gen { return; }
                     error.set(Some(e));
                 }
             }

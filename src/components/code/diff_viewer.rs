@@ -69,13 +69,29 @@ fn is_diff_content(content: &str) -> bool {
     })
 }
 
-/// Extract file path from a "diff --git a/path b/path" line
+/// Extract file path from a "diff --git a/path b/path" line.
+/// Handles git diff quoted paths (surrounded by `"`) and strips `a/` or `b/` prefixes.
 fn extract_file_path(line: &str) -> Option<&str> {
-    if let Some(rest) = line.strip_prefix("diff --git a/") {
-        rest.split(" b/").next()
+    let raw = if let Some(rest) = line.strip_prefix("diff --git a/") {
+        rest.split(" b/").next()?
+    } else if let Some(rest) = line.strip_prefix("diff --git ") {
+        // Handle quoted paths: diff --git "a/path" "b/path"
+        rest.split(' ').next()?
     } else {
-        None
-    }
+        return None;
+    };
+    // Strip surrounding quotes if present
+    let unquoted = if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+        &raw[1..raw.len() - 1]
+    } else {
+        raw
+    };
+    // Strip a/ or b/ prefix from the path
+    let stripped = unquoted
+        .strip_prefix("a/")
+        .or_else(|| unquoted.strip_prefix("b/"))
+        .unwrap_or(unquoted);
+    Some(stripped)
 }
 
 /// A single row in side-by-side view
@@ -220,8 +236,9 @@ pub fn DiffViewer(
     // Text content of the inline comment form
     let mut comment_text = use_signal(String::new);
 
-    // Reset comment state when content prop changes
+    // Reset comment and collapsed state when content prop changes
     use_effect(use_reactive(&content, move |_| {
+        collapsed_hunks.set(HashMap::new());
         active_comment_line.set(None);
         comment_text.set(String::new());
     }));
