@@ -92,6 +92,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                 let current_gen = gen.peek().wrapping_add(1);
                 gen.set(current_gen);
                 repo_result.set(None);
+                error_message.set(None);
                 spawn(async move {
                     loading.set(true);
                     file_loading.set(true);

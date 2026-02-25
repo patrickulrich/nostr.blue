@@ -109,6 +109,7 @@ pub fn QrShareModal(
                         button {
                             class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
                             title: "Copy to clipboard",
+                            aria_label: "Copy URL to clipboard",
                             onclick: {
                                 let url_to_copy = current_url.clone();
                                 move |_| {

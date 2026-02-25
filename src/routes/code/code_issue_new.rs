@@ -75,18 +75,19 @@ pub fn CodeIssueNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
+            if *is_publishing.peek() { return; }
             let title_val = title.read().clone();
             let content_val = content.read().clone();
             let labels_val = selected_labels.read().clone();
             let assignees_val = assignees_input.read().clone();
             let naddr = naddr.clone();
+            if content_val.trim().is_empty() {
+                error_message.set(Some("Please describe the issue".to_string()));
+                return;
+            }
+            is_publishing.set(true);
+            error_message.set(None);
             spawn(async move {
-                if content_val.trim().is_empty() {
-                    error_message.set(Some("Please describe the issue".to_string()));
-                    return;
-                }
-                is_publishing.set(true);
-                error_message.set(None);
                 let label_list: Vec<&str> = labels_val.iter().map(|s| s.as_str()).collect();
                 let assignee_list: Vec<&str> = if assignees_val.is_empty() {
                     vec![]
@@ -146,6 +147,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                                 naddr: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
+                            aria_label: "Back to repository",
                             dangerous_inner_html: icons::ARROW_LEFT,
                         }
                         h1 { class: "text-xl font-bold flex items-center gap-2",

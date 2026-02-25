@@ -100,6 +100,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
                                 naddr: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
+                            aria_label: "Back to repository",
                             dangerous_inner_html: icons::ARROW_LEFT,
                         }
                         div {

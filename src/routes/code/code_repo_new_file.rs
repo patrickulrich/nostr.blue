@@ -443,8 +443,10 @@ async fn submit_new_file(
         return Err("No signer attached. Please sign in first.".to_string());
     }
 
-    if path.contains('\n') || path.contains('\r') || path.contains('\0') {
-        return Err("File path cannot contain newline or null characters".to_string());
+    if path.contains('\n') || path.contains('\r') || path.contains('\0')
+        || path.contains("..") || path.starts_with('/') || path.starts_with('\\')
+    {
+        return Err("Invalid file path".to_string());
     }
 
     if commit_message.contains('\n') || commit_message.contains('\r') {

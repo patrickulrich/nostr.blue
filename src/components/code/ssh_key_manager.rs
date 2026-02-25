@@ -11,6 +11,9 @@ use nostr_sdk::prelude::*;
 /// Maximum allowed length for an SSH public key string
 const MAX_KEY_LEN: usize = 4096;
 
+/// Maximum allowed length for an SSH key title
+const MAX_TITLE_LEN: usize = 128;
+
 /// SSH key management panel for user settings
 #[component]
 pub fn SshKeyManager() -> Element {
@@ -82,6 +85,9 @@ pub fn SshKeyManager() -> Element {
         let key = new_key.read().clone();
         if title.trim().is_empty() || key.trim().is_empty() {
             error.set(Some("Title and SSH key are required".to_string()));
+            return;
+        } else if title.len() > MAX_TITLE_LEN {
+            error.set(Some(format!("Title must be {} characters or fewer", MAX_TITLE_LEN)));
             return;
         }
         // Basic SSH key format validation

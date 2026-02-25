@@ -41,6 +41,8 @@ pub fn CloneHelpModal(
                     h2 { class: "text-lg font-bold", "Clone Repository" }
                     button {
                         class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground",
+                        aria_label: "Close",
+                        r#type: "button",
                         onclick: move |_| on_close.call(()),
                         "X"
                     }
@@ -128,6 +130,8 @@ fn CloneUrlRow(url: String) -> Element {
             button {
                 class: "shrink-0 p-2 hover:bg-accent rounded-lg transition text-muted-foreground hover:text-foreground",
                 title: "Copy to clipboard",
+                aria_label: "Copy clone URL",
+                r#type: "button",
                 onclick: move |_| {
                     let url_clone = url_for_copy.clone();
                     spawn(async move {

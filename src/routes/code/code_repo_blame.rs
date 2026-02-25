@@ -16,6 +16,10 @@ use crate::stores::nostr_client;
 use crate::utils::is_safe_path;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+
+/// Maximum number of lines to display in the blame view before truncating.
+const MAX_BLAME_DISPLAY_LINES: usize = 5000;
+
 /// Repository blame page component
 #[component]
 pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Element {
@@ -339,11 +343,10 @@ fn BlameCommitHeader(commits: Vec<GitHubCommit>, filename: String) -> Element {
 /// Displays the file content with numbered lines
 #[component]
 fn BlameFileContent(content: String, filename: String) -> Element {
-    let max_display_lines = 5000;
     let all_lines: Vec<&str> = content.lines().collect();
     let line_count = all_lines.len();
-    let truncated = line_count > max_display_lines;
-    let lines: Vec<&str> = if truncated { all_lines[..max_display_lines].to_vec() } else { all_lines };
+    let truncated = line_count > MAX_BLAME_DISPLAY_LINES;
+    let lines: Vec<&str> = if truncated { all_lines[..MAX_BLAME_DISPLAY_LINES].to_vec() } else { all_lines };
     let gutter_width = if line_count >= 1000 {
         "w-16"
     } else if line_count >= 100 {
@@ -397,7 +400,7 @@ fn BlameFileContent(content: String, filename: String) -> Element {
             }
             if truncated {
                 div { class: "px-4 py-3 border-t border-border bg-muted/50 text-center text-sm text-muted-foreground",
-                    "Showing {max_display_lines} of {line_count} lines. File too large for full blame view."
+                    "Showing {MAX_BLAME_DISPLAY_LINES} of {line_count} lines. File too large for full blame view."
                 }
             }
         }
@@ -444,8 +447,5 @@ fn BlameLoadingSkeleton() -> Element {
 }
 /// Format a date string for display
 fn format_date(date_str: &str) -> String {
-    if let Some(date_part) = date_str.split('T').next() {
-        return date_part.to_string();
-    }
-    date_str.to_string()
+    date_str.split('T').next().unwrap_or(date_str).to_string()
 }

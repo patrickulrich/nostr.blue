@@ -29,6 +29,11 @@ pub fn CodeDiscussionNew(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        let auth = auth_store::AUTH_STATE.read();
+        if !auth.is_authenticated {
+            loading.set(false);
+            return;
+        }
         let gen = fetch_gen.peek().wrapping_add(1);
         fetch_gen.set(gen);
         repo_result.set(None);

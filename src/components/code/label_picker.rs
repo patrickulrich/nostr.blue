@@ -84,6 +84,7 @@ pub fn LabelPicker(
                             rsx! {
                                 button {
                                     key: "{label}",
+                                    r#type: "button",
                                     class: "inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border {color} font-medium hover:opacity-80 transition",
                                     onclick: move |_| {
                                         let mut updated = labels_for_remove.clone();
@@ -164,6 +165,7 @@ pub fn LabelPicker(
                                 rsx! {
                                     button {
                                         key: "{suggestion}",
+                                        r#type: "button",
                                         class: "w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition flex items-center gap-2",
                                         onmousedown: move |_| {
                                             let mut updated = labels_for_add.clone();

@@ -44,6 +44,8 @@ pub fn CodeDiscussionDetail(note_id: String) -> Element {
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
                 div { class: "p-4 flex items-center gap-3",
                     button {
+                        r#type: "button",
+                        aria_label: "Go back",
                         class: "text-muted-foreground hover:text-foreground",
                         onclick: move |_| {
                             let nav = navigator();

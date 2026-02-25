@@ -35,6 +35,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         let captured_gen = request_gen.peek().wrapping_add(1);
         request_gen.set(captured_gen);
         repo_data.set(None);
+        repo_error.set(None);
         releases.set(vec![]);
         loading.set(true);
         spawn(async move {
@@ -99,6 +100,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                                 naddr: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
+                            aria_label: "Back to repository",
                             dangerous_inner_html: icons::ARROW_LEFT,
                         }
                         div {

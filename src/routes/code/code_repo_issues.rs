@@ -28,6 +28,8 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
         let gen = fetch_gen.peek().wrapping_add(1);
         fetch_gen.set(gen);
         all_issues.set(Vec::new());
+        selected_labels.set(Vec::new());
+        error.set(None);
         loading.set(true);
         spawn(async move {
             match fetch_repo_issues(&n).await {

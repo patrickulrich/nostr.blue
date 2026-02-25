@@ -777,16 +777,18 @@ const methods = {
         // Modified file - proper unified diff with LCS algorithm
         const baseLines = normalizeAndSplit(baseContent);
         const headLines = normalizeAndSplit(headContent);
-        diffParts.push(`diff --git a/${filepath} b/${filepath}`);
-        diffParts.push(`--- a/${filepath}`);
-        diffParts.push(`+++ b/${filepath}`);
 
         // Compute edit script using LCS (Myers-like O(ND) diff)
         const edits = computeEdits(baseLines, headLines);
         // Generate unified diff hunks with 3 lines of context
         const hunks = generateHunks(edits, baseLines, headLines, 3);
-        for (const hunk of hunks) {
-          diffParts.push(hunk);
+        if (hunks.length > 0) {
+          diffParts.push(`diff --git a/${filepath} b/${filepath}`);
+          diffParts.push(`--- a/${filepath}`);
+          diffParts.push(`+++ b/${filepath}`);
+          for (const hunk of hunks) {
+            diffParts.push(hunk);
+          }
         }
       }
     }

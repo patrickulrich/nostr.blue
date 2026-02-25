@@ -79,7 +79,11 @@ pub fn CodeGlobalPulls() -> Element {
                         if !errors.is_empty() {
                             fetch_error.set(Some(errors.join("; ")));
                         }
+                    } else {
+                        if *fetch_gen.peek() != gen { return; }
+                        fetch_error.set(Some("Invalid public key".to_string()));
                     }
+                    if *fetch_gen.peek() != gen { return; }
                     loading.set(false);
                 });
             },
@@ -145,6 +149,7 @@ pub fn CodeGlobalPulls() -> Element {
                         Link {
                             to: Route::CodeHome {},
                             class: "text-muted-foreground hover:text-foreground",
+                            aria_label: "Back to code home",
                             dangerous_inner_html: icons::ARROW_LEFT,
                         }
                         h1 { class: "text-xl font-bold flex items-center gap-2",

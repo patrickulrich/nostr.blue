@@ -2,6 +2,7 @@
 //!
 //! Reusable autocomplete for selecting Nostr users by name, npub, or hex pubkey.
 //! Used by repo settings, zap distribution, and issue assignees.
+use std::collections::HashSet;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::PublicKey;
@@ -36,6 +37,9 @@ pub fn NostrUserPicker(
     let at_max = max_selections > 0 && selected.read().len() >= max_selections;
 
     let mut do_select = move |pubkey: String| {
+        if max_selections > 0 && selected.read().len() >= max_selections {
+            return;
+        }
         let mut current = selected.read().clone();
         if !current.contains(&pubkey) {
             current.push(pubkey);
@@ -80,12 +84,27 @@ pub fn NostrUserPicker(
         // Search cached profiles
         let cached = search_cached_profiles(&val, 8, &[], &[]);
         let selected_snapshot = selected.read().clone();
-        let filtered: Vec<ProfileSearchResult> = cached
+        let mut filtered: Vec<ProfileSearchResult> = cached
             .into_iter()
             .filter(|r| !selected_snapshot.contains(&r.pubkey.to_hex()))
             .collect();
+        // Sort priority pubkeys first
+        let priority_set: HashSet<&str> = priority_pubkeys.iter().map(|s| s.as_str()).collect();
+        filtered.sort_by(|a, b| {
+            let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
+            let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
+            b_pri.cmp(&a_pri).then_with(|| b.relevance.cmp(&a.relevance))
+        });
         results.set(filtered);
         show_dropdown.set(true);
+
+        // Cancel search and clear state when query drops below threshold
+        if val.len() < 3 {
+            if let Some(task) = search_task.read().as_ref() {
+                task.cancel();
+            }
+            is_searching.set(false);
+        }
 
         // Debounced relay search for longer queries
         if val.len() >= 3 {

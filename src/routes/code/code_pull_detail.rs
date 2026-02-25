@@ -42,14 +42,13 @@ enum PrTab {
 pub fn CodePullDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut pr_result = use_signal(|| None::<Result<PullRequest, String>>);
+    let mut refresh_trigger = use_signal(|| 0u32);
     let mut pr_gen = use_signal(|| 0u32);
-    use_effect(use_reactive(&note_id, move |note_id| {
+    use_effect(use_reactive((&note_id, &refresh_trigger), move |(note_id, _trigger)| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
-        // Read pr_gen so this effect re-runs when on_pr_updated bumps it
-        let _tracked_gen = *pr_gen.read();
         let gen = pr_gen.peek().wrapping_add(1);
         pr_gen.set(gen);
         pr_result.set(None);
@@ -108,7 +107,7 @@ pub fn CodePullDetail(note_id: String) -> Element {
                                 is_authenticated: auth.is_authenticated,
                                 user_pubkey: auth.pubkey.clone().unwrap_or_default(),
                                 on_pr_updated: move |_| {
-                                    pr_gen.with_mut(|v| *v = v.wrapping_add(1));
+                                    refresh_trigger.with_mut(|v| *v = v.wrapping_add(1));
                                 },
                             }
                         },
@@ -1051,19 +1050,24 @@ fn ConflictDetectionBanner(
     let mut checking = use_signal(|| false);
     let mut checked = use_signal(|| false);
     let mut show_details = use_signal(|| false);
+    let mut detect_gen = use_signal(|| 0u32);
 
     // Run conflict detection when repo is available
+    let repo_key = repo.as_ref().map(|r| r.name.clone()).unwrap_or_default();
     use_effect(use_reactive(
-        (&diff_content, &parent_commit),
-        move |(diff, parent)| {
-            if diff.is_empty() || checked() {
+        (&diff_content, &parent_commit, &repo_key),
+        move |(diff, parent, _repo_key)| {
+            if diff.is_empty() || *checked.peek() {
                 return;
             }
             if let Some(r) = repo.as_ref() {
                 let r = r.clone();
+                let gen = detect_gen.peek().wrapping_add(1);
+                detect_gen.set(gen);
                 checking.set(true);
                 spawn(async move {
                     let results = detect_conflicts(&r, &diff, &parent).await;
+                    if *detect_gen.peek() != gen { return; }
                     conflicts.set(results);
                     checking.set(false);
                     checked.set(true);
@@ -1081,7 +1085,7 @@ fn ConflictDetectionBanner(
     } else {
         (
             "p-3 rounded-lg border bg-blue-500/10 border-blue-500/20 text-sm",
-            "w-4 h-4 text-blue-200 shrink-0 mt-0.5",
+            "w-4 h-4 text-blue-500 shrink-0 mt-0.5",
         )
     };
 
@@ -1104,7 +1108,7 @@ fn ConflictDetectionBanner(
                     path { d: "M12 8h.01" }
                 }
                 div { class: "flex-1",
-                    p { class: if conflict_count > 0 { "text-orange-400" } else { "text-blue-200" },
+                    p { class: if conflict_count > 0 { "text-orange-400" } else { "text-blue-500" },
                         "Based on commit "
                         code { class: "px-1 py-0.5 bg-blue-500/10 rounded text-xs font-mono", "{short_parent}" }
                         if checking() {

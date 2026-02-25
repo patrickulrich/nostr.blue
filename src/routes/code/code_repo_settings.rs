@@ -402,6 +402,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         span { class: "flex-1 text-sm font-mono truncate", "{relay}" }
                                         button {
                                             class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
+                                            aria_label: "Remove relay",
                                             onclick: move |_| {
                                                 let mut list = relay_list.write();
                                                 list.remove(index);
@@ -506,6 +507,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 }
                                                 button {
                                                     class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
+                                                    aria_label: "Remove maintainer",
                                                     onclick: move |_| {
                                                         let mut list = maintainer_list.write();
                                                         list.remove(index);
@@ -885,6 +887,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         }
                                         button {
                                             class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
+                                            aria_label: "Remove milestone",
                                             onclick: move |_| {
                                                 let mut list = milestones.write();
                                                 list.remove(idx);
@@ -924,6 +927,10 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 }
 
                                                 let id = generate_milestone_id(&name);
+                                                if milestones.read().iter().any(|m| m.id == id) {
+                                                    save_error.set(Some("A milestone with a similar name already exists".to_string()));
+                                                    return;
+                                                }
                                                 let ms = Milestone {
                                                     id,
                                                     name,
@@ -948,6 +955,10 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 return;
                                             }
                                             let id = generate_milestone_id(&name);
+                                            if milestones.read().iter().any(|m| m.id == id) {
+                                                save_error.set(Some("A milestone with a similar name already exists".to_string()));
+                                                return;
+                                            }
                                             let ms = Milestone {
                                                 id,
                                                 name,

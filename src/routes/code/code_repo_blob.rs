@@ -31,6 +31,8 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
         }
         is_directory.set(false);
         repo_signal.set(None);
+        content.set(String::new());
+        branches.set(Vec::new());
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
         spawn(async move {

@@ -207,6 +207,8 @@ pub fn ZapDistribution(
                 h3 { class: "text-lg font-semibold", "Distribute Zaps" }
                 button {
                     class: "p-1 hover:bg-accent rounded-lg transition text-muted-foreground",
+                    aria_label: "Close",
+                    r#type: "button",
                     onclick: move |_| on_close.call(()),
                     svg {
                         class: "w-5 h-5",

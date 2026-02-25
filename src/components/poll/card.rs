@@ -536,6 +536,8 @@ pub fn PollCard(
                 }
                 div { class: "relative",
                     button {
+                        r#type: "button",
+                        aria_label: "Repost",
                         class: "{repost_button_class} hover:bg-green-500/10 gap-1 px-2 py-1.5 rounded",
                         disabled: !has_signer || *is_reposting.read(),
                         onclick: move |e: MouseEvent| {
@@ -654,6 +656,8 @@ pub fn PollCard(
                     if has_lightning {
                         rsx! {
                             button {
+                                r#type: "button",
+                                aria_label: "Zap",
                                 class: "{zap_button_class}",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
@@ -673,6 +677,8 @@ pub fn PollCard(
                     }
                 }
                 button {
+                    r#type: "button",
+                    aria_label: "Bookmark",
                     class: "{bookmark_button_class} hover:bg-blue-500/10 px-2 py-1.5 rounded",
                     disabled: !has_signer || *is_bookmarking.read(),
                     onclick: move |e: MouseEvent| {

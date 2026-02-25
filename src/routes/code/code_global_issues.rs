@@ -150,6 +150,7 @@ pub fn CodeGlobalIssues() -> Element {
                         Link {
                             to: Route::CodeHome {},
                             class: "text-muted-foreground hover:text-foreground",
+                            aria_label: "Back to code home",
                             dangerous_inner_html: icons::ARROW_LEFT,
                         }
                         h1 { class: "text-xl font-bold flex items-center gap-2",
