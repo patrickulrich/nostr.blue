@@ -160,7 +160,7 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                                 to: Route::CodeRepoTree {
                                     naddr: naddr.clone(),
                                     git_ref: "HEAD".to_string(),
-                                    path: "".to_string(),
+                                    path: vec![],
                                 },
                                 class: "flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition font-medium",
                                 svg {

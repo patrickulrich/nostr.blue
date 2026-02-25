@@ -5,6 +5,14 @@
 //! with line numbers. Links to the full blame view on GitHub.
 use crate::components::icons;
 use crate::routes::Route;
+/// Split a slash-separated path string into route segments
+fn split_path(path: &str) -> Vec<String> {
+    if path.is_empty() {
+        Vec::new()
+    } else {
+        path.split('/').map(|s| s.to_string()).collect()
+    }
+}
 use crate::services::git_hosting::{
     fetch_repository,
     file_fetcher,
@@ -17,21 +25,19 @@ use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 /// Repository blame page component
 #[component]
-pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
+pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Element {
+    let path = path.join("/");
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut file_content = use_signal(String::new);
     let mut commits = use_signal(Vec::<GitHubCommit>::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut github_info = use_signal(|| None::<(String, String)>);
-    let decoded_path = urlencoding::decode(&path)
-        .unwrap_or_else(|_| std::borrow::Cow::Borrowed(&path))
-        .to_string();
-    let path_parts: Vec<&str> = decoded_path.split('/').filter(|s| !s.is_empty()).collect();
-    let filename = decoded_path
+    let path_parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let filename = path
         .rsplit('/')
         .next()
-        .unwrap_or(&decoded_path)
+        .unwrap_or(&path)
         .to_string();
     let mut gen = use_signal(|| 0u32);
     use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
@@ -66,11 +72,8 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                     loading.set(false);
                     return;
                 }
-                let decoded = urlencoding::decode(&path)
-                    .map(|s| s.into_owned())
-                    .unwrap_or_else(|_| path.clone());
-                if !is_safe_path(&decoded) {
-                    log::warn!("Path traversal attempt blocked in blame: {}", decoded);
+                if !is_safe_path(&path) {
+                    log::warn!("Path traversal attempt blocked in blame: {}", path);
                     error.set(Some("Invalid path".to_string()));
                     loading.set(false);
                     return;
@@ -78,13 +81,13 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                 // Fetch file content and commit history in parallel
                 let (file_result, commits_result) = {
                     let repo_clone = repo.clone();
-                    let decoded_clone = decoded.clone();
+                    let path_clone = path.clone();
                     let git_ref_clone = git_ref.clone();
                     let (owner, repo_name) = gh_info.unwrap();
                     let file_future =
-                        file_fetcher::fetch_file(&repo_clone, &decoded_clone, Some(&git_ref_clone));
+                        file_fetcher::fetch_file(&repo_clone, &path_clone, Some(&git_ref_clone));
                     let commits_future =
-                        fetch_file_commits(&owner, &repo_name, &decoded, &git_ref, 30);
+                        fetch_file_commits(&owner, &repo_name, &path, &git_ref, 30);
                     futures::join!(file_future, commits_future)
                 };
                 if *gen.read() != current_gen { return; }
@@ -108,7 +111,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
     }));
     let github_blame_url = {
         let gh = github_info();
-        let dp = decoded_path.clone();
+        let dp = path.clone();
         let gr = git_ref.clone();
         gh.map(|(owner, repo_name)| {
             format!(
@@ -129,7 +132,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                         to: Route::CodeRepoBlob {
                             naddr: naddr.clone(),
                             git_ref: git_ref.clone(),
-                            path: path.clone(),
+                            path: split_path(&path),
                         },
                         class: "text-muted-foreground hover:text-foreground",
                         dangerous_inner_html: icons::ARROW_LEFT,
@@ -203,7 +206,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: String) -> Element {
                             to: Route::CodeRepoBlob {
                                 naddr: naddr.clone(),
                                 git_ref: git_ref.clone(),
-                                path: path.clone(),
+                                path: split_path(&path),
                             },
                             class: "inline-block px-4 py-2 bg-muted hover:bg-accent rounded-lg transition text-sm",
                             "Back to File"

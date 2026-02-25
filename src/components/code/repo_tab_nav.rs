@@ -42,7 +42,7 @@ pub fn RepoTabNav(
             route: Route::CodeRepoTree {
                 naddr: naddr.clone(),
                 git_ref: "HEAD".to_string(),
-                path: "".to_string(),
+                path: vec![],
             },
             count: None,
         },
@@ -225,7 +225,7 @@ pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
             Route::CodeRepoTree {
                 naddr: naddr.clone(),
                 git_ref: "HEAD".to_string(),
-                path: "".to_string(),
+                path: vec![],
             },
         ),
         (

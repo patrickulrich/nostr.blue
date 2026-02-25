@@ -15,8 +15,10 @@ use dioxus_core::use_drop;
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
+
 #[component]
-pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
+pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Element {
+    let path = path.join("/");
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut files = use_signal(Vec::new);
@@ -75,13 +77,9 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
     let finder_cache_key = use_memo(use_reactive((&naddr, &git_ref), |(n, g)| {
         format!("{}:{}", n, g)
     }));
-    let mut prev_finder_key = use_signal(String::new);
     use_effect(move || {
-        let current_key = finder_cache_key.read().clone();
-        if *prev_finder_key.peek() != current_key {
-            prev_finder_key.set(current_key);
-            all_file_paths.set(Vec::new());
-        }
+        let _key = finder_cache_key.read();
+        all_file_paths.set(Vec::new());
     });
 
     // Fetch all file paths when the fuzzy finder is opened
@@ -122,65 +120,58 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: String) -> Element {
         });
     }
 
-    let load_key = use_memo({
-        let naddr = naddr.clone();
-        let git_ref = git_ref.clone();
-        let path = path.clone();
-        move || format!("{}:{}:{}", naddr, git_ref, path)
-    });
-    use_effect({
-        let naddr = naddr.clone();
-        let git_ref = git_ref.clone();
-        let path = path.clone();
-        move || {
-            let _key = load_key.read();
-            let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-            if !client_initialized {
-                return;
-            }
-            let naddr = naddr.clone();
-            let git_ref = git_ref.clone();
-            let path = path.clone();
-            spawn(async move {
-                loading.set(true);
-                error.set(None);
-                let repo = match fetch_repository(&naddr).await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error.set(Some(format!("Repository not found: {}", e)));
-                        loading.set(false);
-                        return;
-                    }
-                };
-                repo_signal.set(Some(repo.clone()));
-                if !git_service::GitService::is_initialized() {
-                    if let Err(e) = git_service::GitService::init().await {
-                        error.set(Some(format!("Failed to initialize git: {}", e)));
-                        loading.set(false);
-                        return;
-                    }
-                }
-                let decoded_path = urlencoding::decode(&path)
-                    .map(|s| s.into_owned())
-                    .unwrap_or_else(|_| path.clone());
-                match git_service()
-                    .list_files(&repo, &decoded_path, Some(&git_ref))
-                    .await
-                {
-                    Ok(entries) => {
-                        files.set(entries);
-                    }
-                    Err(e) => {
-                        error.set(Some(format!("Failed to load files: {}", e)));
-                    }
-                }
-                if let Ok(branch_list) = git_service().get_branches(&repo).await {
-                    branches.set(branch_list);
-                }
-                loading.set(false);
-            });
+    let mut gen = use_signal(|| 0u32);
+    use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
         }
-    });
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
+        spawn(async move {
+            loading.set(true);
+            error.set(None);
+            let repo = match fetch_repository(&naddr).await {
+                Ok(r) => r,
+                Err(e) => {
+                    if *gen.peek() != current_gen { return; }
+                    error.set(Some(format!("Repository not found: {}", e)));
+                    loading.set(false);
+                    return;
+                }
+            };
+            if *gen.peek() != current_gen { return; }
+            repo_signal.set(Some(repo.clone()));
+            if !git_service::GitService::is_initialized() {
+                if let Err(e) = git_service::GitService::init().await {
+                    if *gen.peek() != current_gen { return; }
+                    error.set(Some(format!("Failed to initialize git: {}", e)));
+                    loading.set(false);
+                    return;
+                }
+            }
+            if *gen.peek() != current_gen { return; }
+            match git_service()
+                .list_files(&repo, &path, Some(&git_ref))
+                .await
+            {
+                Ok(entries) => {
+                    if *gen.peek() != current_gen { return; }
+                    files.set(entries);
+                }
+                Err(e) => {
+                    if *gen.peek() != current_gen { return; }
+                    error.set(Some(format!("Failed to load files: {}", e)));
+                }
+            }
+            if *gen.peek() != current_gen { return; }
+            if let Ok(branch_list) = git_service().get_branches(&repo).await {
+                if *gen.peek() != current_gen { return; }
+                branches.set(branch_list);
+            }
+            loading.set(false);
+        });
+    }));
     let repo_name = repo_signal()
         .map(|r| r.display_name().to_string())
         .unwrap_or_else(|| "Repository".to_string());

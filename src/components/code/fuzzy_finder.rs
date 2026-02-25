@@ -3,6 +3,14 @@
 //! Modal file finder with fuzzy subsequence search for repository browsing.
 use crate::routes::Route;
 use dioxus::prelude::*;
+/// Split a slash-separated path string into route segments
+fn split_path(path: &str) -> Vec<String> {
+    if path.is_empty() {
+        Vec::new()
+    } else {
+        path.split('/').map(|s| s.to_string()).collect()
+    }
+}
 
 /// Modal fuzzy file finder for repository file navigation
 #[component]
@@ -61,7 +69,7 @@ pub fn FuzzyFinder(
                             nav.push(Route::CodeRepoBlob {
                                 naddr: naddr_nav.clone(),
                                 git_ref: git_ref_nav.clone(),
-                                path: file_path.clone(),
+                                path: split_path(file_path),
                             });
                             on_close.call(());
                         }
@@ -102,7 +110,7 @@ pub fn FuzzyFinder(
                                         nav.push(Route::CodeRepoBlob {
                                             naddr: nav_naddr.clone(),
                                             git_ref: nav_ref.clone(),
-                                            path: nav_path.clone(),
+                                            path: split_path(&nav_path),
                                         });
                                         on_close.call(());
                                     },

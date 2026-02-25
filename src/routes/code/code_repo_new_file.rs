@@ -231,7 +231,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                         to: Route::CodeRepoTree {
                             naddr: naddr.clone(),
                             git_ref: "HEAD".to_string(),
-                            path: String::new(),
+                            path: vec![],
                         },
                         class: "text-muted-foreground hover:text-foreground",
                         dangerous_inner_html: icons::ARROW_LEFT,
@@ -389,7 +389,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                         to: Route::CodeRepoTree {
                             naddr: naddr.clone(),
                             git_ref: "HEAD".to_string(),
-                            path: String::new(),
+                            path: vec![],
                         },
                         class: "px-4 py-2.5 text-muted-foreground hover:text-foreground transition text-sm",
                         "Cancel"

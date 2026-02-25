@@ -278,8 +278,8 @@ pub enum Route {
     CodeRepoInsights { naddr: String },
     #[route("/code/repo/:naddr/projects")]
     CodeRepoProjects { naddr: String },
-    #[route("/code/repo/:naddr/blame/:git_ref/*path")]
-    CodeRepoBlame { naddr: String, git_ref: String, path: String },
+    #[route("/code/repo/:naddr/blame/:git_ref/:..path")]
+    CodeRepoBlame { naddr: String, git_ref: String, path: Vec<String> },
     #[route("/code/repo/:naddr/compare")]
     CodeRepoCompare { naddr: String },
     #[route("/code/repo/:naddr/upload")]
@@ -292,10 +292,10 @@ pub enum Route {
     CodeRepoDiscussions { naddr: String },
     #[route("/code/repo/:naddr/discussions/new")]
     CodeDiscussionNew { naddr: String },
-    #[route("/code/repo/:naddr/tree/:git_ref/*path")]
-    CodeRepoTree { naddr: String, git_ref: String, path: String },
-    #[route("/code/repo/:naddr/blob/:git_ref/*path")]
-    CodeRepoBlob { naddr: String, git_ref: String, path: String },
+    #[route("/code/repo/:naddr/tree/:git_ref/:..path")]
+    CodeRepoTree { naddr: String, git_ref: String, path: Vec<String> },
+    #[route("/code/repo/:naddr/blob/:git_ref/:..path")]
+    CodeRepoBlob { naddr: String, git_ref: String, path: Vec<String> },
     #[route("/code/issue/:note_id")]
     CodeIssueDetail { note_id: String },
     #[route("/code/pull/:note_id")]
