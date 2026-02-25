@@ -33,6 +33,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         }
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             loading.set(true);
             let result = fetch_repository(&n).await;
@@ -91,11 +92,21 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 } else {
                     assignees_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
+                let mut seen = std::collections::HashSet::new();
+                let mut canonical_assignees: Vec<String> = Vec::new();
                 for a in &assignee_list {
-                    if nostr_sdk::PublicKey::parse(a).is_err() {
-                        error_message.set(Some(format!("Invalid assignee pubkey: {}", a)));
-                        is_publishing.set(false);
-                        return;
+                    match nostr_sdk::PublicKey::parse(a) {
+                        Ok(pk) => {
+                            let hex = pk.to_hex();
+                            if seen.insert(hex.clone()) {
+                                canonical_assignees.push(hex);
+                            }
+                        }
+                        Err(_) => {
+                            error_message.set(Some(format!("Invalid assignee pubkey: {}", a)));
+                            is_publishing.set(false);
+                            return;
+                        }
                     }
                 }
                 let subject = if title_val.is_empty() {
@@ -103,7 +114,8 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 } else {
                     Some(title_val.as_str())
                 };
-                match publish_issue_by_naddr(&naddr, subject, &content_val, &label_list, &assignee_list)
+                let canonical_refs: Vec<&str> = canonical_assignees.iter().map(|s| s.as_str()).collect();
+                match publish_issue_by_naddr(&naddr, subject, &content_val, &label_list, &canonical_refs)
                     .await
                 {
                     Ok(event_id) => {

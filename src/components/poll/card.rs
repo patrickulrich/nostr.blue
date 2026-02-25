@@ -706,24 +706,14 @@ pub fn PollCard(
                     class: "flex items-center text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 px-2 py-1.5 rounded transition",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            let nevent = Nip19Event::new(event_id).author(event.pubkey);
-                            if let Ok(nevent_str) = nevent.to_bech32() {
-                                let share_url = format!("https://njump.me/{}", nevent_str);
-                                let window = web_sys::window().unwrap();
-                                let clipboard = window.navigator().clipboard();
-                                spawn(async move {
-                                    match wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&share_url)).await {
-                                        Ok(_) => {
-                                            log::debug!("Share URL copied to clipboard");
-                                        }
-                                        Err(e) => {
-                                            log::warn!("Clipboard write failed: {:?}", e);
-                                        }
-                                    }
-                                });
-                            }
+                        let nevent = Nip19Event::new(event_id).author(event.pubkey);
+                        if let Ok(nevent_str) = nevent.to_bech32() {
+                            let share_url = format!("https://njump.me/{}", nevent_str);
+                            spawn(async move {
+                                if let Err(e) = crate::utils::clipboard::copy_to_clipboard(&share_url).await {
+                                    log::warn!("Clipboard write failed: {:?}", e);
+                                }
+                            });
                         }
                     },
                     ShareIcon {

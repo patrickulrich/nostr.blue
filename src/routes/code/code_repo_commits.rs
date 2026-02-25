@@ -14,6 +14,19 @@ use crate::utils::{format_commit_date, format_time_ago};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 
+/// Split a commit message into its first-line title and optional body.
+pub(super) fn split_commit_message(message: &str) -> (&str, Option<&str>) {
+    match message.find('\n') {
+        Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
+        None => (message, None),
+    }
+}
+
+/// Return the first 7 characters of a hash, or the full string if shorter.
+pub(super) fn short_hash(hash: &str) -> &str {
+    if hash.len() >= 7 { &hash[..7] } else { hash }
+}
+
 /// Unified commit data from either source
 #[derive(Debug, Clone)]
 enum CommitData {
@@ -202,13 +215,10 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
 #[component]
 fn GitHubCommitRow(commit: GitHubCommit) -> Element {
     let message = &commit.commit.message;
-    let (title, body) = match message.find('\n') {
-        Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
-        None => (message.as_str(), None),
-    };
+    let (title, body) = split_commit_message(message);
     let date = &commit.commit.author.date;
     let formatted_date = format_commit_date(date);
-    let short_sha = if commit.sha.len() >= 7 { &commit.sha[..7] } else { &commit.sha };
+    let short_sha = short_hash(&commit.sha);
     rsx! {
         div { class: "p-4 hover:bg-muted/50 transition",
             div { class: "flex items-start justify-between gap-4",
@@ -277,16 +287,9 @@ fn GitHubCommitRow(commit: GitHubCommit) -> Element {
 #[component]
 fn GitCommitRow(commit: CommitEntry) -> Element {
     let message = &commit.message;
-    let (title, body) = match message.find('\n') {
-        Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
-        None => (message.as_str(), None),
-    };
+    let (title, body) = split_commit_message(message);
     let formatted_date = format_time_ago(commit.timestamp);
-    let short_oid = if commit.oid.len() >= 7 {
-        &commit.oid[..7]
-    } else {
-        &commit.oid
-    };
+    let short_oid = short_hash(&commit.oid);
     let initial = commit.author.chars().next().unwrap_or('?');
     rsx! {
         div { class: "p-4 hover:bg-muted/50 transition",

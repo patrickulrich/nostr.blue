@@ -500,7 +500,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                 div { class: "flex flex-wrap gap-2",
                     if can_merge && matches!(*display_status.read(), IssueStatus::Open | IssueStatus::Draft) {
                         button {
-                            class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 flex items-center gap-2",
+                            class: "px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50 flex items-center gap-2",
                             disabled: *is_updating_status.read(),
                             onclick: move |_| show_merge_confirm.set(true),
                             svg {
@@ -672,7 +672,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                 "Cancel"
                             }
                             button {
-                                class: "px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition",
+                                class: "px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition",
                                 onclick: handle_merge,
                                 "Confirm Merge"
                             }
@@ -886,20 +886,30 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                 let id = pr_id_for_handler.clone();
                                 let author = pr_author_for_handler.clone();
                                 line_comment_error.set(None);
+                                let gen = line_comment_gen.peek().wrapping_add(1);
+                                line_comment_gen.set(gen);
                                 spawn(async move {
                                     match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
                                         Ok(_) => {
                                             // Refresh line comments after publishing
                                             match fetch_line_comments_by_id(&id).await {
-                                                Ok(lcs) => line_comments.set(lcs),
+                                                Ok(lcs) => {
+                                                    if *line_comment_gen.peek() == gen {
+                                                        line_comments.set(lcs);
+                                                    }
+                                                }
                                                 Err(e) => {
-                                                    log::warn!("Failed to refresh line comments: {}", e);
-                                                    line_comment_error.set(Some(format!("Failed to refresh line comments: {}", e)));
+                                                    if *line_comment_gen.peek() == gen {
+                                                        log::warn!("Failed to refresh line comments: {}", e);
+                                                        line_comment_error.set(Some(format!("Failed to refresh line comments: {}", e)));
+                                                    }
                                                 }
                                             }
                                         }
                                         Err(e) => {
-                                            line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
+                                            if *line_comment_gen.peek() == gen {
+                                                line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
+                                            }
                                         }
                                     }
                                 });

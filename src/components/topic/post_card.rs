@@ -32,6 +32,8 @@ pub fn TopicPostCard(
     let counts = vote_counts.unwrap_or_default();
     let topic_for_link = post.topic.clone();
     let post_id_for_link = post.id.clone();
+    let topic_for_key = post.topic.clone();
+    let post_id_for_key = post.id.clone();
     let post_for_vote = post.clone();
 
     rsx! {
@@ -69,6 +71,26 @@ pub fn TopicPostCard(
                 // Post content — use div+onclick instead of Link to avoid nested <a> when content contains links
                 div {
                     class: "block cursor-pointer",
+                    role: "link",
+                    tabindex: "0",
+                    onkeydown: move |evt: KeyboardEvent| {
+                        let activate = matches!(evt.key(), Key::Enter)
+                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        if !activate { return; }
+                        evt.prevent_default();
+                        // Don't navigate if key event originated from/inside an anchor element
+                        if let Some(target) = evt.data.as_web_event().target() {
+                            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                                if element.closest("a").ok().flatten().is_some() {
+                                    return;
+                                }
+                            }
+                        }
+                        navigator().push(Route::TopicPostDetail {
+                            topic: topic_for_key.clone(),
+                            post_id: post_id_for_key.clone(),
+                        });
+                    },
                     onclick: move |evt| {
                         // Don't navigate if click originated from/inside an anchor element
                         if let Some(target) = evt.data.as_web_event().target() {

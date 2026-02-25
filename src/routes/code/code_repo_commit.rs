@@ -1,6 +1,7 @@
 //! Commit Detail Page
 //!
 //! Displays a single commit with its diff.
+use super::code_repo_commits::{short_hash, split_commit_message};
 use crate::components::code::{DiffViewer, RepoTabNav};
 use crate::components::icons;
 use crate::routes::Route;
@@ -154,7 +155,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                             "Commit"
                         }
                         p { class: "text-sm text-muted-foreground font-mono",
-                            "{&sha[..7.min(sha.len())]}"
+                            "{short_hash(&sha)}"
                         }
                     }
                 }
@@ -210,15 +211,11 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
 /// Commit header showing author, message, and stats
 #[component]
 fn CommitHeader(detail: CommitDetail, sha: String) -> Element {
-    let (title, body) = match detail.message.find('\n') {
-        Some(idx) => (
-            detail.message[..idx].trim().to_string(),
-            Some(detail.message[idx..].trim().to_string()),
-        ),
-        None => (detail.message.clone(), None),
-    };
+    let (title_ref, body_ref) = split_commit_message(&detail.message);
+    let title = title_ref.to_string();
+    let body = body_ref.map(|b| b.to_string());
     let formatted_date = crate::utils::format_commit_date(&detail.date);
-    let short_sha = if sha.len() >= 7 { &sha[..7] } else { &sha };
+    let short_sha = short_hash(&sha);
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4 space-y-4",
@@ -339,10 +336,22 @@ async fn fetch_commit_detail(
     let (diff, diff_error) = if let Some(ref files) = json.files {
         let mut parts = Vec::new();
         for file in files {
-            parts.push(format!("diff --git a/{f} b/{f}", f = file.filename));
-            parts.push(format!("--- a/{}", file.filename));
-            parts.push(format!("+++ b/{}", file.filename));
             if let Some(ref patch) = file.patch {
+                parts.push(format!("diff --git a/{f} b/{f}", f = file.filename));
+                match file.status.as_str() {
+                    "added" => {
+                        parts.push("--- /dev/null".to_string());
+                        parts.push(format!("+++ b/{}", file.filename));
+                    }
+                    "removed" => {
+                        parts.push(format!("--- a/{}", file.filename));
+                        parts.push("+++ /dev/null".to_string());
+                    }
+                    _ => {
+                        parts.push(format!("--- a/{}", file.filename));
+                        parts.push(format!("+++ b/{}", file.filename));
+                    }
+                }
                 parts.push(patch.clone());
             }
         }

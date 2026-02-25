@@ -655,6 +655,13 @@ const methods = {
   async diff({ dir, base, head }) {
     dir = validateRepoDir(dir);
 
+    if (!base || typeof base !== 'string') {
+      throw new Error('Invalid base ref: must be a non-empty string');
+    }
+    if (!head || typeof head !== 'string') {
+      throw new Error('Invalid head ref: must be a non-empty string');
+    }
+
     // Maximum blob size to include in diff (2 MB)
     const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
