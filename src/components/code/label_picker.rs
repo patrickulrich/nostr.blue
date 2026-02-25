@@ -21,13 +21,13 @@ const DEFAULT_LABELS: &[&str] = &[
 fn label_color(label: &str) -> &'static str {
     let hash: u32 = label.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     match hash % 8 {
-        0 => "bg-muted text-foreground border-border",
-        1 => "bg-accent text-foreground border-border",
-        2 => "bg-muted text-muted-foreground border-border",
-        3 => "bg-accent text-foreground border-border",
-        4 => "bg-muted text-foreground border-border",
-        5 => "bg-accent text-muted-foreground border-border",
-        6 => "bg-muted text-foreground border-border",
+        0 => "bg-muted text-foreground border border-border",
+        1 => "bg-accent text-foreground border border-primary/30",
+        2 => "bg-muted text-muted-foreground border border-border",
+        3 => "bg-accent text-muted-foreground border border-primary/30",
+        4 => "bg-primary/10 text-foreground border border-primary/20",
+        5 => "bg-accent/50 text-foreground border border-accent",
+        6 => "bg-muted/50 text-muted-foreground border border-muted-foreground/20",
         _ => "bg-background text-foreground border border-border",
     }
 }

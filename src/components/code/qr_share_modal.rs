@@ -48,10 +48,13 @@ pub fn QrShareModal(
             onclick: move |_| on_close.call(()),
             div {
                 class: "bg-background border border-border rounded-lg p-6 w-full max-w-sm shadow-lg",
+                role: "dialog",
+                aria_modal: "true",
+                aria_labelledby: "qr-share-title",
                 onclick: move |evt| evt.stop_propagation(),
                 // Header
                 div { class: "flex justify-between items-center mb-4",
-                    h2 { class: "text-lg font-bold", "Share {repo_name}" }
+                    h2 { id: "qr-share-title", class: "text-lg font-bold", "Share {repo_name}" }
                     button {
                         class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground",
                         aria_label: "Close share modal",

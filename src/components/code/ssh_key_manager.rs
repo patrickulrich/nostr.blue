@@ -86,7 +86,7 @@ pub fn SshKeyManager() -> Element {
         if title.trim().is_empty() || key.trim().is_empty() {
             error.set(Some("Title and SSH key are required".to_string()));
             return;
-        } else if title.len() > MAX_TITLE_LEN {
+        } else if title.trim().chars().count() > MAX_TITLE_LEN {
             error.set(Some(format!("Title must be {} characters or fewer", MAX_TITLE_LEN)));
             return;
         }

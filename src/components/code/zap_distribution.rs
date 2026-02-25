@@ -246,6 +246,7 @@ pub fn ZapDistribution(
                                 rsx! {
                                     button {
                                         key: "{amt_val}",
+                                        r#type: "button",
                                         class: if is_selected {
                                             "px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground font-medium"
                                         } else {
@@ -375,6 +376,7 @@ pub fn ZapDistribution(
                 div { class: "pt-2",
                     button {
                         class: "w-full py-2.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
+                        r#type: "button",
                         disabled: !nwc_connected || *is_sending.read() || recipients.read().is_empty(),
                         onclick: handle_send,
                         if *is_sending.read() {

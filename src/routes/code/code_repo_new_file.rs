@@ -234,6 +234,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                             path: vec![],
                         },
                         class: "text-muted-foreground hover:text-foreground",
+                        aria_label: "Back to repository",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",
@@ -443,10 +444,8 @@ async fn submit_new_file(
         return Err("No signer attached. Please sign in first.".to_string());
     }
 
-    if path.contains('\n') || path.contains('\r') || path.contains('\0')
-        || path.contains("..") || path.starts_with('/') || path.starts_with('\\')
-    {
-        return Err("Invalid file path".to_string());
+    if let Some(err) = validate_file_path(path) {
+        return Err(err);
     }
 
     if commit_message.contains('\n') || commit_message.contains('\r') {

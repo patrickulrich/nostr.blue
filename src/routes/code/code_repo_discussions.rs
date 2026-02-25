@@ -57,8 +57,8 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
         request_gen.set(gen);
         discussions.set(vec![]);
         loading.set(true);
+        error.set(None);
         spawn(async move {
-            error.set(None);
             match fetch_repo_discussions(&n).await {
                 Ok(fetched) => {
                     if *request_gen.peek() != gen {

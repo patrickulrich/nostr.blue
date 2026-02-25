@@ -366,9 +366,9 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                 update_error.set(Some("Parent commit must be a 40 or 64-character hex string".to_string()));
                 return;
             }
+            is_submitting_update.set(true);
+            update_error.set(None);
             spawn(async move {
-                is_submitting_update.set(true);
-                update_error.set(None);
                 let commit_opt = if commit.is_empty() { None } else { Some(commit.as_str()) };
                 let parent_opt = if parent.is_empty() { None } else { Some(parent.as_str()) };
                 match publish_pr_update_by_id(&id, &naddr, &content, commit_opt, parent_opt).await {
@@ -1057,9 +1057,10 @@ fn ConflictDetectionBanner(
     use_effect(use_reactive(
         (&diff_content, &parent_commit, &repo_key),
         move |(diff, parent, _repo_key)| {
-            if diff.is_empty() || *checked.peek() {
+            if diff.is_empty() {
                 return;
             }
+            checked.set(false);
             if let Some(r) = repo.as_ref() {
                 let r = r.clone();
                 let gen = detect_gen.peek().wrapping_add(1);

@@ -21,22 +21,6 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut repo_gen = use_signal(|| 0u32);
     let mut form_initialized = use_signal(|| false);
-    use_effect(use_reactive(&naddr, move |n| {
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
-        let gen = repo_gen.peek().wrapping_add(1);
-        repo_gen.set(gen);
-        repo_result.set(None);
-        form_initialized.set(false);
-        spawn(async move {
-            let result = fetch_repository(&n).await;
-            if *repo_gen.peek() == gen {
-                repo_result.set(Some(result));
-            }
-        });
-    }));
     let mut repo_name = use_signal(String::new);
     let mut repo_description = use_signal(String::new);
     let mut clone_url = use_signal(String::new);
@@ -57,6 +41,41 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
     let mut required_approvals = use_signal(|| 0u32);
     let mut topics_list = use_signal(Vec::<String>::new);
     let mut new_topic = use_signal(String::new);
+    use_effect(use_reactive(&naddr, move |n| {
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
+        repo_result.set(None);
+        form_initialized.set(false);
+        repo_name.set(String::new());
+        repo_description.set(String::new());
+        clone_url.set(String::new());
+        web_url.set(String::new());
+        relay_list.set(Vec::new());
+        new_relay_url.set(String::new());
+        maintainer_list.set(Vec::new());
+        new_maintainer.set(String::new());
+        save_error.set(None);
+        save_success.set(false);
+        show_delete_confirm.set(false);
+        zap_splits.set(Vec::new());
+        new_split_pubkey.set(String::new());
+        new_split_weight.set(50);
+        milestones.set(Vec::new());
+        new_milestone_name.set(String::new());
+        required_approvals.set(0);
+        topics_list.set(Vec::new());
+        new_topic.set(String::new());
+        spawn(async move {
+            let result = fetch_repository(&n).await;
+            if *repo_gen.peek() == gen {
+                repo_result.set(Some(result));
+            }
+        });
+    }));
     if let Some(Ok(r)) = repo_result.read().as_ref() {
         if !*form_initialized.read() {
             repo_name.set(r.name.clone().unwrap_or_default());
@@ -608,6 +627,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                         "{topic}"
                                         button {
                                             class: "ml-1 text-primary/50 hover:text-destructive transition",
+                                            aria_label: "Remove topic",
                                             onclick: move |_| {
                                                 let mut list = topics_list.write();
                                                 list.remove(index);
@@ -721,6 +741,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                                                 if can_remove {
                                                     button {
                                                         class: "p-1 text-muted-foreground hover:text-destructive hover:bg-accent rounded opacity-0 group-hover:opacity-100 transition",
+                                                        aria_label: "Remove zap split",
                                                         onclick: move |_| {
                                                             let mut splits = zap_splits.write();
                                                             splits.remove(idx);

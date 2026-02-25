@@ -178,6 +178,7 @@ pub fn CodeGlobalPulls() -> Element {
                         class: "w-full px-3 py-1.5 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary",
                         r#type: "text",
                         placeholder: "Filter pull requests...",
+                        aria_label: "Filter pull requests",
                         value: "{search_query}",
                         oninput: move |e| search_query.set(e.value()),
                     }

@@ -112,6 +112,7 @@ fn TabButton(label: &'static str, tab_id: &'static str, active_tab: Signal<&'sta
     rsx! {
         button {
             class: class,
+            r#type: "button",
             onclick: move |_| active_tab.set(tab_id),
             "{label}"
         }

@@ -18,6 +18,7 @@ use nostr_sdk::{
     Event as NostrEvent, EventId, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId,
     TagStandard, Timestamp, ToBech32,
 };
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -707,6 +708,8 @@ pub fn PollCard(
                     }
                 }
                 button {
+                    r#type: "button",
+                    aria_label: "Share",
                     class: "flex items-center text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 px-2 py-1.5 rounded transition",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
@@ -829,8 +832,13 @@ fn deduplicate_votes(events: Vec<NostrEvent>) -> Vec<NostrEvent> {
     let mut map: HashMap<String, NostrEvent> = HashMap::new();
     for event in events {
         let key = event.pubkey.to_string();
-        if !map.contains_key(&key) || event.created_at > map[&key].created_at {
-            map.insert(key, event);
+        match map.entry(key) {
+            Entry::Vacant(v) => { v.insert(event); }
+            Entry::Occupied(mut o) => {
+                if event.created_at > o.get().created_at {
+                    o.insert(event);
+                }
+            }
         }
     }
     map.into_values().collect()

@@ -8,6 +8,7 @@ use crate::services::git_hosting::{fetch_repo_issues, fetch_repository, publish_
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+use std::collections::HashSet;
 /// New issue page component
 #[component]
 pub fn CodeIssueNew(naddr: String) -> Element {
@@ -20,7 +21,6 @@ pub fn CodeIssueNew(naddr: String) -> Element {
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut loading = use_signal(|| true);
     let nav = use_navigator();
     let naddr_for_effect = naddr.clone();
     let naddr_for_labels = naddr.clone();
@@ -35,11 +35,9 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         repo_gen.set(gen);
         repo_result.set(None);
         spawn(async move {
-            loading.set(true);
             let result = fetch_repository(&n).await;
             if *repo_gen.peek() == gen {
                 repo_result.set(Some(result));
-                loading.set(false);
             }
         });
     });
@@ -94,7 +92,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                 } else {
                     assignees_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = HashSet::new();
                 let mut canonical_assignees: Vec<String> = Vec::new();
                 for a in &assignee_list {
                     match nostr_sdk::PublicKey::parse(a) {

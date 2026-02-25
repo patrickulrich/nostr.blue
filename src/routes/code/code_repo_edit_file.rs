@@ -269,6 +269,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                             path: path.clone(),
                         },
                         class: "text-muted-foreground hover:text-foreground",
+                        aria_label: "Back to file",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",
@@ -430,6 +431,19 @@ async fn submit_edit_file(
     let client = get_client().ok_or("Client not initialized")?;
     if !*HAS_SIGNER.read() {
         return Err("No signer attached. Please sign in first.".to_string());
+    }
+
+    // Validate path (interpolated into diff header)
+    if path.contains('\n') || path.contains('\r') || path.contains('\0')
+        || path.split('/').any(|s| s == ".." || s == "." || s.is_empty())
+        || path.starts_with('/') || path.starts_with('\\')
+    {
+        return Err("Invalid file path".to_string());
+    }
+
+    // Validate commit message (interpolated into Subject header)
+    if commit_message.contains('\n') || commit_message.contains('\r') {
+        return Err("Commit message must not contain newline characters".to_string());
     }
 
     let (coordinate, _relay_hints) =

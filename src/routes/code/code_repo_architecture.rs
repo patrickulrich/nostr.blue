@@ -183,10 +183,11 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
         }
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
+        loading.set(true);
+        error.set(None);
+        repo_signal.set(None);
+        file_paths.set(Vec::new());
         spawn(async move {
-            loading.set(true);
-            error.set(None);
-
             let repo = match fetch_repository(&naddr).await {
                 Ok(r) => r,
                 Err(e) => {

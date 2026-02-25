@@ -55,6 +55,10 @@ pub fn NostrUserPicker(
         selected_index.set(0);
 
         if val.trim().is_empty() {
+            if let Some(task) = search_task.take() {
+                task.cancel();
+            }
+            is_searching.set(false);
             show_dropdown.set(false);
             results.set(Vec::new());
             return;
@@ -112,6 +116,7 @@ pub fn NostrUserPicker(
                 task.cancel();
             }
             let query_snapshot = val.clone();
+            let priority_snapshot = priority_pubkeys.clone();
             is_searching.set(true);
             let new_task = spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(300).await;
@@ -119,10 +124,16 @@ pub fn NostrUserPicker(
                     Ok(relay_results) => {
                         if *query.peek() == query_snapshot {
                             let selected_snapshot = selected.read().clone();
-                            let filtered: Vec<ProfileSearchResult> = relay_results
+                            let mut filtered: Vec<ProfileSearchResult> = relay_results
                                 .into_iter()
                                 .filter(|r| !selected_snapshot.contains(&r.pubkey.to_hex()))
                                 .collect();
+                            let priority_set: HashSet<&str> = priority_snapshot.iter().map(|s| s.as_str()).collect();
+                            filtered.sort_by(|a, b| {
+                                let a_pri = priority_set.contains(a.pubkey.to_hex().as_str());
+                                let b_pri = priority_set.contains(b.pubkey.to_hex().as_str());
+                                b_pri.cmp(&a_pri).then_with(|| b.relevance.cmp(&a.relevance))
+                            });
                             results.set(filtered);
                             is_searching.set(false);
                         }
@@ -232,6 +243,7 @@ pub fn NostrUserPicker(
                                     rsx! {
                                         button {
                                             key: "{hex}",
+                                            r#type: "button",
                                             class: if is_sel {
                                                 "w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent bg-accent transition"
                                             } else {
@@ -307,7 +319,9 @@ fn SelectedUserChip(pubkey: String, on_remove: EventHandler<MouseEvent>) -> Elem
             }
             span { "{display}" }
             button {
+                r#type: "button",
                 class: "ml-0.5 p-0.5 hover:bg-accent rounded-full transition text-muted-foreground hover:text-foreground",
+                aria_label: "Remove {display}",
                 onclick: move |evt| on_remove.call(evt),
                 svg {
                     class: "w-3 h-3",

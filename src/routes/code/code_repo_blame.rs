@@ -132,6 +132,7 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
                             path: split_path(&path),
                         },
                         class: "text-muted-foreground hover:text-foreground",
+                        aria_label: "Back to file",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",

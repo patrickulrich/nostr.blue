@@ -15,6 +15,7 @@ use crate::utils::validation::is_valid_http_url;
 use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::EventId;
+use std::collections::HashMap;
 /// Repository releases page component
 #[component]
 pub fn CodeRepoReleases(naddr: String) -> Element {
@@ -54,7 +55,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                 Ok(fetched) => {
                     if *request_gen.peek() != captured_gen { return; }
                     // Deduplicate by tag_name, keeping the newest release per tag
-                    let mut by_tag: std::collections::HashMap<String, Release> = std::collections::HashMap::new();
+                    let mut by_tag: HashMap<String, Release> = HashMap::new();
                     for release in fetched {
                         by_tag
                             .entry(release.tag_name.clone())
@@ -131,6 +132,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                     }
                     if can_create_release {
                         button {
+                            r#type: "button",
                             class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
                             onclick: move |_| {
                                 let current = *show_new_form.read();
@@ -271,11 +273,13 @@ fn ReleaseCard(
                 if can_edit {
                     div { class: "flex items-center gap-1 shrink-0",
                         button {
+                            r#type: "button",
                             class: "px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition rounded hover:bg-accent",
                             onclick: move |_| show_edit.set(true),
                             "Edit"
                         }
                         button {
+                            r#type: "button",
                             class: "px-2 py-1 text-xs text-muted-foreground hover:text-destructive transition rounded hover:bg-destructive/10",
                             onclick: move |_| show_delete_confirm.set(true),
                             "Delete"
@@ -291,6 +295,7 @@ fn ReleaseCard(
                     }
                     div { class: "flex gap-2",
                         button {
+                            r#type: "button",
                             class: "px-3 py-1.5 text-xs bg-destructive text-destructive-foreground rounded-lg disabled:opacity-50",
                             disabled: *is_deleting.read(),
                             onclick: {
@@ -324,6 +329,7 @@ fn ReleaseCard(
                             if *is_deleting.read() { "Deleting..." } else { "Delete" }
                         }
                         button {
+                            r#type: "button",
                             class: "px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent transition",
                             onclick: move |_| show_delete_confirm.set(false),
                             "Cancel"
@@ -540,6 +546,7 @@ fn EditReleaseForm(
                         }
                     }
                     button {
+                        r#type: "button",
                         class: "text-sm text-primary hover:underline",
                         onclick: move |_| {
                             let mut urls = asset_urls.read().clone();
@@ -562,6 +569,7 @@ fn EditReleaseForm(
             }
             div { class: "flex gap-2",
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
                     disabled: *is_publishing.read(),
                     onclick: handle_submit,
@@ -572,6 +580,7 @@ fn EditReleaseForm(
                     }
                 }
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition",
                     onclick: move |_| on_cancel.call(()),
                     "Cancel"
@@ -746,6 +755,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                         }
                     }
                     button {
+                        r#type: "button",
                         class: "text-sm text-primary hover:underline",
                         onclick: move |_| {
                             let mut urls = asset_urls.read().clone();
@@ -767,6 +777,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                 label { class: "text-sm", r#for: "prerelease", "This is a pre-release" }
             }
             button {
+                r#type: "button",
                 class: "px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition disabled:opacity-50",
                 disabled: *is_publishing.read(),
                 onclick: handle_submit,

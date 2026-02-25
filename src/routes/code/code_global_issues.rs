@@ -183,6 +183,7 @@ pub fn CodeGlobalIssues() -> Element {
                 }
                 div { class: "px-4 pb-3 flex gap-4",
                     button {
+                        r#type: "button",
                         class: if *active_tab.read() == FilterTab::Created {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {
@@ -192,6 +193,7 @@ pub fn CodeGlobalIssues() -> Element {
                         "Created"
                     }
                     button {
+                        r#type: "button",
                         class: if *active_tab.read() == FilterTab::Assigned {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {
@@ -203,6 +205,7 @@ pub fn CodeGlobalIssues() -> Element {
                 }
                 div { class: "px-4 pb-3 flex gap-2",
                     button {
+                        r#type: "button",
                         class: if *status_filter.read() == StatusFilter::Open {
                             "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
                         } else {
@@ -226,6 +229,7 @@ pub fn CodeGlobalIssues() -> Element {
                         "{open_count} Open"
                     }
                     button {
+                        r#type: "button",
                         class: if *status_filter.read() == StatusFilter::Closed {
                             "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
                         } else {
@@ -253,6 +257,7 @@ pub fn CodeGlobalIssues() -> Element {
             if !all_labels.read().is_empty() {
                 div { class: "px-4 pb-3 flex flex-wrap gap-2",
                     button {
+                        r#type: "button",
                         class: if label_filter.read().is_none() { "px-2 py-1 text-xs rounded-full bg-primary text-primary-foreground" } else { "px-2 py-1 text-xs rounded-full bg-accent text-accent-foreground hover:bg-accent/80" },
                         onclick: move |_| label_filter.set(None),
                         "All"
@@ -263,6 +268,7 @@ pub fn CodeGlobalIssues() -> Element {
                             rsx! {
                                 button {
                                     key: "{l}",
+                                    r#type: "button",
                                     class: if label_filter.read().as_deref() == Some(&l) { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 ring-1 ring-blue-400" } else { "px-2 py-1 text-xs rounded-full bg-blue-500/20 text-blue-400 hover:ring-1 hover:ring-blue-400/50" },
                                     onclick: {
                                         let l = l.clone();

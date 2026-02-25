@@ -16,6 +16,12 @@ fn extract_domain(url: &str) -> &str {
         .split(':')
         .next()
         .unwrap_or(url)
+        .split('?')
+        .next()
+        .unwrap_or(url)
+        .split('#')
+        .next()
+        .unwrap_or(url)
 }
 
 /// Sidebar widget displaying repository relays categorized by type
