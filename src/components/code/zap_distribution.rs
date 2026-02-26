@@ -16,7 +16,7 @@ use futures::future::{select, Either};
 #[derive(Clone, Debug)]
 struct ZapRecipient {
     pubkey: String,
-    weight: u32,
+    weight: u64,
     /// Calculated amount in sats
     amount: u64,
     /// Payment status
@@ -52,10 +52,11 @@ pub fn ZapDistribution(
     let mut send_total = use_signal(|| 0usize);
 
     // Deduplicate zap_splits by pubkey, summing weights for duplicates
-    let deduped_splits: Vec<(String, u32)> = {
-        let mut deduped: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let deduped_splits: Vec<(String, u64)> = {
+        let mut deduped: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for (pk, _, w) in &zap_splits {
-            *deduped.entry(pk.clone()).or_default() += w;
+            let entry = deduped.entry(pk.clone()).or_default();
+            *entry = entry.saturating_add(*w as u64);
         }
         deduped.into_iter().collect()
     };
@@ -69,8 +70,8 @@ pub fn ZapDistribution(
     // Pure allocation: largest-remainder method to avoid rounding loss
     let compute_allocations = {
         let deduped_splits = deduped_splits.clone();
-        move |pubkeys: &[String], amount: u64| -> Vec<(String, u32, u64)> {
-            let weights: Vec<u32> = pubkeys
+        move |pubkeys: &[String], amount: u64| -> Vec<(String, u64, u64)> {
+            let weights: Vec<u64> = pubkeys
                 .iter()
                 .map(|pk| {
                     deduped_splits
@@ -80,7 +81,7 @@ pub fn ZapDistribution(
                         .unwrap_or(1)
                 })
                 .collect();
-            let total_weight: u32 = weights.iter().sum();
+            let total_weight: u64 = weights.iter().sum();
             if total_weight == 0 || pubkeys.is_empty() {
                 return pubkeys.iter().map(|pk| (pk.clone(), 0, 0)).collect();
             }

@@ -195,7 +195,7 @@ fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
                                                         class: "w-3 h-3 rounded-sm {color}",
                                                     }
                                                     div {
-                                                        class: "absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-foreground text-background text-xs rounded opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition pointer-events-none whitespace-nowrap z-10",
+                                                        class: "absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-foreground text-background text-xs rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10",
                                                         "{c} {contribution_text} on {date_str}"
                                                     }
                                                 }

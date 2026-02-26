@@ -147,8 +147,8 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     return;
                 }
             };
+            let currently_starred = *is_starred.read();
             spawn(async move {
-                let currently_starred = *is_starred.read();
                 let result = if currently_starred {
                     remove_star(&coord).await
                 } else {

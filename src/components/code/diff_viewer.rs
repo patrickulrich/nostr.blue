@@ -340,6 +340,14 @@ pub fn DiffViewer(
                         }
                     }
                     div { class: "overflow-x-auto",
+                        {
+                            let file_key_for_comments = section.file_path.clone();
+                            let file_comments: HashMap<usize, &Vec<LineComment>> = comment_map
+                                .iter()
+                                .filter(|((f, _), _)| f == &file_key_for_comments)
+                                .map(|((_, ln), c)| (*ln, c))
+                                .collect();
+                            rsx! {
                         table { class: "w-full text-xs font-mono leading-5",
                             tbody {
                                 for (hunk_idx, hunk) in section_hunks[section_idx].iter().enumerate() {
@@ -406,12 +414,6 @@ pub fn DiffViewer(
                                             match current_mode {
                                                 DiffViewMode::Unified => {
                                                     let cached_file_path = section.file_path.clone();
-                                                    let file_key = cached_file_path.clone();
-                                                    let file_comments: HashMap<usize, &Vec<LineComment>> = comment_map
-                                                        .iter()
-                                                        .filter(|((f, _), _)| f == &file_key)
-                                                        .map(|((_, ln), c)| (*ln, c))
-                                                        .collect();
                                                     rsx! {
                                                     for (line_idx, diff_line) in hunk.lines.iter().enumerate() {
                                                         // The diff line row
@@ -440,7 +442,7 @@ pub fn DiffViewer(
                                                                             let line_num = diff_line.new_num.unwrap();
                                                                             rsx! {
                                                                                 button {
-                                                                                    class: "p-1 hover:bg-accent rounded transition text-primary opacity-0 group-hover:opacity-100 text-[10px] font-bold flex items-center justify-center",
+                                                                                    class: "p-1 hover:bg-accent rounded transition text-primary opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:ring-1 focus-visible:ring-primary text-[10px] font-bold flex items-center justify-center",
                                                                                     title: "Add line comment",
                                                                                     onclick: move |e| {
                                                                                         e.stop_propagation();
@@ -651,6 +653,8 @@ pub fn DiffViewer(
                                         }
                                     }
                                 }
+                            }
+                        }
                             }
                         }
                     }

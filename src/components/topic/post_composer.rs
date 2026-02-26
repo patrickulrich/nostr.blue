@@ -76,7 +76,11 @@ pub fn TopicPostComposer(
                 button {
                     class: "px-4 py-1.5 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition disabled:opacity-50",
                     disabled: content.read().trim().is_empty()
-                        || (!is_reply && topic_input.read().trim().is_empty())
+                        || (!is_reply && {
+                            let raw = topic_input.read().trim().to_string();
+                            let stripped = raw.strip_prefix('#').unwrap_or(&raw);
+                            !stripped.chars().any(|c| c.is_ascii_alphanumeric())
+                        })
                         || *submitting.read(),
                     onclick: move |_| {
                         let text = content.read().trim().to_string();

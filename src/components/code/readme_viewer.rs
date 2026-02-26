@@ -160,6 +160,7 @@ pub fn ReadmeViewer(
             if content.is_some() && !loading && error.is_none() {
                 let viewer_id = viewer_id.clone();
                 spawn(async move {
+                    // Allow DOM to settle before mermaid scans for nodes (initMermaidDiagrams/injectCodeBlockCopyButtons)
                     gloo_timers::future::TimeoutFuture::new(100).await;
                     initMermaidDiagrams(&viewer_id);
                     injectCodeBlockCopyButtons(&viewer_id);

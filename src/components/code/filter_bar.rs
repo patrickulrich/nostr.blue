@@ -63,6 +63,7 @@ pub fn FilterBar(
                 div { class: "flex border border-border rounded-lg overflow-hidden",
                     button {
                         r#type: "button",
+                        aria_pressed: if status_filter == StatusFilter::Open { "true" } else { "false" },
                         class: if status_filter == StatusFilter::Open {
                             "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
@@ -77,6 +78,7 @@ pub fn FilterBar(
                     }
                     button {
                         r#type: "button",
+                        aria_pressed: if status_filter == StatusFilter::Closed { "true" } else { "false" },
                         class: if status_filter == StatusFilter::Closed {
                             "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {
@@ -91,6 +93,7 @@ pub fn FilterBar(
                     }
                     button {
                         r#type: "button",
+                        aria_pressed: if status_filter == StatusFilter::All { "true" } else { "false" },
                         class: if status_filter == StatusFilter::All {
                             "px-3 py-2 text-sm font-medium bg-primary text-primary-foreground transition"
                         } else {

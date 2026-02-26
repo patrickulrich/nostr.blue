@@ -170,7 +170,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
     rsx! {
         if *show_help.read() {
             div {
-                class: "fixed inset-0 z-40 bg-black/50 backdrop-blur-sm",
+                class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
                 onclick: move |_| show_help.set(false),
 
                 div {

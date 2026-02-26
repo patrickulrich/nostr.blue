@@ -221,6 +221,7 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
                 if let Some(pos) = line.find(op) {
                     let name = line[..pos].trim();
                     let version = line[pos..].trim();
+                    let version = version.split('#').next().unwrap_or(version).trim();
                     found = Some((name.to_string(), version.to_string()));
                     break;
                 }
