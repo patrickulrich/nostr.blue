@@ -1087,7 +1087,7 @@ fn ConflictDetectionBanner(
                 checking.set(true);
                 spawn(async move {
                     let results = detect_conflicts(&r, &diff, &parent).await;
-                    if *detect_gen.peek() != gen { checking.set(false); return; }
+                    if *detect_gen.peek() != gen { return; }
                     conflicts.set(results);
                     checking.set(false);
                 });

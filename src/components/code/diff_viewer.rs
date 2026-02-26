@@ -868,7 +868,7 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
             let mut current_hunk_header: Option<String> = None;
             let mut current_hunk_lines: Vec<DiffLine> = Vec::new();
 
-            for dl in section.lines.drain(..) {
+            for dl in std::mem::take(&mut section.lines) {
                 if matches!(dl.kind, LineKind::Hunk) {
                     if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {
                         hunks.push(Hunk {

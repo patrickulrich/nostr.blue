@@ -63,6 +63,7 @@ struct GitHubCommitFile {
     additions: u32,
     deletions: u32,
     patch: Option<String>,
+    previous_filename: Option<String>,
 }
 
 /// Commit detail page component
@@ -355,7 +356,8 @@ async fn fetch_commit_detail(
     let (diff, diff_error) = if let Some(ref files) = json.files {
         let mut parts = Vec::new();
         for file in files {
-            parts.push(format!("diff --git a/{f} b/{f}", f = file.filename));
+            let old_name = file.previous_filename.as_deref().unwrap_or(&file.filename);
+            parts.push(format!("diff --git a/{} b/{}", old_name, file.filename));
             match file.status.as_str() {
                 "added" => {
                     parts.push("--- /dev/null".to_string());
@@ -366,7 +368,7 @@ async fn fetch_commit_detail(
                     parts.push("+++ /dev/null".to_string());
                 }
                 _ => {
-                    parts.push(format!("--- a/{}", file.filename));
+                    parts.push(format!("--- a/{}", old_name));
                     parts.push(format!("+++ b/{}", file.filename));
                 }
             }

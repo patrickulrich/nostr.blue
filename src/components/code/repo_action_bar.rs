@@ -291,10 +291,18 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                     // Normalize SCP-style URLs (user@host:path) to ssh://
                     if !url.contains("://") {
                         if let Some(at_pos) = url.find('@') {
-                            if let Some(colon_pos) = url[at_pos..].find(':') {
+                            let after_at = &url[at_pos + 1..];
+                            let colon_offset = if after_at.starts_with('[') {
+                                after_at.find(']').and_then(|bracket_end| {
+                                    after_at[bracket_end + 1..].find(':').map(|c| bracket_end + 1 + c)
+                                })
+                            } else {
+                                after_at.find(':')
+                            };
+                            if let Some(colon_pos) = colon_offset {
                                 let user = &url[..at_pos];
-                                let host = &url[at_pos + 1..at_pos + colon_pos];
-                                let path = &url[at_pos + colon_pos + 1..];
+                                let host = &after_at[..colon_pos];
+                                let path = &after_at[colon_pos + 1..];
                                 return format!("ssh://{}@{}/{}", user, host, path);
                             }
                         }

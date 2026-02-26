@@ -95,6 +95,7 @@ pub fn PRReviewSection(
     let mut review_body = use_signal(String::new);
     let mut reviews = use_signal(Vec::<PersistedReview>::new);
     let mut publish_error = use_signal(|| None::<String>);
+    let mut fetch_error = use_signal(|| None::<String>);
     let mut submitting = use_signal(|| false);
 
     // Fetch persisted reviews from relays on mount, with generation counter
@@ -108,6 +109,7 @@ pub fn PRReviewSection(
                 gen.set(current_gen);
                 reviews.set(Vec::new());
                 publish_error.set(None);
+                fetch_error.set(None);
                 show_form.set(false);
                 review_body.set(String::new());
                 spawn(async move {
@@ -139,6 +141,7 @@ pub fn PRReviewSection(
                         Err(e) => {
                             if *gen.peek() != current_gen { return; }
                             log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
+                            fetch_error.set(Some(format!("Failed to load reviews: {}", e)));
                         }
                     }
                 });
@@ -296,6 +299,12 @@ pub fn PRReviewSection(
                                 }
                             }
                         }
+                    }
+                }
+                // Fetch error display
+                if let Some(err) = fetch_error.read().as_ref() {
+                    div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
+                        "{err}"
                     }
                 }
                 // Review list

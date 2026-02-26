@@ -170,8 +170,10 @@ pub fn CodeNew() -> Element {
                 }
             }
 
-            let name_opt = if name_val.is_empty() { None } else { Some(name_val.as_str()) };
-            let desc_opt = if desc_val.is_empty() { None } else { Some(desc_val.as_str()) };
+            let name_trimmed = name_val.trim();
+            let name_opt = if name_trimmed.is_empty() { None } else { Some(name_trimmed) };
+            let desc_trimmed = desc_val.trim();
+            let desc_opt = if desc_trimmed.is_empty() { None } else { Some(desc_trimmed) };
 
             let topic_list: Vec<&str> = topics_val
                 .split(',')

@@ -112,7 +112,7 @@ pub fn TopicSidebar(
                 let mut trending: Vec<_> = discovered.iter()
                     .map(|(name, info)| (name.clone(), info.post_count))
                     .collect();
-                trending.sort_by(|a, b| b.1.cmp(&a.1));
+                trending.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
                 trending.truncate(10);
                 if !trending.is_empty() {
                     rsx! {

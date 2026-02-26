@@ -43,12 +43,12 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
     use_effect(use_reactive(&naddr, move |n| {
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
+        commits_result.set(None);
+        repo_result.set(None);
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
-        commits_result.set(None);
-        repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&n).await;
             if *request_gen.peek() != gen { return; }

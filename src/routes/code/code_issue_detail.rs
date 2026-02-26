@@ -148,10 +148,12 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let mut bounties = use_signal(Vec::<Bounty>::new);
     let mut bounties_gen = use_signal(|| 0u32);
     let mut bounties_error = use_signal(|| None::<String>);
+    let mut bounties_loading = use_signal(|| false);
     let issue_id_for_bounties = issue_id.clone();
     use_effect(use_reactive(&issue_id_for_bounties, move |id| {
         bounties.set(Vec::new()); // clear stale data
         bounties_error.set(None);
+        bounties_loading.set(true);
         let gen = bounties_gen.peek().wrapping_add(1);
         bounties_gen.set(gen);
         spawn(async move {
@@ -159,12 +161,14 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                 Ok(b) => {
                     if *bounties_gen.peek() == gen {
                         bounties.set(b);
+                        bounties_loading.set(false);
                     }
                 }
                 Err(e) => {
                     log::error!("Failed to fetch bounties: {e}");
                     if *bounties_gen.peek() == gen {
                         bounties_error.set(Some(format!("Failed to load bounties: {e}")));
+                        bounties_loading.set(false);
                     }
                 }
             }
@@ -406,6 +410,19 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                     if let Some(err) = bounties_error.read().as_ref() {
                         div { class: "p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
                             "{err}"
+                        }
+                    }
+
+                    // Bounty loading skeleton
+                    if *bounties_loading.read() && bounties.read().is_empty() {
+                        div { class: "bg-card border border-border rounded-lg",
+                            div { class: "px-4 py-3 border-b border-border bg-muted/30",
+                                h3 { class: "font-semibold text-sm", "Bounties" }
+                            }
+                            div { class: "p-4 space-y-3 animate-pulse",
+                                div { class: "h-4 bg-muted rounded w-2/3" }
+                                div { class: "h-4 bg-muted rounded w-1/2" }
+                            }
                         }
                     }
 
