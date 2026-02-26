@@ -116,7 +116,11 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
                         let k = k.trim();
                         let v = v.trim();
                         match k {
-                            "version" => ver = Some(v.trim_matches('"').to_string()),
+                            "version" => {
+                                let v = v.trim_end_matches('}').trim();
+                                let v = v.split('#').next().unwrap_or(v).trim();
+                                ver = Some(v.trim_matches('"').to_string());
+                            }
                             "optional" => {
                                 let v = v.trim_end_matches('}').trim();
                                 let v = v.split('#').next().unwrap_or(v).trim();
@@ -221,13 +225,14 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
             let line = line.trim();
             // Strip environment markers (PEP 508 "; python_version >= ..." etc.)
             let spec_part = line.split(';').next().unwrap_or(line).trim();
+            // Strip inline comments before operator matching (comments may contain >=, etc.)
+            let spec_clean = spec_part.split('#').next().unwrap_or(spec_part).trim();
             // Try each PEP 508 operator in order (longest first)
             let mut found = None;
             for op in PEP508_OPERATORS {
-                if let Some(pos) = spec_part.find(op) {
-                    let name = spec_part[..pos].trim();
-                    let version = spec_part[pos..].trim();
-                    let version = version.split('#').next().unwrap_or(version).trim();
+                if let Some(pos) = spec_clean.find(op) {
+                    let name = spec_clean[..pos].trim();
+                    let version = spec_clean[pos..].trim();
                     found = Some((name.to_string(), version.to_string()));
                     break;
                 }
@@ -239,7 +244,7 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
                     dep_type: DepType::Runtime,
                 },
                 None => Dependency {
-                    name: spec_part.split('#').next().unwrap_or(spec_part).trim().to_string(),
+                    name: spec_clean.to_string(),
                     version: "*".to_string(),
                     dep_type: DepType::Runtime,
                 },

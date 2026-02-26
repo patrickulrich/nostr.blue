@@ -175,7 +175,7 @@ pub fn ZapDistribution(
                 ).await {
                     Either::Left((Ok(inv), _)) => Ok(inv),
                     Either::Left((Err(e), _)) => Err(PaymentStatus::Failed(format!("{}", e))),
-                    Either::Right(_) => Err(PaymentStatus::Timeout("Invoice request timed out after 30s".to_string())),
+                    Either::Right(_) => Err(PaymentStatus::Failed("Invoice request timed out after 30s".to_string())),
                 };
                 match invoice_result {
                     Ok(invoice) => {

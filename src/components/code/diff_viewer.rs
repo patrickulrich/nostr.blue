@@ -59,14 +59,11 @@ fn parse_hunk_header(line: &str) -> Option<HunkHeader> {
     })
 }
 
-/// Check if content looks like a unified diff
+/// Check if content looks like a unified diff.
+/// Only accept git-style diffs since `parse_diff_content` opens sections on
+/// `diff --git` — plain unified patches would misparse without that boundary.
 fn is_diff_content(content: &str) -> bool {
-    content.lines().any(|line| {
-        line.starts_with("diff --git")
-            || line.starts_with("--- ")
-            || line.starts_with("+++ ")
-            || line.starts_with("@@ ")
-    })
+    content.lines().any(|line| line.starts_with("diff --git"))
 }
 
 /// Extract file path from a "diff --git a/path b/path" line.

@@ -192,6 +192,7 @@ fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
                                                     class: "group relative",
                                                     div {
                                                         class: "w-3 h-3 rounded-sm {color}",
+                                                        role: "img",
                                                         aria_label: "{c} {contribution_text} on {date_str}",
                                                     }
                                                     div {

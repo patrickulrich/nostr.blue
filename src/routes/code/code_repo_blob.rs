@@ -85,8 +85,9 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 }
             }
             if *gen.peek() != current_gen { return; }
-            if let Ok(branch_list) = git_service().get_branches(&repo).await {
-                if *gen.peek() != current_gen { return; }
+            let branch_result = git_service().get_branches(&repo).await;
+            if *gen.peek() != current_gen { return; }
+            if let Ok(branch_list) = branch_result {
                 branches.set(branch_list);
             }
             loading.set(false);

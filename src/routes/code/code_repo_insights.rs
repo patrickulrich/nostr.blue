@@ -442,7 +442,12 @@ fn TimelineRow(entry: TimelineEntry) -> Element {
                 dangerous_inner_html: type_icon,
             }
             // Status dot
-            span { class: "w-2 h-2 rounded-full shrink-0 {status_bg}" }
+            span {
+                class: "w-2 h-2 rounded-full shrink-0 {status_bg}",
+                role: "img",
+                aria_label: entry.status.label(),
+                title: entry.status.label(),
+            }
             // Content
             div { class: "flex-1 min-w-0",
                 div { class: "flex items-center gap-2",
