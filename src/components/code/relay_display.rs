@@ -9,8 +9,9 @@ use crate::stores::grasp_servers::is_grasp_server;
 /// Handles IPv6 addresses in brackets (e.g., "wss://[::1]:8080" -> "[::1]")
 fn extract_domain(url: &str) -> &str {
     let host = url
-        .trim_start_matches("wss://")
-        .trim_start_matches("ws://")
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(url)
         .trim_end_matches('/')
         .split('/')
         .next()

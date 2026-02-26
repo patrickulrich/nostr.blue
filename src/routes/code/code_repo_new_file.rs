@@ -357,6 +357,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                                 "px-6 py-2.5 bg-primary/50 text-primary-foreground/50 rounded-lg font-medium flex items-center gap-2 cursor-not-allowed"
                             }
                         },
+                        r#type: "button",
                         disabled: !can_submit,
                         onclick: handle_submit,
                         if *submitting.read() {
