@@ -1,5 +1,26 @@
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use nostr_sdk::Timestamp;
+
+/// Format a commit date string (typically RFC 3339) to a relative time.
+/// Falls back to the date portion if parsing fails.
+pub fn format_commit_date(date_str: &str) -> String {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+        let ts = dt.timestamp();
+        if ts >= 0 {
+            return format_time_ago(ts as u64);
+        }
+        // Pre-1970 timestamps would wrap when cast to u64; return the date part instead
+        if let Some(date_part) = date_str.split('T').next() {
+            return date_part.to_string();
+        }
+        return date_str.to_string();
+    }
+    // Fallback: try extracting date-only portion
+    if let Some(date_part) = date_str.split('T').next() {
+        return date_part.to_string();
+    }
+    date_str.to_string()
+}
 /// Format a Unix timestamp as relative time (e.g., "2h ago", "3d ago")
 ///
 /// This version takes a raw `u64` timestamp and is WASM-compatible,

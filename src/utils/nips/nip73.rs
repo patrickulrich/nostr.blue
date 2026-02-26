@@ -58,7 +58,7 @@ pub fn get_explorer_url(content: &ExternalContentId) -> Option<String> {
     match content {
         ExternalContentId::Url(url) => Some(url.to_string()),
         ExternalContentId::Hashtag(tag) => {
-            Some(format!("https://nostr.band/?q=%23{}", tag))
+            Some(format!("/topics/t/{}", tag))
         }
         ExternalContentId::Book(isbn) => {
             Some(format!("https://openlibrary.org/isbn/{}", isbn))

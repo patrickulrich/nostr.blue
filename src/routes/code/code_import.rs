@@ -100,6 +100,7 @@ pub fn CodeImport() -> Element {
                 } else {
                     Some(description.as_str())
                 };
+                let topics: Vec<&str> = repo.topics.iter().map(|t| t.as_str()).collect();
                 match publish_repository(
                         &id,
                         name_opt,
@@ -108,6 +109,7 @@ pub fn CodeImport() -> Element {
                         &web_urls,
                         &relays,
                         &[],
+                        &topics,
                     )
                     .await
                 {

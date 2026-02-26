@@ -4,15 +4,18 @@
 //! Uses isomorphic-git Web Worker for git operations.
 use crate::routes::Route;
 use crate::services::git_worker::FileEntry;
-use dioxus::prelude::*;
-/// Encode path segments individually to preserve slashes in the URL.
-/// This avoids encoding the path separator, which would break routing.
-fn encode_path_segments(path: &str) -> String {
-    path.split('/')
-        .map(|segment| urlencoding::encode(segment).into_owned())
-        .collect::<Vec<_>>()
-        .join("/")
+/// Split a slash-separated path string into route segments
+pub fn split_path(path: &str) -> Vec<String> {
+    if path.is_empty() {
+        Vec::new()
+    } else {
+        path.split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    }
 }
+use dioxus::prelude::*;
 /// Get static padding class for tree depth (Tailwind requires static classes)
 /// Clamps at depth 4 (pl-20) to prevent excessive indentation for deeply nested directories
 fn get_indent_class(depth: usize) -> &'static str {
@@ -89,18 +92,17 @@ pub fn FileTreeEntry(
 ) -> Element {
     let indent_class = get_indent_class(depth);
     let is_dir = entry.is_directory();
-    let encoded_path = encode_path_segments(&entry.path);
     let route = if is_dir {
         Route::CodeRepoTree {
             naddr: naddr.clone(),
             git_ref: git_ref.clone(),
-            path: encoded_path,
+            path: split_path(&entry.path),
         }
     } else {
         Route::CodeRepoBlob {
             naddr: naddr.clone(),
             git_ref: git_ref.clone(),
-            path: encoded_path,
+            path: split_path(&entry.path),
         }
     };
     rsx! {
@@ -162,20 +164,16 @@ pub fn CodeFileTree(
         div { class: "divide-y divide-border/50",
             if !current_path.is_empty() {
                 {
-                    let decoded_current = urlencoding::decode(&current_path)
-                        .map(|s| s.into_owned())
-                        .unwrap_or_else(|_| current_path.clone());
-                    let parent_path = decoded_current
+                    let parent_path = current_path
                         .rsplit_once('/')
                         .map(|(p, _)| p.to_string())
                         .unwrap_or_default();
-                    let encoded_parent_path = encode_path_segments(&parent_path);
                     rsx! {
                         Link {
                             to: Route::CodeRepoTree {
                                 naddr: naddr.clone(),
                                 git_ref: git_ref.clone(),
-                                path: encoded_parent_path,
+                                path: split_path(&parent_path),
                             },
                             class: "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition rounded text-muted-foreground",
                             svg {
@@ -211,17 +209,14 @@ pub fn CodeFileTree(
 /// Breadcrumb navigation for file path
 #[component]
 pub fn FilePathBreadcrumb(naddr: String, git_ref: String, path: String) -> Element {
-    let decoded_path = urlencoding::decode(&path)
-        .map(|s| s.into_owned())
-        .unwrap_or_else(|_| path.clone());
-    let parts: Vec<&str> = decoded_path.split('/').filter(|s| !s.is_empty()).collect();
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     rsx! {
         nav { class: "flex items-center gap-1 text-sm overflow-x-auto hide-scrollbar",
             Link {
                 to: Route::CodeRepoTree {
                     naddr: naddr.clone(),
                     git_ref: git_ref.clone(),
-                    path: "".to_string(),
+                    path: vec![],
                 },
                 class: "text-blue-400 hover:underline shrink-0",
                 "root"
@@ -229,7 +224,6 @@ pub fn FilePathBreadcrumb(naddr: String, git_ref: String, path: String) -> Eleme
             for (i , part) in parts.iter().enumerate() {
                 {
                     let accumulated_path = parts[..=i].join("/");
-                    let encoded_accumulated_path = encode_path_segments(&accumulated_path);
                     let is_last = i == parts.len() - 1;
                     rsx! {
                         span { key: "sep-{i}", class: "text-muted-foreground shrink-0", "/" }
@@ -241,7 +235,7 @@ pub fn FilePathBreadcrumb(naddr: String, git_ref: String, path: String) -> Eleme
                                 to: Route::CodeRepoTree {
                                     naddr: naddr.clone(),
                                     git_ref: git_ref.clone(),
-                                    path: encoded_accumulated_path,
+                                    path: split_path(&accumulated_path),
                                 },
                                 class: "text-blue-400 hover:underline truncate",
                                 "{part}"
@@ -262,10 +256,6 @@ pub fn BranchSelector(
     path: String,
 ) -> Element {
     let mut is_open = use_signal(|| false);
-    let decoded_path = urlencoding::decode(&path)
-        .map(|s| s.into_owned())
-        .unwrap_or_else(|_| path.clone());
-    let encoded_path = encode_path_segments(&decoded_path);
     rsx! {
         div { class: "relative",
             button {
@@ -321,7 +311,7 @@ pub fn BranchSelector(
                                     to: Route::CodeRepoTree {
                                         naddr: naddr.clone(),
                                         git_ref: branch.clone(),
-                                        path: encoded_path.clone(),
+                                        path: split_path(&path),
                                     },
                                     onclick: move |_| is_open.set(false),
                                     class: if *branch == current_ref { "flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground" } else { "flex items-center gap-2 px-3 py-1.5 hover:bg-accent/50 transition" },

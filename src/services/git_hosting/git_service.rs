@@ -5,7 +5,8 @@
 //!
 //! This service wraps GitWorkerManager and provides Repository-aware methods
 //! that handle clone URL selection.
-use crate::services::git_worker::{FileEntry, GitWorkerManager};
+#![allow(dead_code)]
+use crate::services::git_worker::{CommitEntry, FileEntry, GitWorkerManager};
 use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
 /// Git Service for repository operations
@@ -102,10 +103,84 @@ impl GitService {
         let dir = self.ensure_cloned(repo).await?;
         GitWorkerManager::get_branches(&dir).await
     }
+    /// Get commit log
+    pub async fn get_log(
+        &self,
+        repo: &Repository,
+        git_ref: Option<&str>,
+        count: u32,
+    ) -> Result<Vec<CommitEntry>, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        let git_ref = git_ref.unwrap_or("HEAD");
+        GitWorkerManager::get_log(&dir, git_ref, count).await
+    }
+    /// List all file paths recursively (flat list for fuzzy finder)
+    pub async fn list_all_files(
+        &self,
+        repo: &Repository,
+        git_ref: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        let git_ref = git_ref.unwrap_or("HEAD");
+        GitWorkerManager::list_all_paths(&dir, git_ref).await
+    }
+    /// Compare two refs and generate a unified diff
+    ///
+    /// Tries local isomorphic-git diff first, falls back to GitHub API.
+    pub async fn compare_refs(
+        &self,
+        repo: &Repository,
+        base: &str,
+        head: &str,
+    ) -> Result<String, String> {
+        let dir = self.ensure_cloned(repo).await?;
+        match GitWorkerManager::diff_refs(&dir, base, head).await {
+            Ok(diff) => Ok(diff),
+            Err(_) => compare_refs_github(repo, base, head).await,
+        }
+    }
 }
 /// Global git service instance
 static GIT_SERVICE: std::sync::OnceLock<GitService> = std::sync::OnceLock::new();
 /// Get the global git service instance
 pub fn git_service() -> &'static GitService {
     GIT_SERVICE.get_or_init(GitService::new)
+}
+/// Compare two refs using GitHub API
+///
+/// Returns the diff content as a string. Only works for GitHub-hosted repositories.
+pub async fn compare_refs_github(
+    repo: &Repository,
+    base: &str,
+    head: &str,
+) -> Result<String, String> {
+    let (owner, repo_name) = extract_github_info(repo).ok_or("Not a GitHub repository")?;
+    let encoded_base = urlencoding::encode(base);
+    let encoded_head = urlencoding::encode(head);
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/compare/{}...{}",
+        owner, repo_name, encoded_base, encoded_head
+    );
+    let resp = gloo_net::http::Request::get(&url)
+        .header("Accept", "application/vnd.github.v3.diff")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if resp.status() != 200 {
+        return Err(format!("GitHub API returned status {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))
+}
+/// Extract owner and repo name from a Repository's GitHub URLs
+pub(crate) fn extract_github_info(repo: &Repository) -> Option<(String, String)> {
+    use super::github_import::parse_github_url;
+    for url in repo.web.iter().chain(repo.clone.iter()) {
+        if let Some(parts) = parse_github_url(url) {
+            return Some(parts);
+        }
+    }
+    None
 }

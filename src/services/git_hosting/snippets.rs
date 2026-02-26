@@ -66,11 +66,17 @@ pub async fn fetch_snippets_by_language(
     Ok(events.iter().filter_map(DisplaySnippet::from_event).collect())
 }
 /// Search snippets by text
+///
+/// When `query` is `None`, no `.search()` filter is applied — the relay returns
+/// all snippets up to `limit`, which is useful for filter-only queries.
 pub async fn search_snippets(
-    query: &str,
+    query: Option<&str>,
     limit: usize,
 ) -> Result<Vec<DisplaySnippet>, String> {
-    let filter = Filter::new().kind(Kind::CodeSnippet).search(query).limit(limit);
+    let mut filter = Filter::new().kind(Kind::CodeSnippet).limit(limit);
+    if let Some(q) = query {
+        filter = filter.search(q);
+    }
     let events = fetch_events_aggregated(filter, FETCH_TIMEOUT)
         .await
         .map_err(|e| format!("Failed to search snippets: {}", e))?;

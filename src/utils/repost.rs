@@ -82,6 +82,15 @@ pub fn process_events_to_feed_items(events: Vec<Event>) -> Vec<FeedItem> {
             if !is_reply {
                 feed_items.push(FeedItem::OriginalPost(event));
             }
+        } else if event.kind == Kind::Comment
+            && crate::stores::topic_store::is_topic_post(&event)
+        {
+            // Include topic posts (kind 1111 with NIP-73 hashtag I tags) in the feed
+            // Only root topic posts (not replies)
+            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+            if !is_reply {
+                feed_items.push(FeedItem::OriginalPost(event));
+            }
         }
     }
     feed_items.sort_by_key(|item| std::cmp::Reverse(item.sort_timestamp()));
