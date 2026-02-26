@@ -1,36 +1,74 @@
 //! New Issue Page
 //!
 //! Create a new NIP-34 Git issue (Kind 1621) for a repository.
+use crate::components::code::LabelPicker;
 use crate::components::icons;
 use crate::routes::Route;
-use crate::services::git_hosting::{fetch_repository, publish_issue_by_naddr};
+use crate::services::git_hosting::{fetch_repo_issues, fetch_repository, publish_issue_by_naddr};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+use std::collections::HashSet;
 /// New issue page component
 #[component]
 pub fn CodeIssueNew(naddr: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut title = use_signal(String::new);
     let mut content = use_signal(String::new);
-    let mut labels = use_signal(String::new);
+    let mut selected_labels = use_signal(Vec::<String>::new);
+    let mut existing_labels = use_signal(Vec::<String>::new);
+    let mut assignees_input = use_signal(String::new);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut loading = use_signal(|| true);
     let nav = use_navigator();
     let naddr_for_effect = naddr.clone();
+    let naddr_for_labels = naddr.clone();
+    let mut repo_gen = use_signal(|| 0u32);
     use_effect(move || {
         let n = naddr_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        if !auth_store::AUTH_STATE.read().is_authenticated {
+            return;
+        }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
-            loading.set(true);
             let result = fetch_repository(&n).await;
-            repo_result.set(Some(result));
-            loading.set(false);
+            if *repo_gen.peek() == gen {
+                repo_result.set(Some(result));
+            }
+        });
+    });
+    // Fetch existing labels from repo issues for suggestions
+    let mut labels_gen = use_signal(|| 0u32);
+    use_effect(move || {
+        let n = naddr_for_labels.clone();
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            return;
+        }
+        if !auth_store::AUTH_STATE.read().is_authenticated {
+            return;
+        }
+        let gen = labels_gen.peek().wrapping_add(1);
+        labels_gen.set(gen);
+        existing_labels.set(vec![]);
+        spawn(async move {
+            if let Ok(issues) = fetch_repo_issues(&n).await {
+                if *labels_gen.peek() != gen { return; }
+                let mut labels: Vec<String> = issues
+                    .iter()
+                    .flat_map(|i| i.labels.clone())
+                    .collect();
+                labels.sort();
+                labels.dedup();
+                existing_labels.set(labels);
+            }
         });
     });
     if !auth.is_authenticated {
@@ -41,28 +79,49 @@ pub fn CodeIssueNew(naddr: String) -> Element {
     let handle_submit = {
         let naddr = naddr.clone();
         move |_| {
+            if *is_publishing.peek() { return; }
             let title_val = title.read().clone();
             let content_val = content.read().clone();
-            let labels_val = labels.read().clone();
+            let labels_val = selected_labels.read().clone();
+            let assignees_val = assignees_input.read().clone();
             let naddr = naddr.clone();
+            if content_val.trim().is_empty() {
+                error_message.set(Some("Please describe the issue".to_string()));
+                return;
+            }
+            is_publishing.set(true);
+            error_message.set(None);
             spawn(async move {
-                if content_val.trim().is_empty() {
-                    error_message.set(Some("Please describe the issue".to_string()));
-                    return;
-                }
-                is_publishing.set(true);
-                error_message.set(None);
-                let label_list: Vec<&str> = if labels_val.is_empty() {
+                let label_list: Vec<&str> = labels_val.iter().map(|s| s.as_str()).collect();
+                let assignee_list: Vec<&str> = if assignees_val.is_empty() {
                     vec![]
                 } else {
-                    labels_val.split(',').map(|s| s.trim()).collect()
+                    assignees_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
+                let mut seen = HashSet::new();
+                let mut canonical_assignees: Vec<String> = Vec::new();
+                for a in &assignee_list {
+                    match nostr_sdk::PublicKey::parse(a) {
+                        Ok(pk) => {
+                            let hex = pk.to_hex();
+                            if seen.insert(hex.clone()) {
+                                canonical_assignees.push(hex);
+                            }
+                        }
+                        Err(_) => {
+                            error_message.set(Some(format!("Invalid assignee pubkey: {}", a)));
+                            is_publishing.set(false);
+                            return;
+                        }
+                    }
+                }
                 let subject = if title_val.is_empty() {
                     None
                 } else {
                     Some(title_val.as_str())
                 };
-                match publish_issue_by_naddr(&naddr, subject, &content_val, &label_list)
+                let canonical_refs: Vec<&str> = canonical_assignees.iter().map(|s| s.as_str()).collect();
+                match publish_issue_by_naddr(&naddr, subject, &content_val, &label_list, &canonical_refs)
                     .await
                 {
                     Ok(event_id) => {
@@ -92,6 +151,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                                 naddr: naddr.clone(),
                             },
                             class: "text-muted-foreground hover:text-foreground",
+                            aria_label: "Back to repository",
                             dangerous_inner_html: icons::ARROW_LEFT,
                         }
                         h1 { class: "text-xl font-bold flex items-center gap-2",
@@ -228,14 +288,25 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                         "Labels "
                         span { class: "text-muted-foreground font-normal", "(optional)" }
                     }
+                    LabelPicker {
+                        selected_labels: selected_labels.read().clone(),
+                        on_change: move |labels: Vec<String>| selected_labels.set(labels),
+                        existing_labels: existing_labels.read().clone(),
+                    }
+                }
+                div {
+                    label { class: "block text-sm font-medium mb-2",
+                        "Assignees "
+                        span { class: "text-muted-foreground font-normal", "(optional)" }
+                    }
                     input {
                         class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
-                        placeholder: "e.g., bug, enhancement, documentation",
-                        value: "{labels}",
-                        oninput: move |e| labels.set(e.value()),
+                        placeholder: "Pubkeys (hex or npub), comma separated",
+                        value: "{assignees_input}",
+                        oninput: move |e| assignees_input.set(e.value()),
                     }
-                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated list of labels" }
+                    p { class: "text-xs text-muted-foreground mt-1", "Comma-separated pubkeys (hex or npub) of people to assign" }
                 }
             }
         }

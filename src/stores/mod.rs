@@ -23,6 +23,7 @@ pub use social::reactions_store;
 pub use social::dms;
 pub use social::p2p_store;
 pub use social::pin_boards_store;
+pub use social::topic_store;
 
 pub mod media;
 pub use media::blossom_store;

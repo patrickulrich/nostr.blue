@@ -1,39 +1,91 @@
 //! Repository Issues Page
 //!
-//! View issues for a repository.
-//! Follows patterns from code_issue_detail.rs and gittr design.
+//! View issues for a repository with filtering by status, search, and labels.
+use crate::components::code::{FilterBar, StatusFilter, filter_issues};
 use crate::components::{icons, CodeIssueRow};
 use crate::routes::Route;
 use crate::services::git_hosting::fetch_repo_issues;
 use crate::stores::nostr_client;
+use crate::utils::nip34::IssueStatus;
 use dioxus::prelude::*;
+
 /// Repository issues page component
 #[component]
 pub fn CodeRepoIssues(naddr: String) -> Element {
-    let mut issues = use_signal(Vec::new);
+    let mut all_issues = use_signal(Vec::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let naddr_for_effect = naddr.clone();
-    use_effect(move || {
-        let n = naddr_for_effect.clone();
+    let mut status_filter = use_signal(|| StatusFilter::Open);
+    let mut search_query = use_signal(String::new);
+    let mut selected_labels = use_signal(Vec::<String>::new);
+    let mut fetch_gen = use_signal(|| 0u32);
+
+    use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = fetch_gen.peek().wrapping_add(1);
+        fetch_gen.set(gen);
+        all_issues.set(Vec::new());
+        selected_labels.set(Vec::new());
+        status_filter.set(StatusFilter::Open);
+        search_query.set(String::new());
+        error.set(None);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
             match fetch_repo_issues(&n).await {
                 Ok(fetched) => {
-                    issues.set(fetched);
+                    if *fetch_gen.peek() != gen { return; }
+                    all_issues.set(fetched);
                     error.set(None);
                 }
                 Err(e) => {
+                    if *fetch_gen.peek() != gen { return; }
                     error.set(Some(e));
                 }
             }
             loading.set(false);
         });
+    }));
+
+    // Derive filtered list (memoized)
+    let filtered = use_memo(move || {
+        let issues = all_issues.read();
+        let status = *status_filter.read();
+        let query = search_query.read().clone();
+        let labels = selected_labels.read().clone();
+        filter_issues(&issues, status, &query, &labels)
     });
+
+    // Count open/closed for tabs (memoized)
+    let open_count = use_memo(move || {
+        all_issues
+            .read()
+            .iter()
+            .filter(|i| i.status == IssueStatus::Open || i.status == IssueStatus::Draft)
+            .count()
+    });
+    let closed_count = use_memo(move || {
+        all_issues
+            .read()
+            .iter()
+            .filter(|i| i.status == IssueStatus::Closed || i.status == IssueStatus::Applied)
+            .count()
+    });
+
+    // Collect unique labels for filter chips (memoized)
+    let available_labels = use_memo(move || {
+        let mut labels: Vec<String> = all_issues
+            .read()
+            .iter()
+            .flat_map(|i| i.labels.clone())
+            .collect();
+        labels.sort_by_key(|a| a.to_ascii_lowercase());
+        labels.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        labels
+    });
+
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -66,7 +118,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                             }
                             p { class: "text-sm text-muted-foreground",
                                 if !*loading.read() {
-                                    "{issues.read().len()} issues"
+                                    "{all_issues.read().len()} issues"
                                 }
                             }
                         }
@@ -139,12 +191,37 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                     }
                 } else if *loading.read() {
                     LoadingSkeleton {}
-                } else if issues.read().is_empty() {
-                    EmptyIssues {}
                 } else {
-                    div { class: "border border-border rounded-lg divide-y divide-border",
-                        for issue in issues.read().iter() {
-                            CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
+                    FilterBar {
+                        status_filter: *status_filter.read(),
+                        on_status_change: move |s| status_filter.set(s),
+                        search_query: search_query.read().clone(),
+                        on_search_change: move |q| search_query.set(q),
+                        open_count: open_count(),
+                        closed_count: closed_count(),
+                        available_labels: available_labels(),
+                        selected_labels: selected_labels.read().clone(),
+                        on_label_toggle: move |label: String| {
+                            let mut labels = selected_labels.write();
+                            if labels.contains(&label) {
+                                labels.retain(|l| *l != label);
+                            } else {
+                                labels.push(label);
+                            }
+                        },
+                    }
+                    {
+                        let filtered_issues = filtered();
+                        if filtered_issues.is_empty() {
+                            rsx! { EmptyIssues { has_filters: !search_query.read().is_empty() || !selected_labels.read().is_empty() || *status_filter.read() != StatusFilter::Open } }
+                        } else {
+                            rsx! {
+                                div { class: "border border-border rounded-lg divide-y divide-border",
+                                    for issue in filtered_issues.iter() {
+                                        CodeIssueRow { key: "{issue.event_id}", issue: issue.clone() }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -153,7 +230,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
     }
 }
 #[component]
-fn EmptyIssues() -> Element {
+fn EmptyIssues(has_filters: bool) -> Element {
     rsx! {
         div { class: "text-center py-12",
             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
@@ -183,8 +260,20 @@ fn EmptyIssues() -> Element {
                     }
                 }
             }
-            h3 { class: "font-semibold text-lg mb-2", "No Issues" }
-            p { class: "text-muted-foreground text-sm", "This repository has no open issues." }
+            h3 { class: "font-semibold text-lg mb-2",
+                if has_filters {
+                    "No Matching Issues"
+                } else {
+                    "No Issues Yet"
+                }
+            }
+            p { class: "text-muted-foreground text-sm",
+                if has_filters {
+                    "No issues match the current filters."
+                } else {
+                    "No issues have been created for this repository."
+                }
+            }
         }
     }
 }
