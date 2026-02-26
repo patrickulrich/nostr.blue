@@ -110,6 +110,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                                 }
                             }
                             if !found {
+                                if *request_id.peek() != current_id { return; }
                                 let msg = if parsed_any && !last_err.is_empty() {
                                     last_err
                                 } else {
@@ -119,6 +120,7 @@ pub fn CodeRepoCommit(naddr: String, sha: String) -> Element {
                             }
                         }
                         Err(e) => {
+                            if *request_id.peek() != current_id { return; }
                             commit_result
                                 .set(Some(Err(format!("Failed to fetch repository: {}", e))));
                         }

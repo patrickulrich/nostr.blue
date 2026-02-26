@@ -16,7 +16,7 @@ pub fn TopicSidebar(
     let loading = *LOADING_SUBSCRIPTIONS.read();
     let current_route = use_route::<Route>();
 
-    let home_class = if current_topic.is_none() {
+    let home_class = if matches!(current_route, Route::TopicsHome {}) {
         "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
     } else {
         "px-4 py-2 text-sm rounded-full hover:bg-accent transition"

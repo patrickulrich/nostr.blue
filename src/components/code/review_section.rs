@@ -212,6 +212,7 @@ pub fn PRReviewSection(
                         current.retain(|r| !(r.pubkey == saved_pubkey && r.content == saved_content && r.event_id.is_empty()));
                         if let Some(prior) = prior_review {
                             current.push(prior);
+                            current.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                         }
                         drop(current);
                         // Restore form so user can retry
@@ -278,10 +279,12 @@ pub fn PRReviewSection(
                 if let Some(required) = required_approvals {
                     if required > 0 {
                         {
-                            let met = approve_count >= required as usize;
+                            let met = approve_count >= required as usize && changes_count == 0;
                             rsx! {
-                                div { class: if met { "text-xs text-green-500 flex items-center gap-1" } else { "text-xs text-muted-foreground flex items-center gap-1" },
-                                    if met {
+                                div { class: if changes_count > 0 { "text-xs text-orange-500 flex items-center gap-1" } else if met { "text-xs text-green-500 flex items-center gap-1" } else { "text-xs text-muted-foreground flex items-center gap-1" },
+                                    if changes_count > 0 {
+                                        "Changes requested ({changes_count} outstanding)"
+                                    } else if met {
                                         "Required approvals met ({approve_count}/{required})"
                                     } else {
                                         "Requires {required} approval(s), has {approve_count}"

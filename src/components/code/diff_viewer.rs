@@ -296,12 +296,20 @@ pub fn DiffViewer(
                 div { class: "bg-muted rounded-lg overflow-hidden p-1",
                     button {
                         class: if current_mode == DiffViewMode::Unified { "px-3 py-1.5 text-xs bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
-                        onclick: move |_| view_mode.set(DiffViewMode::Unified),
+                        onclick: move |_| {
+                            active_comment_line.set(None);
+                            comment_text.set(String::new());
+                            view_mode.set(DiffViewMode::Unified);
+                        },
                         "Unified"
                     }
                     button {
                         class: if current_mode == DiffViewMode::SideBySide { "px-3 py-1.5 text-xs bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
-                        onclick: move |_| view_mode.set(DiffViewMode::SideBySide),
+                        onclick: move |_| {
+                            active_comment_line.set(None);
+                            comment_text.set(String::new());
+                            view_mode.set(DiffViewMode::SideBySide);
+                        },
                         "Side by Side"
                     }
                 }

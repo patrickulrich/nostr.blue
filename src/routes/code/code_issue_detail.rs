@@ -108,6 +108,7 @@ pub fn CodeIssueDetail(note_id: String) -> Element {
 fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> Element {
     let issue_id = issue.event_id.clone();
     let issue_pubkey = issue.pubkey.clone();
+    let repo_naddr_for_bounty = issue.repository_naddr.clone();
     let mut display_status = use_signal(|| issue.status);
     use_effect(use_reactive(&issue.status, move |status| {
         display_status.set(status);
@@ -130,9 +131,14 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
             return;
         }
         spawn(async move {
-            if let Ok(r) = fetch_repository(&naddr).await {
-                if *repo_gen.peek() == gen {
-                    repo.set(Some(r));
+            match fetch_repository(&naddr).await {
+                Ok(r) => {
+                    if *repo_gen.peek() == gen {
+                        repo.set(Some(r));
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch repository {}: {}", naddr, e);
                 }
             }
         });
@@ -439,6 +445,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                             let b_eid = bounty_eid.clone();
                                                             let i_eid = issue_eid.clone();
                                                             let b_amount = bounty_amount;
+                                                            let repo_naddr = repo_naddr_for_bounty.clone();
                                                             move |_| {
                                                                 if claiming_bounty.read().is_some() {
                                                                     return;
@@ -446,6 +453,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 claiming_bounty.set(Some(b_eid.clone()));
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
+                                                                let repo_naddr = repo_naddr.clone();
                                                                 spawn(async move {
                                                                     let b_id = match nostr_sdk::EventId::from_hex(&b) {
                                                                         Ok(id) => id,
@@ -463,7 +471,8 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             return;
                                                                         }
                                                                     };
-                                                                    if let Err(e) = claim_bounty(b_id, i_id, b_amount, None).await {
+                                                                    let repo_coord = crate::utils::nip34::decode_naddr(&repo_naddr).ok();
+                                                                    if let Err(e) = claim_bounty(b_id, i_id, b_amount, repo_coord.as_ref()).await {
                                                                         bounty_error.set(Some(format!("Failed to claim bounty: {}", e)));
                                                                     } else {
                                                                         bounty_error.set(None);
@@ -490,6 +499,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                             let i_eid = issue_eid.clone();
                                                             let amount = bounty_amount;
                                                             let claimer = bounty.claimer.clone();
+                                                            let repo_naddr = repo_naddr_for_bounty.clone();
                                                             move |_| {
                                                                 if claiming_bounty.read().is_some() {
                                                                     return;
@@ -498,6 +508,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
                                                                 let c = claimer.clone();
+                                                                let repo_naddr = repo_naddr.clone();
                                                                 spawn(async move {
                                                                     let c = match c {
                                                                         Some(ref c) if !c.is_empty() => c.clone(),
@@ -524,7 +535,8 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                             return;
                                                                         }
                                                                     };
-                                                                    match release_bounty(b_id, i_id, &c, amount, None).await {
+                                                                    let repo_coord = crate::utils::nip34::decode_naddr(&repo_naddr).ok();
+                                                                    match release_bounty(b_id, i_id, &c, amount, repo_coord.as_ref()).await {
                                                                         Ok(_) => {
                                                                             bounty_error.set(None);
                                                                             let gen_before = *bounties_gen.peek();

@@ -75,6 +75,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
     let mut submitting = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
+    let mut file_load_failed = use_signal(|| false);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
     let mut file_loading = use_signal(|| true);
@@ -100,6 +101,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                 commit_message.set(String::new());
                 repo_result.set(None);
                 error_message.set(None);
+                file_load_failed.set(false);
                 spawn(async move {
                     loading.set(true);
                     file_loading.set(true);
@@ -142,6 +144,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                                     }
                                     error_message
                                         .set(Some(format!("Failed to load file: {}", e)));
+                                    file_load_failed.set(true);
                                 }
                             }
                             file_loading.set(false);
@@ -196,6 +199,10 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
     let file_path_for_submit = file_path.clone();
     let handle_submit = move |_| {
         if *submitting.peek() {
+            return;
+        }
+        if *file_load_failed.peek() {
+            error_message.set(Some("Cannot submit: base file failed to load".to_string()));
             return;
         }
         let path_val = file_path_for_submit.clone();
@@ -398,11 +405,11 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
                     }
                 }
 
-                div { class: "p-4 bg-blue-500/10 rounded-lg border border-blue-500/20",
+                div { class: "p-4 bg-primary/10 rounded-lg border border-primary/20",
                     div { class: "flex items-start gap-3",
-                        div { class: "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0",
+                        div { class: "w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center shrink-0",
                             svg {
-                                class: "w-4 h-4 text-blue-500",
+                                class: "w-4 h-4 text-primary",
                                 xmlns: "http://www.w3.org/2000/svg",
                                 width: "24",
                                 height: "24",

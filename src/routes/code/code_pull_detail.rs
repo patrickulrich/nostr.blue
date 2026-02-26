@@ -141,7 +141,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
 
     // Fetch repository for permission checks
     let mut repo = use_signal(|| None::<Repository>);
-    let mut repo_gen = use_signal(|| 0u64);
+    let mut repo_gen = use_signal(|| 0u32);
     let repo_naddr = pr.repository_naddr.clone();
     use_effect(use_reactive(&repo_naddr, move |naddr| {
         let gen = repo_gen.peek().wrapping_add(1);
@@ -174,7 +174,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
 
     // Fetch reviews to check approval count
     // Generation counter bumped when a new review is submitted, causing use_resource to refetch
-    let mut reviews_gen = use_signal(|| 0u64);
+    let mut reviews_gen = use_signal(|| 0u32);
     let pr_id_for_reviews = pr_id.clone();
     let approval_status = use_resource(move || {
         let _ = reviews_gen.read();
@@ -881,7 +881,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                             naddr: pr.repository_naddr.clone(),
                                         },
                                         class: "text-sm text-primary hover:underline",
-                                        "{pr.repository_naddr.chars().take(30).collect::<String>()}..."
+                                        if pr.repository_naddr.chars().count() > 30 {
+                                            "{pr.repository_naddr.chars().take(30).collect::<String>()}..."
+                                        } else {
+                                            "{pr.repository_naddr}"
+                                        }
                                     }
                                 }
                             }
@@ -1063,7 +1067,6 @@ fn ConflictDetectionBanner(
     let short_parent = truncate_commit(&parent_commit);
     let mut conflicts = use_signal(Vec::<ConflictInfo>::new);
     let mut checking = use_signal(|| false);
-    let mut checked = use_signal(|| false);
     let mut show_details = use_signal(|| false);
     let mut detect_gen = use_signal(|| 0u32);
 
@@ -1075,7 +1078,6 @@ fn ConflictDetectionBanner(
             let gen = detect_gen.peek().wrapping_add(1);
             detect_gen.set(gen);
             conflicts.set(Vec::new());
-            checked.set(false);
             if diff.is_empty() {
                 return;
             }
@@ -1087,7 +1089,6 @@ fn ConflictDetectionBanner(
                     if *detect_gen.peek() != gen { return; }
                     conflicts.set(results);
                     checking.set(false);
-                    checked.set(true);
                 });
             }
         },

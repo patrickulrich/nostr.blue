@@ -18,7 +18,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeRepoInsights(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut repo_gen = use_signal(|| 0u64);
+    let mut repo_gen = use_signal(|| 0u32);
     let naddr_for_render = naddr.clone();
 
     use_effect(use_reactive(&naddr, move |naddr| {
@@ -95,7 +95,7 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
     let mut prs = use_signal(Vec::<PullRequest>::new);
     let mut commit_count = use_signal(|| None::<usize>);
     let mut data_loading = use_signal(|| true);
-    let mut request_gen = use_signal(|| 0u64);
+    let mut request_gen = use_signal(|| 0u32);
     let mut issues_error = use_signal(|| None::<String>);
     let mut prs_error = use_signal(|| None::<String>);
     let mut commits_error = use_signal(|| None::<String>);
@@ -120,7 +120,6 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
             match issues_result {
                 Ok(fetched) => issues.set(fetched),
                 Err(e) => {
-                    if *request_gen.peek() != gen { return; }
                     log::warn!("Failed to fetch issues: {}", e);
                     issues_error.set(Some(format!("Failed to fetch issues: {}", e)));
                     issues.set(Vec::new());
@@ -129,7 +128,6 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
             match prs_result {
                 Ok(fetched) => prs.set(fetched),
                 Err(e) => {
-                    if *request_gen.peek() != gen { return; }
                     log::warn!("Failed to fetch PRs: {}", e);
                     prs_error.set(Some(format!("Failed to fetch pull requests: {}", e)));
                     prs.set(Vec::new());
@@ -390,7 +388,7 @@ fn ActivityTimeline(issues: Vec<Issue>, prs: Vec<PullRequest>) -> Element {
     rsx! {
         div { class: "bg-card border border-border rounded-lg divide-y divide-border",
             for entry in entries.iter() {
-                TimelineRow { key: "{entry.kind:?}_{entry.pubkey}_{entry.created_at}", entry: entry.clone() }
+                TimelineRow { key: "{entry.kind:?}_{entry.pubkey}_{entry.created_at}_{entry.title}", entry: entry.clone() }
             }
         }
     }

@@ -39,7 +39,7 @@ enum CommitData {
 pub fn CodeRepoCommits(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut commits_result = use_signal(|| None::<Result<CommitData, String>>);
-    let mut request_gen = use_signal(|| 0u64);
+    let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {

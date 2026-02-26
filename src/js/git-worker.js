@@ -10,7 +10,11 @@ import { Buffer } from 'buffer';
 globalThis.Buffer = Buffer;
 
 function sanitizeFilepath(fp) {
-    return fp.replace(/[\u0000-\u001F\u007F]/g, '');
+    if (typeof fp !== 'string') fp = String(fp);
+    return fp.split('').filter(c => {
+        const code = c.charCodeAt(0);
+        return code > 0x1F && code !== 0x7F;
+    }).join('');
 }
 
 // Initialize virtual filesystem backed by IndexedDB
@@ -672,7 +676,11 @@ const methods = {
 
     let commitOid;
     try {
-      commitOid = await resolveRefWithFallback(dir, gitRef);
+      if (gitRef === 'HEAD') {
+        commitOid = await resolveRefWithFallback(dir, gitRef);
+      } else {
+        commitOid = await git.resolveRef({ fs, dir, ref: gitRef });
+      }
     } catch (e) {
       throw new Error(`Could not resolve ref '${gitRef}': ${e.message}`);
     }

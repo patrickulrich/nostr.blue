@@ -126,9 +126,9 @@ pub fn PollCard(
     let cancelled_for_loop = cancelled.clone();
 
     use_effect(use_reactive(&poll_data, move |pd| {
-        let Some(_poll) = pd.read().as_ref().cloned() else { return; };
-        let poll_id = event_id;
         let poll = pd.read().clone();
+        if poll.is_none() { return; }
+        let poll_id = event_id;
         let cancelled_for_loop = cancelled_for_loop.clone();
         // Increment generation counter before spawn to guard all mutations
         let current_vote_gen = vote_gen.peek().wrapping_add(1);
@@ -178,7 +178,7 @@ pub fn PollCard(
                         nostr_client::ensure_relays_ready(&client).await;
                     }
                     // New owned set = previously owned relays still in desired set + newly added
-                    let desired: std::collections::HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
+                    let desired: HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
                     let mut new_owned: Vec<nostr_sdk::RelayUrl> = old_owned
                         .iter()
                         .filter(|r| desired.contains(r))

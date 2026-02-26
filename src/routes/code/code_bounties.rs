@@ -57,7 +57,7 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
         .collect();
 
     // Fetch associated issue events in one batch
-    let mut issue_map: HashMap<String, Issue> = HashMap::new();
+    let mut issue_map: HashMap<EventId, Issue> = HashMap::new();
     if !issue_ids.is_empty() {
         let issue_filter = Filter::new()
             .ids(issue_ids)
@@ -66,7 +66,9 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
             Ok(issue_events) => {
                 for event in &issue_events {
                     if let Some(issue) = Issue::from_event(event) {
-                        issue_map.insert(issue.event_id.clone(), issue);
+                        if let Ok(eid) = EventId::from_hex(&issue.event_id) {
+                            issue_map.insert(eid, issue);
+                        }
                     }
                 }
             }
@@ -78,7 +80,7 @@ async fn fetch_all_bounties() -> Result<Vec<BountyListing>, String> {
 
     let mut listings = Vec::new();
     for bounty in bounties {
-        let issue = issue_map.get(&bounty.issue_event_id);
+        let issue = EventId::from_hex(&bounty.issue_event_id).ok().and_then(|eid| issue_map.get(&eid));
         let issue_title = issue.and_then(|i| i.subject.clone());
         let repo_name = issue.and_then(|i| {
             if i.repository_naddr.is_empty() {
@@ -120,8 +122,8 @@ pub fn CodeBounties() -> Element {
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
         error.set(None);
+        loading.set(true);
         spawn(async move {
-            loading.set(true);
             match fetch_all_bounties().await {
                 Ok(b) => { if *gen.peek() == current_gen { bounties.set(b); } }
                 Err(e) => { if *gen.peek() == current_gen { error.set(Some(e)); } }

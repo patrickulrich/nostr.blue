@@ -107,7 +107,7 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
             NotAuthenticatedState { naddr: naddr.clone() }
         };
     }
-    if !is_owner && repo_result.read().is_some() {
+    if !is_owner && matches!(repo_result.read().as_ref(), Some(Ok(_))) {
         return rsx! {
             NotOwnerState { naddr: naddr.clone() }
         };
@@ -192,7 +192,11 @@ pub fn CodeRepoSettings(naddr: String) -> Element {
                         let mut tag_values = vec![pk.to_hex()];
                         let relay_to_use = if relay.is_empty() { default_relay.clone() } else { relay.clone() };
                         if !relay_to_use.is_empty() {
-                            tag_values.push(relay_to_use);
+                            if RelayUrl::parse(&relay_to_use).is_ok() {
+                                tag_values.push(relay_to_use);
+                            } else if !default_relay.is_empty() && RelayUrl::parse(&default_relay).is_ok() {
+                                tag_values.push(default_relay.clone());
+                            }
                         }
                         tag_values.push(weight.to_string());
                         extra_tags.push(Tag::custom(

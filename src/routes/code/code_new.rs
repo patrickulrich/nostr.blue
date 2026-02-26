@@ -60,7 +60,7 @@ pub fn CodeNew() -> Element {
         }
         is_publishing.set(true);
 
-        let id_val = repo_id.read().clone();
+        let id_val = repo_id.read().trim().to_string();
         let name_val = name.read().clone();
         let desc_val = description.read().clone();
         let clone_val: Vec<String> = clone_urls.read().iter().map(|(_, s)| s.clone()).collect();
@@ -70,7 +70,7 @@ pub fn CodeNew() -> Element {
         let topics_val = topics_input.read().clone();
 
         spawn(async move {
-            if id_val.trim().is_empty() {
+            if id_val.is_empty() {
                 error_message.set(Some("Repository ID is required".to_string()));
                 is_publishing.set(false);
                 return;
@@ -113,10 +113,20 @@ pub fn CodeNew() -> Element {
                         } else { false }
                     } else { false }
                 } else { false };
-                if !is_scp_ssh && url::Url::parse(url).is_err() {
-                    error_message.set(Some(format!("Invalid clone URL: '{}'", url)));
-                    is_publishing.set(false);
-                    return;
+                if !is_scp_ssh {
+                    match url::Url::parse(url) {
+                        Ok(parsed) if ["http", "https", "git", "ssh"].contains(&parsed.scheme()) => {}
+                        Ok(_) => {
+                            error_message.set(Some(format!("Unsupported URL scheme in clone URL: '{}'", url)));
+                            is_publishing.set(false);
+                            return;
+                        }
+                        Err(_) => {
+                            error_message.set(Some(format!("Invalid clone URL: '{}'", url)));
+                            is_publishing.set(false);
+                            return;
+                        }
+                    }
                 }
             }
 
@@ -200,7 +210,8 @@ pub fn CodeNew() -> Element {
                         };
                         let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, pk)
                             .identifier(&id_val);
-                        match encode_repo_naddr(&coordinate, &[]) {
+                        let relay_urls: Vec<RelayUrl> = relay_list.iter().filter_map(|r| RelayUrl::parse(r).ok()).collect();
+                        match encode_repo_naddr(&coordinate, &relay_urls) {
                             Ok(naddr) => {
                                 nav.push(Route::CodeRepo { naddr });
                             }

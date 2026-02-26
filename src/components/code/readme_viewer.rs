@@ -10,9 +10,11 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(
     inline_js = r#"
-export function initMermaidDiagrams() {
+export function initMermaidDiagrams(rootId) {
+    const root = rootId ? document.getElementById(rootId) : document;
+    if (!root) return;
     // Find mermaid divs; skip if none present
-    const mermaidDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
+    const mermaidDivs = root.querySelectorAll('div.mermaid:not([data-processed])');
     if (mermaidDivs.length === 0) return;
 
     if (window.mermaid) {
@@ -45,7 +47,8 @@ export function initMermaidDiagrams() {
                 securityLevel: 'strict',
             });
             // Re-query to catch diagrams added while script was loading
-            const freshDivs = document.querySelectorAll('div.mermaid:not([data-processed])');
+            const reRoot = rootId ? document.getElementById(rootId) : document;
+            const freshDivs = reRoot ? reRoot.querySelectorAll('div.mermaid:not([data-processed])') : [];
             if (freshDivs.length === 0) return;
             const freshNodes = Array.from(freshDivs);
             window.mermaid.run({ nodes: freshNodes }).then(() => {
@@ -64,8 +67,10 @@ export function initMermaidDiagrams() {
     document.head.appendChild(script);
 }
 
-export function injectCodeBlockCopyButtons() {
-    document.querySelectorAll('pre:not([data-copy-injected])').forEach(pre => {
+export function injectCodeBlockCopyButtons(rootId) {
+    const root = rootId ? document.getElementById(rootId) : document;
+    if (!root) return;
+    root.querySelectorAll('pre:not([data-copy-injected])').forEach(pre => {
         const code = pre.querySelector('code');
         if (!code) return;
         pre.setAttribute('data-copy-injected', 'true');
@@ -73,29 +78,38 @@ export function injectCodeBlockCopyButtons() {
         const btn = document.createElement('button');
         btn.className = 'code-copy-btn';
         btn.setAttribute('aria-label', 'Copy code');
+        btn.setAttribute('tabindex', '0');
         btn.style.cssText = 'position:absolute;top:8px;right:8px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);color:rgba(255,255,255,0.7);cursor:pointer;opacity:0;transition:opacity 0.2s;font-size:12px;display:flex;align-items:center;gap:4px;backdrop-filter:blur(4px);z-index:1';
         btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
-        btn.addEventListener('click', (e) => {
+        const copySvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+        const successSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+        const errorSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+        const doCopy = (e) => {
             e.stopPropagation();
             navigator.clipboard.writeText(code.innerText).then(() => {
-                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+                btn.innerHTML = successSvg;
                 btn.style.color = '#22c55e';
-                setTimeout(() => {
-                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
-                    btn.style.color = 'rgba(255,255,255,0.7)';
-                }, 2000);
+                setTimeout(() => { btn.innerHTML = copySvg; btn.style.color = 'rgba(255,255,255,0.7)'; }, 2000);
+            }).catch(() => {
+                btn.innerHTML = errorSvg;
+                btn.style.color = '#ef4444';
+                setTimeout(() => { btn.innerHTML = copySvg; btn.style.color = 'rgba(255,255,255,0.7)'; }, 2000);
             });
-        });
+        };
+        btn.addEventListener('click', doCopy);
+        btn.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doCopy(e); } });
         pre.addEventListener('mouseenter', () => btn.style.opacity = '1');
         pre.addEventListener('mouseleave', () => btn.style.opacity = '0');
+        pre.addEventListener('focusin', () => btn.style.opacity = '1');
+        pre.addEventListener('focusout', () => btn.style.opacity = '0');
         pre.appendChild(btn);
     });
 }
 "#
 )]
 extern "C" {
-    fn initMermaidDiagrams();
-    fn injectCodeBlockCopyButtons();
+    fn initMermaidDiagrams(root_id: &str);
+    fn injectCodeBlockCopyButtons(root_id: &str);
 }
 /// README viewer with loading/error states
 #[component]
@@ -117,8 +131,8 @@ pub fn ReadmeViewer(
             // Small delay to ensure dangerous_inner_html has been applied to the DOM
             spawn(async move {
                 gloo_timers::future::TimeoutFuture::new(100).await;
-                initMermaidDiagrams();
-                injectCodeBlockCopyButtons();
+                initMermaidDiagrams("readme-viewer");
+                injectCodeBlockCopyButtons("readme-viewer");
             });
         }
     }));
@@ -201,6 +215,7 @@ pub fn ReadmeViewer(
                         }
                     } else {
                         div {
+                            id: "readme-viewer",
                             class: "prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-headings:text-foreground prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-[''] prose-code:after:content-[''] prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-img:rounded-lg prose-hr:border-border",
                             dangerous_inner_html: "{render_markdown(&markdown)}",
                         }

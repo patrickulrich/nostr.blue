@@ -307,11 +307,18 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 return;
             }
             for url in &urls {
-                let has_scheme = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("git://") || url.starts_with("ssh://");
-                if !has_scheme {
-                    toast.error(format!("Invalid URL format: {}", url), ToastOptions::new());
-                    fork_loading.set(false);
-                    return;
+                match url::Url::parse(url) {
+                    Ok(parsed) if ["http", "https", "git", "ssh"].contains(&parsed.scheme()) => {}
+                    Ok(_) => {
+                        toast.error(format!("Unsupported URL scheme: {}", url), ToastOptions::new());
+                        fork_loading.set(false);
+                        return;
+                    }
+                    Err(_) => {
+                        toast.error(format!("Invalid URL format: {}", url), ToastOptions::new());
+                        fork_loading.set(false);
+                        return;
+                    }
                 }
             }
             let url_refs: Vec<&str> = urls.iter().map(|s| s.as_str()).collect();
@@ -511,12 +518,16 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                         }
                     },
                     div {
+                        role: "dialog",
+                        aria_modal: "true",
+                        aria_labelledby: "fork_modal_title",
                         class: "bg-background border border-border rounded-lg p-6 w-full max-w-md shadow-lg max-h-[90vh] overflow-y-auto",
                         onclick: move |evt| evt.stop_propagation(),
                         // Header
                         div { class: "flex justify-between items-center mb-6",
-                            h2 { class: "text-xl font-bold", "Fork Repository" }
+                            h2 { id: "fork_modal_title", class: "text-xl font-bold", "Fork Repository" }
                             button {
+                                r#type: "button",
                                 class: "p-1 hover:bg-accent rounded transition text-muted-foreground hover:text-foreground disabled:opacity-50",
                                 disabled: *fork_loading.read(),
                                 onclick: move |_| {
@@ -570,6 +581,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                             // Actions
                             div { class: "flex gap-3 justify-end pt-2",
                                 button {
+                                    r#type: "button",
                                     class: "px-4 py-2 text-muted-foreground hover:text-foreground",
                                     disabled: *fork_loading.read(),
                                     onclick: move |_| {
