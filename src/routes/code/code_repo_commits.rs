@@ -73,6 +73,7 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                     }
                 }
                 // Fall back to GitHub API for GitHub-hosted repos
+                let mut last_github_err: Option<String> = None;
                 for url in repo.clone.iter() {
                     if *request_gen.peek() != gen { return; }
                     if let Some((owner, repo_name)) = parse_github_url(url) {
@@ -85,16 +86,19 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                             }
                             Err(e) => {
                                 log::warn!("fetch_commits failed for {}/{}: {}", owner, repo_name, e);
+                                last_github_err = Some(e);
                                 continue;
                             }
                         }
                     }
                 }
                 if *request_gen.peek() != gen { return; }
-                commits_result.set(Some(Err(
-                    "Could not load commits. Try cloning the repository first by browsing its files."
-                        .to_string(),
-                )));
+                let msg = if let Some(err) = last_github_err {
+                    format!("GitHub API error: {}. Try cloning the repository first by browsing its files.", err)
+                } else {
+                    "Could not load commits. Try cloning the repository first by browsing its files.".to_string()
+                };
+                commits_result.set(Some(Err(msg)));
             } else if let Err(ref e) = result {
                 if *request_gen.peek() != gen { return; }
                 commits_result.set(Some(Err(format!("Failed to load repository: {}", e))));

@@ -29,9 +29,9 @@ pub fn CloneHelpModal(
             "https"
         }
     } else {
-        "https"
+        "nostr"
     };
-    let active_tab = use_signal(move || initial_tab);
+    let mut active_tab = use_signal(move || initial_tab);
 
     // Categorize URLs
     let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| {
@@ -70,7 +70,32 @@ pub fn CloneHelpModal(
                     }
                 }
                 // Tabs
-                div { class: "flex gap-1 mb-4 border-b border-border", role: "tablist",
+                div {
+                    class: "flex gap-1 mb-4 border-b border-border",
+                    role: "tablist",
+                    onkeydown: {
+                        let has_git = !git_urls.is_empty();
+                        move |e: KeyboardEvent| {
+                            let tabs: Vec<&str> = if has_git {
+                                vec!["https", "ssh", "git", "nostr"]
+                            } else {
+                                vec!["https", "ssh", "nostr"]
+                            };
+                            let current = *active_tab.read();
+                            let idx = tabs.iter().position(|t| *t == current).unwrap_or(0);
+                            let new_idx = match e.key() {
+                                Key::ArrowRight => Some((idx + 1) % tabs.len()),
+                                Key::ArrowLeft => Some(if idx == 0 { tabs.len() - 1 } else { idx - 1 }),
+                                Key::Home => Some(0),
+                                Key::End => Some(tabs.len() - 1),
+                                _ => None,
+                            };
+                            if let Some(i) = new_idx {
+                                e.prevent_default();
+                                active_tab.set(tabs[i]);
+                            }
+                        }
+                    },
                     TabButton { label: "HTTPS", tab_id: "https", active_tab: active_tab }
                     TabButton { label: "SSH", tab_id: "ssh", active_tab: active_tab }
                     if !git_urls.is_empty() {

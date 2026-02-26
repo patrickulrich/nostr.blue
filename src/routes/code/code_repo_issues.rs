@@ -213,7 +213,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                     {
                         let filtered_issues = filtered();
                         if filtered_issues.is_empty() {
-                            rsx! { EmptyIssues {} }
+                            rsx! { EmptyIssues { has_filters: !search_query.read().is_empty() || !selected_labels.read().is_empty() || *status_filter.read() != StatusFilter::Open } }
                         } else {
                             rsx! {
                                 div { class: "border border-border rounded-lg divide-y divide-border",
@@ -230,7 +230,7 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
     }
 }
 #[component]
-fn EmptyIssues() -> Element {
+fn EmptyIssues(has_filters: bool) -> Element {
     rsx! {
         div { class: "text-center py-12",
             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
@@ -260,8 +260,20 @@ fn EmptyIssues() -> Element {
                     }
                 }
             }
-            h3 { class: "font-semibold text-lg mb-2", "No Issues" }
-            p { class: "text-muted-foreground text-sm", "No issues match the current filters." }
+            h3 { class: "font-semibold text-lg mb-2",
+                if has_filters {
+                    "No Matching Issues"
+                } else {
+                    "No Issues Yet"
+                }
+            }
+            p { class: "text-muted-foreground text-sm",
+                if has_filters {
+                    "No issues match the current filters."
+                } else {
+                    "No issues have been created for this repository."
+                }
+            }
         }
     }
 }

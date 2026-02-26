@@ -50,22 +50,32 @@ pub fn ZapDistribution(
     let mut send_progress = use_signal(|| 0usize);
     let mut send_total = use_signal(|| 0usize);
 
+    // Deduplicate zap_splits by pubkey, summing weights for duplicates
+    let deduped_splits: Vec<(String, u32)> = {
+        let mut deduped: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for (pk, _, w) in &zap_splits {
+            *deduped.entry(pk.clone()).or_default() += w;
+        }
+        deduped.into_iter().collect()
+    };
+
     // Manage selected pubkeys for the user picker
-    let selected_pubkeys = use_signal(|| {
-        zap_splits.iter().map(|(pk, _, _)| pk.clone()).collect::<Vec<String>>()
+    let selected_pubkeys = use_signal({
+        let deduped_splits = deduped_splits.clone();
+        move || deduped_splits.iter().map(|(pk, _)| pk.clone()).collect::<Vec<String>>()
     });
 
     // Pure allocation: largest-remainder method to avoid rounding loss
     let compute_allocations = {
-        let zap_splits = zap_splits.clone();
+        let deduped_splits = deduped_splits.clone();
         move |pubkeys: &[String], amount: u64| -> Vec<(String, u32, u64)> {
             let weights: Vec<u32> = pubkeys
                 .iter()
                 .map(|pk| {
-                    zap_splits
+                    deduped_splits
                         .iter()
-                        .find(|(p, _, _)| p == pk)
-                        .map(|(_, _, w)| *w)
+                        .find(|(p, _)| p == pk)
+                        .map(|(_, w)| *w)
                         .unwrap_or(1)
                 })
                 .collect();

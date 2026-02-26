@@ -45,13 +45,13 @@ pub fn LabelPicker(
         let mut all: Vec<String> = existing_labels.clone();
         for default in DEFAULT_LABELS {
             let s = default.to_string();
-            if !all.contains(&s) {
+            if !all.iter().any(|a| a.eq_ignore_ascii_case(&s)) {
                 all.push(s);
             }
         }
-        all.retain(|l| !selected_labels.contains(l));
+        all.retain(|l| !selected_labels.iter().any(|s| s.eq_ignore_ascii_case(l)));
         all.sort();
-        all.dedup();
+        all.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         all
     };
 
@@ -141,7 +141,7 @@ pub fn LabelPicker(
                             if e.key() == Key::Enter {
                                 e.prevent_default();
                                 let val = new_label_input.read().trim().to_string();
-                                if !val.is_empty() && !selected.contains(&val) {
+                                if !val.is_empty() && !selected.iter().any(|s| s.eq_ignore_ascii_case(&val)) {
                                     let mut updated = selected.clone();
                                     updated.push(val);
                                     on_change.call(updated);
@@ -179,7 +179,7 @@ pub fn LabelPicker(
                                         },
                                         onclick: move |_| {
                                             let mut updated = labels_for_add.clone();
-                                            if !updated.contains(&suggestion_clone) {
+                                            if !updated.iter().any(|u| u.eq_ignore_ascii_case(&suggestion_clone)) {
                                                 updated.push(suggestion_clone.clone());
                                                 on_change.call(updated);
                                             }

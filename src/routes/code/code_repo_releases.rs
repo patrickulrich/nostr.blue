@@ -63,7 +63,10 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                         by_tag
                             .entry(release.tag_name.clone())
                             .and_modify(|existing| {
-                                if release.created_at > existing.created_at {
+                                if release.created_at > existing.created_at
+                                    || (release.created_at == existing.created_at
+                                        && release.event_id > existing.event_id)
+                                {
                                     *existing = release.clone();
                                 }
                             })

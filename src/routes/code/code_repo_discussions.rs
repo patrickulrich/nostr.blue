@@ -121,20 +121,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
                             naddr: naddr.clone(),
                         },
                         class: "px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition flex items-center gap-1",
-                        svg {
-                            class: "w-4 h-4",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            line { x1: "12", y1: "5", x2: "12", y2: "19" }
-                            line { x1: "5", y1: "12", x2: "19", y2: "12" }
-                        }
+                        span { class: "w-4 h-4", dangerous_inner_html: icons::PLUS }
                         "New Discussion"
                     }
                 }

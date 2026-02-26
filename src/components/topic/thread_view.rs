@@ -38,6 +38,11 @@ pub fn ThreadView(
     }
 }
 
+/// Count all descendants (replies + their replies, recursively) for a thread node
+fn count_descendants(thread: &TopicThread) -> usize {
+    thread.replies.len() + thread.replies.iter().map(count_descendants).sum::<usize>()
+}
+
 /// Single thread node with its replies
 #[component]
 fn ThreadNode(
@@ -48,9 +53,14 @@ fn ThreadNode(
 ) -> Element {
     // Prevent stack overflow on deeply nested threads
     if depth >= MAX_RECURSION_DEPTH {
+        let count = count_descendants(&thread);
         return rsx! {
             div { class: "py-2 px-3 text-xs text-muted-foreground italic",
-                "Thread continues ({thread.replies.len()} more replies hidden)"
+                if count > 0 {
+                    "Thread continues ({count} more replies hidden)"
+                } else {
+                    "Further replies hidden"
+                }
             }
         };
     }
