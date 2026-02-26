@@ -95,6 +95,16 @@ pub struct Repository {
     pub star_count: u32,
     pub issue_count: u32,
     pub pr_count: u32,
+    /// Forked from this repository event ID (hex) from e-tag with fork marker
+    pub fork_of: Option<String>,
+    /// Required number of approvals before merge (0 = no requirement)
+    pub required_approvals: u32,
+    /// Repository topics/tags (from hashtag tags)
+    pub topics: Vec<String>,
+    /// Zap split configuration: (pubkey_hex, relay, weight)
+    pub zap_splits: Vec<(String, String, u32)>,
+    /// Milestones parsed from milestone tags
+    pub milestones: Vec<crate::services::git_hosting::milestones::Milestone>,
 }
 impl Repository {
     /// Parse a Repository from a Kind 30617 event
@@ -110,7 +120,37 @@ impl Repository {
         let mut relays = Vec::new();
         let mut maintainers = Vec::new();
         let mut euc = None;
+        let mut fork_of = None;
+        let mut required_approvals = 0u32;
+        let mut topics = Vec::new();
+        let mut zap_splits = Vec::new();
+        let mut milestone_tags: Vec<Vec<String>> = Vec::new();
         for tag in event.tags.iter() {
+            let tag_vec = tag.as_slice();
+            // Collect milestone tags for later parsing
+            if tag_vec.len() >= 3 && tag_vec[0] == "milestone" {
+                milestone_tags.push(tag_vec.iter().map(|s| s.to_string()).collect());
+                continue;
+            }
+            // Parse custom tags first
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec.get(3).map(|s| s.as_str()) == Some("fork") {
+                fork_of = Some(tag_vec[1].to_string());
+                continue;
+            }
+            if tag_vec.len() >= 2 && tag_vec[0] == "required-approvals" {
+                required_approvals = tag_vec[1].parse().unwrap_or(0);
+                continue;
+            }
+            // Parse zap split tags: ["zap", pubkey_hex, relay, weight_str]
+            if tag_vec.len() >= 4 && tag_vec[0] == "zap" {
+                let pubkey_hex = tag_vec[1].to_string();
+                let relay = tag_vec[2].to_string();
+                let weight = tag_vec[3].parse::<u32>().unwrap_or(0);
+                if weight > 0 {
+                    zap_splits.push((pubkey_hex, relay, weight));
+                }
+                continue;
+            }
             match tag.as_standardized() {
                 Some(TagStandard::Identifier(d)) => id = Some(d.clone()),
                 Some(TagStandard::Name(n)) => name = Some(n.clone()),
@@ -130,10 +170,12 @@ impl Repository {
                 Some(TagStandard::GitEarliestUniqueCommitId(hash)) => {
                     euc = Some(hash.to_string());
                 }
+                Some(TagStandard::Hashtag(t)) => topics.push(t.clone()),
                 _ => {}
             }
         }
         let id = id?;
+        let milestones = crate::services::git_hosting::milestones::parse_milestones(&milestone_tags);
         let coordinate = Coordinate::new(Kind::GitRepoAnnouncement, event.pubkey)
             .identifier(&id);
         let naddr = Nip19Coordinate::new(coordinate, vec![])
@@ -155,6 +197,11 @@ impl Repository {
             star_count: 0,
             issue_count: 0,
             pr_count: 0,
+            fork_of,
+            required_approvals,
+            topics,
+            zap_splits,
+            milestones,
         })
     }
     /// Get display name (name or id)
@@ -224,6 +271,8 @@ pub struct Issue {
     pub subject: Option<String>,
     /// Labels (from t tags)
     pub labels: Vec<String>,
+    /// Assignee pubkeys (hex, from p tags)
+    pub assignees: Vec<String>,
     /// Event ID (hex)
     pub event_id: String,
     /// Author pubkey (hex)
@@ -244,6 +293,7 @@ impl Issue {
         let mut repository = None;
         let mut subject = None;
         let mut labels = Vec::new();
+        let mut assignees = Vec::new();
         for tag in event.tags.iter() {
             match tag.as_standardized() {
                 Some(TagStandard::Coordinate { coordinate, .. }) => {
@@ -251,10 +301,19 @@ impl Issue {
                 }
                 Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
                 Some(TagStandard::Hashtag(t)) => labels.push(t.clone()),
+                Some(TagStandard::PublicKey { public_key, .. }) => {
+                    // p tags on issues are assignees (not the repo owner tag)
+                    let hex = public_key.to_hex();
+                    if !assignees.contains(&hex) {
+                        assignees.push(hex);
+                    }
+                }
                 _ => {}
             }
         }
         let repository = repository?;
+        // Remove the repo owner from assignees (they're tagged for routing, not assignment)
+        assignees.retain(|pk| *pk != repository.public_key.to_hex());
         let repository_naddr = Nip19Coordinate::new(repository, vec![])
             .to_bech32()
             .unwrap_or_default();
@@ -263,6 +322,7 @@ impl Issue {
             content: event.content.clone(),
             subject,
             labels,
+            assignees,
             event_id: event.id.to_hex(),
             pubkey: event.pubkey.to_hex(),
             created_at: event.created_at.as_secs(),
@@ -321,6 +381,12 @@ pub struct PullRequest {
     pub status: IssueStatus,
     /// Comment count
     pub comment_count: u32,
+    /// Event IDs of issues this PR closes
+    pub linked_issues: Vec<String>,
+    /// Source branch name
+    pub branch_name: Option<String>,
+    /// Clone URLs for this PR's source
+    pub clone_urls: Vec<String>,
 }
 impl PullRequest {
     /// Parse a PullRequest from a Kind 1617 event
@@ -333,7 +399,16 @@ impl PullRequest {
         let mut parent_commit = None;
         let mut labels = Vec::new();
         let mut is_cover_letter = false;
+        let mut linked_issues = Vec::new();
+        let mut branch_name = None;
+        let mut clone_urls = Vec::new();
         for tag in event.tags.iter() {
+            let tag_vec = tag.as_slice();
+            // Check for "closes" marker on e-tags (linked issues)
+            if tag_vec.len() >= 4 && tag_vec[0] == "e" && tag_vec[3] == "closes" {
+                linked_issues.push(tag_vec[1].to_string());
+                continue;
+            }
             match tag.as_standardized() {
                 Some(TagStandard::Coordinate { coordinate, .. }) => {
                     repository = Some(coordinate.clone());
@@ -348,7 +423,14 @@ impl PullRequest {
                         labels.push(t.clone());
                     }
                 }
+                Some(TagStandard::GitClone(urls)) => {
+                    clone_urls = urls.iter().map(|u| u.to_string()).collect();
+                }
                 _ => {}
+            }
+            // Parse branch name (custom tag)
+            if tag_vec.len() >= 2 && tag_vec[0] == "branch" {
+                branch_name = Some(tag_vec[1].to_string());
             }
             if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("parent-commit"))
             {
@@ -373,6 +455,9 @@ impl PullRequest {
             created_at: event.created_at.as_secs(),
             status: IssueStatus::Open,
             comment_count: 0,
+            linked_issues,
+            branch_name,
+            clone_urls,
         })
     }
     /// Get display title from content (first line or subject)
@@ -405,6 +490,358 @@ impl PullRequest {
     /// Get short event ID for display
     pub fn event_id_short(&self) -> String {
         self.event_id.chars().take(8).collect()
+    }
+}
+/// Discussion parsed from a Kind 9805 event
+#[derive(Debug, Clone, PartialEq)]
+pub struct Discussion {
+    /// Repository naddr this discussion belongs to
+    pub repository_naddr: String,
+    /// Discussion content (markdown)
+    pub content: String,
+    /// Subject/title
+    pub subject: Option<String>,
+    /// Category (from first hashtag)
+    pub category: Option<String>,
+    /// Labels (from t tags, excluding category)
+    pub labels: Vec<String>,
+    /// Event ID (hex)
+    pub event_id: String,
+    /// Author pubkey (hex)
+    pub pubkey: String,
+    /// Created timestamp
+    pub created_at: u64,
+    /// Comment count
+    pub comment_count: u32,
+}
+impl Discussion {
+    pub const KIND: u16 = 9805;
+    /// Parse a Discussion from a Kind 9805 event
+    pub fn from_event(event: &Event) -> Option<Self> {
+        if event.kind != Kind::Custom(Self::KIND) {
+            return None;
+        }
+        let mut repository = None;
+        let mut subject = None;
+        let mut hashtags = Vec::new();
+        for tag in event.tags.iter() {
+            match tag.as_standardized() {
+                Some(TagStandard::Coordinate { coordinate, .. }) => {
+                    repository = Some(coordinate.clone());
+                }
+                Some(TagStandard::Hashtag(t)) => hashtags.push(t.clone()),
+                Some(TagStandard::Subject(s)) => subject = Some(s.clone()),
+                _ => {}
+            }
+        }
+        // Custom "subject" tag takes priority over the standard single-letter tag
+        // parsed above. NIP-34 discussions may use the full "subject" tag name,
+        // which `as_standardized()` can miss or conflate with the "s" single-letter
+        // tag. Check after the loop so it always wins.
+        for tag in event.tags.iter() {
+            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("subject")) {
+                if let Some(s) = tag.content() {
+                    subject = Some(s.to_string());
+                    break;
+                }
+            }
+        }
+        let repository = repository?;
+        let repository_naddr = Nip19Coordinate::new(repository, vec![])
+            .to_bech32()
+            .unwrap_or_default();
+        let category = hashtags.first().cloned();
+        let labels = if hashtags.len() > 1 { hashtags[1..].to_vec() } else { Vec::new() };
+        Some(Self {
+            repository_naddr,
+            content: event.content.clone(),
+            subject,
+            category,
+            labels,
+            event_id: event.id.to_hex(),
+            pubkey: event.pubkey.to_hex(),
+            created_at: event.created_at.as_secs(),
+            comment_count: 0,
+        })
+    }
+    /// Get display title (subject or truncated content)
+    pub fn display_title(&self) -> String {
+        if let Some(subject) = &self.subject {
+            subject.clone()
+        } else {
+            let first_line = self.content.lines().next().unwrap_or("");
+            if first_line.chars().count() > 80 {
+                format!("{}...", first_line.chars().take(77).collect::<String>())
+            } else {
+                first_line.to_string()
+            }
+        }
+    }
+    /// Get truncated pubkey for display
+    pub fn pubkey_display(&self) -> String {
+        if self.pubkey.len() > 12 {
+            format!("{}...{}", &self.pubkey[..6], &self.pubkey[self.pubkey.len() - 4..])
+        } else {
+            self.pubkey.clone()
+        }
+    }
+}
+/// Release parsed from a Kind 1626 event (custom)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Release {
+    /// Repository naddr this release belongs to
+    pub repository_naddr: String,
+    /// Tag name / version (d-tag identifier)
+    pub tag_name: String,
+    /// Human-readable title
+    pub title: Option<String>,
+    /// Release description (content)
+    pub description: String,
+    /// Download/asset URLs
+    pub assets: Vec<String>,
+    /// Whether this is a pre-release
+    pub prerelease: bool,
+    /// Event ID (hex)
+    pub event_id: String,
+    /// Author pubkey (hex)
+    pub pubkey: String,
+    /// Created timestamp
+    pub created_at: u64,
+}
+impl Release {
+    pub const KIND: u16 = 1626;
+    /// Parse a Release from a Kind 1626 event
+    pub fn from_event(event: &Event) -> Option<Self> {
+        if event.kind != Kind::Custom(Self::KIND) {
+            return None;
+        }
+        let mut tag_name = None;
+        let mut title = None;
+        let mut repository = None;
+        let mut assets = Vec::new();
+        let mut prerelease = false;
+        for tag in event.tags.iter() {
+            match tag.as_standardized() {
+                Some(TagStandard::Identifier(d)) => tag_name = Some(d.clone()),
+                Some(TagStandard::Coordinate { coordinate, .. }) => {
+                    repository = Some(coordinate.clone());
+                }
+                _ => {}
+            }
+            let kind = tag.kind();
+            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("name")) {
+                if let Some(n) = tag.content() {
+                    title = Some(n.to_string());
+                }
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("url")) {
+                if let Some(u) = tag.content() {
+                    assets.push(u.to_string());
+                }
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("prerelease")) {
+                if let Some(v) = tag.content() {
+                    prerelease = v.eq_ignore_ascii_case("true");
+                }
+            }
+        }
+        let tag_name = tag_name?;
+        let repository = repository?;
+        let repository_naddr = Nip19Coordinate::new(repository, vec![])
+            .to_bech32()
+            .unwrap_or_default();
+        Some(Self {
+            repository_naddr,
+            tag_name,
+            title,
+            description: event.content.clone(),
+            assets,
+            prerelease,
+            event_id: event.id.to_hex(),
+            pubkey: event.pubkey.to_hex(),
+            created_at: event.created_at.as_secs(),
+        })
+    }
+    /// Get display name (title or tag_name)
+    pub fn display_name(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.tag_name)
+    }
+}
+/// Bounty status for Kind 9806 events
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BountyStatus {
+    #[default]
+    Pending,
+    Claimed,
+    Paid,
+}
+impl BountyStatus {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "claimed" => Self::Claimed,
+            "paid" => Self::Paid,
+            _ => Self::Pending,
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Claimed => "Claimed",
+            Self::Paid => "Paid",
+        }
+    }
+}
+/// Bounty parsed from a Kind 9806 event
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bounty {
+    /// Issue event ID this bounty is attached to
+    pub issue_event_id: String,
+    /// Amount in satoshis
+    pub amount_sats: u64,
+    /// Bounty status
+    pub status: BountyStatus,
+    /// Event ID (hex)
+    pub event_id: String,
+    /// Author pubkey (hex)
+    pub pubkey: String,
+    /// Created timestamp
+    pub created_at: u64,
+    /// Claimer pubkey (hex) - set when status is "claimed", parsed from p tag or event author
+    pub claimer: Option<String>,
+}
+impl Bounty {
+    pub const KIND: u16 = 9806;
+    /// Parse a Bounty from a Kind 9806 event
+    pub fn from_event(event: &Event) -> Option<Self> {
+        if event.kind != Kind::Custom(Self::KIND) {
+            return None;
+        }
+        let mut issue_event_id = None;
+        let mut amount_sats = 0u64;
+        let mut status = BountyStatus::Pending;
+        let mut claimer_pubkey = None;
+        for tag in event.tags.iter() {
+            if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+                if issue_event_id.is_none() {
+                    issue_event_id = Some(event_id.to_hex());
+                }
+            }
+            if let Some(TagStandard::PublicKey { public_key, .. }) = tag.as_standardized() {
+                if claimer_pubkey.is_none() {
+                    claimer_pubkey = Some(public_key.to_hex());
+                }
+            }
+            let kind = tag.kind();
+            if kind == TagKind::Custom(std::borrow::Cow::Borrowed("amount")) {
+                if let Some(amt) = tag.content() {
+                    amount_sats = amt.parse().unwrap_or(0);
+                }
+            } else if kind == TagKind::Custom(std::borrow::Cow::Borrowed("status")) {
+                if let Some(s) = tag.content() {
+                    status = BountyStatus::from_str(s);
+                }
+            }
+        }
+        let issue_event_id = issue_event_id?;
+        // For claimed bounties, use p tag as claimer; fall back to event author
+        let claimer = if status == BountyStatus::Claimed {
+            Some(claimer_pubkey.unwrap_or_else(|| event.pubkey.to_hex()))
+        } else {
+            claimer_pubkey
+        };
+        Some(Self {
+            issue_event_id,
+            amount_sats,
+            status,
+            event_id: event.id.to_hex(),
+            pubkey: event.pubkey.to_hex(),
+            created_at: event.created_at.as_secs(),
+            claimer,
+        })
+    }
+}
+/// Review state for persisted PR reviews
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReviewState {
+    #[default]
+    Commented,
+    Approved,
+    ChangesRequested,
+}
+impl ReviewState {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "approved" => Self::Approved,
+            "changes_requested" => Self::ChangesRequested,
+            _ => Self::Commented,
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Approved => "Approved",
+            Self::ChangesRequested => "Changes Requested",
+            Self::Commented => "Commented",
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::ChangesRequested => "changes_requested",
+            Self::Commented => "commented",
+        }
+    }
+    pub fn css_class(&self) -> &'static str {
+        match self {
+            Self::Approved => "text-green-500",
+            Self::ChangesRequested => "text-red-500",
+            Self::Commented => "text-muted-foreground",
+        }
+    }
+}
+/// Persisted PR review (Kind 9807)
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersistedReview {
+    /// PR event ID this review targets
+    pub pr_event_id: String,
+    /// Review content
+    pub content: String,
+    /// Review state
+    pub state: ReviewState,
+    /// Event ID (hex)
+    pub event_id: String,
+    /// Author pubkey (hex)
+    pub pubkey: String,
+    /// Created timestamp
+    pub created_at: u64,
+}
+impl PersistedReview {
+    pub const KIND: u16 = 9807;
+    /// Parse a PersistedReview from a Kind 9807 event
+    pub fn from_event(event: &Event) -> Option<Self> {
+        if event.kind != Kind::Custom(Self::KIND) {
+            return None;
+        }
+        let mut pr_event_id = None;
+        let mut state = ReviewState::Commented;
+        for tag in event.tags.iter() {
+            if let Some(TagStandard::Event { event_id, .. }) = tag.as_standardized() {
+                if pr_event_id.is_none() {
+                    pr_event_id = Some(event_id.to_hex());
+                }
+            }
+            if tag.kind() == TagKind::Custom(std::borrow::Cow::Borrowed("state")) {
+                if let Some(s) = tag.content() {
+                    state = ReviewState::from_str(s);
+                }
+            }
+        }
+        let pr_event_id = pr_event_id?;
+        Some(Self {
+            pr_event_id,
+            content: event.content.clone(),
+            state,
+            event_id: event.id.to_hex(),
+            pubkey: event.pubkey.to_hex(),
+            created_at: event.created_at.as_secs(),
+        })
     }
 }
 /// Git comment (Kind 1111 - NIP-22 Comment)

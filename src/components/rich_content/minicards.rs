@@ -1,6 +1,7 @@
 use crate::components::citation::card::get_citation_style;
-use crate::components::icons::{self, NostrBlueMiniLogo};
+use crate::components::icons::{self, HashIcon, NostrBlueMiniLogo};
 use crate::routes::Route;
+use crate::stores::social::channel_store::{parse_channel_creation, get_channel_display_info};
 use crate::stores::nostr_music::{NostrPlaylist, NostrTrack};
 use crate::stores::pin_boards_store::Pinboard;
 use crate::stores::publication_store::PublicationIndex;
@@ -878,6 +879,88 @@ pub(super) fn render_comment_minicard(event: &Event, metadata: Option<&Metadata>
                         p { class: "text-sm", "{content}" }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Render a NIP-28 channel minicard with HoverCard preview
+pub(super) fn render_channel_minicard(event: &Event, channel_id: &str) -> Element {
+    if let Some(channel) = parse_channel_creation(event) {
+        let (name, about, picture) = get_channel_display_info(&channel);
+        let display_name = name.unwrap_or_else(|| "Unnamed Channel".to_string());
+        let description = about.unwrap_or_default();
+        let display_desc = if description.chars().count() > 120 {
+            format!("{}...", description.chars().take(120).collect::<String>())
+        } else {
+            description.clone()
+        };
+        let channel_id_owned = event.id.to_hex();
+        rsx! {
+            div {
+                class: "relative my-2",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                Link {
+                    to: Route::ChatDetail {
+                        channel_id: channel_id_owned.clone(),
+                    },
+                    class: "flex items-center gap-2 p-2 bg-card border border-border rounded-lg hover:bg-accent/50 transition",
+                    div { class: "w-10 h-10 rounded-full bg-muted shrink-0 overflow-hidden flex items-center justify-center",
+                        if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
+                            img {
+                                src: "{pic}",
+                                alt: "{display_name}",
+                                class: "w-full h-full object-cover",
+                                loading: "lazy",
+                            }
+                        } else {
+                            HashIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
+                        }
+                    }
+                    div { class: "flex-1 min-w-0",
+                        p { class: "font-medium text-sm truncate", "{display_name}" }
+                        if !display_desc.is_empty() {
+                            p { class: "text-xs text-muted-foreground truncate", "{display_desc}" }
+                        }
+                    }
+                }
+                div { class: "absolute bottom-1 right-1",
+                    HoverCard { open: Signal::new(None),
+                        HoverCardTrigger { NostrBlueMiniLogo {} }
+                        HoverCardContent {
+                            side: ContentSide::Top,
+                            class: "w-72 p-4 bg-popover border border-border rounded-lg shadow-lg",
+                            div { class: "flex items-center gap-2 mb-2",
+                                if let Some(ref pic) = picture.as_ref().filter(|u| is_valid_http_url(u)) {
+                                    img {
+                                        src: "{pic}",
+                                        alt: "{display_name}",
+                                        class: "w-10 h-10 rounded-full object-cover",
+                                    }
+                                }
+                                h4 { class: "font-bold", "{display_name}" }
+                            }
+                            if !description.is_empty() {
+                                p { class: "text-sm text-muted-foreground line-clamp-3",
+                                    "{description}"
+                                }
+                            }
+                            p { class: "text-xs text-muted-foreground mt-1", "Chat Channel" }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            Link {
+                to: Route::ChatDetail {
+                    channel_id: channel_id.to_string(),
+                },
+                class: "inline-flex items-center gap-2 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/40 transition text-sm",
+                onclick: move |e: MouseEvent| e.stop_propagation(),
+                HashIcon { class: "w-4 h-4" }
+                "View Channel"
             }
         }
     }

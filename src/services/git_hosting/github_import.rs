@@ -40,18 +40,34 @@ pub struct GitHubOwner {
 /// Parse a GitHub URL to extract owner and repo
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
     let url = url.trim().trim_end_matches(".git").trim_end_matches('/');
-    if url.contains("github.com") {
-        let parts: Vec<&str> = url
-            .split(['/', ':'])
-            .filter(|s| {
-                !s.is_empty() && *s != "https" && *s != "http" && *s != "git@github.com"
-                    && *s != "github.com"
-            })
-            .collect();
+
+    // Try standard URL parsing first for strict host validation
+    if let Ok(parsed) = url::Url::parse(url) {
+        if parsed.domain() == Some("github.com") || parsed.domain() == Some("www.github.com") {
+            let segments: Vec<&str> = parsed.path_segments()?.filter(|s| !s.is_empty()).collect();
+            if segments.len() >= 2 {
+                return Some((segments[0].to_string(), segments[1].to_string()));
+            }
+        }
+        return None;
+    }
+
+    // Fallback for git@github.com:owner/repo SSH format (not RFC-compliant, won't parse above)
+    if let Some(rest) = url.strip_prefix("git@github.com:") {
+        let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
         if parts.len() >= 2 {
             return Some((parts[0].to_string(), parts[1].to_string()));
         }
     }
+
+    // Fallback for bare github.com/owner/repo (no scheme, won't parse above)
+    if let Some(rest) = url.strip_prefix("github.com/") {
+        let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 2 {
+            return Some((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
     None
 }
 /// Fetch repository metadata from GitHub
@@ -168,6 +184,33 @@ pub async fn fetch_commits(
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
 }
+/// Fetch recent commits for a specific file path
+pub async fn fetch_file_commits(
+    owner: &str,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+    limit: usize,
+) -> Result<Vec<GitHubCommit>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/commits?path={}&sha={}&per_page={}",
+        owner,
+        repo,
+        urlencoding::encode(path),
+        urlencoding::encode(git_ref),
+        limit,
+    );
+    let response = Request::get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "nostr-blue")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !response.ok() {
+        return Err(format!("GitHub API error: {}", response.status()));
+    }
+    response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+}
 /// Fetch branches
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);
@@ -212,5 +255,8 @@ mod tests {
             Some(("owner".to_string(), "repo".to_string())),
         );
         assert_eq!(parse_github_url("not-a-github-url"), None);
+        // Spoofed domain variants must be rejected
+        assert_eq!(parse_github_url("https://github.com.evil.com/owner/repo"), None);
+        assert_eq!(parse_github_url("https://fakegithub.com/owner/repo"), None);
     }
 }

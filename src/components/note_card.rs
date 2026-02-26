@@ -586,6 +586,22 @@ pub fn NoteCard(
                                 event_id: event_id.clone(),
                             }
                         }
+                        // Topic badge for kind 1111 posts with NIP-73 hashtag
+                        {
+                            if event.kind == Kind::Comment {
+                                if let Some(topic_name) = crate::stores::topic_store::extract_topic_name(&event) {
+                                    rsx! {
+                                        div { class: "mb-1",
+                                            crate::components::topic::TopicBadge { topic: topic_name }
+                                        }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
+                            } else {
+                                rsx! {}
+                            }
+                        }
                         div { class: "mb-3",
                             RichContent {
                                 content: content.clone(),

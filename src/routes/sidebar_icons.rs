@@ -108,6 +108,11 @@ pub(super) fn render_sidebar_icon(
                 crate::components::icons::UsersIcon { class: class.to_string() }
             }
         }
+        SidebarItem::Topics => {
+            rsx! {
+                crate::components::icons::HashIcon { class: class.to_string() }
+            }
+        }
         SidebarItem::Events => {
             rsx! {
                 crate::components::icons::MapPinIcon { class: class.to_string() }

@@ -150,10 +150,7 @@ pub async fn publish_date_event(
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
-    let naddr = format!(
-        "nostr:{}",
-        encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag),
-    );
+    let naddr = encode_naddr(KIND_DATE_CALENDAR_EVENT, &pubkey, &d_tag);
     Ok(naddr)
 }
 /// Publish a time-based calendar event (kind 31923)
@@ -239,10 +236,7 @@ pub async fn publish_time_event(
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish event: {}", e))?;
-    let naddr = format!(
-        "nostr:{}",
-        encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag),
-    );
+    let naddr = encode_naddr(KIND_TIME_CALENDAR_EVENT, &pubkey, &d_tag);
     Ok(naddr)
 }
 
@@ -451,6 +445,6 @@ pub async fn publish_calendar(
         .send_event_builder(builder)
         .await
         .map_err(|e| format!("Failed to publish calendar: {}", e))?;
-    let naddr = format!("nostr:{}", encode_naddr(KIND_CALENDAR, &pubkey, &d_tag));
+    let naddr = encode_naddr(KIND_CALENDAR, &pubkey, &d_tag);
     Ok(naddr)
 }
