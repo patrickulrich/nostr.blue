@@ -47,6 +47,7 @@ export function initMermaidDiagrams(rootId) {
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js';
     script.crossOrigin = 'anonymous';
+    script.integrity = 'sha384-enVdc7lTHDGtpROV85t9+VqPC2EyyB0hsRD0MrvQnHUsHmTHIz2D8SPP4EnBkstH';
     script.onload = () => {
         window.__mermaidLoaderStatus = 'loaded';
         try {

@@ -10,6 +10,7 @@ use crate::utils::truncate_pubkey;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use futures::future::{select, Either};
 
 /// A single recipient in the zap distribution
 #[derive(Clone, Debug)]
@@ -146,7 +147,7 @@ pub fn ZapDistribution(
         let recips = recipients.read().clone();
         let sendable: Vec<(ZapRecipient, String)> = recips
             .into_iter()
-            .filter(|r| r.amount > 0)
+            .filter(|r| r.amount > 0 && r.status != PaymentStatus::Success)
             .filter_map(|r| {
                 let lud16 = PROFILE_CACHE.read().peek(&r.pubkey).and_then(|p| p.lud16.clone())?;
                 Some((r, lud16))
@@ -172,7 +173,6 @@ pub fn ZapDistribution(
                     }
                 }
                 // Race invoice fetch against a 30s timeout
-                use futures::future::{select, Either};
                 let invoice_result = match select(
                     Box::pin(lnurl::get_invoice_from_lud16(lud16, recip.amount, None)),
                     Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),

@@ -425,6 +425,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
             }
             div { class: "lg:hidden relative",
                 button {
+                    r#type: "button",
                     class: "flex items-center gap-2 px-3 py-1.5 text-sm border border-border rounded-lg bg-muted hover:bg-accent transition",
                     onclick: move |_| {
                         let current = *show_actions_menu.read();

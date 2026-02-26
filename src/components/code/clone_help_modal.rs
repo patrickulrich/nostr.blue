@@ -104,7 +104,11 @@ pub fn CloneHelpModal(
                     TabButton { label: "Nostr", tab_id: "nostr", active_tab: active_tab }
                 }
                 // Tab content
-                div { class: "space-y-3",
+                div {
+                    class: "space-y-3",
+                    role: "tabpanel",
+                    id: "clone-panel-{active_tab}",
+                    aria_labelledby: "clone-tab-{active_tab}",
                     match *active_tab.read() {
                         "ssh" => rsx! {
                             if ssh_urls.is_empty() {
@@ -161,6 +165,8 @@ fn TabButton(label: &'static str, tab_id: &'static str, active_tab: Signal<&'sta
             class: class,
             r#type: "button",
             role: "tab",
+            id: "clone-tab-{tab_id}",
+            aria_controls: "clone-panel-{tab_id}",
             aria_selected: "{is_active}",
             tabindex: if is_active { "0" } else { "-1" },
             onclick: move |_| active_tab.set(tab_id),

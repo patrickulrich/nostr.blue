@@ -44,6 +44,7 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
             class: "flex flex-col items-center gap-0.5 min-w-[2rem]",
             // Upvote button
             button {
+                r#type: "button",
                 class: "p-1 rounded transition {up_class}",
                 aria_label: "Upvote",
                 title: "Upvote",
@@ -83,6 +84,7 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
             }
             // Downvote button
             button {
+                r#type: "button",
                 class: "p-1 rounded transition {down_class}",
                 aria_label: "Downvote",
                 title: "Downvote",

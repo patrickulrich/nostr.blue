@@ -79,7 +79,15 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
             let name = name.trim().to_string();
             let rest_trimmed = rest.trim();
             let (version, dep_type) = if rest_trimmed.starts_with('"') {
-                (rest_trimmed.trim_matches('"').to_string(), dep_type)
+                (if let Some(start) = rest_trimmed.find('"') {
+                    if let Some(end) = rest_trimmed[start+1..].find('"') {
+                        rest_trimmed[start+1..start+1+end].to_string()
+                    } else {
+                        rest_trimmed.trim_matches('"').to_string()
+                    }
+                } else {
+                    rest_trimmed.to_string()
+                }, dep_type)
             } else if rest_trimmed.contains('{') {
                 // Handle multiline inline tables: if '{' is present but '}' is not,
                 // consume subsequent lines until '}' is found

@@ -95,7 +95,7 @@ pub fn TopicPostComposer(
                             // Collapse consecutive hyphens and trim
                             let topic_name = sanitized.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
                             if topic_name.is_empty() {
-                                topic.clone().unwrap_or_default()
+                                String::new()
                             } else {
                                 topic_name
                             }

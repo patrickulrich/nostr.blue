@@ -190,7 +190,6 @@ fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
                                                 div {
                                                     key: "cell-{col_idx}-{day_idx}",
                                                     class: "group relative",
-                                                    tabindex: "0",
                                                     aria_label: "{c} {contribution_text} on {date_str}",
                                                     div {
                                                         class: "w-3 h-3 rounded-sm {color}",

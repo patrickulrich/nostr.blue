@@ -6,6 +6,15 @@ use crate::stores::topic_store::{
 };
 use dioxus::prelude::*;
 
+fn nav_class(active: bool, extra: &str) -> String {
+    let base = "px-4 py-2 text-sm rounded-full hover:bg-accent transition";
+    if active {
+        format!("{base} bg-accent font-medium {extra}")
+    } else {
+        format!("{base} {extra}")
+    }
+}
+
 /// Sidebar for topic navigation
 #[component]
 pub fn TopicSidebar(
@@ -16,29 +25,10 @@ pub fn TopicSidebar(
     let loading = *LOADING_SUBSCRIPTIONS.read();
     let current_route = use_route::<Route>();
 
-    let home_class = if matches!(current_route, Route::TopicsHome {}) {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
-    } else {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
-    };
-
-    let popular_class = if matches!(current_route, Route::TopicsPopular {}) {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
-    } else {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
-    };
-
-    let browse_class = if matches!(current_route, Route::TopicsBrowse {}) {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
-    } else {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
-    };
-
-    let new_post_class = if matches!(current_route, Route::TopicNewPost {}) {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent text-primary font-medium"
-    } else {
-        "px-4 py-2 text-sm rounded-full hover:bg-accent transition text-primary font-medium"
-    };
+    let home_class = nav_class(matches!(current_route, Route::TopicsHome {}), "");
+    let popular_class = nav_class(matches!(current_route, Route::TopicsPopular {}), "");
+    let browse_class = nav_class(matches!(current_route, Route::TopicsBrowse {}), "");
+    let new_post_class = nav_class(matches!(current_route, Route::TopicNewPost {}), "text-primary font-medium");
 
     rsx! {
         div {
@@ -87,11 +77,7 @@ pub fn TopicSidebar(
                             for topic in &subscribed {
                                 {
                                     let is_active = current_topic.as_ref() == Some(topic);
-                                    let link_class = if is_active {
-                                        "px-4 py-2 text-sm rounded-full hover:bg-accent transition bg-accent font-medium"
-                                    } else {
-                                        "px-4 py-2 text-sm rounded-full hover:bg-accent transition"
-                                    };
+                                    let link_class = nav_class(is_active, "");
                                     rsx! {
                                         Link {
                                             key: "{topic}",

@@ -352,11 +352,23 @@ pub fn DiffViewer(
                                                 tr {
                                                     key: "hunk-{hunk_idx}",
                                                     class: "bg-blue-500/10 cursor-pointer hover:bg-blue-500/20 transition",
+                                                    tabindex: "0",
+                                                    role: "button",
+                                                    aria_expanded: if is_collapsed { "false" } else { "true" },
                                                     onclick: move |_| {
                                                         let key = (section_idx, hunk_idx);
                                                         let mut map = collapsed_hunks.write();
                                                         let current = map.get(&key).copied().unwrap_or(false);
                                                         map.insert(key, !current);
+                                                    },
+                                                    onkeydown: move |e: KeyboardEvent| {
+                                                        if matches!(e.key(), Key::Enter) || matches!(e.key(), Key::Character(ref c) if c == " ") {
+                                                            e.prevent_default();
+                                                            let key = (section_idx, hunk_idx);
+                                                            let mut map = collapsed_hunks.write();
+                                                            let current = map.get(&key).copied().unwrap_or(false);
+                                                            map.insert(key, !current);
+                                                        }
                                                     },
                                                     if current_mode == DiffViewMode::SideBySide {
                                                         td { class: "w-10 px-2 text-right text-muted-foreground select-none border-r border-border/50" }
@@ -395,6 +407,11 @@ pub fn DiffViewer(
                                                 DiffViewMode::Unified => {
                                                     let cached_file_path = section.file_path.clone();
                                                     let file_key = cached_file_path.clone();
+                                                    let file_comments: HashMap<usize, &Vec<LineComment>> = comment_map
+                                                        .iter()
+                                                        .filter(|((f, _), _)| f == &file_key)
+                                                        .map(|((_, ln), c)| (*ln, c))
+                                                        .collect();
                                                     rsx! {
                                                     for (line_idx, diff_line) in hunk.lines.iter().enumerate() {
                                                         // The diff line row
@@ -478,7 +495,7 @@ pub fn DiffViewer(
                                                         // Display existing line comments for this file + line
                                                         if !matches!(diff_line.kind, LineKind::Hunk | LineKind::Info) {
                                                             if let Some(line_num) = diff_line.new_num {
-                                                                if let Some(comments) = comment_map.get(&(file_key.clone(), line_num)) {
+                                                                if let Some(comments) = file_comments.get(&line_num) {
                                                                     for lc in comments.iter() {
                                                                         tr {
                                                                             key: "lc-{lc.event_id}",

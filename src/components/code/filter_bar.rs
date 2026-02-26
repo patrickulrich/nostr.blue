@@ -185,7 +185,7 @@ pub fn filter_issues(
             if selected_labels.is_empty() {
                 return true;
             }
-            selected_labels.iter().any(|l| issue.labels.contains(l))
+            selected_labels.iter().any(|sel| issue.labels.iter().any(|il| il.eq_ignore_ascii_case(sel)))
         })
         .cloned()
         .collect()
@@ -223,7 +223,7 @@ pub fn filter_prs(
             if selected_labels.is_empty() {
                 return true;
             }
-            selected_labels.iter().any(|l| pr.labels.contains(l))
+            selected_labels.iter().any(|sel| pr.labels.iter().any(|il| il.eq_ignore_ascii_case(sel)))
         })
         .cloned()
         .collect()

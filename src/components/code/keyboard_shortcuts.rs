@@ -65,6 +65,14 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     event.prevent_default();
                     let current = *show_help.read();
                     show_help.set(!current);
+                    pending_g.set(false);
+                    let tid = *timeout_id.peek();
+                    if let Some(id) = tid {
+                        if let Some(w) = web_sys::window() {
+                            w.clear_timeout_with_handle(id);
+                        }
+                        timeout_id.set(None);
+                    }
                     return;
                 }
 
@@ -72,6 +80,14 @@ pub fn CodeKeyboardShortcuts() -> Element {
                 if key == "Escape" && *show_help.read() {
                     event.prevent_default();
                     show_help.set(false);
+                    pending_g.set(false);
+                    let tid = *timeout_id.peek();
+                    if let Some(id) = tid {
+                        if let Some(w) = web_sys::window() {
+                            w.clear_timeout_with_handle(id);
+                        }
+                        timeout_id.set(None);
+                    }
                     return;
                 }
 
