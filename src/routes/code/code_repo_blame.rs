@@ -44,10 +44,10 @@ pub fn CodeRepoBlame(naddr: String, git_ref: String, path: Vec<String>) -> Eleme
             }
             let current_gen = gen.peek().wrapping_add(1);
             gen.set(current_gen);
+            loading.set(true);
+            error.set(None);
+            commits.set(Vec::new());
             spawn(async move {
-                loading.set(true);
-                error.set(None);
-                commits.set(Vec::new());
                 if !is_safe_path(&path) {
                     log::warn!("Path traversal attempt blocked in blame: {}", path);
                     error.set(Some("Invalid path".to_string()));
