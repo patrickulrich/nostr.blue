@@ -11,7 +11,6 @@ use dioxus::prelude::*;
 #[component]
 pub fn CodeExplore() -> Element {
     let mut filter = use_signal(|| ExploreFilter::All);
-    let mut sort_by = use_signal(|| SortBy::Recent);
     rsx! {
         div { class: "min-h-screen",
             div { class: "sticky top-0 z-20 bg-background/80 backdrop-blur-sm border-b border-border",
@@ -40,19 +39,6 @@ pub fn CodeExplore() -> Element {
                         onclick: move |_| filter.set(ExploreFilter::Snippets),
                     }
                 }
-                div { class: "px-4 pb-3 flex items-center gap-2 text-sm",
-                    span { class: "text-muted-foreground", "Sort by:" }
-                    SortButton {
-                        label: "Recent",
-                        active: *sort_by.read() == SortBy::Recent,
-                        onclick: move |_| sort_by.set(SortBy::Recent),
-                    }
-                    SortButton {
-                        label: "Stars",
-                        active: *sort_by.read() == SortBy::Stars,
-                        onclick: move |_| sort_by.set(SortBy::Stars),
-                    }
-                }
             }
             div { class: "p-4",
                 match *filter.read() {
@@ -76,11 +62,6 @@ enum ExploreFilter {
     Repositories,
     Snippets,
 }
-#[derive(Clone, Copy, PartialEq)]
-enum SortBy {
-    Recent,
-    Stars,
-}
 #[derive(Props, Clone, PartialEq)]
 struct FilterChipProps {
     label: &'static str,
@@ -95,24 +76,7 @@ fn FilterChip(props: FilterChipProps) -> Element {
         "px-3 py-1.5 text-sm rounded-full bg-muted text-muted-foreground hover:bg-accent"
     };
     rsx! {
-        button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }
-    }
-}
-#[derive(Props, Clone, PartialEq)]
-struct SortButtonProps {
-    label: &'static str,
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-}
-#[component]
-fn SortButton(props: SortButtonProps) -> Element {
-    let class = if props.active {
-        "text-primary font-medium"
-    } else {
-        "text-muted-foreground hover:text-foreground cursor-pointer"
-    };
-    rsx! {
-        button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }
+        button { r#type: "button", class: "{class}", aria_pressed: "{props.active}", onclick: move |e| props.onclick.call(e), "{props.label}" }
     }
 }
 /// All content - shows both repos and snippets
@@ -120,15 +84,21 @@ fn SortButton(props: SortButtonProps) -> Element {
 fn AllContent() -> Element {
     let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
     let mut snippets = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
+        repos.set(None);
+        snippets.set(None);
         spawn(async move {
             let (repos_res, snippets_res) = futures::join!(
-                fetch_recent_repositories(10), fetch_recent_snippets(10)
+                fetch_recent_repositories(10, None), fetch_recent_snippets(10)
             );
+            if *gen.peek() != current_gen { return; }
             repos.set(Some(repos_res));
             snippets.set(Some(snippets_res));
         });
@@ -145,10 +115,9 @@ fn AllContent() -> Element {
                 div { class: "flex items-center justify-between mb-3",
                     h3 { class: "font-semibold", "Recent Repositories" }
                     Link {
-                        to: Route::CodeExplore {},
+                        to: Route::CodeRepositories {},
                         class: "text-sm text-primary hover:underline",
-                        onclick: |_| {},
-                        "View all"
+                        "My Repositories"
                     }
                 }
                 match &*repos.read() {
@@ -205,13 +174,18 @@ fn AllContent() -> Element {
 #[component]
 fn RepositoriesContent() -> Element {
     let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
+        repos.set(None);
         spawn(async move {
-            let result = fetch_recent_repositories(50).await;
+            let result = fetch_recent_repositories(50, None).await;
+            if *gen.peek() != current_gen { return; }
             repos.set(Some(result));
         });
     });
@@ -293,13 +267,18 @@ fn RepositoriesContent() -> Element {
 #[component]
 fn SnippetsContent() -> Element {
     let mut snippets = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
+        snippets.set(None);
         spawn(async move {
             let result = fetch_recent_snippets(50).await;
+            if *gen.peek() != current_gen { return; }
             snippets.set(Some(result));
         });
     });
@@ -413,7 +392,7 @@ fn SkeletonCards(count: usize) -> Element {
             for i in 0..count {
                 div {
                     key: "{i}",
-                    class: "p-4 border border-border rounded-lg animate-pulse",
+                    class: "p-4 bg-card border border-border rounded-lg animate-pulse",
                     div { class: "flex items-start gap-3",
                         div { class: "w-10 h-10 rounded-lg bg-muted" }
                         div { class: "flex-1",

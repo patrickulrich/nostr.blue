@@ -1878,6 +1878,11 @@ pub fn BibleIcon(props: IconProps) -> Element {
         }
     }
 }
+/// Chat bubble icon (message square) — delegates to CommentIcon (identical SVG, different semantic name)
+#[component]
+pub fn ChatBubbleIcon(props: IconProps) -> Element {
+    CommentIcon(props)
+}
 /// Highlighter icon (marker pen)
 #[component]
 pub fn HighlighterIcon(props: IconProps) -> Element {

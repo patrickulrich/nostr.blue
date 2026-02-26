@@ -42,7 +42,7 @@ pub fn RepoTabNav(
             route: Route::CodeRepoTree {
                 naddr: naddr.clone(),
                 git_ref: "HEAD".to_string(),
-                path: "".to_string(),
+                path: vec![],
             },
             count: None,
         },
@@ -69,6 +69,42 @@ pub fn RepoTabNav(
             label: "Commits",
             icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/></svg>"#,
             route: Route::CodeRepoCommits {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
+        TabConfig {
+            id: "discussions",
+            label: "Discussions",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>"#,
+            route: Route::CodeRepoDiscussions {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
+        TabConfig {
+            id: "releases",
+            label: "Releases",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>"#,
+            route: Route::CodeRepoReleases {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
+        TabConfig {
+            id: "insights",
+            label: "Insights",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>"#,
+            route: Route::CodeRepoInsights {
+                naddr: naddr.clone(),
+            },
+            count: None,
+        },
+        TabConfig {
+            id: "architecture",
+            label: "Architecture",
+            icon: r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>"#,
+            route: Route::CodeRepoArchitecture {
                 naddr: naddr.clone(),
             },
             count: None,
@@ -198,7 +234,7 @@ pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
             Route::CodeRepoTree {
                 naddr: naddr.clone(),
                 git_ref: "HEAD".to_string(),
-                path: "".to_string(),
+                path: vec![],
             },
         ),
         (
@@ -219,6 +255,34 @@ pub fn RepoTabNavCompact(naddr: String, active_tab: String) -> Element {
             "commits",
             "Commits",
             Route::CodeRepoCommits {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "discussions",
+            "Discussions",
+            Route::CodeRepoDiscussions {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "releases",
+            "Releases",
+            Route::CodeRepoReleases {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "insights",
+            "Insights",
+            Route::CodeRepoInsights {
+                naddr: naddr.clone(),
+            },
+        ),
+        (
+            "architecture",
+            "Arch",
+            Route::CodeRepoArchitecture {
                 naddr: naddr.clone(),
             },
         ),

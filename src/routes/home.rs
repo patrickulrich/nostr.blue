@@ -916,7 +916,7 @@ pub fn Home(list: String) -> Element {
                     }
                 }
                 let filter = Filter::new()
-                    .kinds(vec![Kind::TextNote, Kind::Repost])
+                    .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
                     .authors(batch_authors.clone())
                     .since(since_timestamp)
                     .limit(0);
@@ -987,6 +987,18 @@ pub fn Home(list: String) -> Element {
                                         };
                                         if should_add {
                                             Some(FeedItem::OriginalPost((*event).clone()))
+                                        } else {
+                                            None
+                                        }
+                                    } else if event.kind == Kind::Comment {
+                                        // Include topic posts (kind 1111 with NIP-73 hashtag) as root posts only
+                                        if crate::stores::topic_store::is_topic_post(&event) {
+                                            let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                                            if !is_reply {
+                                                Some(FeedItem::OriginalPost((*event).clone()))
+                                            } else {
+                                                None
+                                            }
                                         } else {
                                             None
                                         }
@@ -1915,7 +1927,7 @@ async fn load_following_feed(
         return Ok((global, true));
     }
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
         .authors(authors)
         .limit(50);
     if let Some(until_ts) = until {
@@ -1958,6 +1970,13 @@ async fn load_following_feed(
                 } else if event.kind == Kind::TextNote {
                     // Posts with root/reply markers are thread replies - filter these out
                     // Mentions (e-tags without markers) are preserved in the feed
+                    let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                    if !is_reply {
+                        feed_items.push(FeedItem::OriginalPost(event));
+                    }
+                } else if event.kind == Kind::Comment
+                    && crate::stores::topic_store::is_topic_post(&event)
+                {
                     let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
                     if !is_reply {
                         feed_items.push(FeedItem::OriginalPost(event));
@@ -2025,7 +2044,7 @@ where
         return Ok((global, true));
     }
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
         .authors(authors)
         .limit(50);
     if let Some(until_ts) = until {
@@ -2054,6 +2073,17 @@ where
                     let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
                     if !is_reply {
                         Some(FeedItem::OriginalPost(event))
+                    } else {
+                        None
+                    }
+                } else if event.kind == Kind::Comment {
+                    if crate::stores::topic_store::is_topic_post(&event) {
+                        let is_reply = event.tags.iter().any(|tag| tag.is_reply() || tag.is_root());
+                        if !is_reply {
+                            Some(FeedItem::OriginalPost(event))
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -2119,7 +2149,7 @@ async fn load_following_with_replies(
         return Ok((global, true));
     }
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
         .authors(authors)
         .limit(50);
     if let Some(until_ts) = until {
@@ -2161,7 +2191,10 @@ async fn load_following_with_replies(
                             );
                         }
                     }
-                } else if event.kind == Kind::TextNote {
+                } else if event.kind == Kind::TextNote
+                    || (event.kind == Kind::Comment
+                        && crate::stores::topic_store::is_topic_post(&event))
+                {
                     feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
@@ -2184,7 +2217,7 @@ async fn load_following_with_replies(
 }
 async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlueError> {
     log::info!("Loading global feed (until: {:?})...", until);
-    let mut filter = Filter::new().kinds(vec![Kind::TextNote, Kind::Repost]).limit(50);
+    let mut filter = Filter::new().kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment]).limit(50);
     if let Some(until_ts) = until {
         filter = filter.until(Timestamp::from(until_ts));
     } else {
@@ -2213,7 +2246,10 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlue
                             );
                         }
                     }
-                } else if event.kind == Kind::TextNote {
+                } else if event.kind == Kind::TextNote
+                    || (event.kind == Kind::Comment
+                        && crate::stores::topic_store::is_topic_post(&event))
+                {
                     feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
@@ -2232,7 +2268,7 @@ async fn load_global_feed(until: Option<u64>) -> Result<Vec<FeedItem>, NostrBlue
 async fn fetch_quick_global_posts(limit: usize) -> Result<Vec<FeedItem>, crate::error::NostrBlueError> {
     log::info!("Fetching {} quick global posts...", limit);
     let filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
         .limit(limit);
 
     let events = nostr_client::fetch_events_from_connected_relays(
@@ -2289,7 +2325,7 @@ async fn load_people_list_feed(
     }
     log::info!("People list '{}' has {} members", list.name, members.len());
     let mut filter = Filter::new()
-        .kinds(vec![Kind::TextNote, Kind::Repost])
+        .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])
         .authors(members)
         .limit(50);
     if let Some(until_ts) = until {
@@ -2323,7 +2359,10 @@ async fn load_people_list_feed(
                             );
                         }
                     }
-                } else if event.kind == Kind::TextNote {
+                } else if event.kind == Kind::TextNote
+                    || (event.kind == Kind::Comment
+                        && crate::stores::topic_store::is_topic_post(&event))
+                {
                     feed_items.push(FeedItem::OriginalPost(event));
                 }
             }
