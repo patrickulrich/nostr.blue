@@ -74,8 +74,7 @@ pub fn TopicPostCard(
                     role: "link",
                     tabindex: "0",
                     onkeydown: move |evt: KeyboardEvent| {
-                        let activate = matches!(evt.key(), Key::Enter)
-                            || matches!(evt.key(), Key::Character(ref ch) if ch == " ");
+                        let activate = matches!(evt.key(), Key::Enter);
                         if !activate { return; }
                         // Don't navigate if key event originated from/inside an anchor element
                         if let Some(target) = evt.data.as_web_event().target() {

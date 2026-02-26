@@ -296,6 +296,7 @@ pub fn DiffViewer(
             div { class: "flex items-center gap-2 mb-4",
                 div { class: "bg-muted rounded-lg overflow-hidden p-1",
                     button {
+                        r#type: "button",
                         class: if current_mode == DiffViewMode::Unified { "px-3 py-1.5 text-xs bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
                         onclick: move |_| {
                             active_comment_line.set(None);
@@ -305,6 +306,7 @@ pub fn DiffViewer(
                         "Unified"
                     }
                     button {
+                        r#type: "button",
                         class: if current_mode == DiffViewMode::SideBySide { "px-3 py-1.5 text-xs bg-accent text-foreground font-medium" } else { "px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition" },
                         onclick: move |_| {
                             active_comment_line.set(None);
@@ -541,6 +543,7 @@ pub fn DiffViewer(
                                                                                         }
                                                                                         div { class: "flex justify-end gap-2",
                                                                                             button {
+                                                                                                r#type: "button",
                                                                                                 class: "px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition",
                                                                                                 onclick: move |_| {
                                                                                                     active_comment_line.set(None);
@@ -549,6 +552,7 @@ pub fn DiffViewer(
                                                                                                 "Cancel"
                                                                                             }
                                                                                             button {
+                                                                                                r#type: "button",
                                                                                                 class: "px-3 py-1 text-xs bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition disabled:opacity-50",
                                                                                                 disabled: comment_text.read().trim().is_empty(),
                                                                                                 onclick: {
@@ -583,10 +587,6 @@ pub fn DiffViewer(
                                                 // Add interactive '+' gutter button and inline comment form for parity with unified view.
                                                 DiffViewMode::SideBySide => {
                                                     let rows = build_side_by_side_rows(&hunk.lines);
-                                                    let file_comments: HashMap<usize, &Vec<LineComment>> = comment_map.iter()
-                                                        .filter(|((fp, _), _)| fp == &section.file_path)
-                                                        .map(|((_, ln), cs)| (*ln, cs))
-                                                        .collect();
                                                     rsx! {
                                                         for (row_idx, row) in rows.iter().enumerate() {
                                                             tr {

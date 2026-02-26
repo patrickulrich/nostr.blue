@@ -329,7 +329,7 @@ pub fn ReadmePreview(content: String) -> Element {
                 }
             }
             if in_mermaid {
-                if line.trim().starts_with("```") {
+                if trimmed.starts_with("```") {
                     in_mermaid = false;
                 }
                 continue;

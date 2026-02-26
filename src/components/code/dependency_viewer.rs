@@ -117,7 +117,11 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
                         let v = v.trim();
                         match k {
                             "version" => ver = Some(v.trim_matches('"').to_string()),
-                            "optional" => is_optional = v.trim_matches('"') == "true",
+                            "optional" => {
+                                let v = v.trim_end_matches('}').trim();
+                                let v = v.split('#').next().unwrap_or(v).trim();
+                                is_optional = v.trim_matches('"') == "true";
+                            }
                             _ => {}
                         }
                     }
@@ -235,7 +239,7 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
                     dep_type: DepType::Runtime,
                 },
                 None => Dependency {
-                    name: spec_part.to_string(),
+                    name: spec_part.split('#').next().unwrap_or(spec_part).trim().to_string(),
                     version: "*".to_string(),
                     dep_type: DepType::Runtime,
                 },

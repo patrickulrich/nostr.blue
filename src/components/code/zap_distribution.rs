@@ -29,6 +29,7 @@ enum PaymentStatus {
     Sending,
     Success,
     Failed(String),
+    Timeout(String),
 }
 
 /// Zap distribution modal for splitting payments across contributors
@@ -142,7 +143,7 @@ pub fn ZapDistribution(
         let recips = recipients.read().clone();
         let sendable: Vec<(ZapRecipient, String)> = recips
             .into_iter()
-            .filter(|r| r.amount > 0 && r.status != PaymentStatus::Success)
+            .filter(|r| r.amount > 0 && r.status != PaymentStatus::Success && !matches!(r.status, PaymentStatus::Timeout(_)))
             .filter_map(|r| {
                 let lud16 = PROFILE_CACHE.read().peek(&r.pubkey).and_then(|p| p.lud16.clone())?;
                 Some((r, lud16))
@@ -172,41 +173,45 @@ pub fn ZapDistribution(
                     Box::pin(lnurl::get_invoice_from_lud16(lud16, recip.amount, None)),
                     Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),
                 ).await {
-                    Either::Left((result, _)) => result.map_err(|e| format!("{}", e)),
-                    Either::Right(_) => Err("Invoice request timed out after 30s".to_string()),
+                    Either::Left((Ok(inv), _)) => Ok(inv),
+                    Either::Left((Err(e), _)) => Err(PaymentStatus::Failed(format!("{}", e))),
+                    Either::Right(_) => Err(PaymentStatus::Timeout("Invoice request timed out after 30s".to_string())),
                 };
                 match invoice_result {
                     Ok(invoice) => {
                         // Race payment against a 30s timeout
-                        let pay_result = match select(
+                        match select(
                             Box::pin(nwc_store::pay_invoice(invoice)),
                             Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),
                         ).await {
-                            Either::Left((result, _)) => result,
-                            Either::Right(_) => Err("Payment timed out after 30s".to_string()),
-                        };
-                        match pay_result {
-                            Ok(_) => {
+                            Either::Left((Ok(_), _)) => {
                                 success_count += 1;
                                 let mut recips = recipients.write();
                                 if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
                                     r.status = PaymentStatus::Success;
                                 }
                             }
-                            Err(e) => {
+                            Either::Left((Err(e), _)) => {
                                 fail_count += 1;
                                 let mut recips = recipients.write();
                                 if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
                                     r.status = PaymentStatus::Failed(e);
                                 }
                             }
+                            Either::Right(_) => {
+                                fail_count += 1;
+                                let mut recips = recipients.write();
+                                if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
+                                    r.status = PaymentStatus::Timeout("Payment timed out after 30s".to_string());
+                                }
+                            }
                         }
                     }
-                    Err(e) => {
+                    Err(status) => {
                         fail_count += 1;
                         let mut recips = recipients.write();
                         if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
-                            r.status = PaymentStatus::Failed(e);
+                            r.status = status;
                         }
                     }
                 }
@@ -324,6 +329,7 @@ pub fn ZapDistribution(
                                     PaymentStatus::Sending => "opacity-70",
                                     PaymentStatus::Success => "",
                                     PaymentStatus::Failed(_) => "",
+                                    PaymentStatus::Timeout(_) => "",
                                 };
                                 // Resolve profile in RSX path (appropriate place for PROFILE_CACHE.read())
                                 let profile = PROFILE_CACHE.read().peek(&recip.pubkey).cloned();
@@ -386,6 +392,9 @@ pub fn ZapDistribution(
                                             },
                                             PaymentStatus::Failed(msg) => rsx! {
                                                 span { class: "text-xs text-destructive", title: "{msg}", "Failed" }
+                                            },
+                                            PaymentStatus::Timeout(msg) => rsx! {
+                                                span { class: "text-xs text-orange-500", title: "{msg}", "Timed out" }
                                             },
                                         }
                                     }

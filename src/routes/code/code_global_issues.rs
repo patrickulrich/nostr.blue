@@ -139,7 +139,7 @@ pub fn CodeGlobalIssues() -> Element {
                 || i.labels.iter().any(|l| l.to_lowercase().contains(&query))
         })
         .filter(|i| match label_filter.read().as_deref() {
-            Some(filter) => i.labels.iter().any(|l| l.as_str() == filter),
+            Some(filter) => i.labels.iter().any(|l| l.eq_ignore_ascii_case(filter)),
             None => true,
         })
         .cloned()
@@ -199,7 +199,7 @@ pub fn CodeGlobalIssues() -> Element {
                         r#type: "button",
                         role: "tab",
                         aria_selected: if *active_tab.read() == FilterTab::Created { "true" } else { "false" },
-                        tabindex: if *active_tab.read() == FilterTab::Created { "0" } else { "-1" },
+                        tabindex: "0",
                         class: if *active_tab.read() == FilterTab::Created {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {
@@ -212,7 +212,7 @@ pub fn CodeGlobalIssues() -> Element {
                         r#type: "button",
                         role: "tab",
                         aria_selected: if *active_tab.read() == FilterTab::Assigned { "true" } else { "false" },
-                        tabindex: if *active_tab.read() == FilterTab::Assigned { "0" } else { "-1" },
+                        tabindex: "0",
                         class: if *active_tab.read() == FilterTab::Assigned {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {

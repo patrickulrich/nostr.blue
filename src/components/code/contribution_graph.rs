@@ -111,7 +111,7 @@ fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
         let mid_week_ts = week.week_start + 3 * 86400;
         let m = month_of(mid_week_ts);
         if last_month != Some(m) {
-            if let Some(name) = MONTHS.get(m as usize - 1) {
+            if let Some(name) = MONTHS.get(m.saturating_sub(1) as usize) {
                 month_labels.push((col, name));
             }
             last_month = Some(m);
@@ -190,12 +190,13 @@ fn ContributionGrid(weeks: Vec<ContributionWeek>) -> Element {
                                                 div {
                                                     key: "cell-{col_idx}-{day_idx}",
                                                     class: "group relative",
-                                                    aria_label: "{c} {contribution_text} on {date_str}",
                                                     div {
                                                         class: "w-3 h-3 rounded-sm {color}",
+                                                        aria_label: "{c} {contribution_text} on {date_str}",
                                                     }
                                                     div {
                                                         class: "absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-foreground text-background text-xs rounded opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap z-10",
+                                                        aria_hidden: "true",
                                                         "{c} {contribution_text} on {date_str}"
                                                     }
                                                 }
