@@ -235,7 +235,8 @@ fn OverviewTab(repo: Repository, naddr: String) -> Element {
                                     href: "{url}",
                                     target: "_blank",
                                     rel: "noopener noreferrer",
-                                    class: "text-sm text-primary hover:underline flex items-center gap-1",
+                                    class: "text-sm text-primary hover:underline flex items-center gap-1 max-w-[14rem] truncate",
+                                    title: "{url}",
                                     svg {
                                         class: "w-3 h-3",
                                         xmlns: "http://www.w3.org/2000/svg",

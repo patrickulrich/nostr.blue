@@ -8,6 +8,7 @@ use crate::services::git_hosting::{fetch_repository, file_fetcher, git_service};
 use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
+use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(
@@ -184,6 +185,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
     let mut file_paths = use_signal(Vec::<String>::new);
     let mut repo_signal = use_signal(|| None::<Repository>);
     let mut gen = use_signal(|| 0u32);
+    let mut open_categories = use_signal(HashSet::<String>::new);
 
     use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
@@ -384,20 +386,36 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
                             {
                                 let (label, _, tw_color) = category_info(cat);
                                 let cat_files = cat_groups.get(cat).cloned().unwrap_or_default();
+                                let is_open = open_categories.read().contains(cat);
+                                let cat_key = cat.clone();
                                 rsx! {
                                     details {
-                                        key: "{cat}-details",
+                                        key: "{cat_key}-details",
                                         class: "bg-card border border-border rounded-lg",
+                                        open: is_open,
+                                        ontoggle: {
+                                            let cat_key = cat_key.clone();
+                                            move |_| {
+                                                let mut set = open_categories.write();
+                                                if set.contains(&cat_key) {
+                                                    set.remove(&cat_key);
+                                                } else {
+                                                    set.insert(cat_key.clone());
+                                                }
+                                            }
+                                        },
                                         summary { class: "px-4 py-3 cursor-pointer select-none hover:bg-accent/50 transition rounded-lg",
                                             span { class: "font-medium {tw_color}", "{label}" }
                                             span { class: "ml-2 text-muted-foreground text-sm", "({cat_files.len()} files)" }
                                         }
-                                        div { class: "px-4 pb-3 max-h-64 overflow-y-auto",
-                                            for file in cat_files.iter() {
-                                                div {
-                                                    key: "{file}",
-                                                    class: "py-0.5 text-sm text-muted-foreground font-mono truncate",
-                                                    "{file}"
+                                        if is_open {
+                                            div { class: "px-4 pb-3 max-h-64 overflow-y-auto",
+                                                for file in cat_files.iter() {
+                                                    div {
+                                                        key: "{file}",
+                                                        class: "py-0.5 text-sm text-muted-foreground font-mono truncate",
+                                                        "{file}"
+                                                    }
                                                 }
                                             }
                                         }

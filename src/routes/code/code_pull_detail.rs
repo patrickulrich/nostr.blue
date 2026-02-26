@@ -75,6 +75,7 @@ pub fn CodePullDetail(note_id: String) -> Element {
                     Link {
                         to: Route::CodeHome {},
                         class: "text-muted-foreground hover:text-foreground",
+                        aria_label: "Back to code",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",
@@ -676,12 +677,16 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
 
             // Merge confirmation modal
             if *show_merge_confirm.read() {
-                div { class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center",
+                div {
+                    class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center",
+                    role: "dialog",
+                    aria_modal: "true",
+                    aria_labelledby: "merge-confirm-title",
                     onclick: move |_| show_merge_confirm.set(false),
                     div {
                         class: "bg-background border border-border rounded-xl p-6 max-w-md mx-4 shadow-lg",
                         onclick: move |e| e.stop_propagation(),
-                        h3 { class: "text-lg font-semibold mb-2", "Merge Pull Request" }
+                        h3 { id: "merge-confirm-title", class: "text-lg font-semibold mb-2", "Merge Pull Request" }
                         p { class: "text-sm text-muted-foreground mb-4",
                             "This will mark the pull request as merged (Applied). This action publishes a status event to Nostr relays."
                         }
@@ -901,43 +906,52 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                 "{err}"
                             }
                         }
-                        DiffViewer {
-                            content: pr.content.clone(),
-                            is_cover_letter: pr.is_cover_letter,
-                            pr_event_id: Some(pr_id.clone()),
-                            line_comments: line_comments.read().clone(),
-                            on_line_comment: move |(file, line_num, text): (String, usize, String)| {
-                                let id = pr_id_for_handler.clone();
-                                let author = pr_author_for_handler.clone();
-                                line_comment_error.set(None);
-                                let gen = line_comments_gen.peek().wrapping_add(1);
-                                line_comments_gen.set(gen);
-                                spawn(async move {
-                                    match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
-                                        Ok(_) => {
-                                            // Refresh line comments after publishing
-                                            match fetch_line_comments_by_id(&id).await {
-                                                Ok(lcs) => {
-                                                    if *line_comments_gen.peek() == gen {
-                                                        line_comments.set(lcs);
+                        if is_authenticated {
+                            DiffViewer {
+                                content: pr.content.clone(),
+                                is_cover_letter: pr.is_cover_letter,
+                                pr_event_id: Some(pr_id.clone()),
+                                line_comments: line_comments.read().clone(),
+                                on_line_comment: move |(file, line_num, text): (String, usize, String)| {
+                                    let id = pr_id_for_handler.clone();
+                                    let author = pr_author_for_handler.clone();
+                                    line_comment_error.set(None);
+                                    let gen = line_comments_gen.peek().wrapping_add(1);
+                                    line_comments_gen.set(gen);
+                                    spawn(async move {
+                                        match publish_line_comment_by_id(&id, &author, &text, &file, line_num).await {
+                                            Ok(_) => {
+                                                // Refresh line comments after publishing
+                                                match fetch_line_comments_by_id(&id).await {
+                                                    Ok(lcs) => {
+                                                        if *line_comments_gen.peek() == gen {
+                                                            line_comments.set(lcs);
+                                                        }
                                                     }
-                                                }
-                                                Err(e) => {
-                                                    if *line_comments_gen.peek() == gen {
-                                                        log::warn!("Comment published but failed to refresh: {}", e);
-                                                        line_comment_error.set(Some(format!("Comment published but failed to refresh: {}", e)));
+                                                    Err(e) => {
+                                                        if *line_comments_gen.peek() == gen {
+                                                            log::warn!("Comment published but failed to refresh: {}", e);
+                                                            line_comment_error.set(Some(format!("Comment published but failed to refresh: {}", e)));
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-                                        Err(e) => {
-                                            if *line_comments_gen.peek() == gen {
-                                                line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
+                                            Err(e) => {
+                                                if *line_comments_gen.peek() == gen {
+                                                    line_comment_error.set(Some(format!("Failed to publish line comment: {}", e)));
+                                                }
                                             }
                                         }
-                                    }
-                                });
-                            },
+                                    });
+                                },
+                            }
+                        } else {
+                            DiffViewer {
+                                content: pr.content.clone(),
+                                is_cover_letter: pr.is_cover_letter,
+                                pr_event_id: Some(pr_id.clone()),
+                                line_comments: line_comments.read().clone(),
+                            }
                         }
                     }
                 },

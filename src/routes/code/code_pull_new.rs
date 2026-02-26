@@ -7,7 +7,8 @@ use crate::services::git_hosting::{fetch_repository, publish_patch_by_naddr};
 use crate::stores::{auth_store, nostr_client};
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
-/// Validate a git ref name per git-check-ref-format rules
+/// Validate a git branch name per git-check-ref-format rules.
+/// Rejects `HEAD`, leading `-`, and other invalid ref characters.
 fn is_valid_git_refname(name: &str) -> bool {
     if name.is_empty() {
         return false;
@@ -80,6 +81,7 @@ pub fn CodePullNew(naddr: String) -> Element {
         }
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);
+        repo_result.set(None);
         spawn(async move {
             let result = fetch_repository(&n).await;
             if *repo_gen.peek() == gen {

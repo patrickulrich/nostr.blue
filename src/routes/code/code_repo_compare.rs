@@ -102,6 +102,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
                             naddr: naddr.clone(),
                         },
                         class: "text-muted-foreground hover:text-foreground",
+                        aria_label: "Back to repository",
                         dangerous_inner_html: icons::ARROW_LEFT,
                     }
                     h1 { class: "text-xl font-bold flex items-center gap-2",

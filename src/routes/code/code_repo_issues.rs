@@ -213,7 +213,13 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
                     {
                         let filtered_issues = filtered();
                         if filtered_issues.is_empty() {
-                            rsx! { EmptyIssues { has_filters: !search_query.read().is_empty() || !selected_labels.read().is_empty() || *status_filter.read() != StatusFilter::Open } }
+                            {
+                                let has_any_issues = !all_issues.read().is_empty();
+                                let has_filters = !search_query.read().is_empty()
+                                    || !selected_labels.read().is_empty()
+                                    || (has_any_issues && *status_filter.read() != StatusFilter::Open);
+                                rsx! { EmptyIssues { has_filters } }
+                            }
                         } else {
                             rsx! {
                                 div { class: "border border-border rounded-lg divide-y divide-border",

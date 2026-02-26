@@ -33,7 +33,7 @@ pub fn CodeNew() -> Element {
     // Auto-generate repo_id from name (only if user hasn't manually edited repo_id)
     use_effect(move || {
         let name_val = name.read().clone();
-        if !name_val.is_empty() && !*repo_id_touched.peek() {
+        if !name_val.is_empty() && !*repo_id_touched.read() {
             let slug = name_val
                 .to_lowercase()
                 .chars()

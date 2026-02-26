@@ -108,7 +108,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
         .unwrap_or_else(|| discussion.pubkey_display());
     // Fetch repository for role badges
     let mut repo_data = use_signal(|| None::<Repository>);
-    let mut repo_gen = use_signal(|| 0u64);
+    let mut repo_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&repo_naddr, move |naddr| {
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);

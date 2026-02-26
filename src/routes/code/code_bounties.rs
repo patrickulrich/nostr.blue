@@ -474,7 +474,7 @@ fn SortButton(props: SortButtonProps) -> Element {
         "text-muted-foreground hover:text-foreground cursor-pointer"
     };
     rsx! {
-        button { class: "{class}", aria_pressed: if props.active { "true" } else { "false" }, onclick: move |e| props.onclick.call(e), "{props.label}" }
+        button { r#type: "button", class: "{class}", aria_pressed: if props.active { "true" } else { "false" }, onclick: move |e| props.onclick.call(e), "{props.label}" }
     }
 }
 
@@ -493,7 +493,7 @@ fn StatusChip(props: StatusChipProps) -> Element {
         "px-3 py-1.5 text-sm rounded-full bg-muted text-muted-foreground hover:bg-accent"
     };
     rsx! {
-        button { class: "{class}", aria_pressed: if props.active { "true" } else { "false" }, onclick: move |e| props.onclick.call(e), "{props.label}" }
+        button { r#type: "button", class: "{class}", aria_pressed: if props.active { "true" } else { "false" }, onclick: move |e| props.onclick.call(e), "{props.label}" }
     }
 }
 

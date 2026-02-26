@@ -74,7 +74,7 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 }
                 // Fall back to GitHub API for GitHub-hosted repos
                 let mut last_github_err: Option<String> = None;
-                for url in repo.clone.iter() {
+                for url in repo.clone.iter().chain(repo.web.iter()) {
                     if *request_gen.peek() != gen { return; }
                     if let Some((owner, repo_name)) = parse_github_url(url) {
                         match fetch_commits(&owner, &repo_name, 30).await {

@@ -18,6 +18,9 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.is_empty() {
         return Some("File path is required".to_string());
     }
+    if path.len() > 4096 {
+        return Some("Path must not exceed 4096 characters".to_string());
+    }
     if path.starts_with('/') {
         return Some("Path must not start with /".to_string());
     }

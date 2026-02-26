@@ -44,6 +44,11 @@ pub fn CodeGlobalIssues() -> Element {
 
     use_effect(use_reactive((&user_pubkey, &client_init), move |(pk_hex, initialized)| {
         if !initialized || pk_hex.is_empty() {
+            loading.set(false);
+            created_issues.set(Vec::new());
+            assigned_issues.set(Vec::new());
+            label_filter.set(None);
+            error_msg.set(None);
             return;
         }
         let gen = request_gen.peek().wrapping_add(1);

@@ -459,6 +459,9 @@ async fn submit_edit_file(
     {
         return Err("Invalid file path".to_string());
     }
+    if path.chars().any(|c| c.is_ascii_whitespace()) {
+        return Err("File path must not contain whitespace".into());
+    }
 
     // Validate commit message (interpolated into Subject header)
     if commit_message.contains('\n') || commit_message.contains('\r') {

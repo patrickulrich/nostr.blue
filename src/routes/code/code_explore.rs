@@ -76,7 +76,7 @@ fn FilterChip(props: FilterChipProps) -> Element {
         "px-3 py-1.5 text-sm rounded-full bg-muted text-muted-foreground hover:bg-accent"
     };
     rsx! {
-        button { class: "{class}", onclick: move |e| props.onclick.call(e), "{props.label}" }
+        button { r#type: "button", class: "{class}", aria_pressed: "{props.active}", onclick: move |e| props.onclick.call(e), "{props.label}" }
     }
 }
 /// All content - shows both repos and snippets
@@ -117,7 +117,7 @@ fn AllContent() -> Element {
                     Link {
                         to: Route::CodeRepositories {},
                         class: "text-sm text-primary hover:underline",
-                        "View all"
+                        "My Repositories"
                     }
                 }
                 match &*repos.read() {
