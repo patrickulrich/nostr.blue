@@ -50,7 +50,7 @@ pub fn LabelPicker(
             }
         }
         all.retain(|l| !selected_labels.iter().any(|s| s.eq_ignore_ascii_case(l)));
-        all.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        all.sort_by_key(|a| a.to_ascii_lowercase());
         all.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         all
     };
