@@ -1078,6 +1078,7 @@ fn ConflictDetectionBanner(
             let gen = detect_gen.peek().wrapping_add(1);
             detect_gen.set(gen);
             conflicts.set(Vec::new());
+            checking.set(false);
             if diff.is_empty() {
                 return;
             }
@@ -1086,7 +1087,7 @@ fn ConflictDetectionBanner(
                 checking.set(true);
                 spawn(async move {
                     let results = detect_conflicts(&r, &diff, &parent).await;
-                    if *detect_gen.peek() != gen { return; }
+                    if *detect_gen.peek() != gen { checking.set(false); return; }
                     conflicts.set(results);
                     checking.set(false);
                 });

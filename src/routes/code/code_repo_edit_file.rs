@@ -274,7 +274,7 @@ pub fn CodeRepoEditFile(naddr: String, git_ref: String, path: Vec<String>) -> El
     }
 
     let has_changes = *file_content.read() != *original_content.read();
-    let can_submit = has_changes && !*submitting.read();
+    let can_submit = has_changes && !*submitting.read() && !*file_load_failed.read();
 
     rsx! {
         div { class: "min-h-screen",

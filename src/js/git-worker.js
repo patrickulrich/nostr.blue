@@ -588,8 +588,8 @@ const methods = {
     dir = validateRepoDir(dir);
 
     // Reject filepaths containing control characters before sanitization
-    if (/[\u0000-\u001F\u007F]/.test(filepath)) {
-      throw new Error(`Filepath contains control characters: ${filepath.replace(/[\u0000-\u001F\u007F]/g, '?')}`);
+    if (filepath.split('').some(c => { const code = c.charCodeAt(0); return code <= 0x1F || code === 0x7F; })) {
+      throw new Error(`Filepath contains control characters: ${sanitizeFilepath(filepath)}`);
     }
 
     let commitOid;

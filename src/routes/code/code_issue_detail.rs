@@ -322,9 +322,17 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
 
                     // Comments section
                     div { class: "space-y-4",
-                        h3 { class: "font-semibold flex items-center gap-2",
-                            "Comments"
-                            span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{issue.comment_count}" }
+                        {
+                            let displayed_comment_count = match comments.read().as_ref() {
+                                Some(Ok(list)) => list.len(),
+                                _ => issue.comment_count as usize,
+                            };
+                            rsx! {
+                                h3 { class: "font-semibold flex items-center gap-2",
+                                    "Comments"
+                                    span { class: "px-1.5 py-0.5 text-xs rounded-full bg-muted", "{displayed_comment_count}" }
+                                }
+                            }
                         }
                         match &*comments.read() {
                             Some(Ok(comment_list)) => rsx! {
@@ -417,7 +425,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                         let bounty_amount = bounty.amount_sats;
                                         let bounty_status = bounty.status;
                                         let issue_eid = issue_id.clone();
-                                        let is_owner = is_authenticated && repo.read().as_ref().map(|r| user_pubkey == r.pubkey).unwrap_or(false);
+                                        let is_owner = is_authenticated && repo.read().as_ref().map(|r| permissions::is_owner(&user_pubkey, r)).unwrap_or(false);
                                         rsx! {
                                             div {
                                                 key: "{bounty.event_id}",

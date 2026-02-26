@@ -210,6 +210,7 @@ pub fn CodeBounties() -> Element {
                         class: "w-full px-3 py-1.5 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary",
                         r#type: "text",
                         placeholder: "Search bounties...",
+                        aria_label: "Search bounties",
                         value: "{search_query}",
                         oninput: move |e| search_query.set(e.value()),
                     }
@@ -284,7 +285,8 @@ pub fn CodeBounties() -> Element {
                         class: "w-28 px-2 py-1 bg-muted rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary",
                         r#type: "number",
                         placeholder: "0",
-                        value: if *min_amount.read() > 0 { min_amount.read().to_string() } else { String::new() },
+                        aria_label: "Minimum bounty amount in sats",
+                        value: "{*min_amount.read()}",
                         oninput: move |e| {
                             let val = e.value().parse::<u64>().unwrap_or(0);
                             min_amount.set(val);

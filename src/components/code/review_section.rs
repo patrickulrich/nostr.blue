@@ -46,11 +46,7 @@ enum LocalReviewState {
 
 impl LocalReviewState {
     fn label(&self) -> &'static str {
-        match self {
-            Self::Approved => "Approved",
-            Self::ChangesRequested => "Changes Requested",
-            Self::Commented => "Commented",
-        }
+        self.to_review_state().label()
     }
 
     fn bg_class(&self) -> &'static str {
@@ -115,27 +111,35 @@ pub fn PRReviewSection(
                 show_form.set(false);
                 review_body.set(String::new());
                 spawn(async move {
-                    if let Ok(persisted) = fetch_pr_reviews(&id).await {
-                        if *gen.peek() != current_gen { return; }
-                        // Dedup persisted reviews: keep latest per pubkey
-                        let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
-                        for r in persisted {
-                            by_pubkey.entry(r.pubkey.clone())
-                                .and_modify(|existing| {
-                                    if r.created_at > existing.created_at {
-                                        *existing = r.clone();
-                                    }
-                                })
-                                .or_insert(r);
+                    match fetch_pr_reviews(&id).await {
+                        Ok(persisted) => {
+                            if *gen.peek() != current_gen { return; }
+                            // Dedup persisted reviews: keep latest per pubkey
+                            let mut by_pubkey = std::collections::HashMap::<String, PersistedReview>::new();
+                            for r in persisted {
+                                by_pubkey.entry(r.pubkey.clone())
+                                    .and_modify(|existing| {
+                                        if r.created_at > existing.created_at
+                                            || (r.created_at == existing.created_at && r.event_id > existing.event_id)
+                                        {
+                                            *existing = r.clone();
+                                        }
+                                    })
+                                    .or_insert(r);
+                            }
+                            // Merge: optimistic entries override persisted via insert()
+                            let current = reviews.read().clone();
+                            for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
+                                by_pubkey.insert(r.pubkey.clone(), r);
+                            }
+                            let mut sorted: Vec<_> = by_pubkey.into_values().collect();
+                            sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                            reviews.set(sorted);
                         }
-                        // Merge: optimistic entries override persisted via insert()
-                        let current = reviews.read().clone();
-                        for r in current.into_iter().filter(|r| r.event_id.is_empty()) {
-                            by_pubkey.insert(r.pubkey.clone(), r);
+                        Err(e) => {
+                            if *gen.peek() != current_gen { return; }
+                            log::warn!("Failed to fetch PR reviews for {}: {}", id, e);
                         }
-                        let mut sorted: Vec<_> = by_pubkey.into_values().collect();
-                        sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                        reviews.set(sorted);
                     }
                 });
             },

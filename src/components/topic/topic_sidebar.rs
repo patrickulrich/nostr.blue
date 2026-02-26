@@ -127,7 +127,9 @@ pub fn TopicSidebar(
                                         to: Route::TopicFeed { topic: name.clone() },
                                         class: "flex items-center justify-between px-4 py-2 text-sm rounded-full hover:bg-accent transition",
                                         span { "#{name}" }
-                                        span { class: "text-xs text-muted-foreground", "{count} posts" }
+                                        span { class: "text-xs text-muted-foreground",
+                                            if *count == 1 { "{count} post" } else { "{count} posts" }
+                                        }
                                     }
                                 }
                             }

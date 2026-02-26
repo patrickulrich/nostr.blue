@@ -6,7 +6,10 @@
 //! Supports mermaid diagram rendering via mermaid.js CDN.
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 use wasm_bindgen::prelude::*;
+
+static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[wasm_bindgen(
     inline_js = r#"
@@ -32,8 +35,15 @@ export function initMermaidDiagrams(rootId) {
     }
 
     // Load mermaid.js from CDN (skip if already loading/loaded)
-    if (window.__mermaidLoaderStatus === 'loading' || window.__mermaidLoaderStatus === 'loaded') return;
+    if (window.__mermaidLoaderStatus === 'loading') {
+        if (!window.__mermaidPendingRoots) window.__mermaidPendingRoots = new Set();
+        window.__mermaidPendingRoots.add(rootId);
+        return;
+    }
+    if (window.__mermaidLoaderStatus === 'loaded') return;
     window.__mermaidLoaderStatus = 'loading';
+    window.__mermaidPendingRoots = new Set();
+    window.__mermaidPendingRoots.add(rootId);
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
     script.integrity = 'sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT';
@@ -56,6 +66,21 @@ export function initMermaidDiagrams(rootId) {
             }).catch(e => {
                 console.warn('Mermaid render error:', e);
             });
+            if (window.__mermaidPendingRoots) {
+                for (const pendingId of window.__mermaidPendingRoots) {
+                    const pendingRoot = pendingId ? document.getElementById(pendingId) : document;
+                    if (pendingRoot) {
+                        const pendingDivs = pendingRoot.querySelectorAll('div.mermaid:not([data-processed])');
+                        if (pendingDivs.length > 0) {
+                            const pendingNodes = Array.from(pendingDivs);
+                            window.mermaid.run({ nodes: pendingNodes }).then(() => {
+                                pendingNodes.forEach(el => el.setAttribute('data-processed', 'true'));
+                            }).catch(e => console.warn('Mermaid render error:', e));
+                        }
+                    }
+                }
+                window.__mermaidPendingRoots.clear();
+            }
         } catch (e) {
             console.warn('Mermaid init error:', e);
         }
@@ -123,17 +148,22 @@ pub fn ReadmeViewer(
     #[props(default = "README.md".to_string())]
     filename: String,
 ) -> Element {
+    let viewer_id = use_hook(|| format!("readme-viewer-{}", COUNTER.fetch_add(1, Ordering::Relaxed)));
     // Initialize mermaid.js after the README HTML is rendered into the DOM.
     // Call initMermaidDiagrams whenever content is present; the JS function
     // already no-ops if there are no .mermaid nodes in the DOM.
-    use_effect(use_reactive(&content, move |content| {
-        if content.is_some() {
-            // Small delay to ensure dangerous_inner_html has been applied to the DOM
-            spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(100).await;
-                initMermaidDiagrams("readme-viewer");
-                injectCodeBlockCopyButtons("readme-viewer");
-            });
+    use_effect(use_reactive(&content, {
+        let viewer_id = viewer_id.clone();
+        move |content| {
+            if content.is_some() {
+                let viewer_id = viewer_id.clone();
+                // Small delay to ensure dangerous_inner_html has been applied to the DOM
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(100).await;
+                    initMermaidDiagrams(&viewer_id);
+                    injectCodeBlockCopyButtons(&viewer_id);
+                });
+            }
         }
     }));
 
@@ -215,7 +245,7 @@ pub fn ReadmeViewer(
                         }
                     } else {
                         div {
-                            id: "readme-viewer",
+                            id: "{viewer_id}",
                             class: "prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-headings:text-foreground prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-[''] prose-code:after:content-[''] prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-img:rounded-lg prose-hr:border-border",
                             dangerous_inner_html: "{render_markdown(&markdown)}",
                         }

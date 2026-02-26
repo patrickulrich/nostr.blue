@@ -862,13 +862,13 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
 
     // Split each section's lines into hunks for collapse support
     let section_hunks: Vec<Vec<Hunk>> = sections
-        .iter()
+        .iter_mut()
         .map(|section| {
             let mut hunks: Vec<Hunk> = Vec::new();
             let mut current_hunk_header: Option<String> = None;
             let mut current_hunk_lines: Vec<DiffLine> = Vec::new();
 
-            for dl in &section.lines {
+            for dl in section.lines.drain(..) {
                 if matches!(dl.kind, LineKind::Hunk) {
                     if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {
                         hunks.push(Hunk {
@@ -876,14 +876,9 @@ fn parse_diff_content(content: &str) -> ParsedDiff {
                             lines: std::mem::take(&mut current_hunk_lines),
                         });
                     }
-                    current_hunk_header = Some(dl.content.clone());
+                    current_hunk_header = Some(dl.content);
                 } else {
-                    current_hunk_lines.push(DiffLine {
-                        kind: dl.kind,
-                        old_num: dl.old_num,
-                        new_num: dl.new_num,
-                        content: dl.content.clone(),
-                    });
+                    current_hunk_lines.push(dl);
                 }
             }
             if current_hunk_header.is_some() || !current_hunk_lines.is_empty() {

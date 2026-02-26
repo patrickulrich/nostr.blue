@@ -355,23 +355,25 @@ async fn fetch_commit_detail(
     let (diff, diff_error) = if let Some(ref files) = json.files {
         let mut parts = Vec::new();
         for file in files {
-            if let Some(ref patch) = file.patch {
-                parts.push(format!("diff --git a/{f} b/{f}", f = file.filename));
-                match file.status.as_str() {
-                    "added" => {
-                        parts.push("--- /dev/null".to_string());
-                        parts.push(format!("+++ b/{}", file.filename));
-                    }
-                    "removed" => {
-                        parts.push(format!("--- a/{}", file.filename));
-                        parts.push("+++ /dev/null".to_string());
-                    }
-                    _ => {
-                        parts.push(format!("--- a/{}", file.filename));
-                        parts.push(format!("+++ b/{}", file.filename));
-                    }
+            parts.push(format!("diff --git a/{f} b/{f}", f = file.filename));
+            match file.status.as_str() {
+                "added" => {
+                    parts.push("--- /dev/null".to_string());
+                    parts.push(format!("+++ b/{}", file.filename));
                 }
+                "removed" => {
+                    parts.push(format!("--- a/{}", file.filename));
+                    parts.push("+++ /dev/null".to_string());
+                }
+                _ => {
+                    parts.push(format!("--- a/{}", file.filename));
+                    parts.push(format!("+++ b/{}", file.filename));
+                }
+            }
+            if let Some(ref patch) = file.patch {
                 parts.push(patch.clone());
+            } else {
+                parts.push(format!("Binary file or content unchanged ({})", file.status));
             }
         }
         if parts.is_empty() {

@@ -66,22 +66,16 @@ pub fn CodeRepoInsights(naddr: String) -> Element {
                 }
             }
             div { class: "p-4",
-                if !*nostr_client::CLIENT_INITIALIZED.read()
-                    || repo_result.read().is_none()
-                {
-                    LoadingSkeleton {}
-                } else {
-                    match repo_result.read().as_ref() {
-                        Some(Ok(r)) => rsx! {
-                            InsightsContent { repo: r.clone(), naddr: naddr_for_render.clone() }
-                        },
-                        Some(Err(e)) => rsx! {
-                            ErrorState { message: e.clone() }
-                        },
-                        None => rsx! {
-                            LoadingSkeleton {}
-                        },
-                    }
+                match repo_result.read().as_ref() {
+                    Some(Ok(r)) if *nostr_client::CLIENT_INITIALIZED.read() => rsx! {
+                        InsightsContent { repo: r.clone(), naddr: naddr_for_render.clone() }
+                    },
+                    Some(Err(e)) => rsx! {
+                        ErrorState { message: e.clone() }
+                    },
+                    _ => rsx! {
+                        LoadingSkeleton {}
+                    },
                 }
             }
         }

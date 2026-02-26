@@ -156,6 +156,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
                 };
                 // Stale guard: skip state update if a newer star action started
                 if *star_gen.peek() != current_gen {
+                    star_loading.set(false);
                     return;
                 }
                 match result {

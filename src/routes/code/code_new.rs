@@ -36,9 +36,8 @@ pub fn CodeNew() -> Element {
         if !name_val.is_empty() && !*repo_id_touched.peek() {
             let slug = name_val
                 .to_lowercase()
-                .replace(' ', "-")
                 .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
                 .collect::<String>()
                 .split('-')
                 .filter(|s| !s.is_empty())

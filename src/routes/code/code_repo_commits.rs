@@ -41,12 +41,12 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
     let mut commits_result = use_signal(|| None::<Result<CommitData, String>>);
     let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |n| {
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
-        let gen = request_gen.peek().wrapping_add(1);
-        request_gen.set(gen);
         commits_result.set(None);
         repo_result.set(None);
         spawn(async move {
@@ -74,6 +74,7 @@ pub fn CodeRepoCommits(naddr: String) -> Element {
                 }
                 // Fall back to GitHub API for GitHub-hosted repos
                 for url in repo.clone.iter() {
+                    if *request_gen.peek() != gen { return; }
                     if let Some((owner, repo_name)) = parse_github_url(url) {
                         match fetch_commits(&owner, &repo_name, 30).await {
                             Ok(commits) => {
