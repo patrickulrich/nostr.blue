@@ -770,6 +770,8 @@ const methods = {
       }
 
       if (baseSkipReason && headSkipReason) {
+        // If file exists in both refs with same skip reason, it's unchanged - skip it
+        if (inBase && inHead && baseSkipReason === headSkipReason) continue;
         diffParts.push(`diff --git a/${safePath} b/${safePath}`);
         diffParts.push(`--- a/${safePath}`);
         diffParts.push(`+++ b/${safePath}`);

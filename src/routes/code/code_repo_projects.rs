@@ -89,6 +89,10 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     use_effect(use_reactive(&naddr, move |n| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
+            repo.set(None);
+            items.set(Vec::new());
+            fetch_error.set(None);
+            loading.set(true);
             return;
         }
         let captured_gen = gen.peek().wrapping_add(1);

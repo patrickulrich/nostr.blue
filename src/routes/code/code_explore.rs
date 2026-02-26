@@ -92,6 +92,8 @@ fn AllContent() -> Element {
         }
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
+        repos.set(None);
+        snippets.set(None);
         spawn(async move {
             let (repos_res, snippets_res) = futures::join!(
                 fetch_recent_repositories(10, None), fetch_recent_snippets(10)
@@ -180,6 +182,7 @@ fn RepositoriesContent() -> Element {
         }
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
+        repos.set(None);
         spawn(async move {
             let result = fetch_recent_repositories(50, None).await;
             if *gen.peek() != current_gen { return; }
@@ -272,6 +275,7 @@ fn SnippetsContent() -> Element {
         }
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
+        snippets.set(None);
         spawn(async move {
             let result = fetch_recent_snippets(50).await;
             if *gen.peek() != current_gen { return; }

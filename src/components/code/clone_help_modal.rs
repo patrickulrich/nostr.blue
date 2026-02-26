@@ -70,7 +70,7 @@ pub fn CloneHelpModal(
                     }
                 }
                 // Tabs
-                div { class: "flex gap-1 mb-4 border-b border-border",
+                div { class: "flex gap-1 mb-4 border-b border-border", role: "tablist",
                     TabButton { label: "HTTPS", tab_id: "https", active_tab: active_tab }
                     TabButton { label: "SSH", tab_id: "ssh", active_tab: active_tab }
                     if !git_urls.is_empty() {
@@ -135,6 +135,9 @@ fn TabButton(label: &'static str, tab_id: &'static str, active_tab: Signal<&'sta
         button {
             class: class,
             r#type: "button",
+            role: "tab",
+            aria_selected: "{is_active}",
+            tabindex: if is_active { "0" } else { "-1" },
             onclick: move |_| active_tab.set(tab_id),
             "{label}"
         }

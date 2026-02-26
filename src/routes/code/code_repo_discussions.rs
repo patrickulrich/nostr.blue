@@ -188,8 +188,9 @@ fn discussion_preview_title(discussion: &Discussion) -> String {
         .subject
         .clone()
         .unwrap_or_else(|| {
-            let preview: String = discussion.content.chars().take(80).collect();
-            if discussion.content.chars().nth(80).is_some() {
+            let mut chars = discussion.content.chars();
+            let preview: String = chars.by_ref().take(80).collect();
+            if chars.next().is_some() {
                 format!("{}...", preview)
             } else {
                 preview

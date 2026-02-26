@@ -184,9 +184,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     // Generation counter bumped when a new review is submitted, causing use_resource to refetch
     let mut reviews_gen = use_signal(|| 0u32);
     let pr_id_for_reviews = pr_id.clone();
+    let pr_pubkey_for_reviews = pr_pubkey.clone();
     let approval_status = use_resource(move || {
         let _ = reviews_gen.read();
         let id = pr_id_for_reviews.clone();
+        let pr_author = pr_pubkey_for_reviews.clone();
         let maintainer_set: Vec<String> = repo.read().as_ref()
             .map(build_maintainers)
             .unwrap_or_default();
@@ -195,9 +197,10 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                 Ok(reviews) => {
                     let mut latest: HashMap<&str, &PersistedReview> =
                         HashMap::new();
-                    for r in &reviews {
+                    // Filter out PR author's own reviews — authors cannot self-approve
+                    for r in reviews.iter().filter(|r| r.pubkey != pr_author) {
                         match latest.get(r.pubkey.as_str()) {
-                            Some(existing) if existing.created_at >= r.created_at => {}
+                            Some(existing) if existing.created_at > r.created_at => {}
                             _ => { latest.insert(r.pubkey.as_str(), r); }
                         }
                     }

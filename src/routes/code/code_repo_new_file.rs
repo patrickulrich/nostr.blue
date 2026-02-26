@@ -21,20 +21,20 @@ fn validate_file_path(path: &str) -> Option<String> {
     if path.starts_with('/') {
         return Some("Path must not start with /".to_string());
     }
-    if path.chars().any(|c| c.is_whitespace()) {
-        return Some("Path must not contain whitespace".to_string());
+    if path.contains('\0') {
+        return Some("Path must not contain null bytes".to_string());
+    }
+    if path.contains('\n') || path.contains('\r') {
+        return Some("Path must not contain newline characters".to_string());
     }
     if path.chars().any(|c| c.is_control()) {
         return Some("Path must not contain control characters".to_string());
     }
-    if path.contains('\0') {
-        return Some("Path must not contain null bytes".to_string());
+    if path.chars().any(|c| c.is_whitespace()) {
+        return Some("Path must not contain whitespace".to_string());
     }
     if path.split('/').any(|segment| segment == ".." || segment == ".") {
         return Some("Path must not contain . or .. segments".to_string());
-    }
-    if path.contains('\n') || path.contains('\r') {
-        return Some("Path must not contain newline characters".to_string());
     }
     if path.contains('\\') {
         return Some("Backslash path separators are not allowed".to_string());
@@ -273,7 +273,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                         "Failed to load repository: {err}"
                     }
                 } else {
-                    div { class: "p-4 bg-muted rounded-lg",
+                    div { class: "bg-card border border-border rounded-lg p-4",
                         p { class: "text-sm text-muted-foreground",
                             "Creating new file in "
                             span { class: "font-medium text-foreground", "{repo_name}" }

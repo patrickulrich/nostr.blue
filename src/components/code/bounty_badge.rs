@@ -26,9 +26,17 @@ fn format_bounty_amount(amount: u64) -> String {
         let val = val.trim_end_matches(".0");
         format!("{}M", val)
     } else if amount >= 1_000 {
-        let val = format!("{:.1}", amount as f64 / 1_000.0);
-        let val = val.trim_end_matches(".0");
-        format!("{}K", val)
+        let raw = amount as f64 / 1_000.0;
+        if raw >= 999.95 {
+            // Would round to "1000K", emit "1M" instead
+            let val = format!("{:.1}", amount as f64 / 1_000_000.0);
+            let val = val.trim_end_matches(".0");
+            format!("{}M", val)
+        } else {
+            let val = format!("{:.1}", raw);
+            let val = val.trim_end_matches(".0");
+            format!("{}K", val)
+        }
     } else {
         amount.to_string()
     }

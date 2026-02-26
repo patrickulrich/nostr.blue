@@ -13,22 +13,30 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(
     inline_js = r#"
 export function initArchitectureMermaid() {
-    const divs = document.querySelectorAll('div.mermaid:not([data-processed])');
-    if (divs.length === 0) return;
-    if (typeof mermaid === 'undefined') {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js';
-        script.crossOrigin = 'anonymous';
-        script.onload = () => {
-            mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    let retries = 0;
+    function tryInit() {
+        const divs = document.querySelectorAll('div.mermaid:not([data-processed])');
+        if (divs.length === 0) {
+            if (++retries < 30) requestAnimationFrame(tryInit);
+            return;
+        }
+        if (typeof mermaid === 'undefined') {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js';
+            script.crossOrigin = 'anonymous';
+            script.integrity = 'sha384-enVdc7lTHDGtpROV85t9+VqPC2EyyB0hsRD0MrvQnHUsHmTHIz2D8SPP4EnBkstH';
+            script.onload = () => {
+                mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+                mermaid.run({ nodes: divs });
+                divs.forEach(d => d.setAttribute('data-processed', 'true'));
+            };
+            document.head.appendChild(script);
+        } else {
             mermaid.run({ nodes: divs });
             divs.forEach(d => d.setAttribute('data-processed', 'true'));
-        };
-        document.head.appendChild(script);
-    } else {
-        mermaid.run({ nodes: divs });
-        divs.forEach(d => d.setAttribute('data-processed', 'true'));
+        }
     }
+    requestAnimationFrame(tryInit);
 }
 "#
 )]
@@ -257,13 +265,10 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
         String::new()
     };
 
-    // Initialize mermaid after DOM update
+    // Initialize mermaid after DOM update (rAF retry loop handles DOM readiness)
     use_effect(use_reactive(&mermaid_code, move |code| {
         if !code.is_empty() {
-            spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(100).await;
-                initArchitectureMermaid();
-            });
+            initArchitectureMermaid();
         }
     }));
 

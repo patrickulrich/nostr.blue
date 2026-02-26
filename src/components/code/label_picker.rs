@@ -20,15 +20,11 @@ const DEFAULT_LABELS: &[&str] = &[
 /// Uses the project's semantic theme tokens instead of hardcoded colors.
 fn label_color(label: &str) -> &'static str {
     let hash: u32 = label.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
-    match hash % 8 {
+    match hash % 4 {
         0 => "bg-muted text-foreground border border-border",
-        1 => "bg-accent text-foreground border border-primary/30",
+        1 => "bg-accent text-foreground border border-border",
         2 => "bg-muted text-muted-foreground border border-border",
-        3 => "bg-accent text-muted-foreground border border-primary/30",
-        4 => "bg-primary/10 text-foreground border border-primary/20",
-        5 => "bg-accent/50 text-foreground border border-accent",
-        6 => "bg-muted/50 text-muted-foreground border border-muted-foreground/20",
-        _ => "bg-background text-foreground border border-border",
+        _ => "bg-accent text-muted-foreground border border-border",
     }
 }
 
@@ -171,6 +167,15 @@ pub fn LabelPicker(
                                         onfocusin: move |_| {
                                             let next = focus_gen.peek().wrapping_add(1);
                                             focus_gen.set(next);
+                                        },
+                                        onfocusout: move |_| {
+                                            let gen = *focus_gen.peek();
+                                            spawn(async move {
+                                                gloo_timers::future::TimeoutFuture::new(200).await;
+                                                if *focus_gen.peek() == gen {
+                                                    show_suggestions.set(false);
+                                                }
+                                            });
                                         },
                                         onclick: move |_| {
                                             let mut updated = labels_for_add.clone();

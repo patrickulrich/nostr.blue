@@ -73,22 +73,21 @@ pub fn ZapDistribution(
             if total_weight == 0 || pubkeys.is_empty() {
                 return pubkeys.iter().map(|pk| (pk.clone(), 0, 0)).collect();
             }
-            // Compute exact shares and take floors
-            let exact: Vec<f64> = weights
+            // Compute exact shares using integer arithmetic to avoid f64 precision loss
+            let mut floors: Vec<u64> = weights
                 .iter()
-                .map(|w| amount as f64 * *w as f64 / total_weight as f64)
+                .map(|w| ((amount as u128) * (*w as u128) / (total_weight as u128)) as u64)
                 .collect();
-            let mut floors: Vec<u64> = exact.iter().map(|e| *e as u64).collect();
             let allocated: u64 = floors.iter().sum();
             let remainder = amount.saturating_sub(allocated) as usize;
-            // Distribute remainder to entries with largest fractional parts
-            let mut indices: Vec<usize> = (0..exact.len()).collect();
-            indices.sort_by(|&a, &b| {
-                let frac_a = exact[a] - exact[a].floor();
-                let frac_b = exact[b] - exact[b].floor();
-                frac_b.partial_cmp(&frac_a).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            for &i in indices.iter().take(remainder) {
+            // Distribute remainder to entries with largest fractional parts (by remainder of integer division)
+            let mut remainders: Vec<(usize, u128)> = weights
+                .iter()
+                .enumerate()
+                .map(|(i, w)| (i, (amount as u128) * (*w as u128) % (total_weight as u128)))
+                .collect();
+            remainders.sort_by(|a, b| b.1.cmp(&a.1));
+            for &(i, _) in remainders.iter().take(remainder) {
                 floors[i] += 1;
             }
             pubkeys
@@ -162,9 +161,26 @@ pub fn ZapDistribution(
                         r.status = PaymentStatus::Sending;
                     }
                 }
-                match lnurl::get_invoice_from_lud16(lud16, recip.amount, None).await {
+                // Race invoice fetch against a 30s timeout
+                use futures::future::{select, Either};
+                let invoice_result = match select(
+                    Box::pin(lnurl::get_invoice_from_lud16(lud16, recip.amount, None)),
+                    Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),
+                ).await {
+                    Either::Left((result, _)) => result.map_err(|e| format!("{}", e)),
+                    Either::Right(_) => Err("Invoice request timed out after 30s".to_string()),
+                };
+                match invoice_result {
                     Ok(invoice) => {
-                        match nwc_store::pay_invoice(invoice).await {
+                        // Race payment against a 30s timeout
+                        let pay_result = match select(
+                            Box::pin(nwc_store::pay_invoice(invoice)),
+                            Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),
+                        ).await {
+                            Either::Left((result, _)) => result,
+                            Either::Right(_) => Err("Payment timed out after 30s".to_string()),
+                        };
+                        match pay_result {
                             Ok(_) => {
                                 success_count += 1;
                                 let mut recips = recipients.write();
@@ -185,7 +201,7 @@ pub fn ZapDistribution(
                         fail_count += 1;
                         let mut recips = recipients.write();
                         if let Some(r) = recips.iter_mut().find(|r| r.pubkey == recip.pubkey) {
-                            r.status = PaymentStatus::Failed(format!("{}", e));
+                            r.status = PaymentStatus::Failed(e);
                         }
                     }
                 }
@@ -205,7 +221,7 @@ pub fn ZapDistribution(
         // Backdrop
         div {
             class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| { if !*is_sending.peek() { on_close.call(()); } },
         }
         div {
             class: "fixed inset-x-4 top-[10%] z-50 max-w-lg mx-auto bg-background border border-border rounded-xl shadow-xl max-h-[80vh] overflow-y-auto",
@@ -218,10 +234,11 @@ pub fn ZapDistribution(
             div { class: "p-4 border-b border-border flex items-center justify-between",
                 h3 { id: "distribute-zaps-title", class: "text-lg font-semibold", "Distribute Zaps" }
                 button {
-                    class: "p-1 hover:bg-accent rounded-lg transition text-muted-foreground",
+                    class: if *is_sending.read() { "p-1 rounded-lg text-muted-foreground opacity-50" } else { "p-1 hover:bg-accent rounded-lg transition text-muted-foreground" },
                     aria_label: "Close",
                     r#type: "button",
-                    onclick: move |_| on_close.call(()),
+                    disabled: *is_sending.read(),
+                    onclick: move |_| { if !*is_sending.peek() { on_close.call(()); } },
                     svg {
                         class: "w-5 h-5",
                         xmlns: "http://www.w3.org/2000/svg",

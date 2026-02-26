@@ -47,7 +47,7 @@ fn ThreadNode(
     depth: usize,
 ) -> Element {
     // Prevent stack overflow on deeply nested threads
-    if depth > MAX_RECURSION_DEPTH {
+    if depth >= MAX_RECURSION_DEPTH {
         return rsx! {
             div { class: "py-2 px-3 text-xs text-muted-foreground italic",
                 "Thread continues ({thread.replies.len()} more replies hidden)"

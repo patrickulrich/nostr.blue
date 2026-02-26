@@ -4,6 +4,8 @@ use crate::components::icons::{
 };
 use crate::components::{ConfirmModal, ReactionButton, ZapModal};
 use crate::hooks::use_reaction;
+use crate::utils::clipboard::copy_to_clipboard;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 use crate::routes::Route;
 use crate::services::aggregation::InteractionCounts;
 use crate::stores::bookmarks;
@@ -61,6 +63,7 @@ pub fn PollCard(
     let mut is_bookmarking = use_signal(|| false);
     let is_bookmarked = bookmarks::is_bookmarked(&event_id_str);
     let has_signer = *HAS_SIGNER.read();
+    let toast = consume_toast();
     let mut reply_count = use_signal(|| 0usize);
     let mut repost_count = use_signal(|| 0usize);
     let mut zap_amount_sats = use_signal(|| 0u64);
@@ -126,8 +129,7 @@ pub fn PollCard(
     let cancelled_for_loop = cancelled.clone();
 
     use_effect(use_reactive(&poll_data, move |pd| {
-        let poll = pd.read().clone();
-        if poll.is_none() { return; }
+        let Some(poll) = pd.read().clone() else { return; };
         let poll_id = event_id;
         let cancelled_for_loop = cancelled_for_loop.clone();
         // Increment generation counter before spawn to guard all mutations
@@ -135,9 +137,7 @@ pub fn PollCard(
         vote_gen.set(current_vote_gen);
         spawn(async move {
             loading_votes.set(true);
-            let (ends_at, poll_relays) = poll
-                .map(|p| (p.ends_at, p.relays))
-                .unwrap_or((None, Vec::new()));
+            let (ends_at, poll_relays) = (poll.ends_at, poll.relays);
             let poll_relays_for_sub = poll_relays.clone();
             // Capture timestamp before fetch so votes created during
             // the fetch window are not missed on the next poll.
@@ -174,9 +174,7 @@ pub fn PollCard(
                 if !poll_relays_for_sub.is_empty() {
                     let old_owned = poll_relay_urls.peek().clone();
                     let added = relay::add_relays(&client, &poll_relays_for_sub).await;
-                    if !added.is_empty() {
-                        nostr_client::ensure_relays_ready(&client).await;
-                    }
+                    nostr_client::ensure_relays_ready(&client).await;
                     // New owned set = previously owned relays still in desired set + newly added
                     let desired: HashSet<&nostr_sdk::RelayUrl> = poll_relays_for_sub.iter().collect();
                     let mut new_owned: Vec<nostr_sdk::RelayUrl> = old_owned
@@ -735,8 +733,10 @@ pub fn PollCard(
                         if let Ok(nevent_str) = nevent.to_bech32() {
                             let share_url = format!("https://njump.me/{}", nevent_str);
                             spawn(async move {
-                                if let Err(e) = crate::utils::clipboard::copy_to_clipboard(&share_url).await {
-                                    log::warn!("Clipboard write failed: {:?}", e);
+                                if copy_to_clipboard(&share_url).await.is_ok() {
+                                    toast.success("Link copied".to_string(), ToastOptions::new());
+                                } else {
+                                    toast.error("Copy failed".to_string(), ToastOptions::new());
                                 }
                             });
                         }

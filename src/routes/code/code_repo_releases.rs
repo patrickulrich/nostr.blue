@@ -88,7 +88,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
         && repo_data
             .read()
             .as_ref()
-            .map(|r| permissions::is_owner(&user_pubkey, r) || permissions::is_maintainer(&user_pubkey, r))
+            .map(|r| permissions::is_owner(&user_pubkey, r))
             .unwrap_or(false);
     let all_releases = releases.read();
     rsx! {
@@ -230,7 +230,7 @@ fn ReleaseCard(
         && (user_pubkey == release.pubkey
             || repo
                 .as_ref()
-                .is_some_and(|r| permissions::is_owner(&user_pubkey, r) || permissions::is_maintainer(&user_pubkey, r)));
+                .is_some_and(|r| permissions::is_owner(&user_pubkey, r)));
     if *show_edit.read() {
         return rsx! {
             EditReleaseForm {

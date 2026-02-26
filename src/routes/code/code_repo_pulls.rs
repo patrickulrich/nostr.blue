@@ -22,16 +22,17 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
 
     use_effect(use_reactive(&naddr, move |naddr| {
         error.set(None);
-        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
-        if !client_initialized {
-            return;
-        }
         let gen = request_gen.peek().wrapping_add(1);
         request_gen.set(gen);
         all_prs.set(vec![]);
         selected_labels.set(Vec::new());
         status_filter.set(StatusFilter::Open);
         search_query.set(String::new());
+        let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
+        if !client_initialized {
+            loading.set(true);
+            return;
+        }
         loading.set(true);
         spawn(async move {
             let result = fetch_repo_prs(&naddr).await;

@@ -26,6 +26,7 @@ pub fn SshKeyManager() -> Element {
     let mut adding = use_signal(|| false);
     let mut deleting_id = use_signal(|| None::<String>);
     let mut confirm_delete = use_signal(|| None::<String>);
+    let mut fetch_gen = use_signal(|| 0u32);
 
     // Fetch keys on mount and when auth changes
     use_effect(move || {
@@ -40,10 +41,15 @@ pub fn SshKeyManager() -> Element {
             confirm_delete.set(None);
             deleting_id.set(None);
             adding.set(false);
+            let current_gen = fetch_gen.peek().wrapping_add(1);
+            fetch_gen.set(current_gen);
             spawn(async move {
                 match PublicKey::from_hex(&pubkey_hex) {
                     Ok(pk) => match ssh_keys::fetch_ssh_keys(&pk).await {
                         Ok(k) => {
+                            if *fetch_gen.peek() != current_gen {
+                                return;
+                            }
                             if auth_store::get_pubkey() != Some(pubkey_hex.clone()) {
                                 return;
                             }
@@ -51,6 +57,9 @@ pub fn SshKeyManager() -> Element {
                             loading.set(false);
                         }
                         Err(e) => {
+                            if *fetch_gen.peek() != current_gen {
+                                return;
+                            }
                             if auth_store::get_pubkey() != Some(pubkey_hex.clone()) {
                                 return;
                             }
@@ -59,6 +68,9 @@ pub fn SshKeyManager() -> Element {
                         }
                     },
                     Err(e) => {
+                        if *fetch_gen.peek() != current_gen {
+                            return;
+                        }
                         error.set(Some(format!("Invalid public key: {}", e)));
                         loading.set(false);
                     }
