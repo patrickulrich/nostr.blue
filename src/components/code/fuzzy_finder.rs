@@ -3,14 +3,7 @@
 //! Modal file finder with fuzzy subsequence search for repository browsing.
 use crate::routes::Route;
 use dioxus::prelude::*;
-/// Split a slash-separated path string into route segments
-fn split_path(path: &str) -> Vec<String> {
-    if path.is_empty() {
-        Vec::new()
-    } else {
-        path.split('/').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect()
-    }
-}
+use super::file_tree::split_path;
 
 /// Modal fuzzy file finder for repository file navigation
 #[component]

@@ -242,15 +242,14 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
         });
     }));
 
-    // Classify files into categories
     let paths = file_paths();
     let total = paths.len();
-    let mut cat_counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut cat_groups: std::collections::BTreeMap<String, Vec<&str>> = std::collections::BTreeMap::new();
     for p in &paths {
         let cat = classify_path(p);
-        *cat_counts.entry(cat.to_string()).or_default() += 1;
+        cat_groups.entry(cat.to_string()).or_default().push(p);
     }
-    let mut sorted_cats: Vec<(String, usize)> = cat_counts.into_iter().collect();
+    let mut sorted_cats: Vec<(String, usize)> = cat_groups.iter().map(|(k, v)| (k.clone(), v.len())).collect();
     sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
 
     let mermaid_code = if !sorted_cats.is_empty() {
@@ -380,7 +379,7 @@ pub fn CodeRepoArchitecture(naddr: String) -> Element {
                         for (cat , _count) in sorted_cats.iter() {
                             {
                                 let (label, _, tw_color) = category_info(cat);
-                                let cat_files: Vec<&String> = paths.iter().filter(|p| classify_path(p) == cat.as_str()).collect();
+                                let cat_files = cat_groups.get(cat).cloned().unwrap_or_default();
                                 rsx! {
                                     details {
                                         key: "{cat}-details",

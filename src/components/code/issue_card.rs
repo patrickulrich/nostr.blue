@@ -44,7 +44,7 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                         }
                     }
                     if !issue.assignees.is_empty() {
-                        div { class: "flex items-center gap-1 ml-auto",
+                        div { class: format!("flex items-center gap-1{}", if !issue.labels.is_empty() { " ml-auto" } else { "" }),
                             for assignee in issue.assignees.iter() {
                                 {
                                     rsx! {

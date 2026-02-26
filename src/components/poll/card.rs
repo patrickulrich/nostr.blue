@@ -609,7 +609,7 @@ pub fn PollCard(
                                                     is_reposted.set(true);
                                                     user_repost_id.set(Some(repost_id));
                                                     let current_count = *repost_count.peek();
-                                                    repost_count.set(current_count + 1);
+                                                    repost_count.set((current_count + 1).min(501));
                                                     is_reposting.set(false);
                                                 }
                                                 Err(e) => {

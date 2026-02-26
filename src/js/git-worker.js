@@ -587,6 +587,7 @@ const methods = {
     // Validate and normalize directory path to prevent path traversal attacks
     dir = validateRepoDir(dir);
 
+    if (typeof filepath !== 'string') throw new Error('Invalid filepath type: ' + typeof filepath);
     // Reject filepaths containing control characters before sanitization
     if (filepath.split('').some(c => { const code = c.charCodeAt(0); return code <= 0x1F || code === 0x7F; })) {
       throw new Error(`Filepath contains control characters: ${sanitizeFilepath(filepath)}`);

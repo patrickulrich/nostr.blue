@@ -7,6 +7,7 @@ use crate::services::payments::lnurl;
 use crate::stores::nwc_store;
 use crate::stores::profiles::PROFILE_CACHE;
 use crate::utils::truncate_pubkey;
+use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
@@ -100,22 +101,29 @@ pub fn ZapDistribution(
 
     // Recalculate when amount or selection changes
     use_effect(move || {
-        // Guard: don't reset recipients mid-send; .read() subscribes so
-        // effect re-runs when send completes (true→false) to rebuild list
         if *is_sending.read() {
             return;
         }
         let amount = *total_amount.read();
         let pubkeys = selected_pubkeys.read().clone();
         let allocations = compute_allocations(&pubkeys, amount);
+        let current = recipients.read().clone();
         recipients.set(
             allocations
                 .into_iter()
-                .map(|(pk, weight, amt)| ZapRecipient {
-                    pubkey: pk,
-                    weight,
-                    amount: amt,
-                    status: PaymentStatus::Pending,
+                .map(|(pk, weight, amt)| {
+                    let status = current
+                        .iter()
+                        .find(|r| r.pubkey == pk)
+                        .filter(|r| r.status != PaymentStatus::Pending)
+                        .map(|r| r.status.clone())
+                        .unwrap_or(PaymentStatus::Pending);
+                    ZapRecipient {
+                        pubkey: pk,
+                        weight,
+                        amount: amt,
+                        status,
+                    }
                 })
                 .collect(),
         );
@@ -308,7 +316,7 @@ pub fn ZapDistribution(
                                         key: "{recip.pubkey}",
                                         class: "flex items-center gap-3 p-2 bg-muted rounded-lg {status_class}",
                                         // Avatar
-                                        if let Some(ref pic_url) = pic {
+                                        if let Some(ref pic_url) = pic.as_ref().filter(|u| is_valid_http_url(u)) {
                                             img {
                                                 src: "{pic_url}",
                                                 class: "w-8 h-8 rounded-full shrink-0",
@@ -317,7 +325,7 @@ pub fn ZapDistribution(
                                             }
                                         } else {
                                             div { class: "w-8 h-8 rounded-full bg-accent flex items-center justify-center text-xs font-bold shrink-0",
-                                                {display_name.chars().next().unwrap_or('?').to_string()}
+                                                {truncate_pubkey(&recip.pubkey)}
                                             }
                                         }
                                         // Name + weight

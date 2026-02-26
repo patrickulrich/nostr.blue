@@ -18,7 +18,7 @@ pub fn CodeRepoCompare(naddr: String) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut has_compared = use_signal(|| false);
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
-    let mut request_gen = use_signal(|| 0u64);
+    let mut request_gen = use_signal(|| 0u32);
     let mut compare_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&naddr, move |naddr| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();

@@ -31,6 +31,9 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        if !auth_store::AUTH_STATE.read().is_authenticated {
+            return;
+        }
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);
         repo_result.set(None);
@@ -42,11 +45,14 @@ pub fn CodeIssueNew(naddr: String) -> Element {
         });
     });
     // Fetch existing labels from repo issues for suggestions
-    let mut labels_gen = use_signal(|| 0u64);
+    let mut labels_gen = use_signal(|| 0u32);
     use_effect(move || {
         let n = naddr_for_labels.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
+            return;
+        }
+        if !auth_store::AUTH_STATE.read().is_authenticated {
             return;
         }
         let gen = labels_gen.peek().wrapping_add(1);

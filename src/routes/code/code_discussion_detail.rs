@@ -22,7 +22,7 @@ pub fn CodeDiscussionDetail(note_id: String) -> Element {
     let auth = auth_store::AUTH_STATE.read();
     let mut discussion_result = use_signal(|| None::<Result<Discussion, String>>);
     let mut loading = use_signal(|| true);
-    let mut request_gen = use_signal(|| 0u64);
+    let mut request_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&note_id, move |note_id| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {

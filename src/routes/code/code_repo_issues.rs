@@ -29,6 +29,8 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
         fetch_gen.set(gen);
         all_issues.set(Vec::new());
         selected_labels.set(Vec::new());
+        status_filter.set(StatusFilter::Open);
+        search_query.set(String::new());
         error.set(None);
         loading.set(true);
         spawn(async move {

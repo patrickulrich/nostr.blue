@@ -37,7 +37,7 @@ pub fn RelayDisplay(relays: Vec<String>) -> Element {
     }
 
     let (grasp_relays, plain_relays): (Vec<&String>, Vec<&String>) =
-        relays.iter().partition(|r| is_grasp_server(extract_domain(r)));
+        relays.iter().partition(|r| is_grasp_server(&extract_domain(r).to_lowercase()));
 
     rsx! {
         div { class: "bg-card border border-border rounded-lg p-4",

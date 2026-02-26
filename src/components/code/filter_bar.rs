@@ -108,21 +108,35 @@ pub fn FilterBar(
                         {
                             let is_selected = selected_labels.contains(label);
                             let label_clone = label.clone();
-                            rsx! {
-                                button {
-                                    r#type: "button",
-                                    key: "{label}",
-                                    class: if is_selected {
-                                        "px-2 py-0.5 text-xs rounded-full border border-primary bg-primary/10 text-primary font-medium"
-                                    } else {
-                                        "px-2 py-0.5 text-xs rounded-full border border-border text-muted-foreground hover:bg-accent transition"
-                                    },
-                                    onclick: move |_| {
-                                        if let Some(handler) = &on_label_toggle {
-                                            handler.call(label_clone.clone());
-                                        }
-                                    },
-                                    "{label}"
+                            if on_label_toggle.is_some() {
+                                rsx! {
+                                    button {
+                                        r#type: "button",
+                                        key: "{label}",
+                                        class: if is_selected {
+                                            "px-2 py-0.5 text-xs rounded-full border border-primary bg-primary/10 text-primary font-medium"
+                                        } else {
+                                            "px-2 py-0.5 text-xs rounded-full border border-border text-muted-foreground hover:bg-accent transition"
+                                        },
+                                        onclick: move |_| {
+                                            if let Some(handler) = &on_label_toggle {
+                                                handler.call(label_clone.clone());
+                                            }
+                                        },
+                                        "{label}"
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    span {
+                                        key: "{label}",
+                                        class: if is_selected {
+                                            "px-2 py-0.5 text-xs rounded-full border border-primary bg-primary/10 text-primary font-medium"
+                                        } else {
+                                            "px-2 py-0.5 text-xs rounded-full border border-border text-muted-foreground"
+                                        },
+                                        "{label}"
+                                    }
                                 }
                             }
                         }

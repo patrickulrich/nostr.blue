@@ -47,6 +47,7 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                 title: "Upvote",
                 disabled: !has_signer || *voting.read(),
                 onclick: move |_| {
+                    if *voting.peek() { return; }
                     if !has_signer { return; }
                     let post = post_for_up.clone();
                     voting.set(true);
@@ -83,6 +84,7 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                 title: "Downvote",
                 disabled: !has_signer || *voting.read(),
                 onclick: move |_| {
+                    if *voting.peek() { return; }
                     if !has_signer { return; }
                     let post = post_for_down.clone();
                     voting.set(true);

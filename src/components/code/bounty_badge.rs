@@ -23,9 +23,13 @@ pub fn BountyBadge(amount: u64, #[props(default = false)] compact: bool) -> Elem
 #[allow(dead_code)]
 fn format_bounty_amount(amount: u64) -> String {
     if amount >= 1_000_000 {
-        format!("{}M", amount / 1_000_000)
+        let val = format!("{:.1}", amount as f64 / 1_000_000.0);
+        let val = val.trim_end_matches(".0");
+        format!("{}M", val)
     } else if amount >= 1_000 {
-        format!("{}K", amount / 1_000)
+        let val = format!("{:.1}", amount as f64 / 1_000.0);
+        let val = val.trim_end_matches(".0");
+        format!("{}K", val)
     } else {
         amount.to_string()
     }

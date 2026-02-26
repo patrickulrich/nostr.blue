@@ -344,7 +344,7 @@ pub fn CodeNew() -> Element {
                         placeholder: "e.g., my-awesome-project",
                         value: "{repo_id}",
                         oninput: move |e| {
-                            repo_id_touched.set(true);
+                            repo_id_touched.set(!e.value().is_empty());
                             repo_id.set(e.value());
                         },
                     }

@@ -12,7 +12,16 @@ pub fn CloneHelpModal(
     naddr: String,
     on_close: EventHandler<()>,
 ) -> Element {
-    let active_tab = use_signal(|| "https");
+    let initial_tab = if clone_urls.iter().any(|u| u.starts_with("https://") || u.starts_with("http://")) {
+        "https"
+    } else if clone_urls.iter().any(|u| u.starts_with("ssh://") || u.starts_with("git@")) {
+        "ssh"
+    } else if clone_urls.iter().any(|u| u.starts_with("git://")) {
+        "git"
+    } else {
+        "https"
+    };
+    let active_tab = use_signal(move || initial_tab);
 
     // Categorize URLs
     let ssh_urls: Vec<&String> = clone_urls.iter().filter(|u| {

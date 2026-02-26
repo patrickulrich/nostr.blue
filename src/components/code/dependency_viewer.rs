@@ -57,6 +57,10 @@ pub fn parse_cargo_toml(content: &str) -> Vec<Dependency> {
             continue;
         }
 
+        if section.contains("dependencies") && section.contains('.') {
+            i += 1;
+            continue;
+        }
         let dep_type = if section.contains("dependencies") {
             if section.contains("dev-dependencies") {
                 DepType::Dev
@@ -167,13 +171,26 @@ pub fn parse_package_json(content: &str) -> Vec<Dependency> {
                 });
             }
         }
-        if let Some(obj) = json.get("bundleDependencies").and_then(|v| v.as_object()) {
-            for (name, version) in obj {
-                deps.push(Dependency {
-                    name: name.clone(),
-                    version: version.as_str().unwrap_or("*").to_string(),
-                    dep_type: DepType::Runtime,
-                });
+        let bundle_val = json.get("bundleDependencies").or_else(|| json.get("bundledDependencies"));
+        if let Some(val) = bundle_val {
+            if let Some(arr) = val.as_array() {
+                for item in arr {
+                    if let Some(name) = item.as_str() {
+                        deps.push(Dependency {
+                            name: name.to_string(),
+                            version: "*".to_string(),
+                            dep_type: DepType::Runtime,
+                        });
+                    }
+                }
+            } else if let Some(obj) = val.as_object() {
+                for (name, version) in obj {
+                    deps.push(Dependency {
+                        name: name.clone(),
+                        version: version.as_str().unwrap_or("*").to_string(),
+                        dep_type: DepType::Runtime,
+                    });
+                }
             }
         }
     }
@@ -271,8 +288,8 @@ pub fn DependencyViewer(deps: Vec<Dependency>, filename: String) -> Element {
                     span { "Type" }
                 }
                 // Rows
-                for dep in deps.iter() {
-                    div { key: "{dep.name}:{dep.dep_type:?}:{dep.version}", class: "grid grid-cols-3 gap-4 p-3 border-t border-border hover:bg-accent/30 transition text-sm",
+                for (idx , dep) in deps.iter().enumerate() {
+                    div { key: "{dep.name}:{dep.dep_type:?}:{dep.version}:{idx}", class: "grid grid-cols-3 gap-4 p-3 border-t border-border hover:bg-accent/30 transition text-sm",
                         span { class: "font-medium text-foreground truncate", "{dep.name}" }
                         code { class: "text-muted-foreground font-mono text-xs", "{dep.version}" }
                         span {

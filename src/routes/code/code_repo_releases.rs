@@ -281,7 +281,10 @@ fn ReleaseCard(
                         button {
                             r#type: "button",
                             class: "px-2 py-1 text-xs text-muted-foreground hover:text-destructive transition rounded hover:bg-destructive/10",
-                            onclick: move |_| show_delete_confirm.set(true),
+                            onclick: move |_| {
+                                delete_error.set(None);
+                                show_delete_confirm.set(true);
+                            },
                             "Delete"
                         }
                     }
@@ -562,11 +565,11 @@ fn EditReleaseForm(
                 input {
                     class: "rounded border-border",
                     r#type: "checkbox",
-                    id: "edit-prerelease",
+                    id: "edit-prerelease-{tag_name}",
                     checked: *prerelease.read(),
                     onchange: move |e| prerelease.set(e.checked()),
                 }
-                label { class: "text-sm", r#for: "edit-prerelease", "This is a pre-release" }
+                label { class: "text-sm", r#for: "edit-prerelease-{tag_name}", "This is a pre-release" }
             }
             div { class: "flex gap-2",
                 button {

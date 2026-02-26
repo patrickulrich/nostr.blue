@@ -5,7 +5,7 @@
 //! Reviews are cached in-memory per PR event ID.
 use crate::services::git_hosting::reviews::fetch_pr_reviews;
 use crate::stores::profiles::PROFILE_CACHE;
-use crate::stores::nostr_client::{get_client, HAS_SIGNER};
+use crate::stores::nostr_client::{get_client, CLIENT_INITIALIZED, HAS_SIGNER};
 use crate::utils::format_relative_time_or;
 use crate::utils::nip34::PersistedReview;
 use crate::utils::truncate_pubkey;
@@ -105,6 +105,7 @@ pub fn PRReviewSection(
         use_reactive(
             &pr_id,
             move |id| {
+                if !*CLIENT_INITIALIZED.read() { return; }
                 let current_gen = gen.peek().wrapping_add(1);
                 gen.set(current_gen);
                 reviews.set(Vec::new());

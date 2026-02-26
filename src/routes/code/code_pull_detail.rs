@@ -38,6 +38,14 @@ enum PrTab {
     FilesChanged,
 }
 
+fn build_maintainers(repo: &Repository) -> Vec<String> {
+    let mut m = repo.maintainers.clone();
+    if !m.contains(&repo.pubkey) {
+        m.push(repo.pubkey.clone());
+    }
+    m
+}
+
 /// Pull request detail page component
 #[component]
 pub fn CodePullDetail(note_id: String) -> Element {
@@ -180,11 +188,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
         let _ = reviews_gen.read();
         let id = pr_id_for_reviews.clone();
         let maintainer_set: Vec<String> = repo.read().as_ref()
-            .map(|r| {
-                let mut m = r.maintainers.clone();
-                if !m.contains(&r.pubkey) { m.push(r.pubkey.clone()); }
-                m
-            })
+            .map(build_maintainers)
             .unwrap_or_default();
         async move {
             match fetch_pr_reviews(&id).await {
@@ -235,13 +239,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
     let maintainers: Vec<String> = repo
         .read()
         .as_ref()
-        .map(|r| {
-            let mut m = r.maintainers.clone();
-            if !m.contains(&r.pubkey) {
-                m.push(r.pubkey.clone());
-            }
-            m
-        })
+        .map(build_maintainers)
         .unwrap_or_default();
 
     let is_pr_author = is_authenticated && user_pubkey == pr.pubkey;

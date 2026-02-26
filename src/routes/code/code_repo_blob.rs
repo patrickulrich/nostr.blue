@@ -34,9 +34,16 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
         branches.set(Vec::new());
         let current_gen = gen.peek().wrapping_add(1);
         gen.set(current_gen);
+        loading.set(true);
+        error.set(None);
         spawn(async move {
-            loading.set(true);
-            error.set(None);
+            if !is_safe_path(&path_str) {
+                log::warn!("Path traversal attempt blocked: {}", path_str);
+                if *gen.peek() != current_gen { return; }
+                error.set(Some("Invalid path".to_string()));
+                loading.set(false);
+                return;
+            }
             let repo = match fetch_repository(&naddr).await {
                 Ok(r) => r,
                 Err(e) => {
@@ -57,12 +64,6 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 }
             }
             if *gen.peek() != current_gen { return; }
-            if !is_safe_path(&path_str) {
-                log::warn!("Path traversal attempt blocked: {}", path_str);
-                error.set(Some("Invalid path".to_string()));
-                loading.set(false);
-                return;
-            }
             match git_service().read_file(&repo, &path_str, Some(&git_ref)).await
             {
                 Ok(file_content) => {

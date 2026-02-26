@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 pub fn CodeRepo(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let mut loading = use_signal(|| true);
-    let mut request_gen = use_signal(|| 0u64);
+    let mut request_gen = use_signal(|| 0u32);
     let naddr_for_render = naddr.clone();
     use_effect(use_reactive(&naddr, move |naddr_val| {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();

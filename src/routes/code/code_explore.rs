@@ -84,15 +84,19 @@ fn FilterChip(props: FilterChipProps) -> Element {
 fn AllContent() -> Element {
     let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
     let mut snippets = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
         spawn(async move {
             let (repos_res, snippets_res) = futures::join!(
                 fetch_recent_repositories(10, None), fetch_recent_snippets(10)
             );
+            if *gen.peek() != current_gen { return; }
             repos.set(Some(repos_res));
             snippets.set(Some(snippets_res));
         });
@@ -168,13 +172,17 @@ fn AllContent() -> Element {
 #[component]
 fn RepositoriesContent() -> Element {
     let mut repos = use_signal(|| None::<Result<Vec<Repository>, String>>);
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
         spawn(async move {
             let result = fetch_recent_repositories(50, None).await;
+            if *gen.peek() != current_gen { return; }
             repos.set(Some(result));
         });
     });
@@ -256,13 +264,17 @@ fn RepositoriesContent() -> Element {
 #[component]
 fn SnippetsContent() -> Element {
     let mut snippets = use_signal(|| None::<Result<Vec<DisplaySnippet>, String>>);
+    let mut gen = use_signal(|| 0u32);
     use_effect(move || {
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let current_gen = gen.peek().wrapping_add(1);
+        gen.set(current_gen);
         spawn(async move {
             let result = fetch_recent_snippets(50).await;
+            if *gen.peek() != current_gen { return; }
             snippets.set(Some(result));
         });
     });

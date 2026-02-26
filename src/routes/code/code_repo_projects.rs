@@ -83,7 +83,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
     let mut loading = use_signal(|| true);
     let mut repo = use_signal(|| None);
     let mut fetch_error = use_signal(|| None::<String>);
-    let mut gen = use_signal(|| 0u64);
+    let mut gen = use_signal(|| 0u32);
 
     // Fetch repo + issues + PRs
     use_effect(use_reactive(&naddr, move |n| {

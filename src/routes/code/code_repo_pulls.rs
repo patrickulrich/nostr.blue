@@ -18,7 +18,7 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
     let mut status_filter = use_signal(|| StatusFilter::Open);
     let mut search_query = use_signal(String::new);
     let mut selected_labels = use_signal(Vec::<String>::new);
-    let mut request_gen = use_signal(|| 0u64);
+    let mut request_gen = use_signal(|| 0u32);
 
     use_effect(use_reactive(&naddr, move |naddr| {
         error.set(None);

@@ -66,15 +66,16 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
                     }
                     discussions.set(fetched);
                     error.set(None);
+                    loading.set(false);
                 }
                 Err(e) => {
                     if *request_gen.peek() != gen {
                         return;
                     }
                     error.set(Some(e));
+                    loading.set(false);
                 }
             }
-            loading.set(false);
         });
     }));
     let all_discussions = discussions.read();

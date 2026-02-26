@@ -152,12 +152,11 @@ pub fn ReadmeViewer(
     // Initialize mermaid.js after the README HTML is rendered into the DOM.
     // Call initMermaidDiagrams whenever content is present; the JS function
     // already no-ops if there are no .mermaid nodes in the DOM.
-    use_effect(use_reactive(&content, {
+    use_effect(use_reactive((&content, &loading, &error), {
         let viewer_id = viewer_id.clone();
-        move |content| {
-            if content.is_some() {
+        move |(content, loading, error)| {
+            if content.is_some() && !loading && error.is_none() {
                 let viewer_id = viewer_id.clone();
-                // Small delay to ensure dangerous_inner_html has been applied to the DOM
                 spawn(async move {
                     gloo_timers::future::TimeoutFuture::new(100).await;
                     initMermaidDiagrams(&viewer_id);

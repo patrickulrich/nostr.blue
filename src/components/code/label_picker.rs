@@ -168,6 +168,10 @@ pub fn LabelPicker(
                                         key: "{suggestion}",
                                         r#type: "button",
                                         class: "w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition flex items-center gap-2",
+                                        onfocusin: move |_| {
+                                            let next = focus_gen.peek().wrapping_add(1);
+                                            focus_gen.set(next);
+                                        },
                                         onclick: move |_| {
                                             let mut updated = labels_for_add.clone();
                                             if !updated.contains(&suggestion_clone) {

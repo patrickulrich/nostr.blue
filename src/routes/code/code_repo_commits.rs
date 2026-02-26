@@ -230,14 +230,19 @@ fn GitHubCommitRow(commit: GitHubCommit) -> Element {
         div { class: "p-4 hover:bg-muted/50 transition",
             div { class: "flex items-start justify-between gap-4",
                 div { class: "flex-1 min-w-0",
-                    a {
-                        href: if commit.html_url.starts_with("https://") || commit.html_url.starts_with("http://") {
-                            "{commit.html_url}"
-                        } else { "#" },
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                        class: "font-medium hover:text-primary truncate block",
-                        "{title}"
+                    if commit.html_url.starts_with("https://") || commit.html_url.starts_with("http://") {
+                        a {
+                            href: "{commit.html_url}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "font-medium hover:text-primary truncate block",
+                            "{title}"
+                        }
+                    } else {
+                        span {
+                            class: "font-medium truncate block",
+                            "{title}"
+                        }
                     }
                     if let Some(b) = body {
                         if !b.is_empty() {
@@ -267,27 +272,45 @@ fn GitHubCommitRow(commit: GitHubCommit) -> Element {
                         span { "committed {formatted_date}" }
                     }
                 }
-                a {
-                    href: if commit.html_url.starts_with("https://") || commit.html_url.starts_with("http://") {
-                        "{commit.html_url}"
-                    } else { "#" },
-                    target: "_blank",
-                    rel: "noopener noreferrer",
-                    class: "flex items-center gap-2 px-2 py-1 bg-muted rounded text-xs font-mono hover:bg-accent transition",
-                    svg {
-                        class: "w-3 h-3 text-muted-foreground",
-                        xmlns: "http://www.w3.org/2000/svg",
-                        width: "24",
-                        height: "24",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        circle { cx: "12", cy: "12", r: "3" }
+                if commit.html_url.starts_with("https://") || commit.html_url.starts_with("http://") {
+                    a {
+                        href: "{commit.html_url}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        class: "flex items-center gap-2 px-2 py-1 bg-muted rounded text-xs font-mono hover:bg-accent transition",
+                        svg {
+                            class: "w-3 h-3 text-muted-foreground",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "12", cy: "12", r: "3" }
+                        }
+                        "{short_sha}"
                     }
-                    "{short_sha}"
+                } else {
+                    span {
+                        class: "flex items-center gap-2 px-2 py-1 bg-muted rounded text-xs font-mono",
+                        svg {
+                            class: "w-3 h-3 text-muted-foreground",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "12", cy: "12", r: "3" }
+                        }
+                        "{short_sha}"
+                    }
                 }
             }
         }
