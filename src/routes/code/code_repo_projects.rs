@@ -147,9 +147,9 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
         }
         (draft, open, applied, closed)
     });
-    let items_read = items.read();
     let grouped_read = grouped.read();
     let (ref draft, ref open, ref applied, ref closed) = *grouped_read;
+    let all_empty = draft.is_empty() && open.is_empty() && applied.is_empty() && closed.is_empty();
 
     rsx! {
         div { class: "min-h-screen",
@@ -186,7 +186,7 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                 if *loading.read() {
                     LoadingSkeleton {}
                 } else if let Some(ref err) = *fetch_error.read() {
-                    if items_read.is_empty() {
+                    if all_empty {
                         div { class: "text-center py-12",
                             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-destructive/10 flex items-center justify-center",
                                 svg {
@@ -209,11 +209,11 @@ pub fn CodeRepoProjects(naddr: String) -> Element {
                             p { class: "text-muted-foreground text-sm", "{err}" }
                         }
                     }
-                } else if items_read.is_empty() {
+                } else if all_empty {
                     EmptyBoard {}
                 }
                 // Show error banner + Kanban board when partial data loaded
-                if !*loading.read() && !items_read.is_empty() {
+                if !*loading.read() && !all_empty {
                     if let Some(ref err) = *fetch_error.read() {
                         div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
                             "{err}"

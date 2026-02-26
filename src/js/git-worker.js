@@ -732,7 +732,8 @@ const methods = {
       const safePath = sanitizeFilepath(filepath);
       let baseContent = null;
       let headContent = null;
-      let skipReason = null;
+      let baseSkipReason = null;
+      let headSkipReason = null;
       const inBase = baseFiles.has(filepath);
       const inHead = headFiles.has(filepath);
 
@@ -740,41 +741,47 @@ const methods = {
         try {
           const { blob } = await git.readBlob({ fs, dir, oid: baseOid, filepath });
           if (blob.byteLength > MAX_DIFF_BYTES) {
-            skipReason = 'File too large to diff';
+            baseSkipReason = 'File too large to diff';
           } else if (isBinary(blob)) {
-            skipReason = 'Binary file';
+            baseSkipReason = 'Binary file';
           } else {
             baseContent = new TextDecoder().decode(blob);
           }
         } catch (e) {
-          // Could not read base blob — skip file rather than misclassifying as absent
           console.warn(`[GitWorker] Could not read base blob for '${filepath}': ${e.message}`, e);
-          skipReason = `Could not read base blob: ${e.message}`;
+          baseSkipReason = `Could not read base blob: ${e.message}`;
         }
       }
 
-      if (!skipReason && inHead) {
+      if (inHead) {
         try {
           const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath });
           if (blob.byteLength > MAX_DIFF_BYTES) {
-            skipReason = 'File too large to diff';
+            headSkipReason = 'File too large to diff';
           } else if (isBinary(blob)) {
-            skipReason = 'Binary file';
+            headSkipReason = 'Binary file';
           } else {
             headContent = new TextDecoder().decode(blob);
           }
         } catch (e) {
-          // Could not read head blob — skip file rather than misclassifying as absent
           console.warn(`[GitWorker] Could not read head blob for '${filepath}': ${e.message}`, e);
-          skipReason = `Could not read head blob: ${e.message}`;
+          headSkipReason = `Could not read head blob: ${e.message}`;
         }
       }
 
-      if (skipReason) {
+      if (baseSkipReason && headSkipReason) {
+        diffParts.push(`diff --git a/${safePath} b/${safePath}`);
+        diffParts.push(`--- a/${safePath}`);
+        diffParts.push(`+++ b/${safePath}`);
+        diffParts.push(`File skipped: ${baseSkipReason}`);
+        continue;
+      }
+      if (baseSkipReason || headSkipReason) {
         diffParts.push(`diff --git a/${safePath} b/${safePath}`);
         diffParts.push(inBase ? `--- a/${safePath}` : `--- /dev/null`);
         diffParts.push(inHead ? `+++ b/${safePath}` : `+++ /dev/null`);
-        diffParts.push(`File skipped: ${skipReason}`);
+        if (baseSkipReason) diffParts.push(`Base file skipped: ${baseSkipReason}`);
+        if (headSkipReason) diffParts.push(`Head file skipped: ${headSkipReason}`);
         continue;
       }
 

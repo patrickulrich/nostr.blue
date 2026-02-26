@@ -142,7 +142,7 @@ pub fn PollCard(
             // Capture timestamp before fetch so votes created during
             // the fetch window are not missed on the next poll.
             let pre_fetch = Timestamp::now();
-            match fetch_poll_votes(poll_id, ends_at, poll_relays).await {
+            match fetch_poll_votes(poll_id, ends_at, poll_relays, true).await {
                 Ok(vote_events) => {
                     if *vote_gen.peek() != current_vote_gen { return; }
                     votes.set(vote_events.clone());
@@ -343,7 +343,7 @@ pub fn PollCard(
             {
                 Ok(_event_id) => {
                     log::info!("Vote published successfully");
-                    match fetch_poll_votes(poll_id, poll.ends_at, relays).await {
+                    match fetch_poll_votes(poll_id, poll.ends_at, relays, false).await {
                         Ok(vote_events) => {
                             votes.set(vote_events.clone());
                             if let Ok(user_pubkey) = nostr_client::get_cached_pubkey() {
@@ -809,6 +809,7 @@ async fn fetch_poll_votes(
     poll_id: EventId,
     ends_at: Option<Timestamp>,
     poll_relays: Vec<nostr_sdk::RelayUrl>,
+    keep_relays: bool,
 ) -> Result<Vec<NostrEvent>, String> {
     let client = nostr_client::get_client().ok_or("Client not initialized")?;
     let mut filter = Filter::new().kind(Kind::PollResponse).event(poll_id);
@@ -835,7 +836,9 @@ async fn fetch_poll_votes(
                 .await
                 .map_err(|e| format!("Failed to fetch votes: {}", e))
         };
-        relay::remove_relays(&client, &added_relays).await;
+        if !keep_relays {
+            relay::remove_relays(&client, &added_relays).await;
+        }
         result?
     } else {
         nostr_client::ensure_relays_ready(&client).await;

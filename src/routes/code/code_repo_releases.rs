@@ -334,7 +334,10 @@ fn ReleaseCard(
                         button {
                             r#type: "button",
                             class: "px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent transition",
-                            onclick: move |_| show_delete_confirm.set(false),
+                            onclick: move |_| {
+                                delete_error.set(None);
+                                show_delete_confirm.set(false);
+                            },
                             "Cancel"
                         }
                     }
@@ -620,6 +623,17 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                 error_message.set(Some("Description is required".to_string()));
                 return;
             }
+            let non_empty_assets: Vec<String> = assets
+                .iter()
+                .filter(|a| !a.trim().is_empty())
+                .cloned()
+                .collect();
+            for url in &non_empty_assets {
+                if !is_valid_http_url(url) {
+                    error_message.set(Some(format!("Invalid asset URL: {}", url)));
+                    return;
+                }
+            }
             is_publishing.set(true);
             error_message.set(None);
             spawn(async move {
@@ -636,19 +650,8 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                 } else {
                     Some(title_val.as_str())
                 };
-                let non_empty_assets: Vec<&str> = assets
-                    .iter()
-                    .filter(|a| !a.trim().is_empty())
-                    .map(|a| a.as_str())
-                    .collect();
-                for url in &non_empty_assets {
-                    if !is_valid_http_url(url) {
-                        error_message.set(Some(format!("Invalid asset URL: {}", url)));
-                        is_publishing.set(false);
-                        return;
-                    }
-                }
-                match publish_release(&coord, &tag, title_opt, &desc, &non_empty_assets, is_pre).await {
+                let asset_refs: Vec<&str> = non_empty_assets.iter().map(|a| a.as_str()).collect();
+                match publish_release(&coord, &tag, title_opt, &desc, &asset_refs, is_pre).await {
                     Ok(_) => {
                         tag_name.set(String::new());
                         title.set(String::new());

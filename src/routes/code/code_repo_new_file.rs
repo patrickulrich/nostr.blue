@@ -223,7 +223,7 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
         };
     }
 
-    let can_submit = !current_path.is_empty() && path_error.read().is_none() && !*submitting.read();
+    let can_submit = !current_path.is_empty() && path_error.read().is_none() && !*submitting.read() && repo_result.read().as_ref().map(|r| r.is_ok()).unwrap_or(false);
 
     rsx! {
         div { class: "min-h-screen",
@@ -267,6 +267,10 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                 if repo_result.read().is_none() {
                     div { class: "p-4 bg-muted rounded-lg animate-pulse",
                         div { class: "h-4 bg-muted-foreground/20 rounded w-48" }
+                    }
+                } else if let Some(Err(err)) = repo_result.read().as_ref() {
+                    div { class: "p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm",
+                        "Failed to load repository: {err}"
                     }
                 } else {
                     div { class: "p-4 bg-muted rounded-lg",
@@ -451,8 +455,8 @@ async fn submit_new_file(
         return Err(err);
     }
 
-    if commit_message.contains('\n') || commit_message.contains('\r') {
-        return Err("Commit message must not contain newline characters".to_string());
+    if commit_message.chars().any(|c| c.is_control()) {
+        return Err("Commit message must not contain control characters".to_string());
     }
 
     // Decode the repository coordinate

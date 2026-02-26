@@ -18,6 +18,16 @@ pub fn CloneHelpModal(
         "ssh"
     } else if clone_urls.iter().any(|u| u.starts_with("git://")) {
         "git"
+    } else if clone_urls.iter().any(|u| u.starts_with("nostr:")) {
+        "nostr"
+    } else if let Some(first) = clone_urls.first() {
+        if first.starts_with("ssh://") || first.contains('@') {
+            "ssh"
+        } else if first.starts_with("git://") {
+            "git"
+        } else {
+            "https"
+        }
     } else {
         "https"
     };

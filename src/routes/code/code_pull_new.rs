@@ -71,15 +71,20 @@ pub fn CodePullNew(naddr: String) -> Element {
     let mut repo_result = use_signal(|| None::<Result<Repository, String>>);
     let nav = use_navigator();
     let naddr_for_effect = naddr.clone();
+    let mut repo_gen = use_signal(|| 0u32);
     use_effect(move || {
         let n = naddr_for_effect.clone();
         let client_initialized = *nostr_client::CLIENT_INITIALIZED.read();
         if !client_initialized {
             return;
         }
+        let gen = repo_gen.peek().wrapping_add(1);
+        repo_gen.set(gen);
         spawn(async move {
             let result = fetch_repository(&n).await;
-            repo_result.set(Some(result));
+            if *repo_gen.peek() == gen {
+                repo_result.set(Some(result));
+            }
         });
     });
     if !auth.is_authenticated {
@@ -107,6 +112,17 @@ pub fn CodePullNew(naddr: String) -> Element {
                 error_message.set(Some(format!("Invalid branch name '{}': contains invalid characters", branch_val)));
                 return;
             }
+            let closes_list: Vec<String> = if closes_val.is_empty() {
+                vec![]
+            } else {
+                closes_val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+            for id in &closes_list {
+                if nostr_sdk::EventId::from_hex(id).is_err() {
+                    error_message.set(Some(format!("Invalid event ID '{}': must be exactly 64 hex characters", id)));
+                    return;
+                }
+            }
             is_publishing.set(true);
             error_message.set(None);
             spawn(async move {
@@ -115,19 +131,6 @@ pub fn CodePullNew(naddr: String) -> Element {
                 } else {
                     labels_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
                 };
-                let closes_list: Vec<&str> = if closes_val.is_empty() {
-                    vec![]
-                } else {
-                    closes_val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
-                };
-                for id in &closes_list {
-                    // EventId::from_hex validates both hex chars and 64-char length
-                    if nostr_sdk::EventId::from_hex(id).is_err() {
-                        error_message.set(Some(format!("Invalid event ID '{}': must be exactly 64 hex characters", id)));
-                        is_publishing.set(false);
-                        return;
-                    }
-                }
                 let (commit_ref, parent_ref) = if is_cover {
                     (None, None)
                 } else {
@@ -156,6 +159,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                 } else {
                     Some(branch_val.as_str())
                 };
+                let closes_refs: Vec<&str> = closes_list.iter().map(|s| s.as_str()).collect();
                 match publish_patch_by_naddr(
                         &naddr,
                         &content_val,
@@ -163,7 +167,7 @@ pub fn CodePullNew(naddr: String) -> Element {
                         parent_ref,
                         is_cover,
                         &label_list,
-                        &closes_list,
+                        &closes_refs,
                         branch_ref,
                     )
                     .await

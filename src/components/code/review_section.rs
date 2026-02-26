@@ -205,9 +205,13 @@ pub fn PRReviewSection(
             let on_review_submitted = on_review_submitted;
             spawn(async move {
                 match publish_review_event(&id, &author_pk, review_state, &saved_content).await {
-                    Ok(_) => {
+                    Ok(event_id) => {
+                        let mut current = reviews.write();
+                        if let Some(r) = current.iter_mut().find(|r| r.pubkey == saved_pubkey && r.event_id.is_empty()) {
+                            r.event_id = event_id;
+                        }
+                        drop(current);
                         submitting.set(false);
-                        // Notify parent only after successful publish
                         if let Some(handler) = on_review_submitted.as_ref() {
                             handler.call(());
                         }

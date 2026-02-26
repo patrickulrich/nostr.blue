@@ -7,12 +7,11 @@ use dioxus::prelude::*;
 /// Display a bounty amount badge with lightning bolt
 #[component]
 pub fn BountyBadge(amount: u64, #[props(default = false)] compact: bool) -> Element {
-    let formatted = format_bounty_amount(amount);
     rsx! {
         span { class: "inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-xs font-medium",
             "\u{26A1}"
             if compact {
-                "{formatted}"
+                "{format_bounty_amount(amount)}"
             } else {
                 "{format_sats_with_separator(amount)} sats bounty"
             }

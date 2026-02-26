@@ -107,7 +107,7 @@ pub fn ZapDistribution(
         let amount = *total_amount.read();
         let pubkeys = selected_pubkeys.read().clone();
         let allocations = compute_allocations(&pubkeys, amount);
-        let current = recipients.read().clone();
+        let current = recipients.peek().clone();
         recipients.set(
             allocations
                 .into_iter()

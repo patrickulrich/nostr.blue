@@ -18,7 +18,7 @@ use dioxus::prelude::*;
 pub(super) fn split_commit_message(message: &str) -> (&str, Option<&str>) {
     match message.find('\n') {
         Some(idx) => (message[..idx].trim(), Some(message[idx..].trim())),
-        None => (message, None),
+        None => (message.trim(), None),
     }
 }
 

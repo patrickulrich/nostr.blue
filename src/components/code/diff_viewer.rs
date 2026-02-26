@@ -282,7 +282,7 @@ pub fn DiffViewer(
     let current_mode = *view_mode.read();
 
     // Build a lookup map for line comments by (file_path, line_number)
-    let comment_map = use_memo(move || build_line_comment_map(&line_comments));
+    let comment_map = use_memo(use_reactive(&line_comments, |lc| build_line_comment_map(&lc)));
     let comment_map = comment_map.read();
 
     // Column count for spanning rows (unified mode)

@@ -106,19 +106,7 @@ pub fn CodeRepoDiscussions(naddr: String) -> Element {
                         }
                         div {
                             h1 { class: "text-xl font-bold flex items-center gap-2",
-                                svg {
-                                    class: "w-5 h-5",
-                                    xmlns: "http://www.w3.org/2000/svg",
-                                    width: "24",
-                                    height: "24",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
-                                }
+                                icons::ChatBubbleIcon { class: "w-5 h-5".to_string() }
                                 "Discussions"
                             }
                             p { class: "text-sm text-muted-foreground",
@@ -237,19 +225,7 @@ fn DiscussionRow(discussion: Discussion) -> Element {
             div { class: "flex items-start justify-between gap-3",
                 div { class: "flex-1 min-w-0",
                     div { class: "flex items-center gap-2 mb-1",
-                        svg {
-                            class: "w-4 h-4 text-green-500 shrink-0",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
-                        }
+                        icons::ChatBubbleIcon { class: "w-4 h-4 text-green-500 shrink-0".to_string() }
                         span { class: "font-medium text-foreground truncate", "{title}" }
                     }
                     div { class: "flex items-center gap-2 text-xs text-muted-foreground",
@@ -264,19 +240,7 @@ fn DiscussionRow(discussion: Discussion) -> Element {
                 }
                 if discussion.comment_count > 0 {
                     div { class: "flex items-center gap-1 text-xs text-muted-foreground shrink-0",
-                        svg {
-                            class: "w-3.5 h-3.5",
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
-                        }
+                        icons::ChatBubbleIcon { class: "w-3.5 h-3.5".to_string() }
                         "{discussion.comment_count}"
                     }
                 }
@@ -289,19 +253,7 @@ fn EmptyDiscussions() -> Element {
     rsx! {
         div { class: "text-center py-12",
             div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
-                svg {
-                    class: "w-8 h-8 text-muted-foreground",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }
-                }
+                icons::ChatBubbleIcon { class: "w-8 h-8 text-muted-foreground".to_string() }
             }
             h3 { class: "font-semibold text-lg mb-2", "No Discussions" }
             p { class: "text-muted-foreground text-sm", "Start a discussion to share ideas or ask questions." }

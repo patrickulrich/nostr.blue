@@ -67,6 +67,9 @@ pub fn FuzzyFinder(
                             on_close.call(());
                         }
                     }
+                    Key::Tab => {
+                        evt.prevent_default();
+                    }
                     _ => {}
                 }
             },

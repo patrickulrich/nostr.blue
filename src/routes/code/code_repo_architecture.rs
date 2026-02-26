@@ -17,8 +17,7 @@ export function initArchitectureMermaid() {
     if (divs.length === 0) return;
     if (typeof mermaid === 'undefined') {
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
-        script.integrity = 'sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT';
+        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js';
         script.crossOrigin = 'anonymous';
         script.onload = () => {
             mermaid.initialize({ startOnLoad: false, theme: 'dark' });
@@ -100,7 +99,7 @@ fn classify_path(path: &str) -> &'static str {
         || lower.ends_with(".config.js")
         || lower.ends_with(".config.ts")
         || lower.ends_with(".config.mjs")
-        || lower.ends_with(".toml") && !lower.contains('/')
+        || (lower.ends_with(".toml") && !lower.contains('/'))
         || lower == ".gitignore"
         || lower == ".env"
         || lower == ".env.example"

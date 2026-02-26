@@ -922,8 +922,8 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                                 }
                                                 Err(e) => {
                                                     if *line_publish_gen.peek() == gen {
-                                                        log::warn!("Failed to refresh line comments: {}", e);
-                                                        line_comment_error.set(Some(format!("Failed to refresh line comments: {}", e)));
+                                                        log::warn!("Comment published but failed to refresh: {}", e);
+                                                        line_comment_error.set(Some(format!("Comment published but failed to refresh: {}", e)));
                                                     }
                                                 }
                                             }
@@ -1071,8 +1071,8 @@ fn ConflictDetectionBanner(
     // Run conflict detection when repo is available
     let repo_key = repo.as_ref().map(|r| r.name.clone()).unwrap_or_default();
     use_effect(use_reactive(
-        (&diff_content, &parent_commit, &repo_key),
-        move |(diff, parent, _repo_key)| {
+        (&diff_content, &parent_commit, &repo_key, &repo),
+        move |(diff, parent, _repo_key, repo)| {
             let gen = detect_gen.peek().wrapping_add(1);
             detect_gen.set(gen);
             conflicts.set(Vec::new());

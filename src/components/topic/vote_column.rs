@@ -3,10 +3,12 @@
 use crate::stores::nostr_client::HAS_SIGNER;
 use crate::stores::topic_store::{vote_on_post, TopicPost, VoteCounts, VoteDirection};
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
 
 /// Vote column with up/down arrows and score display
 #[component]
 pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
+    let toast = consume_toast();
     let has_signer = *HAS_SIGNER.read();
     let mut voting = use_signal(|| false);
 
@@ -54,6 +56,7 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                     spawn(async move {
                         if let Err(e) = vote_on_post(&post, VoteDirection::Up).await {
                             log::error!("Vote failed: {}", e);
+                            toast.error(format!("Vote failed: {e}"), ToastOptions::new());
                         }
                         voting.set(false);
                     });
@@ -91,6 +94,7 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                     spawn(async move {
                         if let Err(e) = vote_on_post(&post, VoteDirection::Down).await {
                             log::error!("Vote failed: {}", e);
+                            toast.error(format!("Vote failed: {e}"), ToastOptions::new());
                         }
                         voting.set(false);
                     });

@@ -46,15 +46,11 @@ pub fn CodeIssueCard(issue: Issue) -> Element {
                     if !issue.assignees.is_empty() {
                         div { class: format!("flex items-center gap-1{}", if !issue.labels.is_empty() { " ml-auto" } else { "" }),
                             for assignee in issue.assignees.iter() {
-                                {
-                                    rsx! {
-                                        div {
-                                            key: "{assignee}",
-                                            class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] text-foreground",
-                                            title: "{assignee}",
-                                            "{assignee.chars().next().unwrap_or('?')}"
-                                        }
-                                    }
+                                div {
+                                    key: "{assignee}",
+                                    class: "w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] text-foreground",
+                                    title: "{assignee}",
+                                    "{assignee.chars().next().unwrap_or('?')}"
                                 }
                             }
                         }

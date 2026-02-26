@@ -179,6 +179,7 @@ pub fn LabelPicker(
                                                 on_change.call(updated);
                                             }
                                             new_label_input.set(String::new());
+                                            show_suggestions.set(false);
                                         },
                                         span { class: "px-1.5 py-0.5 text-xs rounded-full border {color}", "{suggestion}" }
                                     }
