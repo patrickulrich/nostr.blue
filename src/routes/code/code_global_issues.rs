@@ -194,9 +194,12 @@ pub fn CodeGlobalIssues() -> Element {
                         oninput: move |e| search_query.set(e.value()),
                     }
                 }
-                div { class: "px-4 pb-3 flex gap-4",
+                div { class: "px-4 pb-3 flex gap-4", role: "tablist",
                     button {
                         r#type: "button",
+                        role: "tab",
+                        aria_selected: if *active_tab.read() == FilterTab::Created { "true" } else { "false" },
+                        tabindex: if *active_tab.read() == FilterTab::Created { "0" } else { "-1" },
                         class: if *active_tab.read() == FilterTab::Created {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {
@@ -207,6 +210,9 @@ pub fn CodeGlobalIssues() -> Element {
                     }
                     button {
                         r#type: "button",
+                        role: "tab",
+                        aria_selected: if *active_tab.read() == FilterTab::Assigned { "true" } else { "false" },
+                        tabindex: if *active_tab.read() == FilterTab::Assigned { "0" } else { "-1" },
                         class: if *active_tab.read() == FilterTab::Assigned {
                             "text-sm font-medium text-foreground border-b-2 border-primary pb-1"
                         } else {

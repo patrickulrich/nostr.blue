@@ -383,7 +383,7 @@ fn ActivityTimeline(issues: Vec<Issue>, prs: Vec<PullRequest>) -> Element {
     rsx! {
         div { class: "bg-card border border-border rounded-lg divide-y divide-border",
             for entry in entries.iter() {
-                TimelineRow { key: "{entry.kind:?}_{entry.pubkey}_{entry.created_at}_{entry.title}", entry: entry.clone() }
+                TimelineRow { key: "{entry.created_at}_{entry.pubkey}", entry: entry.clone() }
             }
         }
     }

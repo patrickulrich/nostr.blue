@@ -297,8 +297,9 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
 
                 // File path input
                 div { class: "space-y-2",
-                    label { class: "block text-sm font-medium", "File path" }
+                    label { class: "block text-sm font-medium", r#for: "file-path-input", "File path" }
                     input {
+                        id: "file-path-input",
                         class: {
                             let base = "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2";
                             if path_error.read().is_some() {
@@ -310,10 +311,11 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
                         r#type: "text",
                         placeholder: "path/to/file.rs",
                         value: "{current_path}",
+                        aria_describedby: if path_error.read().is_some() { "path-error" } else { "" },
                         oninput: on_path_change,
                     }
                     if let Some(err) = path_error.read().as_ref() {
-                        p { class: "text-xs text-destructive", "{err}" }
+                        p { id: "path-error", class: "text-xs text-destructive", "{err}" }
                     } else {
                         p { class: "text-xs text-muted-foreground",
                             "Enter the path relative to the repository root"
@@ -323,8 +325,9 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
 
                 // File content textarea
                 div { class: "space-y-2",
-                    label { class: "block text-sm font-medium", "Content" }
+                    label { class: "block text-sm font-medium", r#for: "file-content-textarea", "Content" }
                     textarea {
+                        id: "file-content-textarea",
                         class: "w-full px-3 py-2 bg-muted rounded-lg text-sm font-mono focus:outline-hidden focus:ring-2 focus:ring-primary min-h-[400px] resize-y",
                         placeholder: "File content...",
                         value: "{file_content}",
@@ -334,8 +337,9 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
 
                 // Commit message input
                 div { class: "space-y-2",
-                    label { class: "block text-sm font-medium", "Commit message" }
+                    label { class: "block text-sm font-medium", r#for: "commit-message-input", "Commit message" }
                     input {
+                        id: "commit-message-input",
                         class: "w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-primary",
                         r#type: "text",
                         placeholder: "{default_commit_msg}",
@@ -461,6 +465,15 @@ async fn submit_new_file(
 
     if let Some(err) = validate_file_path(path) {
         return Err(err);
+    }
+
+    const MAX_FILE_SIZE: usize = 512 * 1024; // 512 KB
+    if content.len() > MAX_FILE_SIZE {
+        return Err(format!(
+            "File size ({} bytes) exceeds maximum of {} bytes",
+            content.len(),
+            MAX_FILE_SIZE
+        ));
     }
 
     if commit_message.chars().any(|c| c.is_control()) {

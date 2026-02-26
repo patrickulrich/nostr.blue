@@ -87,8 +87,8 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
             loading.set(false);
         });
     }));
-    use_effect(use_reactive((&naddr, &git_ref, &path), move |(naddr, git_ref, path)| {
-        if *is_directory.read() {
+    use_effect(use_reactive((&naddr, &git_ref, &path, &path_str), move |(naddr, git_ref, path, path_str)| {
+        if *is_directory.read() && is_safe_path(&path_str) {
             let nav = navigator();
             nav.replace(Route::CodeRepoTree {
                 naddr,
@@ -177,10 +177,10 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                             to: Route::CodeRepoTree {
                                 naddr: naddr.clone(),
                                 git_ref: git_ref.clone(),
-                                path: path[..path.len().saturating_sub(1)].to_vec(),
+                                path: vec![],
                             },
                             class: "inline-block mt-4 px-4 py-2 bg-muted hover:bg-accent rounded-lg transition",
-                            "Back to Directory"
+                            "Back to Repository Root"
                         }
                     }
                 } else {

@@ -290,6 +290,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                 div { class: "flex flex-wrap gap-2",
                     if display_status() != IssueStatus::Closed {
                         button {
+                            r#type: "button",
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
                             onclick: {
@@ -301,6 +302,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                     }
                     if display_status() == IssueStatus::Closed {
                         button {
+                            r#type: "button",
                             class: "px-3 py-1.5 text-sm bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
                             onclick: {
