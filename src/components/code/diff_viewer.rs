@@ -442,7 +442,9 @@ pub fn DiffViewer(
                                                                             let line_num = diff_line.new_num.unwrap();
                                                                             rsx! {
                                                                                 button {
+                                                                                    r#type: "button",
                                                                                     class: "p-1 hover:bg-accent rounded transition text-primary opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:ring-1 focus-visible:ring-primary text-[10px] font-bold flex items-center justify-center",
+                                                                                    aria_label: "Add line comment",
                                                                                     title: "Add line comment",
                                                                                     onclick: move |e| {
                                                                                         e.stop_propagation();
@@ -581,7 +583,10 @@ pub fn DiffViewer(
                                                 // Add interactive '+' gutter button and inline comment form for parity with unified view.
                                                 DiffViewMode::SideBySide => {
                                                     let rows = build_side_by_side_rows(&hunk.lines);
-                                                    let file_key = section.file_path.clone();
+                                                    let file_comments: HashMap<usize, &Vec<LineComment>> = comment_map.iter()
+                                                        .filter(|((fp, _), _)| fp == &section.file_path)
+                                                        .map(|((_, ln), cs)| (*ln, cs))
+                                                        .collect();
                                                     rsx! {
                                                         for (row_idx, row) in rows.iter().enumerate() {
                                                             tr {
@@ -630,7 +635,7 @@ pub fn DiffViewer(
 
                                                             // Display existing line comments for the right (new) side line
                                                             if let Some(line_num) = row.right_num {
-                                                                if let Some(comments) = comment_map.get(&(file_key.clone(), line_num)) {
+                                                                if let Some(comments) = file_comments.get(&line_num) {
                                                                     for lc in comments.iter() {
                                                                         tr {
                                                                             key: "lc-sbs-{lc.event_id}",

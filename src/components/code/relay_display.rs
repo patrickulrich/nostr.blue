@@ -18,6 +18,8 @@ fn extract_domain(url: &str) -> &str {
         .unwrap_or(url);
     let host = host.split('?').next().unwrap_or(host);
     let host = host.split('#').next().unwrap_or(host);
+    // Strip userinfo (e.g., "user:pass@host" -> "host")
+    let host = host.rsplit_once('@').map(|(_, h)| h).unwrap_or(host);
     if host.starts_with('[') {
         // IPv6: take up to and including ']'
         if let Some(end) = host.find(']') {

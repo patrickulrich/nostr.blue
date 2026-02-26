@@ -80,7 +80,7 @@ pub fn TopicPostCard(
                         // Don't navigate if key event originated from/inside an anchor element
                         if let Some(target) = evt.data.as_web_event().target() {
                             if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
+                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
                                     return;
                                 }
                             }
@@ -95,7 +95,7 @@ pub fn TopicPostCard(
                         // Don't navigate if click originated from/inside an interactive element
                         if let Some(target) = evt.data.as_web_event().target() {
                             if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
+                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
                                     return;
                                 }
                             }

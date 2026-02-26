@@ -32,7 +32,7 @@ fn civil_from_ts(ts: u64) -> (i64, u32, u32) {
 /// Format a unix timestamp as "Mon DD, YYYY"
 fn format_date(ts: u64) -> String {
     let (y, m, d) = civil_from_ts(ts);
-    let month_name = MONTHS.get(m as usize - 1).unwrap_or(&"???");
+    let month_name = MONTHS.get(m.saturating_sub(1) as usize).unwrap_or(&"???");
     format!("{} {}, {}", month_name, d, y)
 }
 

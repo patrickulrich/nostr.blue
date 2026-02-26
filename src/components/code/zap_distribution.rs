@@ -69,17 +69,11 @@ pub fn ZapDistribution(
 
     // Pure allocation: largest-remainder method to avoid rounding loss
     let compute_allocations = {
-        let deduped_splits = deduped_splits.clone();
+        let weight_map: std::collections::HashMap<String, u64> = deduped_splits.iter().cloned().collect();
         move |pubkeys: &[String], amount: u64| -> Vec<(String, u64, u64)> {
             let weights: Vec<u64> = pubkeys
                 .iter()
-                .map(|pk| {
-                    deduped_splits
-                        .iter()
-                        .find(|(p, _)| p == pk)
-                        .map(|(_, w)| *w)
-                        .unwrap_or(1)
-                })
+                .map(|pk| weight_map.get(pk).copied().unwrap_or(1))
                 .collect();
             let total_weight: u64 = weights.iter().sum();
             if total_weight == 0 || pubkeys.is_empty() {

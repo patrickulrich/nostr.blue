@@ -225,6 +225,7 @@ pub fn CodeGlobalIssues() -> Element {
                 div { class: "px-4 pb-3 flex gap-2",
                     button {
                         r#type: "button",
+                        aria_pressed: if *status_filter.read() == StatusFilter::Open { "true" } else { "false" },
                         class: if *status_filter.read() == StatusFilter::Open {
                             "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
                         } else {
@@ -249,6 +250,7 @@ pub fn CodeGlobalIssues() -> Element {
                     }
                     button {
                         r#type: "button",
+                        aria_pressed: if *status_filter.read() == StatusFilter::Closed { "true" } else { "false" },
                         class: if *status_filter.read() == StatusFilter::Closed {
                             "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent text-foreground font-medium"
                         } else {

@@ -105,11 +105,21 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
         issues_error.set(None);
         prs_error.set(None);
         commits_error.set(None);
+        let github_info = extract_github_info(&r);
         spawn(async move {
-            // Fetch issues and PRs in parallel
-            let (issues_result, prs_result) = futures::join!(
+            let commit_future = async {
+                if let Some((owner, repo_name)) = github_info {
+                    Some(github_import::fetch_commits(&owner, &repo_name, 100).await)
+                } else {
+                    None
+                }
+            };
+
+            // Fetch issues, PRs, and commits in parallel
+            let (issues_result, prs_result, commits_result) = futures::join!(
                 fetch_repo_issues(&n),
-                fetch_repo_prs(&n)
+                fetch_repo_prs(&n),
+                commit_future
             );
             if *request_gen.peek() != gen { return; }
             match issues_result {
@@ -128,16 +138,12 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                     prs.set(Vec::new());
                 }
             }
-
-            // For GitHub repos, fetch commit count
-            if let Some((owner, repo_name)) = extract_github_info(&r) {
-                match github_import::fetch_commits(&owner, &repo_name, 100).await {
+            if let Some(result) = commits_result {
+                match result {
                     Ok(commits) => {
-                        if *request_gen.peek() != gen { return; }
                         commit_count.set(Some(commits.len()));
                     }
                     Err(e) => {
-                        if *request_gen.peek() != gen { return; }
                         log::warn!("Failed to fetch commits: {}", e);
                         commits_error.set(Some(format!("Failed to fetch commits: {}", e)));
                         commit_count.set(None);
@@ -145,7 +151,6 @@ fn InsightsContent(repo: Repository, naddr: String) -> Element {
                 }
             }
 
-            if *request_gen.peek() != gen { return; }
             data_loading.set(false);
         });
     }));

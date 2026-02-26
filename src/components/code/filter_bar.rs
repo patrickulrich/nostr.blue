@@ -54,6 +54,7 @@ pub fn FilterBar(
                             class: "w-full pl-10 pr-3 py-2 bg-muted border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary",
                             r#type: "text",
                             placeholder: "Filter by title or content...",
+                            aria_label: "Search by title or content",
                             value: "{search_query}",
                             oninput: move |e| on_search_change.call(e.value()),
                         }
@@ -109,7 +110,7 @@ pub fn FilterBar(
                 div { class: "flex flex-wrap gap-1.5",
                     for label in available_labels.iter() {
                         {
-                            let is_selected = selected_labels.contains(label);
+                            let is_selected = selected_labels.iter().any(|sel| sel.eq_ignore_ascii_case(label));
                             let label_clone = label.clone();
                             if on_label_toggle.is_some() {
                                 rsx! {

@@ -198,9 +198,12 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
     let handle_status_change = {
         let issue_id = issue_id.clone();
         move |new_status: IssueStatus| {
+            if *is_updating_status.read() {
+                return;
+            }
+            is_updating_status.set(true);
             let id = issue_id.clone();
             spawn(async move {
-                is_updating_status.set(true);
                 status_error.set(None);
                 match update_issue_status_by_id(&id, new_status).await {
                     Ok(_) => {
@@ -218,14 +221,17 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
         let issue_id = issue_id.clone();
         let issue_pubkey = issue_pubkey.clone();
         move |_| {
+            if *is_submitting.read() {
+                return;
+            }
             let content = new_comment.read().clone();
             let id = issue_id.clone();
             let issue_author = issue_pubkey.clone();
             if content.trim().is_empty() {
                 return;
             }
+            is_submitting.set(true);
             spawn(async move {
-                is_submitting.set(true);
                 comment_error.set(None);
                 match publish_comment_by_id(&id, &issue_author, &content).await {
                     Ok(_) => {
@@ -294,7 +300,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             class: "px-3 py-1.5 text-sm bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
                             onclick: {
-                                let handler = handle_status_change.clone();
+                                let mut handler = handle_status_change.clone();
                                 move |_| handler(IssueStatus::Closed)
                             },
                             "Close Issue"
@@ -306,7 +312,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                             class: "px-3 py-1.5 text-sm bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500/20 transition disabled:opacity-50",
                             disabled: *is_updating_status.read(),
                             onclick: {
-                                let handler = handle_status_change.clone();
+                                let mut handler = handle_status_change.clone();
                                 move |_| handler(IssueStatus::Open)
                             },
                             "Reopen Issue"

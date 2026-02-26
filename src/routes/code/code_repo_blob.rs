@@ -12,6 +12,11 @@ use crate::utils::is_safe_path;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 
+fn is_tree_error(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    lower.contains("is a tree") || lower.contains("is a directory")
+}
+
 #[component]
 pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Element {
     let path_str = path.join("/");
@@ -48,7 +53,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 Ok(r) => r,
                 Err(e) => {
                     if *gen.peek() != current_gen { return; }
-                    error.set(Some(format!("Repository not found: {}", e)));
+                    error.set(Some(format!("Failed to load repository: {}", e)));
                     loading.set(false);
                     return;
                 }
@@ -72,7 +77,7 @@ pub fn CodeRepoBlob(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
                 }
                 Err(e) => {
                     if *gen.peek() != current_gen { return; }
-                    if e.contains("is a tree") || e.contains("is a directory") {
+                    if is_tree_error(&e) {
                         is_directory.set(true);
                     } else {
                         error.set(Some(format!("Failed to load file: {}", e)));

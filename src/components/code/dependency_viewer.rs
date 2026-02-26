@@ -215,12 +215,14 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
         .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
         .map(|line| {
             let line = line.trim();
+            // Strip environment markers (PEP 508 "; python_version >= ..." etc.)
+            let spec_part = line.split(';').next().unwrap_or(line).trim();
             // Try each PEP 508 operator in order (longest first)
             let mut found = None;
             for op in PEP508_OPERATORS {
-                if let Some(pos) = line.find(op) {
-                    let name = line[..pos].trim();
-                    let version = line[pos..].trim();
+                if let Some(pos) = spec_part.find(op) {
+                    let name = spec_part[..pos].trim();
+                    let version = spec_part[pos..].trim();
                     let version = version.split('#').next().unwrap_or(version).trim();
                     found = Some((name.to_string(), version.to_string()));
                     break;
@@ -233,7 +235,7 @@ pub fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
                     dep_type: DepType::Runtime,
                 },
                 None => Dependency {
-                    name: line.to_string(),
+                    name: spec_part.to_string(),
                     version: "*".to_string(),
                     dep_type: DepType::Runtime,
                 },

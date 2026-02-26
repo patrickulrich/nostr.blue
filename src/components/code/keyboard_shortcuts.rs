@@ -193,7 +193,7 @@ pub fn CodeKeyboardShortcuts() -> Element {
                     }
 
                     div { class: "mt-6 pt-4 border-t border-border text-sm text-muted-foreground text-center",
-                        "Press any key combination or click outside to close"
+                        "Press Esc or click outside to close"
                     }
                 }
             }

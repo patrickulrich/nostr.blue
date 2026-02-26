@@ -113,7 +113,7 @@ export function injectCodeBlockCopyButtons(rootId) {
         const errorSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
         const doCopy = (e) => {
             e.stopPropagation();
-            navigator.clipboard.writeText(code.innerText).then(() => {
+            (navigator.clipboard ? navigator.clipboard.writeText(code.innerText) : Promise.reject()).then(() => {
                 btn.innerHTML = successSvg;
                 btn.style.color = '#22c55e';
                 setTimeout(() => { btn.innerHTML = copySvg; btn.style.color = 'rgba(255,255,255,0.7)'; }, 2000);
@@ -319,10 +319,14 @@ pub fn ReadmePreview(content: String) -> Element {
         let mut result = String::new();
         let mut in_mermaid = false;
         for line in content.lines() {
-            if line.trim() == "```mermaid" {
-                in_mermaid = true;
-                result.push_str("[Diagram]\n");
-                continue;
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") {
+                let lang = trimmed.trim_start_matches('`').trim().to_lowercase();
+                if lang.starts_with("mermaid") {
+                    in_mermaid = true;
+                    result.push_str("[Diagram]\n");
+                    continue;
+                }
             }
             if in_mermaid {
                 if line.trim().starts_with("```") {
