@@ -104,6 +104,10 @@ pub fn CodeRepoNewFile(naddr: String) -> Element {
         if !client_initialized {
             return;
         }
+        let auth = auth_store::AUTH_STATE.read();
+        if !auth.is_authenticated {
+            return;
+        }
         let gen = repo_gen.peek().wrapping_add(1);
         repo_gen.set(gen);
         repo_result.set(None);

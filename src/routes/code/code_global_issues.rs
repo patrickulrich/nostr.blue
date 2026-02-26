@@ -43,6 +43,8 @@ pub fn CodeGlobalIssues() -> Element {
     let client_init = *nostr_client::CLIENT_INITIALIZED.read();
 
     use_effect(use_reactive((&user_pubkey, &client_init), move |(pk_hex, initialized)| {
+        let gen = request_gen.peek().wrapping_add(1);
+        request_gen.set(gen);
         if !initialized || pk_hex.is_empty() {
             loading.set(false);
             created_issues.set(Vec::new());
@@ -51,8 +53,6 @@ pub fn CodeGlobalIssues() -> Element {
             error_msg.set(None);
             return;
         }
-        let gen = request_gen.peek().wrapping_add(1);
-        request_gen.set(gen);
         created_issues.set(Vec::new());
         assigned_issues.set(Vec::new());
         label_filter.set(None);
@@ -62,6 +62,7 @@ pub fn CodeGlobalIssues() -> Element {
             let pk = match PublicKey::from_hex(&pk_hex) {
                 Ok(pk) => pk,
                 Err(e) => {
+                    if *request_gen.peek() != gen { return; }
                     error_msg.set(Some(format!("Invalid public key: {e}")));
                     loading.set(false);
                     return;

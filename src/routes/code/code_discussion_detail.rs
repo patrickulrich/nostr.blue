@@ -259,7 +259,7 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
                         }
                     },
                 }
-                if is_authenticated {
+                if is_authenticated && crate::stores::signer::has_signer() {
                     div { class: "border border-border rounded-lg overflow-hidden",
                         textarea {
                             class: "w-full p-3 text-sm bg-background resize-none focus:outline-hidden",
@@ -285,6 +285,10 @@ fn DiscussionContent(discussion: Discussion, is_authenticated: bool) -> Element 
                                 }
                             }
                         }
+                    }
+                } else if is_authenticated {
+                    div { class: "p-4 bg-muted rounded-lg text-center",
+                        p { class: "text-sm text-muted-foreground", "Connect your signer to post comments" }
                     }
                 } else {
                     div { class: "p-4 bg-muted rounded-lg text-center",

@@ -475,6 +475,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 if claiming_bounty.read().is_some() {
                                                                     return;
                                                                 }
+                                                                bounty_error.set(None);
                                                                 claiming_bounty.set(Some(b_eid.clone()));
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();
@@ -529,6 +530,7 @@ fn IssueContent(issue: Issue, is_authenticated: bool, user_pubkey: String) -> El
                                                                 if claiming_bounty.read().is_some() {
                                                                     return;
                                                                 }
+                                                                bounty_error.set(None);
                                                                 claiming_bounty.set(Some(b_eid.clone()));
                                                                 let b = b_eid.clone();
                                                                 let i = i_eid.clone();

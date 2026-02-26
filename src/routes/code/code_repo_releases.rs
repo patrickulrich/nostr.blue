@@ -73,7 +73,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                             .or_insert(release);
                     }
                     let mut deduped: Vec<Release> = by_tag.into_values().collect();
-                    deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.event_id.cmp(&b.event_id)));
+                    deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.event_id.cmp(&a.event_id)));
                     releases.set(deduped);
                     error.set(None);
                 }

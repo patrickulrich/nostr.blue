@@ -708,12 +708,18 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
 
             // Tab navigation
             div { class: "flex items-center gap-1 border-b border-border",
+                role: "tablist",
                 button {
                     class: if current_tab == PrTab::Conversation {
                         "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 border-primary text-foreground -mb-px"
                     } else {
                         "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
                     },
+                    role: "tab",
+                    id: "pr-tab-conversation",
+                    aria_selected: if current_tab == PrTab::Conversation { "true" } else { "false" },
+                    tabindex: if current_tab == PrTab::Conversation { "0" } else { "-1" },
+                    aria_controls: "pr-panel-conversation",
                     onclick: move |_| active_tab.set(PrTab::Conversation),
                     svg {
                         class: "w-4 h-4",
@@ -739,6 +745,11 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                     } else {
                         "flex items-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 transition -mb-px border-b-2 border-transparent"
                     },
+                    role: "tab",
+                    id: "pr-tab-files-changed",
+                    aria_selected: if current_tab == PrTab::FilesChanged { "true" } else { "false" },
+                    tabindex: if current_tab == PrTab::FilesChanged { "0" } else { "-1" },
+                    aria_controls: "pr-panel-files-changed",
                     onclick: move |_| active_tab.set(PrTab::FilesChanged),
                     svg {
                         class: "w-4 h-4",
@@ -761,6 +772,10 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
             // Tab content
             match current_tab {
                 PrTab::Conversation => rsx! {
+                    div {
+                        role: "tabpanel",
+                        id: "pr-panel-conversation",
+                        aria_labelledby: "pr-tab-conversation",
                     div { class: "grid grid-cols-1 lg:grid-cols-3 gap-6",
                         // Main content: comments
                         div { class: "lg:col-span-2 space-y-4",
@@ -896,11 +911,16 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                             }
                         }
                     }
+                    }
                 },
                 PrTab::FilesChanged => {
                     let pr_id_for_handler = pr_id.clone();
                     let pr_author_for_handler = pr_pubkey.clone();
                     rsx! {
+                    div {
+                        role: "tabpanel",
+                        id: "pr-panel-files-changed",
+                        aria_labelledby: "pr-tab-files-changed",
                         if let Some(err) = line_comment_error.read().as_ref() {
                             div { class: "mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive",
                                 "{err}"
@@ -953,6 +973,7 @@ fn PRContent(pr: PullRequest, is_authenticated: bool, user_pubkey: String, on_pr
                                 line_comments: line_comments.read().clone(),
                             }
                         }
+                    }
                     }
                 },
             }

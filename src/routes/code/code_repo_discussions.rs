@@ -174,6 +174,7 @@ fn discussion_preview_title(discussion: &Discussion) -> String {
     discussion
         .subject
         .clone()
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
             let mut chars = discussion.content.chars();
             let preview: String = chars.by_ref().take(80).collect();

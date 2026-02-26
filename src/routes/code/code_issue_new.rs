@@ -125,6 +125,7 @@ pub fn CodeIssueNew(naddr: String) -> Element {
                     .await
                 {
                     Ok(event_id) => {
+                        is_publishing.set(false);
                         nav.push(Route::CodeIssueDetail {
                             note_id: event_id,
                         });
