@@ -151,6 +151,7 @@ pub fn NostrUserPicker(
                                 b_pri.cmp(&a_pri).then_with(|| b.relevance.cmp(&a.relevance))
                             });
                             results.set(filtered);
+                            selected_index.set(0);
                             is_searching.set(false);
                         }
                     }

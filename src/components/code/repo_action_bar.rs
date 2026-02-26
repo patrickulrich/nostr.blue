@@ -33,7 +33,7 @@ fn generate_fork_id(name: &str, fallback_id: &str) -> String {
     if slug.is_empty() {
         format!("{}-fork-{}", fallback_id, nostr_sdk::Timestamp::now().as_secs())
     } else {
-        slug
+        format!("{}-{}", slug, nostr_sdk::Timestamp::now().as_secs())
     }
 }
 

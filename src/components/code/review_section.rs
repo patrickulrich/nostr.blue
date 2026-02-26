@@ -13,6 +13,7 @@ use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::prelude::*;
 use std::borrow::Cow;
+use std::collections::HashSet;
 
 /// Publish a review as a Kind 9807 event on Nostr
 pub async fn publish_review_event(pr_event_id: &str, pr_author_pubkey: &str, state: crate::utils::nip34::ReviewState, content: &str) -> std::result::Result<String, String> {
@@ -151,12 +152,13 @@ pub fn PRReviewSection(
     );
 
     let review_list = reviews.read();
+    let maintainer_set: HashSet<&String> = HashSet::from_iter(maintainers.iter());
     let approve_count = review_list.iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainers.contains(&r.pubkey) && r.pubkey != pr_pubkey)
+        .filter(|r| r.state == crate::utils::nip34::ReviewState::Approved && maintainer_set.contains(&r.pubkey) && r.pubkey != pr_pubkey)
         .count();
     let changes_count = review_list
         .iter()
-        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainers.contains(&r.pubkey) && r.pubkey != pr_pubkey)
+        .filter(|r| r.state == crate::utils::nip34::ReviewState::ChangesRequested && maintainer_set.contains(&r.pubkey) && r.pubkey != pr_pubkey)
         .count();
 
     let handle_submit = {

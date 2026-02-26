@@ -159,9 +159,12 @@ pub fn CodeKeyboardShortcuts() -> Element {
 
                 div {
                     class: "fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-background border border-border rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl z-50",
+                    role: "dialog",
+                    aria_modal: "true",
+                    aria_labelledby: "keyboard-shortcuts-title",
                     onclick: move |e| e.stop_propagation(),
 
-                    h2 { class: "text-lg font-bold mb-4", "Keyboard Shortcuts" }
+                    h2 { id: "keyboard-shortcuts-title", class: "text-lg font-bold mb-4", "Keyboard Shortcuts" }
 
                     div { class: "space-y-3",
                         ShortcutRow { keys: "g then i", description: "Go to Global Issues" }

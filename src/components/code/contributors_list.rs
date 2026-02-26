@@ -80,7 +80,11 @@ fn ContributorRow(pk: String, role: String, role_class: String) -> Element {
     let picture = profile.as_ref().and_then(|p| p.picture.clone());
     let display_name = profile
         .as_ref()
-        .and_then(|p| p.display_name.as_ref().or(p.name.as_ref()))
+        .and_then(|p| {
+            p.display_name.as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .or(p.name.as_ref().filter(|s| !s.trim().is_empty()))
+        })
         .cloned()
         .unwrap_or_else(|| truncate_pk(&pk));
     let initial = display_name.chars().next().unwrap_or('?');

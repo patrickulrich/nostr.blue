@@ -124,7 +124,7 @@ pub fn ZapDistribution(
                     let status = current
                         .iter()
                         .find(|r| r.pubkey == pk)
-                        .filter(|r| r.status != PaymentStatus::Pending)
+                        .filter(|r| r.status != PaymentStatus::Pending && r.amount == amt)
                         .map(|r| r.status.clone())
                         .unwrap_or(PaymentStatus::Pending);
                     ZapRecipient {

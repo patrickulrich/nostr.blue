@@ -55,29 +55,31 @@ export function initMermaidDiagrams(rootId) {
                 theme: 'dark',
                 securityLevel: 'strict',
             });
-            // Re-query to catch diagrams added while script was loading
-            const reRoot = rootId ? document.getElementById(rootId) : document;
-            const freshDivs = reRoot ? reRoot.querySelectorAll('div.mermaid:not([data-processed])') : [];
-            if (freshDivs.length === 0) return;
-            const freshNodes = Array.from(freshDivs);
-            window.mermaid.run({ nodes: freshNodes }).then(() => {
-                freshNodes.forEach(el => el.setAttribute('data-processed', 'true'));
-            }).catch(e => {
-                console.warn('Mermaid render error:', e);
-            });
+            // Collect all unique roots: current rootId + any pending roots
+            const allRoots = new Set();
+            allRoots.add(rootId);
             if (window.__mermaidPendingRoots) {
                 for (const pendingId of window.__mermaidPendingRoots) {
-                    const pendingRoot = pendingId ? document.getElementById(pendingId) : document;
-                    if (pendingRoot) {
-                        const pendingDivs = pendingRoot.querySelectorAll('div.mermaid:not([data-processed])');
-                        if (pendingDivs.length > 0) {
-                            const pendingNodes = Array.from(pendingDivs);
-                            window.mermaid.run({ nodes: pendingNodes }).then(() => {
-                                pendingNodes.forEach(el => el.setAttribute('data-processed', 'true'));
-                            }).catch(e => console.warn('Mermaid render error:', e));
-                        }
-                    }
+                    allRoots.add(pendingId);
                 }
+            }
+            // Query each root for unprocessed mermaid divs, merge into single array
+            const allNodes = [];
+            for (const rid of allRoots) {
+                const r = rid ? document.getElementById(rid) : document;
+                if (r) {
+                    const divs = r.querySelectorAll('div.mermaid:not([data-processed])');
+                    for (const d of divs) allNodes.push(d);
+                }
+            }
+            if (allNodes.length > 0) {
+                window.mermaid.run({ nodes: allNodes }).then(() => {
+                    allNodes.forEach(el => el.setAttribute('data-processed', 'true'));
+                }).catch(e => {
+                    console.warn('Mermaid render error:', e);
+                });
+            }
+            if (window.__mermaidPendingRoots) {
                 window.__mermaidPendingRoots.clear();
             }
         } catch (e) {

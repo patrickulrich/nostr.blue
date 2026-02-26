@@ -10,7 +10,7 @@ pub fn split_path(path: &str) -> Vec<String> {
         Vec::new()
     } else {
         path.split('/')
-            .filter(|s| !s.is_empty())
+            .filter(|s| !s.is_empty() && *s != "." && *s != "..")
             .map(|s| s.to_string())
             .collect()
     }
