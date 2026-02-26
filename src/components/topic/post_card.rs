@@ -92,10 +92,10 @@ pub fn TopicPostCard(
                         });
                     },
                     onclick: move |evt| {
-                        // Don't navigate if click originated from/inside an anchor element
+                        // Don't navigate if click originated from/inside an interactive element
                         if let Some(target) = evt.data.as_web_event().target() {
                             if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                if element.closest("a").ok().flatten().is_some() {
+                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"]").ok().flatten().is_some() {
                                     return;
                                 }
                             }

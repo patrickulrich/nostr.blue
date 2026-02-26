@@ -895,7 +895,7 @@ pub(super) fn render_channel_minicard(event: &Event, channel_id: &str) -> Elemen
         } else {
             description.clone()
         };
-        let channel_id_owned = channel_id.to_string();
+        let channel_id_owned = event.id.to_hex();
         rsx! {
             div {
                 class: "relative my-2",

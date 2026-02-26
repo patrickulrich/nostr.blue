@@ -142,7 +142,7 @@ pub fn PollCard(
             // Capture timestamp before fetch so votes created during
             // the fetch window are not missed on the next poll.
             let pre_fetch = Timestamp::now();
-            match fetch_poll_votes(poll_id, ends_at, poll_relays, true).await {
+            match fetch_poll_votes(poll_id, ends_at, poll_relays, false).await {
                 Ok(vote_events) => {
                     if *vote_gen.peek() != current_vote_gen { return; }
                     votes.set(vote_events.clone());
@@ -805,6 +805,8 @@ pub fn PollCard(
         }
     }
 }
+/// Fetches poll votes from relays. When `keep_relays` is true, callers are responsible
+/// for managing relay connections; when false, this function handles connect/disconnect.
 async fn fetch_poll_votes(
     poll_id: EventId,
     ends_at: Option<Timestamp>,

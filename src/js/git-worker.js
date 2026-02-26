@@ -11,10 +11,15 @@ globalThis.Buffer = Buffer;
 
 function sanitizeFilepath(fp) {
     if (typeof fp !== 'string') fp = String(fp);
-    return fp.split('').filter(c => {
+    const cleaned = fp.split('').filter(c => {
         const code = c.charCodeAt(0);
         return code > 0x1F && code !== 0x7F;
     }).join('');
+    const segments = cleaned.split('/');
+    if (segments.some(s => s === '..' || s === '.')) {
+        throw new Error('Path traversal detected: ' + fp);
+    }
+    return cleaned;
 }
 
 // Initialize virtual filesystem backed by IndexedDB

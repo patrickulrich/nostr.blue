@@ -85,7 +85,20 @@ pub fn TopicPostComposer(
                         } else if topic_locked {
                             topic.clone().unwrap_or_default()
                         } else {
-                            topic_input.read().trim().to_lowercase().replace(' ', "-")
+                            let raw = topic_input.read().trim().to_string();
+                            let stripped = raw.strip_prefix('#').unwrap_or(&raw);
+                            let sanitized: String = stripped
+                                .to_lowercase()
+                                .chars()
+                                .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+                                .collect();
+                            // Collapse consecutive hyphens and trim
+                            let topic_name = sanitized.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+                            if topic_name.is_empty() {
+                                topic.clone().unwrap_or_default()
+                            } else {
+                                topic_name
+                            }
                         };
 
                         if text.is_empty() {

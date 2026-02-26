@@ -48,7 +48,8 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                 aria_label: "Upvote",
                 title: "Upvote",
                 disabled: !has_signer || *voting.read(),
-                onclick: move |_| {
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
                     if *voting.peek() { return; }
                     if !has_signer { return; }
                     let post = post_for_up.clone();
@@ -86,7 +87,8 @@ pub fn VoteColumn(post: TopicPost, vote_counts: VoteCounts) -> Element {
                 aria_label: "Downvote",
                 title: "Downvote",
                 disabled: !has_signer || *voting.read(),
-                onclick: move |_| {
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
                     if *voting.peek() { return; }
                     if !has_signer { return; }
                     let post = post_for_down.clone();

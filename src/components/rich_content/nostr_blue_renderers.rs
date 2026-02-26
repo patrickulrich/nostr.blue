@@ -1077,7 +1077,7 @@ pub(super) fn NostrBlueChannelRenderer(id: String) -> Element {
             } else if let Some(err) = fetch.error().as_ref() {
                 {nostr_blue_error(err)}
             } else if let Some(ev) = fetch.event().as_ref() {
-                {render_channel_minicard(ev, &id)}
+                {render_channel_minicard(ev, &ev.id.to_hex())}
             }
         }
     }
