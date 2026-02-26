@@ -81,8 +81,8 @@ pub fn CodeRepoIssues(naddr: String) -> Element {
             .iter()
             .flat_map(|i| i.labels.clone())
             .collect();
-        labels.sort();
-        labels.dedup();
+        labels.sort_by_key(|a| a.to_ascii_lowercase());
+        labels.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         labels
     });
 

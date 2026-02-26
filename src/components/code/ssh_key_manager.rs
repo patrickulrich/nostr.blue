@@ -416,7 +416,7 @@ fn truncate_key(key: &str) -> String {
         let char_count = key_data.chars().count();
         if char_count > 20 {
             let prefix: String = key_data.chars().take(10).collect();
-            let suffix: String = key_data.chars().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
+            let suffix: String = key_data.chars().skip(char_count - 10).collect();
             format!("{} {}...{}", key_type, prefix, suffix)
         } else {
             key.to_string()
@@ -425,7 +425,7 @@ fn truncate_key(key: &str) -> String {
         let char_count = key.chars().count();
         if char_count > 40 {
             let prefix: String = key.chars().take(20).collect();
-            let suffix: String = key.chars().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
+            let suffix: String = key.chars().skip(char_count - 10).collect();
             format!("{}...{}", prefix, suffix)
         } else {
             key.to_string()

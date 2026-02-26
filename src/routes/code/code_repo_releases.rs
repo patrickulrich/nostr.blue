@@ -73,7 +73,7 @@ pub fn CodeRepoReleases(naddr: String) -> Element {
                             .or_insert(release);
                     }
                     let mut deduped: Vec<Release> = by_tag.into_values().collect();
-                    deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    deduped.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.event_id.cmp(&b.event_id)));
                     releases.set(deduped);
                     error.set(None);
                 }
@@ -530,6 +530,7 @@ fn EditReleaseForm(
                             button {
                                 class: "px-2 py-2 text-muted-foreground hover:text-destructive transition rounded hover:bg-destructive/10",
                                 r#type: "button",
+                                aria_label: "Remove asset URL",
                                 onclick: move |_| {
                                     let mut urls = asset_urls.read().clone();
                                     urls.remove(i);
@@ -739,6 +740,7 @@ fn NewReleaseForm(naddr: String, on_published: EventHandler<()>) -> Element {
                             button {
                                 class: "px-2 py-2 text-muted-foreground hover:text-destructive transition rounded hover:bg-destructive/10",
                                 r#type: "button",
+                                aria_label: "Remove asset URL",
                                 onclick: move |_| {
                                     let mut urls = asset_urls.read().clone();
                                     urls.remove(i);

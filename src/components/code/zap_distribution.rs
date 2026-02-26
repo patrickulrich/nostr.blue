@@ -407,6 +407,8 @@ pub fn ZapDistribution(
                         selected: selected_pubkeys,
                         placeholder: "Search or paste npub...".to_string(),
                         max_selections: 0,
+                        // NostrUserPicker mutates `selected_pubkeys` signal directly;
+                        // the use_effect above reacts to changes. on_change is a no-op placeholder.
                         on_change: move |_new: Vec<String>| {},
                     }
                 }

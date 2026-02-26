@@ -310,7 +310,7 @@ fn BoardCard(item: BoardItem) -> Element {
             if !item.labels().is_empty() {
                 div { class: "flex flex-wrap gap-1 mb-2",
                     for label in item.labels().iter().take(3) {
-                        span { class: "px-1.5 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20",
+                        span { key: "{label}", class: "px-1.5 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20",
                             "{label}"
                         }
                     }

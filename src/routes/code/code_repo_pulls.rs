@@ -77,8 +77,8 @@ pub fn CodeRepoPulls(naddr: String) -> Element {
             .iter()
             .flat_map(|p| p.labels.iter().cloned())
             .collect();
-        labels.sort();
-        labels.dedup();
+        labels.sort_by_key(|a| a.to_ascii_lowercase());
+        labels.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
         labels
     });
 

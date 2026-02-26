@@ -38,9 +38,19 @@ pub fn ThreadView(
     }
 }
 
-/// Count all descendants (replies + their replies, recursively) for a thread node
+/// Count all descendants (replies + their replies) for a thread node using iterative traversal
 fn count_descendants(thread: &TopicThread) -> usize {
-    thread.replies.len() + thread.replies.iter().map(count_descendants).sum::<usize>()
+    const MAX_COUNT: usize = 1000;
+    let mut count = 0usize;
+    let mut stack: Vec<&TopicThread> = thread.replies.iter().collect();
+    while let Some(node) = stack.pop() {
+        count += 1;
+        if count >= MAX_COUNT {
+            return count;
+        }
+        stack.extend(node.replies.iter());
+    }
+    count
 }
 
 /// Single thread node with its replies
