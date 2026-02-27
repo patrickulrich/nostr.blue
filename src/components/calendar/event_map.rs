@@ -3,16 +3,19 @@
 //! Displays calendar events on an interactive map using Leaflet.
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
+#[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 use crate::services::geocoding::{geocode, geohash_to_coords, GeoLocation};
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::utils::validation::validate_css_dimension;
 /// Global counter for unique EventMap container IDs
 static EVENT_MAP_COUNTER: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 // Store for map instances
@@ -185,6 +188,7 @@ extern "C" {
     fn invalidateSize(container_id: &str);
 }
 /// Marker data for JS
+#[cfg(feature = "web")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MarkerData {
     lat: f64,
@@ -193,6 +197,7 @@ struct MarkerData {
     event_id: String,
 }
 /// Event with resolved location
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct GeocodedEvent {
     pub event: UnifiedEvent,
@@ -213,13 +218,17 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let container_id = use_signal(|| {
         format!(
             "event-map-{}-{}",
-            js_sys::Date::now() as u64,
+            crate::platform::timestamp::now_millis(),
             EVENT_MAP_COUNTER.fetch_add(1, Ordering::Relaxed),
         )
     });
+    #[allow(unused_mut)]
     let mut leaflet_loaded = use_signal(|| false);
+    #[allow(unused_variables, unused_mut)]
     let mut leaflet_loading = use_signal(|| false);
+    #[allow(unused_mut)]
     let mut leaflet_error = use_signal(|| None::<String>);
+    #[allow(unused_mut)]
     let mut map_initialized = use_signal(|| false);
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
     let mut loading_geo = use_signal(|| false);
@@ -251,56 +260,62 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
     use_effect(move || {
-        if *leaflet_loaded.read() || *leaflet_loading.read()
-            || leaflet_error.read().is_some()
+        #[cfg(feature = "web")]
         {
-            return;
-        }
-        leaflet_loading.set(true);
-        spawn(async move {
-            if let Err(e) = loadLeaflet().await {
+            if *leaflet_loaded.read() || *leaflet_loading.read()
+                || leaflet_error.read().is_some()
+            {
+                return;
+            }
+            leaflet_loading.set(true);
+            spawn(async move {
+                if let Err(e) = loadLeaflet().await {
+                    if *unmounted.read() {
+                        return;
+                    }
+                    log::error!("Failed to load Leaflet: {:?}", e);
+                    leaflet_error
+                        .set(
+                            Some("Failed to load map. Please refresh the page.".to_string()),
+                        );
+                    leaflet_loading.set(false);
+                    return;
+                }
                 if *unmounted.read() {
                     return;
                 }
-                log::error!("Failed to load Leaflet: {:?}", e);
-                leaflet_error
-                    .set(
-                        Some("Failed to load map. Please refresh the page.".to_string()),
-                    );
+                leaflet_loaded.set(true);
                 leaflet_loading.set(false);
-                return;
-            }
-            if *unmounted.read() {
-                return;
-            }
-            leaflet_loaded.set(true);
-            leaflet_loading.set(false);
-        });
+            });
+        }
     });
     use_effect(move || {
-        if !*leaflet_loaded.read() || *map_initialized.read() {
-            return;
-        }
-        let id = container_id.read().clone();
-        spawn(async move {
-            gloo_timers::future::sleep(std::time::Duration::from_millis(100)).await;
-            if *unmounted.read() {
+        #[cfg(feature = "web")]
+        {
+            if !*leaflet_loaded.read() || *map_initialized.read() {
                 return;
             }
-            if initMap(&id, 20.0, 0.0, 2) {
-                map_initialized.set(true);
-                log::info!("Map initialized: {}", id);
-            } else {
-                log::error!("Failed to initialize map container: {}", id);
-                leaflet_error
-                    .set(
-                        Some(
-                            "Failed to initialize map. Please refresh the page."
-                                .to_string(),
-                        ),
-                    );
-            }
-        });
+            let id = container_id.read().clone();
+            spawn(async move {
+                crate::platform::timer::sleep(std::time::Duration::from_millis(100)).await;
+                if *unmounted.read() {
+                    return;
+                }
+                if initMap(&id, 20.0, 0.0, 2) {
+                    map_initialized.set(true);
+                    log::info!("Map initialized: {}", id);
+                } else {
+                    log::error!("Failed to initialize map container: {}", id);
+                    leaflet_error
+                        .set(
+                            Some(
+                                "Failed to initialize map. Please refresh the page."
+                                    .to_string(),
+                            ),
+                        );
+                }
+            });
+        }
     });
     use_effect({
         let events_for_geocode = events_for_geocode.clone();
@@ -331,7 +346,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         return;
                     }
                     if idx > 0 && idx % BATCH_SIZE == 0 {
-                        gloo_timers::future::TimeoutFuture::new(BATCH_DELAY_MS).await;
+                        crate::platform::timer::sleep_ms(BATCH_DELAY_MS).await;
                     }
                     if let Some(geohash) = event.geohash() {
                         if let Some((lat, lon)) = geohash_to_coords(geohash) {
@@ -389,39 +404,45 @@ pub fn EventMap(props: EventMapProps) -> Element {
         }
     });
     use_effect(move || {
-        if !*map_initialized.read() {
-            return;
-        }
-        let events = geocoded_events.read();
-        let id = container_id.read().clone();
-        clearMarkers(&id);
-        if events.is_empty() {
-            return;
-        }
-        let markers: Vec<MarkerData> = events
-            .iter()
-            .map(|ge| MarkerData {
-                lat: ge.location.lat,
-                lng: ge.location.lon,
-                popup: format_popup(&ge.event, &ge.location),
-                event_id: ge.event.naddr().to_string(),
-            })
-            .collect();
-        match serde_json::to_string(&markers) {
-            Ok(json) => {
-                addMarkersAndFit(&id, &json);
+        #[cfg(feature = "web")]
+        {
+            if !*map_initialized.read() {
+                return;
             }
-            Err(e) => {
-                log::error!(
-                    "Failed to serialize {} map markers for container {}: {}", markers
-                    .len(), id, e
-                );
+            let events = geocoded_events.read();
+            let id = container_id.read().clone();
+            clearMarkers(&id);
+            if events.is_empty() {
+                return;
+            }
+            let markers: Vec<MarkerData> = events
+                .iter()
+                .map(|ge| MarkerData {
+                    lat: ge.location.lat,
+                    lng: ge.location.lon,
+                    popup: format_popup(&ge.event, &ge.location),
+                    event_id: ge.event.naddr().to_string(),
+                })
+                .collect();
+            match serde_json::to_string(&markers) {
+                Ok(json) => {
+                    addMarkersAndFit(&id, &json);
+                }
+                Err(e) => {
+                    log::error!(
+                        "Failed to serialize {} map markers for container {}: {}", markers
+                        .len(), id, e
+                    );
+                }
             }
         }
     });
     use_drop(move || {
-        let id = container_id.read().clone();
-        destroyMap(&id);
+        #[cfg(feature = "web")]
+        {
+            let id = container_id.read().clone();
+            destroyMap(&id);
+        }
     });
     let safe_height = validate_css_dimension(&props.height).unwrap_or("400px");
     let container_style = format!("height: {}; width: 100%;", safe_height);
@@ -499,6 +520,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
     }
 }
 /// Format popup HTML for a marker
+#[cfg(feature = "web")]
 fn format_popup(event: &UnifiedEvent, location: &GeoLocation) -> String {
     let title = event.title();
     let time = format_popup_time(event);
@@ -522,6 +544,7 @@ fn format_popup(event: &UnifiedEvent, location: &GeoLocation) -> String {
     )
 }
 /// Format time for popup
+#[cfg(feature = "web")]
 fn format_popup_time(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();
     if ts == 0 {
@@ -561,7 +584,9 @@ fn format_popup_time(event: &UnifiedEvent) -> String {
         format!("{} {} at {}:{:02} {}", month_str, day, hour_12, minutes, am_pm)
     }
 }
+
 /// Escape HTML entities
+#[cfg(feature = "web")]
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

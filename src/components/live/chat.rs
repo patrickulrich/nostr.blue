@@ -10,7 +10,9 @@ use dioxus_core::use_drop;
 use nostr::TagKind;
 use nostr_sdk::{Event, EventBuilder, Filter, Kind, PublicKey, RelayPoolNotification, SubscriptionId, Tag, Timestamp};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 export function scrollChatToBottom(elementId) {
@@ -44,7 +46,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     let chat_container_id = {
-        let timestamp = js_sys::Date::now() as u64;
+        let timestamp = crate::platform::timestamp::now_millis();
         format!("live-chat-messages-{}", timestamp)
     };
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
@@ -152,12 +154,20 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         let msg_count = messages.read().len();
         let container_id = chat_id_for_auto_scroll.clone();
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(50).await;
-            if *is_first_load.peek() && msg_count > 0 {
-                scrollChatToBottom(&container_id);
+            crate::platform::timer::sleep_ms(50).await;
+            #[cfg(feature = "web")]
+            {
+                if *is_first_load.peek() && msg_count > 0 {
+                    scrollChatToBottom(&container_id);
+                    is_first_load.set(false);
+                } else if isScrolledNearBottom(&container_id, 100.0) {
+                    scrollChatToBottom(&container_id);
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = (&container_id, msg_count);
                 is_first_load.set(false);
-            } else if isScrolledNearBottom(&container_id, 100.0) {
-                scrollChatToBottom(&container_id);
             }
         });
     });
@@ -227,7 +237,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         });
     };
     // Escape key closes expanded chat overlay
+    #[cfg(feature = "web")]
     let mut escape_cb = use_signal(|| None::<Closure<dyn FnMut(web_sys::KeyboardEvent)>>);
+    #[cfg(feature = "web")]
     use_effect(move || {
         let Some(window) = web_sys::window() else { return };
         let cb = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
@@ -238,6 +250,7 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
         window.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref()).ok();
         escape_cb.set(Some(cb));
     });
+    #[cfg(feature = "web")]
     use_drop(move || {
         if let Some(cb) = escape_cb.peek().as_ref() {
             if let Some(window) = web_sys::window() {

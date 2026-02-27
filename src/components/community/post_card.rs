@@ -369,7 +369,7 @@ pub fn CommunityPostCard(
                         tabindex: "-1",
                         onclick: move |e| e.stop_propagation(),
                         onmounted: move |_evt| {
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "web")]
                             {
                                 if let Some(el) = _evt.data().downcast::<web_sys::HtmlElement>() {
                                     let _ = el.focus();

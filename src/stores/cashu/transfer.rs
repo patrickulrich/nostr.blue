@@ -196,12 +196,11 @@ pub async fn transfer_between_mints(
             });
             return Err(error);
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
-            use gloo_timers::future::TimeoutFuture;
-            TimeoutFuture::new(2000).await;
+            crate::platform::timer::sleep_ms(2000).await;
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(feature = "web"))]
         {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }

@@ -237,7 +237,7 @@ impl DisplayEpisode {
     ) -> Self {
         let mut ep = Self::from_podcast_index_episode(episode, feed);
         ep.is_live = true;
-        ep.created_at = (js_sys::Date::now() / 1000.0) as u64;
+        ep.created_at = crate::platform::timestamp::now_secs();
         ep
     }
     /// Convert to MusicTrack for player

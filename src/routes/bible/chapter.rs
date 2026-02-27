@@ -124,7 +124,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(format!("{} {}", v, text));
                     }
                 }
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let first = *verses.first().unwrap_or(&0);
                     let last = *verses.last().unwrap_or(&0);
@@ -584,7 +584,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             log::info!("Highlight created");
                                             highlight_feedback.set(Some((true, "Highlight saved".to_string())));
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                crate::platform::timer::sleep_ms(2000).await;
                                                 highlight_feedback.set(None);
                                             });
                                         }
@@ -592,7 +592,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             log::error!("Failed to create highlight: {}", e);
                                             highlight_feedback.set(Some((false, format!("Failed: {}", e))));
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(4000).await;
+                                                crate::platform::timer::sleep_ms(4000).await;
                                                 highlight_feedback.set(None);
                                             });
                                         }

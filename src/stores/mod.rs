@@ -38,7 +38,7 @@ pub use ui::notifications;
 pub use ui::emoji_store;
 
 pub mod auth_store;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub mod bible_store;
 pub mod bookmarks;
 pub mod calendar_store;
@@ -52,6 +52,7 @@ pub mod feed_cache_db;
 pub mod grasp_servers;
 pub mod indexeddb_database;
 pub mod nostr_client;
+pub mod wallet_database;
 pub mod nwc_store;
 pub mod profiles;
 pub mod relay;

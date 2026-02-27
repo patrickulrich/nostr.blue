@@ -397,11 +397,29 @@ async fn upload_blob_with_auth(
                     format!("Upload failed: {}", e)
                 })?
         }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            client
+                .upload_blob(
+                    data,
+                    Some(content_type),
+                    auth_options,
+                    Some(android_signer.as_ref()),
+                )
+                .await
+                .map_err(|e| {
+                    UPLOAD_PROGRESS.write().replace(0.0);
+                    format!("Upload failed: {}", e)
+                })?
+        }
     };
     UPLOAD_PROGRESS.write().replace(100.0);
     log::info!("Upload successful: {}", descriptor.url);
     spawn(async move {
+        #[cfg(feature = "web")]
         gloo_timers::future::TimeoutFuture::new(1000).await;
+        #[cfg(not(feature = "web"))]
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         *UPLOAD_PROGRESS.write() = None;
     });
     Ok(descriptor.url.to_string())
@@ -571,6 +589,13 @@ pub async fn publish_user_servers() -> Result<String, String> {
                 .await
                 .map_err(|e| format!("Failed to sign event: {}", e))?
         }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            builder
+                .sign(android_signer.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign event: {}", e))?
+        }
     };
     nostr_client::ensure_relays_ready(&client).await;
     use nostr_relay_pool::RelayStatus as PoolRelayStatus;
@@ -658,6 +683,13 @@ pub async fn get_auth_header(
         crate::stores::signer::SignerType::NostrConnect(nostr_connect) => {
             builder
                 .sign(nostr_connect.as_ref())
+                .await
+                .map_err(|e| format!("Failed to sign auth event: {}", e))?
+        }
+        #[cfg(feature = "mobile")]
+        crate::stores::signer::SignerType::AndroidSigner(android_signer) => {
+            builder
+                .sign(android_signer.as_ref())
                 .await
                 .map_err(|e| format!("Failed to sign auth event: {}", e))?
         }

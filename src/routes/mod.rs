@@ -25,9 +25,9 @@ pub mod wiki;
 pub mod blossom;
 pub mod music;
 pub mod radio;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub mod bible;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub mod bible {
     use dioxus::prelude::*;
     #[component]
@@ -731,6 +731,7 @@ fn Layout() -> Element {
                                         class: "flex items-center gap-2 hover:opacity-80 transition mb-6 cursor-pointer",
                                         onclick: move |_| {
                                             if is_home_page {
+                                                #[cfg(feature = "web")]
                                                 if let Some(window) = web_sys::window() {
                                                     window.scroll_to_with_x_and_y(0.0, 0.0);
                                                 }
@@ -766,6 +767,7 @@ fn Layout() -> Element {
                                                         onclick: move |_| {
                                                             sidebar_page.set(0);
                                                             if is_home_page {
+                                                                #[cfg(feature = "web")]
                                                                 if let Some(window) = web_sys::window() {
                                                                     window.scroll_to_with_x_and_y(0.0, 0.0);
                                                                 }
@@ -935,6 +937,7 @@ fn Layout() -> Element {
                                                     sidebar_open.set(false);
                                                     sidebar_page.set(0);
                                                     if is_home_page {
+                                                        #[cfg(feature = "web")]
                                                         if let Some(window) = web_sys::window() {
                                                             window.scroll_to_with_x_and_y(0.0, 0.0);
                                                         }
@@ -973,6 +976,7 @@ fn Layout() -> Element {
                                                                     sidebar_open.set(false);
                                                                     sidebar_page.set(0);
                                                                     if is_home_page {
+                                                                        #[cfg(feature = "web")]
                                                                         if let Some(window) = web_sys::window() {
                                                                             window.scroll_to_with_x_and_y(0.0, 0.0);
                                                                         }

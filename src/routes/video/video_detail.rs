@@ -14,7 +14,9 @@ use dioxus_core::use_drop;
 use nostr_sdk::prelude::*;
 use nostr_sdk::{Event, EventId, PublicKey};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlVideoElement;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -557,6 +559,7 @@ fn VerticalVideoPlayer(
             move |muted| {
                 let id = video_id_for_effect.clone();
                 spawn(async move {
+                    #[cfg(feature = "web")]
                     if let Some(window) = web_sys::window() {
                         if let Some(document) = window.document() {
                             if let Some(element) = document.get_element_by_id(&id) {
@@ -566,6 +569,8 @@ fn VerticalVideoPlayer(
                             }
                         }
                     }
+                    #[cfg(not(feature = "web"))]
+                    let _ = (&id, muted);
                 });
             },
         ),

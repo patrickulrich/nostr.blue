@@ -18,9 +18,18 @@ pub fn QrShareModal(
     let mut active_tab = use_signal(|| "nostr");
 
     let nostr_url = format!("nostr:{}", naddr);
-    let base = web_sys::window()
-        .and_then(|w| w.location().origin().ok())
-        .unwrap_or_else(|| "https://nostr.blue".to_string());
+    let base = {
+        #[cfg(feature = "web")]
+        {
+            web_sys::window()
+                .and_then(|w| w.location().origin().ok())
+                .unwrap_or_else(|| "https://nostr.blue".to_string())
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            "https://nostr.blue".to_string()
+        }
+    };
     let web_url = format!("{}/code/repo/{}", base, naddr);
 
     let current_url = if *active_tab.read() == "nostr" {

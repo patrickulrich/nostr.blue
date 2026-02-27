@@ -306,7 +306,7 @@ pub fn CashuSendModal(on_close: EventHandler<()>) -> Element {
                                             readonly: true,
                                             value: token.clone(),
                                             onclick: move |_| {
-                                                #[cfg(target_arch = "wasm32")]
+                                                #[cfg(feature = "web")]
                                                 {
                                                     use wasm_bindgen::JsCast;
                                                     if let Some(window) = web_sys::window() {

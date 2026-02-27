@@ -13,7 +13,6 @@
 use crate::utils::podcast::{
     ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
 };
-use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 /// Full Podcasting 2.0 podcast representation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -149,17 +148,15 @@ pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
     } else {
         url.to_string()
     };
-    let response = Request::get(&fetch_url)
-        .send()
+    let response = reqwest::get(&fetch_url)
         .await
         .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(
             format!(
-                "HTTP {} from {}: {}",
+                "HTTP {} from {}",
                 response.status(),
                 fetch_url,
-                response.status_text(),
             ),
         );
     }
@@ -421,12 +418,11 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
 /// Note: For browser use, prefer podcast_index::fetch_chapters_proxied
 #[allow(dead_code)]
 pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
-    let response = Request::get(url)
-        .send()
+    let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
     response
         .json::<ChaptersFile>()
@@ -437,12 +433,11 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
 /// Note: For browser use, prefer podcast_index::fetch_transcript_proxied
 #[allow(dead_code)]
 pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, String> {
-    let response = Request::get(&transcript.url)
-        .send()
+    let response = reqwest::get(&transcript.url)
         .await
         .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
     response.text().await.map_err(|e| format!("Failed to read transcript: {}", e))
 }

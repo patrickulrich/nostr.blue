@@ -4,14 +4,17 @@ use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Guard struct that removes scroll listener on drop
 /// Note: Clone is required by use_hook but should not be manually called.
 /// The Signal ensures cleanup happens correctly even if cloned by the hook.
+#[cfg(feature = "web")]
 #[derive(Clone)]
 struct ScrollListenerGuard {
     callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,
 }
+#[cfg(feature = "web")]
 impl Drop for ScrollListenerGuard {
     fn drop(&mut self) {
         if let Some(callback) = self.callback.write().take() {
@@ -64,93 +67,96 @@ pub fn VideosLiveTag(tag: String) -> Element {
             },
         ),
     );
-    let tag_for_scroll = tag.clone();
-    let mut scroll_callback = use_signal(|| {
-        None::<wasm_bindgen::closure::Closure<dyn FnMut()>>
-    });
-    use_effect(
-        use_reactive(
-            &tag_for_scroll,
-            move |current_tag| {
-                if let Some(old_callback) = scroll_callback.write().take() {
-                    if let Some(window) = web_sys::window() {
-                        window
-                            .remove_event_listener_with_callback(
-                                "scroll",
-                                old_callback.as_ref().unchecked_ref(),
-                            )
-                            .ok();
-                    }
-                }
-                let window = web_sys::window().expect("no global window");
-                let _document = window.document().expect("no document");
-                let tag_for_callback = current_tag.clone();
-                let callback = wasm_bindgen::closure::Closure::wrap(
-                    Box::new(move || {
-                        let window = web_sys::window().expect("no global window");
-                        let scroll_y = window.scroll_y().unwrap_or(0.0);
-                        let inner_height = window
-                            .inner_height()
-                            .unwrap()
-                            .as_f64()
-                            .unwrap_or(0.0);
-                        let document = window.document().expect("no document");
-                        let body = document.body().expect("no body");
-                        let scroll_height = body.scroll_height() as f64;
-                        if scroll_y + inner_height >= scroll_height - 1000.0 {
-                            if *loading.read() || !*has_more.read() {
-                                return;
-                            }
-                            let until = *oldest_timestamp.read();
-                            let current_tag = tag_for_callback.clone();
-                            loading.set(true);
-                            spawn(async move {
-                                match load_streams_by_tag(&current_tag, until).await {
-                                    Ok((new_events, hit_limit)) => {
-                                        let existing_ids: std::collections::HashSet<_> = {
-                                            let current = stream_events.read();
-                                            current.iter().map(|e| e.id).collect()
-                                        };
-                                        let unique_events: Vec<_> = new_events
-                                            .into_iter()
-                                            .filter(|e| !existing_ids.contains(&e.id))
-                                            .collect();
-                                        if unique_events.is_empty() {
-                                            has_more.set(false);
-                                            loading.set(false);
-                                            return;
-                                        }
-                                        if let Some(last_event) = unique_events.last() {
-                                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                                        }
-                                        has_more.set(hit_limit);
-                                        let mut current = stream_events.read().clone();
-                                        current.extend(unique_events);
-                                        stream_events.set(current);
-                                        loading.set(false);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to load more streams: {}", e);
-                                        loading.set(false);
-                                    }
-                                }
-                            });
+    #[cfg(feature = "web")]
+    {
+        let tag_for_scroll = tag.clone();
+        let mut scroll_callback = use_signal(|| {
+            None::<wasm_bindgen::closure::Closure<dyn FnMut()>>
+        });
+        use_effect(
+            use_reactive(
+                &tag_for_scroll,
+                move |current_tag| {
+                    if let Some(old_callback) = scroll_callback.write().take() {
+                        if let Some(window) = web_sys::window() {
+                            window
+                                .remove_event_listener_with_callback(
+                                    "scroll",
+                                    old_callback.as_ref().unchecked_ref(),
+                                )
+                                .ok();
                         }
-                    }) as Box<dyn FnMut()>,
-                );
-                window
-                    .add_event_listener_with_callback(
-                        "scroll",
-                        callback.as_ref().unchecked_ref(),
-                    )
-                    .ok();
-                scroll_callback.set(Some(callback));
-            },
-        ),
-    );
-    use_hook(move || ScrollListenerGuard {
-        callback: scroll_callback,
-    });
+                    }
+                    let window = web_sys::window().expect("no global window");
+                    let _document = window.document().expect("no document");
+                    let tag_for_callback = current_tag.clone();
+                    let callback = wasm_bindgen::closure::Closure::wrap(
+                        Box::new(move || {
+                            let window = web_sys::window().expect("no global window");
+                            let scroll_y = window.scroll_y().unwrap_or(0.0);
+                            let inner_height = window
+                                .inner_height()
+                                .unwrap()
+                                .as_f64()
+                                .unwrap_or(0.0);
+                            let document = window.document().expect("no document");
+                            let body = document.body().expect("no body");
+                            let scroll_height = body.scroll_height() as f64;
+                            if scroll_y + inner_height >= scroll_height - 1000.0 {
+                                if *loading.read() || !*has_more.read() {
+                                    return;
+                                }
+                                let until = *oldest_timestamp.read();
+                                let current_tag = tag_for_callback.clone();
+                                loading.set(true);
+                                spawn(async move {
+                                    match load_streams_by_tag(&current_tag, until).await {
+                                        Ok((new_events, hit_limit)) => {
+                                            let existing_ids: std::collections::HashSet<_> = {
+                                                let current = stream_events.read();
+                                                current.iter().map(|e| e.id).collect()
+                                            };
+                                            let unique_events: Vec<_> = new_events
+                                                .into_iter()
+                                                .filter(|e| !existing_ids.contains(&e.id))
+                                                .collect();
+                                            if unique_events.is_empty() {
+                                                has_more.set(false);
+                                                loading.set(false);
+                                                return;
+                                            }
+                                            if let Some(last_event) = unique_events.last() {
+                                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                                            }
+                                            has_more.set(hit_limit);
+                                            let mut current = stream_events.read().clone();
+                                            current.extend(unique_events);
+                                            stream_events.set(current);
+                                            loading.set(false);
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to load more streams: {}", e);
+                                            loading.set(false);
+                                        }
+                                    }
+                                });
+                            }
+                        }) as Box<dyn FnMut()>,
+                    );
+                    window
+                        .add_event_listener_with_callback(
+                            "scroll",
+                            callback.as_ref().unchecked_ref(),
+                        )
+                        .ok();
+                    scroll_callback.set(Some(callback));
+                },
+            ),
+        );
+        use_hook(move || ScrollListenerGuard {
+            callback: scroll_callback,
+        });
+    }
     rsx! {
         div { class: "min-h-screen bg-background",
             div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",

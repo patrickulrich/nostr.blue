@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum Theme {
@@ -30,7 +30,7 @@ pub static THEME: GlobalSignal<Theme> = Signal::global(Theme::default);
 const STORAGE_KEY: &str = "nostr_theme";
 /// Initialize theme from localStorage or system preference
 pub fn init_theme() {
-    if let Ok(theme_str) = LocalStorage::get::<String>(STORAGE_KEY) {
+    if let Ok(theme_str) = storage::get::<String>(STORAGE_KEY) {
         let theme = Theme::from_str(&theme_str);
         *THEME.write() = theme;
         log::info!("Loaded theme from storage: {:?}", theme);
@@ -46,14 +46,14 @@ pub fn set_theme_internal(theme: Theme) {
         return;
     }
     *THEME.write() = theme;
-    LocalStorage::set(STORAGE_KEY, theme.as_str()).ok();
+    storage::set(STORAGE_KEY, &theme.as_str()).ok();
     log::info!("Theme changed to: {:?}", theme);
     apply_theme();
 }
 /// Set theme and persist to localStorage and Nostr (NIP-78)
 pub fn set_theme(theme: Theme) {
     set_theme_internal(theme);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use crate::stores::settings_store;
         dioxus::prelude::spawn(async move {
@@ -63,7 +63,7 @@ pub fn set_theme(theme: Theme) {
 }
 /// Apply theme to document
 pub fn apply_theme() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use web_sys::window;
         if let Some(win) = window() {
@@ -92,6 +92,19 @@ pub fn apply_theme() {
             }
         }
     }
+    #[cfg(feature = "native")]
+    {
+        let theme = *THEME.read();
+        let class = match theme {
+            Theme::Light => "",
+            Theme::Dark => "dark",
+            Theme::System => "dark", // Default to dark on native
+        };
+        let js = format!("document.documentElement.setAttribute('class', '{}')", class);
+        dioxus::prelude::spawn(async move {
+            let _ = dioxus::prelude::document::eval(&js).await;
+        });
+    }
 }
 /// Get current theme
 #[allow(dead_code)]
@@ -116,7 +129,7 @@ pub fn is_dark_mode() -> bool {
         Theme::Dark => true,
         Theme::Light => false,
         Theme::System => {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 use web_sys::window;
                 if let Some(window) = window() {

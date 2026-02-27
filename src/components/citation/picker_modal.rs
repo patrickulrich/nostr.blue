@@ -91,11 +91,11 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         let query_snapshot = new_query.clone();
         let query_lower = query_snapshot.to_lowercase();
         let new_task = spawn(async move {
-            #[cfg(target_family = "wasm")]
+            #[cfg(feature = "web")]
             {
-                gloo_timers::future::TimeoutFuture::new(150).await;
+                crate::platform::timer::sleep_ms(150).await;
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(not(feature = "web"))]
             {
                 use std::time::Duration;
                 tokio::time::sleep(Duration::from_millis(150)).await;

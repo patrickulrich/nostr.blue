@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 /// Type alias for the IntersectionObserver handles (observer + closure)
-#[cfg(target_family = "wasm")]
+#[cfg(feature = "web")]
 type ObserverHandles = Rc<
     RefCell<
         Option<
@@ -43,12 +43,12 @@ where
     F: FnMut() + 'static,
 {
     let sentinel_id = use_hook(|| format!("scroll-sentinel-{}", uuid::Uuid::new_v4()));
-    #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
+    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
     let last_check = use_signal(|| 0u64);
     let trigger = use_signal(|| 0u64);
-    #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
+    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
     let cb = use_hook(|| Rc::new(RefCell::new(callback)));
-    #[cfg_attr(not(target_family = "wasm"), allow(unused_variables))]
+    #[cfg_attr(not(feature = "web"), allow(unused_variables))]
     let id_for_effect = sentinel_id.clone();
     use_effect(move || {
         let trigger_value = *trigger.read();
@@ -83,7 +83,7 @@ where
             );
         }
     });
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         #[derive(Clone)]
         struct ObserverCleanup {
@@ -169,7 +169,7 @@ where
                 };
                 let mut element = None;
                 for attempt in 1..=20 {
-                    gloo_timers::future::TimeoutFuture::new(attempt * 50).await;
+                    crate::platform::timer::sleep_ms(attempt * 50).await;
                     if let Some(el) = document.get_element_by_id(&id) {
                         log::info!(
                             "[InfiniteScroll] Found sentinel element on attempt {}",
@@ -211,7 +211,7 @@ where
                                     is_intersecting
                                 );
                                 if is_intersecting {
-                                    let now = js_sys::Date::now() as u64;
+                                    let now = crate::platform::timestamp::now_millis();
                                     let last = *last_check_for_callback.peek();
                                     log::debug!(
                                         "[InfiniteScroll] Debounce check - now: {}, last: {}, diff: {}",

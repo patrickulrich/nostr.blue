@@ -15,10 +15,15 @@ pub use payments::lnurl;
 
 pub mod admission_policy;
 pub mod aggregation;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub mod bible_api;
 pub mod geocoding;
 pub mod git_hosting;
+#[cfg(feature = "native")]
+#[allow(dead_code)]
+pub mod git_native;
+pub mod git_types;
+#[cfg(feature = "web")]
 pub mod git_worker;
 pub mod github_nips;
 pub mod openlibrary;

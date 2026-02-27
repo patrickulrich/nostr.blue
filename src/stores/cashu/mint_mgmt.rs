@@ -321,7 +321,7 @@ pub async fn backup_mint_counters(mint_url: &str) -> CashuResult<()> {
     let backup = CounterBackup {
         mint_url: mint_url.to_string(),
         counters,
-        created_at: js_sys::Date::now() as u64 / 1000,
+        created_at: crate::platform::timestamp::now_secs(),
     };
     let mut backups = COUNTER_BACKUPS.write();
     if let Some(existing) = backups.iter_mut().find(|b| b.mint_url == mint_url) {
@@ -535,7 +535,14 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
         log::warn!("Failed to restore counters for {}: {}", mint_url, e);
     }
     let mint_url_owned = mint_url.clone();
+    #[cfg(feature = "web")]
     wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
+            log::warn!("Background restoration failed for {}: {}", mint_url_owned, e);
+        }
+    });
+    #[cfg(not(feature = "web"))]
+    tokio::task::spawn(async move {
         if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
             log::warn!("Background restoration failed for {}: {}", mint_url_owned, e);
         }
@@ -944,7 +951,7 @@ pub async fn consolidate_proofs(
                 "Emergency recovery: {} proofs now visible in UI", new_proofs.len()
             );
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             use cdk_common::database::WalletDatabase;
             use std::str::FromStr;
@@ -960,7 +967,7 @@ pub async fn consolidate_proofs(
                         * PERSISTENCE_RETRY_JITTER_MS as f64) as u32;
                     let delay = base_delay_ms
                         .saturating_sub(PERSISTENCE_RETRY_JITTER_MS / 2) + jitter;
-                    gloo_timers::future::TimeoutFuture::new(delay).await;
+                    crate::platform::timer::sleep_ms(delay).await;
                     let retry_localstore = match SHARED_LOCALSTORE.read().as_ref() {
                         Some(store) => store.clone(),
                         None => {
@@ -1077,13 +1084,13 @@ pub async fn consolidate_proofs(
         .enumerate()
     {
         if attempt > 0 {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 let jitter = (js_sys::Math::random() * 200.0) as u32;
                 let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+                crate::platform::timer::sleep_ms(actual_delay).await;
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(feature = "web"))]
             {
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64))
                     .await;

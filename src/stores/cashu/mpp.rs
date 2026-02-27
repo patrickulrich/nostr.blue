@@ -468,7 +468,7 @@ pub async fn execute_mpp_melt(
 /// Checks the mint info's `nuts.nut15.methods` array. Results are cached
 /// for 5 minutes to reduce network requests.
 pub async fn mint_supports_mpp(mint_url: &str) -> bool {
-    let now = js_sys::Date::now();
+    let now = crate::platform::timestamp::now_millis() as f64;
     {
         let cache = MINT_MPP_CACHE.read();
         if let Some((timestamp, supports)) = cache.get(mint_url) {

@@ -3,6 +3,7 @@
 //! Displays file content with language detection, line numbers, and copy-to-clipboard.
 //! Shows file metadata including detected language label.
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Extract file extension from filename
 /// Returns empty string for extensionless files or dotfiles (e.g., ".gitignore")
@@ -161,21 +162,14 @@ pub fn CodeFileViewer(
                         move |_| {
                             let content = content.clone();
                             spawn(async move {
-                                if let Some(window) = web_sys::window() {
-                                    let clipboard = window.navigator().clipboard();
-                                    match wasm_bindgen_futures::JsFuture::from(
-                                            clipboard.write_text(&content),
-                                        )
-                                        .await
-                                    {
-                                        Ok(_) => {
-                                            copied.set(true);
-                                            gloo_timers::future::TimeoutFuture::new(2000).await;
-                                            copied.set(false);
-                                        }
-                                        Err(e) => {
-                                            log::debug!("Clipboard write failed: {:?}", e);
-                                        }
+                                match crate::platform::clipboard::copy_to_clipboard(&content).await {
+                                    Ok(_) => {
+                                        copied.set(true);
+                                        crate::platform::timer::sleep_ms(2000).await;
+                                        copied.set(false);
+                                    }
+                                    Err(e) => {
+                                        log::debug!("Clipboard write failed: {:?}", e);
                                     }
                                 }
                             });
@@ -290,102 +284,111 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                 let content = content.clone();
                 let filename = filename.clone();
                 move |_| {
-                    let content = content.clone();
-                    let filename = filename.clone();
-                    let Some(window) = web_sys::window() else {
-                        log::error!(
-                            "Download failed for '{}': window object not available", filename
-                        );
-                        return;
-                    };
-                    let Some(document) = window.document() else {
-                        log::error!(
-                            "Download failed for '{}': document object not available", filename
-                        );
-                        return;
-                    };
-                    let blob = match web_sys::Blob::new_with_str_sequence(
-                        &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&content)),
-                    ) {
-                        Ok(b) => b,
-                        Err(e) => {
+                    let _content = content.clone();
+                    let _filename = filename.clone();
+                    #[cfg(feature = "web")]
+                    {
+                        let content = _content;
+                        let filename = _filename;
+                        let Some(window) = web_sys::window() else {
                             log::error!(
-                                "Download failed for '{}': blob creation error: {:?}", filename,
-                                e
+                                "Download failed for '{}': window object not available", filename
                             );
                             return;
-                        }
-                    };
-                    let url = match web_sys::Url::create_object_url_with_blob(&blob) {
-                        Ok(u) => u,
-                        Err(e) => {
+                        };
+                        let Some(document) = window.document() else {
                             log::error!(
-                                "Download failed for '{}': create_object_url error: {:?}",
-                                filename, e
+                                "Download failed for '{}': document object not available", filename
                             );
                             return;
-                        }
-                    };
-                    let a = match document.create_element("a") {
-                        Ok(el) => el,
-                        Err(e) => {
+                        };
+                        let blob = match web_sys::Blob::new_with_str_sequence(
+                            &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&content)),
+                        ) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                log::error!(
+                                    "Download failed for '{}': blob creation error: {:?}", filename,
+                                    e
+                                );
+                                return;
+                            }
+                        };
+                        let url = match web_sys::Url::create_object_url_with_blob(&blob) {
+                            Ok(u) => u,
+                            Err(e) => {
+                                log::error!(
+                                    "Download failed for '{}': create_object_url error: {:?}",
+                                    filename, e
+                                );
+                                return;
+                            }
+                        };
+                        let a = match document.create_element("a") {
+                            Ok(el) => el,
+                            Err(e) => {
+                                log::error!(
+                                    "Download failed for '{}': create_element error: {:?}", filename,
+                                    e
+                                );
+                                let _ = web_sys::Url::revoke_object_url(&url);
+                                return;
+                            }
+                        };
+                        if let Err(e) = a.set_attribute("href", &url) {
                             log::error!(
-                                "Download failed for '{}': create_element error: {:?}", filename,
+                                "Download failed for '{}': set href attribute error: {:?}", filename,
                                 e
                             );
                             let _ = web_sys::Url::revoke_object_url(&url);
                             return;
                         }
-                    };
-                    if let Err(e) = a.set_attribute("href", &url) {
-                        log::error!(
-                            "Download failed for '{}': set href attribute error: {:?}", filename,
-                            e
-                        );
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                        return;
-                    }
-                    if let Err(e) = a.set_attribute("download", &filename) {
-                        log::error!(
-                            "Download failed for '{}': set download attribute error: {:?}",
-                            filename, e
-                        );
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                        return;
-                    }
-                    let Some(body) = document.body() else {
-                        log::error!(
-                            "Download failed for '{}': document body not available", filename
-                        );
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                        return;
-                    };
-                    if let Err(e) = body.append_child(&a) {
-                        log::error!(
-                            "Download failed for '{}': append_child error: {:?}", filename, e
-                        );
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                        return;
-                    }
-                    if let Some(html_a) = a.dyn_ref::<web_sys::HtmlElement>() {
-                        html_a.click();
-                    }
-                    if let Err(e) = body.remove_child(&a) {
-                        log::error!(
-                            "Download cleanup for '{}': remove_child error: {:?}", filename, e
-                        );
-                    }
-                    let url_to_revoke = url.clone();
-                    let filename_for_log = filename.clone();
-                    spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(100).await;
-                        if let Err(e) = web_sys::Url::revoke_object_url(&url_to_revoke) {
+                        if let Err(e) = a.set_attribute("download", &filename) {
                             log::error!(
-                                "Download cleanup for '{}': revoke_object_url error: {:?}",
-                                filename_for_log, e
+                                "Download failed for '{}': set download attribute error: {:?}",
+                                filename, e
+                            );
+                            let _ = web_sys::Url::revoke_object_url(&url);
+                            return;
+                        }
+                        let Some(body) = document.body() else {
+                            log::error!(
+                                "Download failed for '{}': document body not available", filename
+                            );
+                            let _ = web_sys::Url::revoke_object_url(&url);
+                            return;
+                        };
+                        if let Err(e) = body.append_child(&a) {
+                            log::error!(
+                                "Download failed for '{}': append_child error: {:?}", filename, e
+                            );
+                            let _ = web_sys::Url::revoke_object_url(&url);
+                            return;
+                        }
+                        if let Some(html_a) = a.dyn_ref::<web_sys::HtmlElement>() {
+                            html_a.click();
+                        }
+                        if let Err(e) = body.remove_child(&a) {
+                            log::error!(
+                                "Download cleanup for '{}': remove_child error: {:?}", filename, e
                             );
                         }
-                    });
+                        let url_to_revoke = url.clone();
+                        let filename_for_log = filename.clone();
+                        spawn(async move {
+                            crate::platform::timer::sleep_ms(100).await;
+                            if let Err(e) = web_sys::Url::revoke_object_url(&url_to_revoke) {
+                                log::error!(
+                                    "Download cleanup for '{}': revoke_object_url error: {:?}",
+                                    filename_for_log, e
+                                );
+                            }
+                        });
+                    }
+                    #[cfg(not(feature = "web"))]
+                    {
+                        log::warn!("Raw file download not yet supported on native desktop");
+                    }
                 }
             },
             svg {

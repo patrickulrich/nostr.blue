@@ -16,18 +16,18 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     /// Track if a scroll update is pending (prevents flooding with rAF callbacks)
     static SCROLL_UPDATE_PENDING: RefCell<bool> = const { RefCell::new(false) };
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = requestAnimationFrame)]
@@ -191,7 +191,7 @@ pub struct VirtualListProps<T: PartialEq + 'static> {
 pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Element {
     let config = props.config.unwrap_or_default();
     let mut virtual_state = use_signal(|| VirtualState::new(props.items.len(), config));
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     let mut container_element = use_signal(|| None::<web_sys::HtmlElement>);
     use_effect(
         use_reactive(
@@ -225,7 +225,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
             class: "{props.container_class}",
             style: "overflow-y: auto; position: relative; height: 100%;",
             onmounted: move |_evt| {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let element = _evt.data();
                     if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
@@ -239,7 +239,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                 }
             },
             onscroll: move |_evt| {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let already_pending = SCROLL_UPDATE_PENDING
                         .with(|pending| {
@@ -269,7 +269,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                     });
                     request_animation_frame(closure.unchecked_ref());
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 {
                     use std::sync::atomic::{AtomicU64, Ordering};
                     static LAST_SCROLL_UPDATE: AtomicU64 = AtomicU64::new(0);
@@ -300,7 +300,7 @@ pub fn VirtualList<T: PartialEq + 'static>(props: VirtualListProps<T>) -> Elemen
                                 key: "{index}",
                                 class: "virtual-item",
                                 onmounted: move |_evt| {
-                                    #[cfg(target_arch = "wasm32")]
+                                    #[cfg(feature = "web")]
                                     {
                                         let mut state = state;
                                         spawn(async move {

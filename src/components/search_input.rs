@@ -41,11 +41,11 @@ pub fn SearchInput() -> Element {
             }
             let query_snapshot = new_value.clone();
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
+                #[cfg(feature = "web")]
                 {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
+                    crate::platform::timer::sleep_ms(300).await;
                 }
-                #[cfg(not(target_family = "wasm"))]
+                #[cfg(not(feature = "web"))]
                 {
                     use std::time::Duration;
                     tokio::time::sleep(Duration::from_millis(300)).await;

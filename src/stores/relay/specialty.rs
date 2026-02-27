@@ -110,9 +110,9 @@ pub async fn ensure_connected(client: &Client, relay_url: &str) -> bool {
                 return true;
             }
         }
-        #[cfg(target_arch = "wasm32")]
-        gloo_timers::future::TimeoutFuture::new(100).await;
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "web")]
+        crate::platform::timer::sleep_ms(100).await;
+        #[cfg(not(feature = "web"))]
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     log::warn!("Specialty relay connection timeout: {}", relay_url);

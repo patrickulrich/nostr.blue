@@ -3,7 +3,6 @@
 //! Fetches BTC prices from CoinGecko API for fiat currency conversions.
 //! CoinGecko supports CORS and provides free API access.
 use dioxus::prelude::*;
-use gloo_net::http::Request;
 use serde::Deserialize;
 use std::collections::HashMap;
 /// CoinGecko simple price response
@@ -24,11 +23,10 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
         "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={}",
         SUPPORTED_CURRENCIES,
     );
-    let response = Request::get(&url)
-        .send()
+    let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Failed to fetch prices: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("CoinGecko API error: {}", response.status()));
     }
     let data: CoinGeckoResponse = response
@@ -39,7 +37,7 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
     for (currency, price) in data.bitcoin {
         prices.insert(currency.to_uppercase(), price);
     }
-    *PRICE_LAST_FETCH.write() = js_sys::Date::now() as u64 / 1000;
+    *PRICE_LAST_FETCH.write() = crate::platform::timestamp::now_secs();
     log::debug!("Updated BTC prices: {} currencies", prices.len());
     Ok(())
 }
@@ -82,6 +80,6 @@ pub fn prices_are_stale() -> bool {
     if last_fetch == 0 {
         return true;
     }
-    let now = js_sys::Date::now() as u64 / 1000;
+    let now = crate::platform::timestamp::now_secs();
     now.saturating_sub(last_fetch) > 300
 }

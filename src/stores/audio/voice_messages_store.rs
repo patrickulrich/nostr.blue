@@ -72,10 +72,12 @@ pub fn is_playing(event_id: &EventId) -> bool {
     VOICE_PLAYBACK.read().currently_playing.as_ref() == Some(event_id)
 }
 /// Update current playback time
+#[allow(dead_code)]
 pub fn set_current_time(time: f64) {
     VOICE_PLAYBACK.write().current_time = time;
 }
 /// Update duration
+#[allow(dead_code)]
 pub fn set_duration(duration: f64) {
     VOICE_PLAYBACK.write().duration = duration;
 }
@@ -95,7 +97,7 @@ pub fn toggle_mute() {
 /// Start recording
 #[allow(dead_code)]
 pub fn start_recording() {
-    let now = js_sys::Date::now() / 1000.0;
+    let now = crate::platform::timestamp::now_secs() as f64;
     RECORDING_STATE
         .write()
         .clone_from(

@@ -66,11 +66,20 @@ pub fn CommunityPostComposer(
     let confirm_close = move |handler: EventHandler<()>| {
         let has_content = !content.read().trim().is_empty();
         if has_content {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("You have unsaved content. Discard it?").ok()
-                })
-                .unwrap_or(false);
+            let confirmed = {
+                #[cfg(feature = "web")]
+                {
+                    web_sys::window()
+                        .and_then(|w| {
+                            w.confirm_with_message("You have unsaved content. Discard it?").ok()
+                        })
+                        .unwrap_or(false)
+                }
+                #[cfg(not(feature = "web"))]
+                {
+                    true // On native, just allow closing
+                }
+            };
             if confirmed {
                 handler.call(());
             }

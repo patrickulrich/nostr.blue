@@ -3,7 +3,7 @@
 //! Multi-source file fetching with fallback chain:
 //! GitHub API → GitLab API → Codeberg API → Generic HTTP
 #![allow(dead_code)]
-use gloo_net::http::Request;
+use reqwest::Client;
 use serde::Deserialize;
 use crate::utils::nip34::Repository;
 /// A file or directory entry in the repository tree
@@ -176,13 +176,14 @@ async fn fetch_github_file(
         path,
         git_ref,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     let content: GitHubContentResponse = response
@@ -215,13 +216,14 @@ async fn fetch_github_tree(
         repo,
         git_ref,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     let tree: GitHubTreeResponse = response
@@ -276,11 +278,10 @@ async fn fetch_gitlab_file(
         encoded_path,
         git_ref,
     );
-    let response = Request::get(&url)
-        .send()
+    let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitLab API error: {}", response.status()));
     }
     response.text().await.map_err(|e| format!("Read error: {}", e))
@@ -298,11 +299,10 @@ async fn fetch_gitlab_tree(
         git_ref,
         urlencoding::encode(path),
     );
-    let response = Request::get(&url)
-        .send()
+    let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitLab API error: {}", response.status()));
     }
     #[derive(Deserialize)]
@@ -344,11 +344,10 @@ async fn fetch_codeberg_file(
         path,
         git_ref,
     );
-    let response = Request::get(&url)
-        .send()
+    let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("Codeberg API error: {}", response.status()));
     }
     response.text().await.map_err(|e| format!("Read error: {}", e))
@@ -366,11 +365,10 @@ async fn fetch_codeberg_tree(
         path,
         git_ref,
     );
-    let response = Request::get(&url)
-        .send()
+    let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("Codeberg API error: {}", response.status()));
     }
     #[derive(Deserialize)]
@@ -438,13 +436,14 @@ async fn fetch_github_all_paths(
         "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
         owner, repo, git_ref,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     let tree: GitHubTreeResponse = response

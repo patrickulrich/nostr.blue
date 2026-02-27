@@ -45,9 +45,18 @@ enum TwitchEmbedType {
 #[component]
 fn TwitchEmbedRenderer(embed_type: TwitchEmbedType) -> Element {
     let mut is_visible = use_signal(|| false);
-    let parent_domain = web_sys::window()
-        .and_then(|w| w.location().hostname().ok())
-        .unwrap_or_else(|| "localhost".to_string());
+    let parent_domain = {
+        #[cfg(feature = "web")]
+        {
+            web_sys::window()
+                .and_then(|w| w.location().hostname().ok())
+                .unwrap_or_else(|| "localhost".to_string())
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            "localhost".to_string()
+        }
+    };
 
     let (embed_url, title, subtitle) = match &embed_type {
         TwitchEmbedType::Stream { channel } => (

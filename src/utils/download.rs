@@ -6,32 +6,40 @@
 
 use regex::Regex;
 use std::sync::LazyLock;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
 // Regex patterns for AsciiDoc to Markdown conversion
+#[allow(dead_code)]
 static ASCIIDOC_HEADING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^(={1,6})\s+(.+?)(?:\s+=+)?$").expect("Invalid heading regex"));
 
+#[allow(dead_code)]
 static ASCIIDOC_BOLD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\*([^*\n]+?)\*").expect("Invalid bold regex"));
 
+#[allow(dead_code)]
 static ASCIIDOC_LINK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"link:(https?://[^\s\[]+)\[([^\]]*)\]").expect("Invalid link regex"));
 
+#[allow(dead_code)]
 static ASCIIDOC_IMAGE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"image::?([^\s\[]+)\[([^\]]*)\]").expect("Invalid image regex"));
 
+#[allow(dead_code)]
 static ASCIIDOC_CODE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)\[source(?:,([^\]]*))?\]\s*\n----\n(.*?)\n----")
         .expect("Invalid code block regex")
 });
 
+#[allow(dead_code)]
 static WIKILINK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").expect("Invalid wikilink regex"));
 
 /// Download content as a Markdown file
 ///
 /// Converts AsciiDoc content to Markdown format and triggers a browser download.
+#[cfg(feature = "web")]
 pub fn download_markdown(filename: &str, title: &str, content: &str) {
     let markdown = asciidoc_to_markdown(title, content);
     download_blob(filename, &markdown, "text/markdown;charset=utf-8");
@@ -46,6 +54,7 @@ pub fn download_markdown(filename: &str, title: &str, content: &str) {
 /// - Images: image::url[alt] -> ![alt](url)
 /// - Code blocks: [source,lang]\n----\ncode\n---- -> ```lang\ncode\n```
 /// - Wikilinks: [[page]] -> [page](/wiki/page)
+#[allow(dead_code)]
 pub fn asciidoc_to_markdown(title: &str, content: &str) -> String {
     let mut markdown = String::new();
 
@@ -125,6 +134,7 @@ pub fn asciidoc_to_markdown(title: &str, content: &str) -> String {
 /// Trigger a browser download for text content
 ///
 /// Creates a Blob URL and programmatically clicks a download link.
+#[cfg(feature = "web")]
 pub fn download_blob(filename: &str, content: &str, mime_type: &str) {
     #[wasm_bindgen]
     extern "C" {
@@ -198,6 +208,7 @@ pub fn download_blob(filename: &str, content: &str, mime_type: &str) {
 ///
 /// Uses the browser's built-in print functionality which allows "Save as PDF".
 /// This provides a high-quality PDF with proper formatting.
+#[cfg(feature = "web")]
 pub fn trigger_print() {
     if let Some(window) = web_sys::window() {
         window.print().ok();

@@ -555,86 +555,86 @@ mod native_stub {
 }
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_stub::IndexedDbDatabase;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::common::ProofInfo;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::database::{self, WalletDatabase};
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::mint_url::MintUrl;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::nuts::{
     CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo, PublicKey as CashuPublicKey,
     SpendingConditions, State,
 };
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use cdk_common::wallet::{
     MeltQuote, MintQuote, Transaction, TransactionDirection, TransactionId,
 };
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use indexed_db_futures::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use indexed_db_futures::IdbQuerySource;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use serde::{Deserialize, Serialize};
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use std::collections::HashMap;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use std::future::IntoFuture;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use std::str::FromStr;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use wasm_bindgen::JsValue;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 use web_sys::IdbTransactionMode;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const DB_NAME: &str = "cashu_wallet_db";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const DB_VERSION: u32 = 6;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_MINTS: &str = "mints";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_KEYSETS: &str = "keysets";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_KEYSET_BY_ID: &str = "keyset_by_id";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_KEYS: &str = "keys";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_MINT_QUOTES: &str = "mint_quotes";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_MELT_QUOTES: &str = "melt_quotes";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_PROOFS: &str = "proofs";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_TRANSACTIONS: &str = "transactions";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_KEYSET_COUNTERS: &str = "keyset_counters";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_PENDING_EVENTS: &str = "pending_events";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_SYNC_STATE: &str = "sync_state";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_SHOP_ORDERS: &str = "shop_orders";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_PENDING_SECRETS: &str = "pending_secrets";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_IN_FLIGHT_MELTS: &str = "in_flight_melts";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_NUTZAP_SETTINGS: &str = "nutzap_settings";
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 const STORE_PENDING_NUTZAPS: &str = "pending_nutzaps";
 /// IndexedDB-backed implementation of WalletDatabase
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 #[derive(Clone, Debug)]
 pub struct IndexedDbDatabase {
     db: Rc<IdbDatabase>,
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 unsafe impl Send for IndexedDbDatabase {}
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 unsafe impl Sync for IndexedDbDatabase {}
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 impl IndexedDbDatabase {
     /// Helper to create a database error from a string
     fn make_error(msg: String) -> database::Error {
@@ -1068,10 +1068,8 @@ impl IndexedDbDatabase {
         self.get_value(STORE_PENDING_NUTZAPS, "current").await
     }
 }
-#[cfg(target_arch = "wasm32")]
-#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
+#[async_trait::async_trait(?Send)]
 impl WalletDatabase for IndexedDbDatabase {
     type Err = database::Error;
     async fn add_mint(
@@ -1719,7 +1717,7 @@ impl WalletDatabase for IndexedDbDatabase {
         self.delete_value(STORE_TRANSACTIONS, &key).await
     }
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web", not(feature = "native")))]
 impl IndexedDbDatabase {
     /// Get current counter value for a keyset (NUT-13)
     ///

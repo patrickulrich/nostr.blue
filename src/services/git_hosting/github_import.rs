@@ -2,7 +2,7 @@
 //!
 //! Fetches repository metadata from GitHub for import wizard.
 #![allow(dead_code)]
-use gloo_net::http::Request;
+use reqwest::Client;
 use serde::Deserialize;
 /// GitHub repository metadata
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -73,18 +73,19 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 /// Fetch repository metadata from GitHub
 pub async fn fetch_github_repo(owner: &str, repo: &str) -> Result<GitHubRepo, String> {
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if response.status() == 404 {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Err("Repository not found".to_string());
     }
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(
-            format!("GitHub API error: {} {}", response.status(), response.status_text()),
+            format!("GitHub API error: {}", response.status()),
         );
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
@@ -105,13 +106,14 @@ pub async fn fetch_user_repos(
         username,
         limit,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
@@ -123,13 +125,14 @@ pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, 
         urlencoding::encode(query),
         limit,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     #[derive(Deserialize)]
@@ -173,13 +176,14 @@ pub async fn fetch_commits(
         repo,
         limit,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
@@ -200,13 +204,14 @@ pub async fn fetch_file_commits(
         urlencoding::encode(git_ref),
         limit,
     );
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     response.json().await.map_err(|e| format!("Failed to parse response: {}", e))
@@ -214,13 +219,14 @@ pub async fn fetch_file_commits(
 /// Fetch branches
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);
-    let response = Request::get(&url)
+    let response = Client::new()
+        .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("GitHub API error: {}", response.status()));
     }
     #[derive(Deserialize)]

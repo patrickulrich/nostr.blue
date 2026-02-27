@@ -2,13 +2,9 @@
 //!
 //! This module is WASM-only as it uses web_sys::AbortController and gloo_net.
 //! (Gated in services/mod.rs)
-use gloo_net::http::Request;
-use gloo_timers::callback::Timeout;
 use serde::{Deserialize, Serialize};
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";
-/// API request timeout in milliseconds (10 seconds)
-const API_TIMEOUT_MS: u32 = 10_000;
 /// A Bible translation available in the API
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -176,39 +172,24 @@ pub struct FootnoteVerseReference {
     pub chapter: u32,
     pub verse: u32,
 }
-/// Helper to perform HTTP GET request with timeout and abort controller
+/// Helper to perform HTTP GET request with timeout
 /// Reduces code duplication across fetch_translations, fetch_books, fetch_chapter
 async fn fetch_with_timeout(
     url: &str,
     error_context: &str,
-) -> Result<gloo_net::http::Response, String> {
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController".to_string())?;
-    let signal = controller.signal();
-    let controller_for_timeout = controller.clone();
-    let timeout = Timeout::new(
-        API_TIMEOUT_MS,
-        move || {
-            controller_for_timeout.abort();
-        },
-    );
-    let response = match Request::get(url).abort_signal(Some(&signal)).send().await {
-        Ok(resp) => {
-            timeout.cancel();
-            resp
-        }
-        Err(e) => {
-            timeout.cancel();
-            return Err(
-                if signal.aborted() {
-                    "Request timeout".to_string()
-                } else {
-                    format!("Failed to {}: {}", error_context, e)
-                },
-            );
-        }
-    };
-    if !response.ok() {
+) -> Result<reqwest::Response, String> {
+    let response = reqwest::Client::new()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Request timeout".to_string()
+            } else {
+                format!("Failed to {}: {}", error_context, e)
+            }
+        })?;
+    if !response.status().is_success() {
         return Err(format!("API error: {}", response.status()));
     }
     Ok(response)

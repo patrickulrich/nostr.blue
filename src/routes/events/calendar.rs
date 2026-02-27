@@ -442,15 +442,44 @@ fn add_days(date: &str, days: i32) -> String {
     let year: i32 = parts[0].parse().unwrap_or(2024);
     let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1;
     let day: i32 = parts[2].parse().unwrap_or(1);
-    let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
-    let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
-    js_date.set_time(js_date.get_time() + (days as f64 * ms_per_day));
-    format!(
-        "{:04}-{:02}-{:02}",
-        js_date.get_full_year(),
-        js_date.get_month() + 1,
-        js_date.get_date(),
-    )
+    #[cfg(feature = "web")]
+    {
+        let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
+        let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
+        js_date.set_time(js_date.get_time() + (days as f64 * ms_per_day));
+        format!(
+            "{:04}-{:02}-{:02}",
+            js_date.get_full_year(),
+            js_date.get_month() + 1,
+            js_date.get_date(),
+        )
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        // Simple date arithmetic without js_sys
+        let total_days = day + days;
+        let days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut y = year;
+        let mut m = month; // 0-indexed
+        let mut d = total_days;
+        while d > days_in_month[m as usize % 12] {
+            d -= days_in_month[m as usize % 12];
+            m += 1;
+            if m >= 12 {
+                m -= 12;
+                y += 1;
+            }
+        }
+        while d < 1 {
+            m -= 1;
+            if m < 0 {
+                m += 12;
+                y -= 1;
+            }
+            d += days_in_month[m as usize % 12];
+        }
+        format!("{:04}-{:02}-{:02}", y, m + 1, d)
+    }
 }
 /// Add months to a date
 fn add_months(date: &str, months: i32) -> String {
@@ -469,13 +498,20 @@ fn add_months(date: &str, months: i32) -> String {
         total_months / 12
     };
     let new_year = year + year_adjustment;
-    let js_date = js_sys::Date::new_with_year_month_day(new_year as u32, new_month, day);
-    format!(
-        "{:04}-{:02}-{:02}",
-        js_date.get_full_year(),
-        js_date.get_month() + 1,
-        js_date.get_date(),
-    )
+    #[cfg(feature = "web")]
+    {
+        let js_date = js_sys::Date::new_with_year_month_day(new_year as u32, new_month, day);
+        format!(
+            "{:04}-{:02}-{:02}",
+            js_date.get_full_year(),
+            js_date.get_month() + 1,
+            js_date.get_date(),
+        )
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        format!("{:04}-{:02}-{:02}", new_year, new_month + 1, day.min(28))
+    }
 }
 /// Props for EventTypeFilterRow
 #[derive(Props, Clone, PartialEq)]

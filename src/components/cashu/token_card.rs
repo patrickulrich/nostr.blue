@@ -135,9 +135,17 @@ pub fn CashuTokenCard(token: String) -> Element {
         let token = token.clone();
         move |e: MouseEvent| {
             e.stop_propagation();
-            if let Some(window) = web_sys::window() {
-                let url = format!("cashu://{}", token);
-                let _ = window.open_with_url_and_target(&url, "_blank");
+            #[cfg(feature = "web")]
+            {
+                if let Some(window) = web_sys::window() {
+                    let url = format!("cashu://{}", token);
+                    let _ = window.open_with_url_and_target(&url, "_blank");
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = &token;
+                log::warn!("Open wallet not supported on this platform");
             }
         }
     };
@@ -151,7 +159,7 @@ pub fn CashuTokenCard(token: String) -> Element {
                 match copy_to_clipboard(&token).await {
                     Ok(_) => {
                         copied.set(true);
-                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                        crate::platform::timer::sleep_ms(2000).await;
                         copied.set(false);
                     }
                     Err(e) => {

@@ -9,7 +9,7 @@ use crate::utils::clipboard::copy_to_clipboard;
 use dioxus::prelude::*;
 use nostr_sdk::{EventBuilder, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Global counter for generating unique modal IDs
 static CONTENT_SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -26,7 +26,7 @@ pub enum ContentType {
     PodcastEpisode,
     MusicAlbum,
     MusicTrack,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     BibleVerse,
 }
 impl ContentType {
@@ -36,7 +36,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Episode",
             ContentType::MusicAlbum => "Album",
             ContentType::MusicTrack => "Track",
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             ContentType::BibleVerse => "Bible",
         }
     }
@@ -46,7 +46,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share Episode",
             ContentType::MusicAlbum => "Share Album",
             ContentType::MusicTrack => "Share Track",
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             ContentType::BibleVerse => "Share Verses",
         }
     }
@@ -56,7 +56,7 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share your thoughts about this episode...",
             ContentType::MusicAlbum => "Share your thoughts about this album...",
             ContentType::MusicTrack => "Share your thoughts about this track...",
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
@@ -74,7 +74,7 @@ impl ContentType {
             ContentType::MusicTrack => {
                 format!("Check out this track on nostr.blue: {}", url)
             }
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             ContentType::BibleVerse => {
                 format!("Check out this Bible passage on nostr.blue: {}", url)
             }
@@ -114,7 +114,7 @@ pub fn ContentShareModal(
     let textarea_id = use_signal(|| format!("content-share-textarea-{}", modal_id()));
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str) -> usize {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
@@ -201,7 +201,7 @@ pub fn ContentShareModal(
         show_poll_modal.set(false);
     };
     let handle_copy_link = {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         let copy_text = if matches!(content_type, ContentType::BibleVerse) {
             if let Some(ref text) = content {
                 format!("{}\n\n— {}", text, title)
@@ -211,7 +211,7 @@ pub fn ContentShareModal(
         } else {
             url.clone()
         };
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(feature = "web"))]
         let copy_text = url.clone();
         move |_| {
             let text_to_copy = copy_text.clone();
@@ -221,11 +221,11 @@ pub fn ContentShareModal(
                         copied.set(true);
                         log::info!("Content copied to clipboard");
                         spawn(async move {
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "web")]
                             {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                crate::platform::timer::sleep_ms(2000).await;
                             }
-                            #[cfg(not(target_arch = "wasm32"))]
+                            #[cfg(not(feature = "web"))]
                             {
                                 tokio::time::sleep(std::time::Duration::from_millis(2000))
                                     .await;
@@ -375,7 +375,7 @@ pub fn ContentShareModal(
                                         ContentType::MusicAlbum | ContentType::MusicTrack => rsx! {
                                             MusicIcon { class: "w-6 h-6 text-white" }
                                         },
-                                        #[cfg(target_arch = "wasm32")]
+                                        #[cfg(feature = "web")]
                                         ContentType::BibleVerse => rsx! {
                                             BookOpenIcon { class: "w-6 h-6 text-white" }
                                         },
@@ -489,9 +489,9 @@ pub fn ContentShareModal(
                             }
                             div { class: "flex flex-wrap gap-2",
                                 {
-                                    #[cfg(target_arch = "wasm32")]
+                                    #[cfg(feature = "web")]
                                     let show_verse_button = matches!(content_type, ContentType::BibleVerse);
-                                    #[cfg(not(target_arch = "wasm32"))]
+                                    #[cfg(not(feature = "web"))]
                                     let show_verse_button = false;
                                     if show_verse_button {
                                         if let Some(ref verse_content) = content {

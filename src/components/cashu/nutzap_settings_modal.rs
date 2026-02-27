@@ -99,14 +99,10 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
             match cashu::publish_nutzap_info(mints, relays).await {
                 Ok(event_id) => {
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        use gloo_storage::{LocalStorage, Storage};
-                        let _ = LocalStorage::set(
-                            "nostr_nutzap_auto_redeem",
-                            auto_redeem_setting,
-                        );
-                    }
+                    let _ = crate::platform::storage::set(
+                        "nostr_nutzap_auto_redeem",
+                        &auto_redeem_setting,
+                    );
                     success_message
                         .set(
                             Some(

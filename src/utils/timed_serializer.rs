@@ -17,13 +17,18 @@
 //! // Use debounced saving:
 //! bookmarks.request_save(); // Called 10x per second = 1 write after 1s delay
 //! ```
+#[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::Timeout;
 use std::cell::RefCell;
 use std::rc::Rc;
+
 /// A debouncer that delays execution until a quiet period
 #[allow(dead_code)]
 pub struct Debouncer {
+    #[cfg(target_arch = "wasm32")]
     timeout: Rc<RefCell<Option<Timeout>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    timeout: Rc<RefCell<Option<()>>>,
     delay_ms: u32,
 }
 #[allow(dead_code)]
@@ -37,6 +42,7 @@ impl Debouncer {
     }
     /// Schedule a callback to run after the delay period
     /// If called again before the delay expires, the previous call is cancelled
+    #[cfg(target_arch = "wasm32")]
     pub fn debounce<F>(&self, callback: F)
     where
         F: FnOnce() + 'static,
@@ -45,6 +51,17 @@ impl Debouncer {
         let timeout = Timeout::new(self.delay_ms, callback);
         *self.timeout.borrow_mut() = Some(timeout);
     }
+
+    /// Schedule a callback (native: executes immediately, no debouncing)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn debounce<F>(&self, callback: F)
+    where
+        F: FnOnce() + 'static,
+    {
+        // On native, execute immediately (no timer-based debouncing available)
+        callback();
+    }
+
     /// Cancel any pending debounced call
     pub fn cancel(&self) {
         *self.timeout.borrow_mut() = None;

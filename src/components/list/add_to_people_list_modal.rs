@@ -102,10 +102,9 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 Ok(_) => {
                     log::debug!("Added person to list (private: {})", is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
-                        use gloo_timers::future::TimeoutFuture;
-                        TimeoutFuture::new(1000).await;
+                        crate::platform::timer::sleep_ms(1000).await;
                     }
                     loading.set(false);
                     on_added.call(());
@@ -149,10 +148,9 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                 log::debug!("Added person to new list");
                                 success_msg
                                     .set(Some(format!("Created \"{}\" and added", name)));
-                                #[cfg(target_arch = "wasm32")]
+                                #[cfg(feature = "web")]
                                 {
-                                    use gloo_timers::future::TimeoutFuture;
-                                    TimeoutFuture::new(1000).await;
+                                    crate::platform::timer::sleep_ms(1000).await;
                                 }
                                 loading.set(false);
                                 on_added.call(());
@@ -204,14 +202,14 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 tabindex: "-1",
                 onclick: move |e| e.stop_propagation(),
                 onmounted: move |evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         let element = evt.data();
                         if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();
                         }
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
+                    #[cfg(not(feature = "web"))]
                     let _ = evt;
                 },
                 div { class: "flex justify-between items-center mb-4",

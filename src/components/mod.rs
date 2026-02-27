@@ -208,7 +208,9 @@ pub use recipe::{
 };
 
 pub mod voice;
-pub use voice::{VoiceMessageCard, VoiceRecorder, VoiceReplyComposer};
+pub use voice::VoiceMessageCard;
+pub use voice::VoiceRecorder;
+pub use voice::VoiceReplyComposer;
 
 pub mod wiki;
 pub use wiki::{

@@ -2,10 +2,14 @@ use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
+#[cfg(feature = "web")]
 use crate::utils::radio::NowPlaying;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
+#[cfg(feature = "web")]
 use js_sys::eval;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Format seconds as M:SS
 fn format_time(seconds: f64) -> String {
@@ -26,114 +30,123 @@ pub fn PersistentMusicPlayer() -> Element {
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         if let Some(ref track) = state.current_track {
-            let media_url = track.media_url.clone();
-            let is_playing = state.is_playing;
+            let _media_url = track.media_url.clone();
+            let _is_playing = state.is_playing;
             let _is_live_stream = track.is_live_stream;
-            spawn(async move {
-                let audio_id_json = serde_json::to_string(&audio_id)
-                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-                let media_url_json = serde_json::to_string(&media_url)
-                    .unwrap_or_else(|_| "\"\"".to_string());
-                let is_playing_literal = if is_playing { "true" } else { "false" };
-                let is_hls = media_url.contains(".m3u8");
-                let script = if is_hls {
-                    format!(
-                        r#"
-                        (async function() {{
-                            try {{
+            #[cfg(feature = "web")]
+            {
+                let media_url = _media_url;
+                let is_playing = _is_playing;
+                spawn(async move {
+                    let audio_id_json = serde_json::to_string(&audio_id)
+                        .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                    let media_url_json = serde_json::to_string(&media_url)
+                        .unwrap_or_else(|_| "\"\"".to_string());
+                    let is_playing_literal = if is_playing { "true" } else { "false" };
+                    let is_hls = media_url.contains(".m3u8");
+                    let script = if is_hls {
+                        format!(
+                            r#"
+                            (async function() {{
+                                try {{
+                                    let audio = document.getElementById({audio_id});
+                                    if (!audio) return;
+
+                                    // Skip if already playing this URL
+                                    if (audio.dataset.currentUrl === {media_url}) {{
+                                        if ({is_playing} && audio.paused) {{
+                                            audio.play().catch(e => console.log('Play failed:', e));
+                                        }} else if (!{is_playing} && !audio.paused) {{
+                                            audio.pause();
+                                        }}
+                                        return;
+                                    }}
+
+                                    if (window.hlsManager) {{
+                                        const result = await window.hlsManager.attachToAudio({audio_id}, {media_url});
+                                        console.log('[Radio] Stream attached:', result);
+                                        audio.dataset.currentUrl = {media_url};
+                                    }}
+                                    if ({is_playing}) {{
+                                        audio.play().catch(e => console.log('Play failed:', e));
+                                    }}
+                                }} catch (e) {{
+                                    console.error('[Radio] Stream attach failed:', e);
+                                }}
+                            }})();
+                            "#,
+                            audio_id = audio_id_json,
+                            media_url = media_url_json,
+                            is_playing = is_playing_literal,
+                        )
+                    } else {
+                        format!(
+                            r#"
+                            (function() {{
                                 let audio = document.getElementById({audio_id});
                                 if (!audio) return;
 
-                                // Skip if already playing this URL
-                                if (audio.dataset.currentUrl === {media_url}) {{
+                                // Cleanup any existing HLS instance
+                                if (window.hlsManager) {{
+                                    window.hlsManager.detach({audio_id});
+                                }}
+
+                                // Use dataset to track current URL (more reliable than audio.src comparison)
+                                const urlChanged = audio.dataset.currentUrl !== {media_url};
+
+                                if (urlChanged) {{
+                                    audio.dataset.currentUrl = {media_url};
+                                    audio.src = {media_url};
+                                    // For live streams, wait for canplay before playing
+                                    if ({is_playing}) {{
+                                        audio.addEventListener('canplay', function onCanPlay() {{
+                                            audio.removeEventListener('canplay', onCanPlay);
+                                            audio.play().catch(e => console.log('Play failed:', e.name, e.message));
+                                        }}, {{ once: true }});
+                                        audio.load();
+                                    }}
+                                }} else {{
+                                    // URL unchanged - just toggle play/pause
                                     if ({is_playing} && audio.paused) {{
-                                        audio.play().catch(e => console.log('Play failed:', e));
+                                        audio.play().catch(e => console.log('Play failed:', e.name, e.message));
                                     }} else if (!{is_playing} && !audio.paused) {{
                                         audio.pause();
                                     }}
-                                    return;
                                 }}
-
-                                if (window.hlsManager) {{
-                                    const result = await window.hlsManager.attachToAudio({audio_id}, {media_url});
-                                    console.log('[Radio] Stream attached:', result);
-                                    audio.dataset.currentUrl = {media_url};
-                                }}
-                                if ({is_playing}) {{
-                                    audio.play().catch(e => console.log('Play failed:', e));
-                                }}
-                            }} catch (e) {{
-                                console.error('[Radio] Stream attach failed:', e);
-                            }}
-                        }})();
-                        "#,
-                        audio_id = audio_id_json,
-                        media_url = media_url_json,
-                        is_playing = is_playing_literal,
-                    )
-                } else {
-                    format!(
-                        r#"
-                        (function() {{
-                            let audio = document.getElementById({audio_id});
-                            if (!audio) return;
-
-                            // Cleanup any existing HLS instance
-                            if (window.hlsManager) {{
-                                window.hlsManager.detach({audio_id});
-                            }}
-
-                            // Use dataset to track current URL (more reliable than audio.src comparison)
-                            const urlChanged = audio.dataset.currentUrl !== {media_url};
-
-                            if (urlChanged) {{
-                                audio.dataset.currentUrl = {media_url};
-                                audio.src = {media_url};
-                                // For live streams, wait for canplay before playing
-                                if ({is_playing}) {{
-                                    audio.addEventListener('canplay', function onCanPlay() {{
-                                        audio.removeEventListener('canplay', onCanPlay);
-                                        audio.play().catch(e => console.log('Play failed:', e.name, e.message));
-                                    }}, {{ once: true }});
-                                    audio.load();
-                                }}
-                            }} else {{
-                                // URL unchanged - just toggle play/pause
-                                if ({is_playing} && audio.paused) {{
-                                    audio.play().catch(e => console.log('Play failed:', e.name, e.message));
-                                }} else if (!{is_playing} && !audio.paused) {{
-                                    audio.pause();
-                                }}
-                            }}
-                        }})();
-                        "#,
-                        audio_id = audio_id_json,
-                        media_url = media_url_json,
-                        is_playing = is_playing_literal,
-                    )
-                };
-                let _ = eval(&script);
-            });
+                            }})();
+                            "#,
+                            audio_id = audio_id_json,
+                            media_url = media_url_json,
+                            is_playing = is_playing_literal,
+                        )
+                    };
+                    let _ = eval(&script);
+                });
+            }
         }
     });
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
-        let volume = if state.is_muted { 0.0 } else { state.volume };
-        spawn(async move {
-            let audio_id_json = serde_json::to_string(&audio_id)
-                .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-            let script = format!(
-                r#"
-                (function() {{
-                    let audio = document.getElementById({audio_id});
-                    if (audio) audio.volume = {volume};
-                }})();
-                "#,
-                audio_id = audio_id_json,
-                volume = volume,
-            );
-            let _ = eval(&script);
-        });
+        let _volume = if state.is_muted { 0.0 } else { state.volume };
+        #[cfg(feature = "web")]
+        {
+            let volume = _volume;
+            spawn(async move {
+                let audio_id_json = serde_json::to_string(&audio_id)
+                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                let script = format!(
+                    r#"
+                    (function() {{
+                        let audio = document.getElementById({audio_id});
+                        if (audio) audio.volume = {volume};
+                    }})();
+                    "#,
+                    audio_id = audio_id_json,
+                    volume = volume,
+                );
+                let _ = eval(&script);
+            });
+        }
     });
     let mut last_synced_time = use_signal(|| 0.0f64);
     use_effect(move || {
@@ -144,28 +157,31 @@ pub fn PersistentMusicPlayer() -> Element {
             last_synced_time.set(current_time);
             is_seeking.set(true);
             spawn(async move {
-                let audio_id_json = serde_json::to_string(&audio_id)
-                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-                let script = format!(
-                    r#"
-                    (function() {{
-                        let audio = document.getElementById({audio_id});
-                        if (!audio) return;
-                        // Only seek if the difference is significant (avoids fighting with timeupdate)
-                        if (Math.abs(audio.currentTime - {current_time}) > 0.5) {{
-                            audio.currentTime = {current_time};
-                        }}
-                    }})();
-                    "#,
-                    audio_id = audio_id_json,
-                    current_time = current_time,
-                );
-                let _ = eval(&script);
-                #[cfg(target_family = "wasm")]
+                #[cfg(feature = "web")]
                 {
-                    gloo_timers::future::TimeoutFuture::new(500).await;
+                    let audio_id_json = serde_json::to_string(&audio_id)
+                        .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                    let script = format!(
+                        r#"
+                        (function() {{
+                            let audio = document.getElementById({audio_id});
+                            if (!audio) return;
+                            // Only seek if the difference is significant (avoids fighting with timeupdate)
+                            if (Math.abs(audio.currentTime - {current_time}) > 0.5) {{
+                                audio.currentTime = {current_time};
+                            }}
+                        }})();
+                        "#,
+                        audio_id = audio_id_json,
+                        current_time = current_time,
+                    );
+                    let _ = eval(&script);
                 }
-                #[cfg(not(target_family = "wasm"))]
+                #[cfg(feature = "web")]
+                {
+                    crate::platform::timer::sleep_ms(500).await;
+                }
+                #[cfg(not(feature = "web"))]
                 {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
@@ -175,22 +191,26 @@ pub fn PersistentMusicPlayer() -> Element {
     });
     let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
     use_effect(move || {
-        let speed = playback_speed();
-        spawn(async move {
-            let audio_id_json = serde_json::to_string(&audio_id)
-                .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
-            let script = format!(
-                r#"
-                (function() {{
-                    let audio = document.getElementById({audio_id});
-                    if (audio) audio.playbackRate = {speed};
-                }})();
-                "#,
-                audio_id = audio_id_json,
-                speed = speed,
-            );
-            let _ = eval(&script);
-        });
+        let _speed = playback_speed();
+        #[cfg(feature = "web")]
+        {
+            let speed = _speed;
+            spawn(async move {
+                let audio_id_json = serde_json::to_string(&audio_id)
+                    .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
+                let script = format!(
+                    r#"
+                    (function() {{
+                        let audio = document.getElementById({audio_id});
+                        if (audio) audio.playbackRate = {speed};
+                    }})();
+                    "#,
+                    audio_id = audio_id_json,
+                    speed = speed,
+                );
+                let _ = eval(&script);
+            });
+        }
     });
     let is_live = use_memo(move || {
         MUSIC_PLAYER
@@ -207,27 +227,30 @@ pub fn PersistentMusicPlayer() -> Element {
     });
     let _now_playing_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
-            gloo_timers::future::TimeoutFuture::new(2000).await;
+            crate::platform::timer::sleep_ms(2000).await;
             if !is_live() {
                 continue;
             }
-            let result = eval(
-                r#"
-                (function() {
-                    if (window.hlsManager && window.hlsManager.nowPlaying) {
-                        return JSON.stringify(window.hlsManager.nowPlaying);
-                    }
-                    return null;
-                })()
-            "#,
-            );
-            if let Ok(js_value) = result {
-                if let Some(json_str) = js_value.as_string() {
-                    if let Ok(now_playing) = serde_json::from_str::<
-                        NowPlaying,
-                    >(&json_str) {
-                        if now_playing.has_data() {
-                            music_player::set_now_playing(Some(now_playing));
+            #[cfg(feature = "web")]
+            {
+                let result = eval(
+                    r#"
+                    (function() {
+                        if (window.hlsManager && window.hlsManager.nowPlaying) {
+                            return JSON.stringify(window.hlsManager.nowPlaying);
+                        }
+                        return null;
+                    })()
+                "#,
+                );
+                if let Ok(js_value) = result {
+                    if let Some(json_str) = js_value.as_string() {
+                        if let Ok(now_playing) = serde_json::from_str::<
+                            NowPlaying,
+                        >(&json_str) {
+                            if now_playing.has_data() {
+                                music_player::set_now_playing(Some(now_playing));
+                            }
                         }
                     }
                 }
@@ -240,22 +263,23 @@ pub fn PersistentMusicPlayer() -> Element {
                 id: "{audio_id}",
                 preload: "metadata",
                 style: "display: none;",
-                ontimeupdate: move |evt| {
-                    if *is_seeking.read() {
-                        return;
-                    }
-                    if let Some(target) = evt.data.as_web_event().target() {
-                        if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
-                            let current_time = audio.current_time();
-                            if !current_time.is_nan() {
-                                last_synced_time.set(current_time);
-                                music_player::set_current_time(current_time);
+                ontimeupdate: move |_evt| {
+                    if !*is_seeking.read() {
+                        #[cfg(feature = "web")]
+                        if let Some(target) = _evt.data.as_web_event().target() {
+                            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                                let current_time = audio.current_time();
+                                if !current_time.is_nan() {
+                                    last_synced_time.set(current_time);
+                                    music_player::set_current_time(current_time);
+                                }
                             }
                         }
                     }
                 },
-                onloadedmetadata: move |evt| {
-                    if let Some(target) = evt.data.as_web_event().target() {
+                onloadedmetadata: move |_evt| {
+                    #[cfg(feature = "web")]
+                    if let Some(target) = _evt.data.as_web_event().target() {
                         if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                             let duration = audio.duration();
                             if !duration.is_nan() {
@@ -306,22 +330,23 @@ pub fn PersistentMusicPlayer() -> Element {
             preload: if track.is_live_stream { "none" } else { "metadata" },
             style: "display: none;",
             src: "{track.media_url}",
-            ontimeupdate: move |evt| {
-                if *is_seeking.read() {
-                    return;
-                }
-                if let Some(target) = evt.data.as_web_event().target() {
-                    if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
-                        let current_time = audio.current_time();
-                        if !current_time.is_nan() {
-                            last_synced_time.set(current_time);
-                            music_player::set_current_time(current_time);
+            ontimeupdate: move |_evt| {
+                if !*is_seeking.read() {
+                    #[cfg(feature = "web")]
+                    if let Some(target) = _evt.data.as_web_event().target() {
+                        if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                            let current_time = audio.current_time();
+                            if !current_time.is_nan() {
+                                last_synced_time.set(current_time);
+                                music_player::set_current_time(current_time);
+                            }
                         }
                     }
                 }
             },
-            onloadedmetadata: move |evt| {
-                if let Some(target) = evt.data.as_web_event().target() {
+            onloadedmetadata: move |_evt| {
+                #[cfg(feature = "web")]
+                if let Some(target) = _evt.data.as_web_event().target() {
                     if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                         let duration = audio.duration();
                         if !duration.is_nan() {
@@ -488,10 +513,14 @@ pub fn PersistentMusicPlayer() -> Element {
                             div {
                                 class: "flex-1 relative h-2 bg-secondary rounded-full overflow-hidden cursor-pointer",
                                 onclick: move |evt| {
-
-                                    let client_x = evt.client_coordinates().x;
-                                    let client_y = evt.client_coordinates().y;
-                                    let audio_id_str = audio_id.to_string();
+                                    let _client_x = evt.client_coordinates().x;
+                                    let _client_y = evt.client_coordinates().y;
+                                    let _audio_id_str = audio_id.to_string();
+                                    #[cfg(feature = "web")]
+                                    {
+                                    let client_x = _client_x;
+                                    let client_y = _client_y;
+                                    let audio_id_str = _audio_id_str;
                                     spawn(async move {
                                         let audio_id_json = serde_json::to_string(&audio_id_str)
                                             .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -562,6 +591,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                         );
                                         let _ = eval(&script);
                                     });
+                                    }
                                 },
                                 div {
                                     class: "absolute h-full bg-primary transition-all duration-100",

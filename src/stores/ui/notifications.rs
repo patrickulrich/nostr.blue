@@ -2,7 +2,7 @@ use crate::stores::{auth_store, nostr_client, settings_store, subscription_manag
 use crate::utils::notification_nip78;
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use nostr_sdk::{Filter, FromBech32, Kind, PublicKey, SubscriptionId};
 const NOTIFICATIONS_CHECKED_AT_KEY: &str = "notifications_checked_at";
 /// Minimum interval between NIP-78 publishes (10 minutes)
@@ -38,7 +38,7 @@ pub fn increment_unread_count() {
 }
 /// Load the last checked timestamp from localStorage and update the signal
 pub fn load_checked_at() {
-    let timestamp = LocalStorage::get::<i64>(NOTIFICATIONS_CHECKED_AT_KEY).unwrap_or(0);
+    let timestamp = storage::get::<i64>(NOTIFICATIONS_CHECKED_AT_KEY).unwrap_or(0);
     *NOTIFICATIONS_CHECKED_AT.write() = timestamp;
     log::debug!("Loaded notifications checked_at from localStorage: {}", timestamp);
 }
@@ -50,7 +50,7 @@ pub fn get_checked_at() -> i64 {
 /// Optionally publishes to NIP-78 if sync is enabled (throttled to once per 10 min)
 pub fn set_checked_at(timestamp: i64) {
     *NOTIFICATIONS_CHECKED_AT.write() = timestamp;
-    if let Err(e) = LocalStorage::set(NOTIFICATIONS_CHECKED_AT_KEY, timestamp) {
+    if let Err(e) = storage::set(NOTIFICATIONS_CHECKED_AT_KEY, &timestamp) {
         log::error!("Failed to save checked_at to localStorage: {}", e);
     }
     log::debug!("Set notifications checked_at: {}", timestamp);
@@ -155,9 +155,9 @@ pub async fn fetch_and_merge_from_nip78() {
                     );
                     if merged_timestamp > local_timestamp {
                         *NOTIFICATIONS_CHECKED_AT.write() = merged_timestamp;
-                        if let Err(e) = LocalStorage::set(
+                        if let Err(e) = storage::set(
                             NOTIFICATIONS_CHECKED_AT_KEY,
-                            merged_timestamp,
+                            &merged_timestamp,
                         ) {
                             log::error!("Failed to save merged checked_at: {}", e);
                         }

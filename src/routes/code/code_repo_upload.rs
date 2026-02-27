@@ -11,13 +11,13 @@ use crate::utils::format::display_server_url;
 use crate::utils::nip34::Repository;
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use js_sys::{ArrayBuffer, Uint8Array};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use web_sys::{HtmlElement, HtmlInputElement};
 
 /// Maximum file size: 50 MB
@@ -191,7 +191,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                 if copy_to_clipboard(&url).await.is_ok() {
                     copied_index.set(Some(index));
                     // Reset copied state after 2 seconds
-                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                    crate::platform::timer::sleep_ms(2000).await;
                     if *copied_index.read() == Some(index) {
                         copied_index.set(None);
                     }
@@ -627,7 +627,7 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
 }
 
 /// Read multiple files from a file input element
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, String> {
     let window = web_sys::window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;
@@ -681,13 +681,13 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
     Ok(files)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 async fn read_files_from_input(_input_id: &str) -> Result<Vec<SelectedFile>, String> {
     Err("File reading is only supported in WASM".to_string())
 }
 
 /// Programmatically click a file input element
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn trigger_file_input(input_id: &str) {
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -700,11 +700,11 @@ fn trigger_file_input(input_id: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 fn trigger_file_input(_input_id: &str) {}
 
 /// Clear a file input element's value
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn clear_file_input(input_id: &str) {
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -717,7 +717,7 @@ fn clear_file_input(input_id: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 fn clear_file_input(_input_id: &str) {}
 
 /// Format bytes as human-readable string

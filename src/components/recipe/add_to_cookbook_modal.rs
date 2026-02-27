@@ -220,10 +220,10 @@ pub fn AddToCookbookModal(
                         Ok(_) => {
                             success.set(true);
                             pending_pin_cookbook.set(None);
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "web")]
                             {
                                 let task = spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(1500).await;
+                                    crate::platform::timer::sleep_ms(1500).await;
                                     navigator
                                         .push(Route::PinBoardDetail {
                                             naddr: cookbook_naddr,
@@ -280,10 +280,10 @@ pub fn AddToCookbookModal(
                 Ok(_) => {
                     success.set(true);
                     pending_pin_cookbook.set(None);
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         let task = spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(1500).await;
+                            crate::platform::timer::sleep_ms(1500).await;
                             navigator
                                 .push(Route::PinBoardDetail {
                                     naddr: cookbook_naddr,

@@ -191,7 +191,12 @@ pub fn Home(list: String) -> Element {
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
-        );
+        ) || {
+            #[cfg(feature = "mobile")]
+            { matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
+            #[cfg(not(feature = "mobile"))]
+            { false }
+        };
         let signer_available = !requires_signer || has_signer;
         let cache_only = is_authenticated && requires_signer && !has_signer;
         let (last_refresh, last_feed, last_signer_available) = last_loaded_trigger.peek().clone();
@@ -835,7 +840,12 @@ pub fn Home(list: String) -> Element {
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
-        );
+        ) || {
+            #[cfg(feature = "mobile")]
+            { matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
+            #[cfg(not(feature = "mobile"))]
+            { false }
+        };
         if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before starting realtime...");
             return;
@@ -898,13 +908,12 @@ pub fn Home(list: String) -> Element {
                 let client = client.clone();
                 let batch_num = batch_idx + 1;
                 if batch_idx > 0 {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
-                        use gloo_timers::future::TimeoutFuture;
-                        TimeoutFuture::new(batch_idx as u32 * BATCH_DELAY_MS as u32)
+                        crate::platform::timer::sleep_ms(batch_idx as u32 * BATCH_DELAY_MS as u32)
                             .await;
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
+                    #[cfg(not(feature = "web"))]
                     {
                         use tokio::time::{sleep, Duration as TokioDuration};
                         sleep(
@@ -1125,7 +1134,7 @@ pub fn Home(list: String) -> Element {
     let mut refresh_and_scroll_to_top = move || {
         let current = *refresh_trigger.read();
         refresh_trigger.set(current + 1);
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 window.scroll_to_with_x_and_y(0.0, 0.0);
@@ -1559,6 +1568,17 @@ fn LoginSection() -> Element {
         });
     };
     let has_extension = auth_store::is_browser_extension_available();
+    let has_android_signer = auth_store::is_android_signer_available();
+    let mut nip55_npub_input = use_signal(String::new);
+    let login_with_android_signer = move |_| {
+        let npub = nip55_npub_input.read().clone();
+        spawn(async move {
+            match auth_store::login_with_android_signer(&npub).await {
+                Ok(_) => error.set(None),
+                Err(e) => error.set(Some(e)),
+            }
+        });
+    };
     rsx! {
         div { class: "p-6 max-w-lg mx-auto",
             div { class: "flex items-center justify-between mb-6",
@@ -1604,6 +1624,41 @@ fn LoginSection() -> Element {
                                 class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs",
                                 onclick: login_with_extension,
                                 "Connect Extension"
+                            }
+                        }
+                    }
+                    if has_android_signer {
+                        div { class: "p-4 bg-accent/50 rounded-lg border-2 border-primary/50",
+                            div { class: "flex items-start gap-3 mb-3",
+                                div { class: "text-2xl", "📱" }
+                                div { class: "flex-1",
+                                    div { class: "flex items-center gap-2 mb-1",
+                                        span { class: "font-semibold text-foreground",
+                                            "Android Signer (NIP-55)"
+                                        }
+                                        span { class: "px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded-full",
+                                            "RECOMMENDED"
+                                        }
+                                    }
+                                    p { class: "text-sm text-muted-foreground",
+                                        "Use Amber or another NIP-55 signer app. Your keys never leave the signer."
+                                    }
+                                }
+                            }
+                            div { class: "space-y-2",
+                                input {
+                                    class: "w-full px-3 py-2 text-sm border border-primary/50 rounded-lg bg-card text-foreground focus:ring-2 focus:ring-primary focus:border-transparent",
+                                    r#type: "text",
+                                    placeholder: "npub1...",
+                                    value: "{nip55_npub_input}",
+                                    oninput: move |evt| nip55_npub_input.set(evt.value()),
+                                }
+                                button {
+                                    class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed",
+                                    onclick: login_with_android_signer,
+                                    disabled: nip55_npub_input.read().is_empty(),
+                                    "Connect Signer"
+                                }
                             }
                         }
                     }
@@ -1814,6 +1869,8 @@ fn ProfileSection() -> Element {
                             Some(auth_store::LoginMethod::ReadOnly) => "👁️ Read-Only",
                             Some(auth_store::LoginMethod::BrowserExtension) => "🔌 Browser Extension",
                             Some(auth_store::LoginMethod::RemoteSigner) => "🔐 Remote Signer",
+                            #[cfg(feature = "mobile")]
+                            Some(auth_store::LoginMethod::AndroidSigner) => "📱 Android Signer",
                             None => "Unknown",
                         }
                     }

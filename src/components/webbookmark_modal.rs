@@ -120,7 +120,7 @@ pub fn WebBookmarkModal(
                 && (new_url.starts_with("http") || !new_url.contains(' '))
             {
                 spawn(async move {
-                    gloo_timers::future::TimeoutFuture::new(500).await;
+                    crate::platform::timer::sleep_ms(500).await;
                     if url_input.read().trim() == new_url.trim() && !*auto_fetched.read()
                     {
                         is_fetching_metadata.set(true);

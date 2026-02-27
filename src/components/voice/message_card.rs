@@ -11,10 +11,11 @@ use crate::services::aggregation::InteractionCounts;
 use crate::utils::truncate_pubkey;
 use dioxus::events::{MediaData, MouseData};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-use js_sys;
 use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[component]
 pub fn VoiceMessageCard(
@@ -29,8 +30,10 @@ pub fn VoiceMessageCard(
     let event_id_str = event_id.to_string();
     let event_clone = event.clone();
     let mut author_metadata = use_signal(|| None::<nostr_sdk::Metadata>);
+    #[allow(unused_mut)]
     let mut duration = use_signal(|| 0.0);
     let mut current_time = use_signal(|| 0.0);
+    #[allow(unused_variables, unused_mut)]
     let mut is_loading = use_signal(|| true);
     let mut show_reply_modal = use_signal(|| false);
     let mut show_zap_modal = use_signal(|| false);
@@ -248,48 +251,54 @@ pub fn VoiceMessageCard(
     let audio_id_for_effect = audio_id.clone();
     use_effect(move || {
         let global_state = voice_messages_store::VOICE_PLAYBACK.read();
-        let is_playing = global_state.currently_playing == Some(event_id);
-        let audio_id_clone = audio_id_for_effect.clone();
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => {
-                log::error!("Failed to get window object");
-                return;
+        let _is_playing = global_state.currently_playing == Some(event_id);
+        let _audio_id_clone = audio_id_for_effect.clone();
+        #[cfg(feature = "web")]
+        {
+            let is_playing = _is_playing;
+            let audio_id_clone = _audio_id_clone;
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => {
+                    log::error!("Failed to get window object");
+                    return;
+                }
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => {
+                    log::error!("Failed to get document object");
+                    return;
+                }
+            };
+            let element = match document.get_element_by_id(&audio_id_clone) {
+                Some(e) => e,
+                None => {
+                    log::debug!("Audio element {} not found yet", audio_id_clone);
+                    return;
+                }
+            };
+            let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
+                Ok(a) => a,
+                Err(e) => {
+                    log::error!("Element is not an HtmlAudioElement: {:?}", e);
+                    return;
+                }
+            };
+            if is_playing {
+                let _ = audio
+                    .play()
+                    .map_err(|e| {
+                        log::debug!("Play failed: {:?}", e);
+                    });
+            } else if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
             }
-        };
-        let document = match window.document() {
-            Some(d) => d,
-            None => {
-                log::error!("Failed to get document object");
-                return;
-            }
-        };
-        let element = match document.get_element_by_id(&audio_id_clone) {
-            Some(e) => e,
-            None => {
-                log::debug!("Audio element {} not found yet", audio_id_clone);
-                return;
-            }
-        };
-        let audio: web_sys::HtmlAudioElement = match element.dyn_into() {
-            Ok(a) => a,
-            Err(e) => {
-                log::error!("Element is not an HtmlAudioElement: {:?}", e);
-                return;
-            }
-        };
-        if is_playing {
-            let _ = audio
-                .play()
-                .map_err(|e| {
-                    log::debug!("Play failed: {:?}", e);
-                });
-        } else if let Err(e) = audio.pause() {
-            log::debug!("Pause failed: {:?}", e);
         }
     });
-    let handle_timeupdate = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
+    let handle_timeupdate = move |_evt: Event<MediaData>| {
+        #[cfg(feature = "web")]
+        if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let time = audio.current_time();
                 if !time.is_nan() {
@@ -301,8 +310,9 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_loadedmetadata = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
+    let handle_loadedmetadata = move |_evt: Event<MediaData>| {
+        #[cfg(feature = "web")]
+        if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let dur = audio.duration();
                 if !dur.is_nan() {
@@ -360,7 +370,7 @@ pub fn VoiceMessageCard(
         .and_then(|m| m.picture.clone())
         .unwrap_or_default();
     let time_ago = {
-        let now = js_sys::Date::now() / 1000.0;
+        let now = crate::platform::timestamp::now_secs() as f64;
         let diff = now - created_at.as_secs() as f64;
         if diff < 60.0 {
             format!("{}s", diff as u32)
@@ -374,23 +384,26 @@ pub fn VoiceMessageCard(
     };
     let navigator = use_navigator();
     let voice_id_for_nav = event_id_str.clone();
-    let navigate_to_detail = move |evt: Event<MouseData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
-            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                let tag_name = element.tag_name().to_lowercase();
-                if tag_name == "button" || tag_name == "a" || tag_name == "audio" {
-                    return;
-                }
-                let mut current = element.clone();
-                for _ in 0..5 {
-                    if let Some(parent) = current.parent_element() {
-                        let parent_tag = parent.tag_name().to_lowercase();
-                        if parent_tag == "button" || parent_tag == "a" {
-                            return;
+    let navigate_to_detail = move |_evt: Event<MouseData>| {
+        #[cfg(feature = "web")]
+        {
+            if let Some(target) = _evt.data.as_web_event().target() {
+                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                    let tag_name = element.tag_name().to_lowercase();
+                    if tag_name == "button" || tag_name == "a" || tag_name == "audio" {
+                        return;
+                    }
+                    let mut current = element.clone();
+                    for _ in 0..5 {
+                        if let Some(parent) = current.parent_element() {
+                            let parent_tag = parent.tag_name().to_lowercase();
+                            if parent_tag == "button" || parent_tag == "a" {
+                                return;
+                            }
+                            current = parent;
+                        } else {
+                            break;
                         }
-                        current = parent;
-                    } else {
-                        break;
                     }
                 }
             }

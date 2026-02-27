@@ -334,7 +334,7 @@ pub fn PackDetail(naddr: String) -> Element {
                                             to: Route::PackNew {},
                                             class: "px-4 py-2 border border-border rounded-lg hover:bg-accent transition text-sm",
                                             onclick: move |_| {
-                                                #[cfg(target_arch = "wasm32")]
+                                                #[cfg(feature = "web")]
                                                 {
                                                     if let Some(window) = web_sys::window() {
                                                         if let Ok(Some(storage)) = window.local_storage() {
@@ -370,7 +370,7 @@ pub fn PackDetail(naddr: String) -> Element {
                                             match crate::utils::clipboard::copy_to_clipboard(&uri).await {
                                                 Ok(()) => {
                                                     copied.set(true);
-                                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                                    crate::platform::timer::sleep_ms(2000).await;
                                                     copied.set(false);
                                                 }
                                                 Err(e) => {

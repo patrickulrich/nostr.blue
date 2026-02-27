@@ -52,8 +52,13 @@ pub fn MusicRadio() -> Element {
                             .into_iter()
                             .map(|t| t.into())
                             .collect();
-                        use js_sys::Date;
-                        let seed = (Date::now() as u64) as usize;
+                        #[cfg(feature = "web")]
+                        let seed = (js_sys::Date::now() as u64) as usize;
+                        #[cfg(not(feature = "web"))]
+                        let seed = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as usize)
+                            .unwrap_or(0);
                         for i in (1..music_tracks.len()).rev() {
                             let j = seed.wrapping_add(i) % (i + 1);
                             music_tracks.swap(i, j);

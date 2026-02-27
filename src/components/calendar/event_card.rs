@@ -8,6 +8,7 @@ use crate::utils::time::format_relative_time;
 use crate::utils::validation::is_valid_http_url;
 use dioxus::prelude::*;
 use nostr::Timestamp;
+#[cfg(feature = "web")]
 const MONTH_NAMES: [&str; 12] = [
     "Jan",
     "Feb",
@@ -22,6 +23,7 @@ const MONTH_NAMES: [&str; 12] = [
     "Nov",
     "Dec",
 ];
+#[cfg(feature = "web")]
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 /// Build route based on event type
 /// - Livestreams (30311) go to /videos/live/:naddr
@@ -337,6 +339,7 @@ pub fn EventCardCompactSkeleton() -> Element {
     }
 }
 /// Format event time for display
+#[cfg(feature = "web")]
 fn format_event_time(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();
     if ts == 0 {
@@ -367,22 +370,38 @@ fn format_event_time(event: &UnifiedEvent) -> String {
         format!("{} {} at {}:{:02} {}", month_name, day, hour_12, minutes, am_pm)
     }
 }
+
+#[cfg(not(feature = "web"))]
+fn format_event_time(event: &UnifiedEvent) -> String {
+    let ts = event.start_timestamp();
+    if ts == 0 {
+        return "TBD".to_string();
+    }
+    crate::utils::time::format_relative_time(Timestamp::from(ts))
+}
 /// Format event time (short version for compact cards)
 fn format_event_time_short(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();
     if ts == 0 {
         return "TBD".to_string();
     }
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let diff = ts.abs_diff(now_secs);
     if diff < 7 * 86400 {
         format_relative_time(Timestamp::from(ts))
     } else {
-        let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-        let month = date.get_month() as usize;
-        let day = date.get_date();
-        let month_str = MONTH_NAMES.get(month).unwrap_or(&"");
-        format!("{} {}", month_str, day)
+        #[cfg(feature = "web")]
+        {
+            let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
+            let month = date.get_month() as usize;
+            let day = date.get_date();
+            let month_str = MONTH_NAMES.get(month).unwrap_or(&"");
+            format!("{} {}", month_str, day)
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            format_relative_time(Timestamp::from(ts))
+        }
     }
 }
 /// Get location info (location string, is_online flag)
@@ -414,7 +433,7 @@ fn get_event_status(event: &UnifiedEvent) -> EventStatus {
     if event.is_live() {
         return EventStatus::Live;
     }
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let start_ts = event.start_timestamp();
     if start_ts == 0 {
         return EventStatus::None;

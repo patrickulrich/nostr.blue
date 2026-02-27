@@ -1,12 +1,11 @@
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use nostr_sdk::Timestamp;
 #[component]
 pub fn PollTimer(ends_at: Timestamp) -> Element {
     let mut time_remaining = use_signal(|| calculate_time_remaining(ends_at));
     use_future(move || async move {
         loop {
-            TimeoutFuture::new(1000).await;
+            crate::platform::timer::sleep_ms(1000).await;
             time_remaining.set(calculate_time_remaining(ends_at));
         }
     });

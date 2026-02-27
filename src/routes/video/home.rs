@@ -9,6 +9,7 @@ use crate::utils::FeedItem;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, PublicKey, Timestamp};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FeedType {
@@ -100,7 +101,12 @@ pub fn Videos() -> Element {
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
-        );
+        ) || {
+            #[cfg(feature = "mobile")]
+            { matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
+            #[cfg(not(feature = "mobile"))]
+            { false }
+        };
         if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before loading video feed...");
             return;
@@ -502,6 +508,7 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
         spawn(async move {
+            #[cfg(feature = "web")]
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&id) {
@@ -518,6 +525,8 @@ fn LandscapeVideoCard(event: Event, feed_type: FeedType) -> Element {
                     }
                 }
             }
+            #[cfg(not(feature = "web"))]
+            let _ = (&id, hovering);
         });
     });
     let display_name = author_metadata
@@ -605,6 +614,7 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
         let hovering = *is_hovering.read();
         let id = video_element_id_for_effect.clone();
         spawn(async move {
+            #[cfg(feature = "web")]
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
                     if let Some(element) = document.get_element_by_id(&id) {
@@ -621,6 +631,8 @@ fn VertsVideoCard(event: Event, feed_type: FeedType) -> Element {
                     }
                 }
             }
+            #[cfg(not(feature = "web"))]
+            let _ = (&id, hovering);
         });
     });
     let video_id = event.id.to_hex();

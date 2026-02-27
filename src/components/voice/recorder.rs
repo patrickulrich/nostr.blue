@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use js_sys::Reflect;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
@@ -28,7 +27,7 @@ pub fn VoiceRecorder(
             log::info!("Start recording button clicked, recorder_id: {}", recorder_id);
             state
                 .set(RecorderState::Recording {
-                    started_at: js_sys::Date::now() / 1000.0,
+                    started_at: crate::platform::timestamp::now_secs() as f64,
                 });
             log::debug!("State set to Recording");
             spawn(async move {
@@ -75,11 +74,11 @@ pub fn VoiceRecorder(
                                 let monitor_state = state;
                                 let monitor_is_mounted = is_mounted;
                                 spawn(async move {
-                                    let started_at = js_sys::Date::now() / 1000.0;
+                                    let started_at = crate::platform::timestamp::now_secs() as f64;
                                     log::info!("Monitoring loop started at: {}", started_at);
                                     let mut last_logged_second: i32 = -1;
                                     loop {
-                                        TimeoutFuture::new(100).await;
+                                        crate::platform::timer::sleep_ms(100).await;
                                         if !*monitor_is_mounted.read() {
                                             log::debug!(
                                                 "Component unmounted, stopping monitoring loop"
@@ -88,7 +87,7 @@ pub fn VoiceRecorder(
                                         }
                                         let current_state = monitor_state.read().clone();
                                         if let RecorderState::Recording { .. } = current_state {
-                                            let elapsed = (js_sys::Date::now() / 1000.0) - started_at;
+                                            let elapsed = (crate::platform::timestamp::now_secs() as f64) - started_at;
                                             monitor_current_time.set(elapsed);
                                             let current_second = elapsed as i32;
                                             if current_second != last_logged_second {
@@ -149,7 +148,7 @@ pub fn VoiceRecorder(
                         let mut attempts = 0;
                         const MAX_ATTEMPTS: u32 = 50;
                         loop {
-                            TimeoutFuture::new(200).await;
+                            crate::platform::timer::sleep_ms(200).await;
                             attempts += 1;
                             if attempts > MAX_ATTEMPTS {
                                 log::error!("Timeout waiting for recording result");
@@ -298,7 +297,7 @@ pub fn VoiceRecorder(
                 match js_sys::eval(&script) {
                     Ok(result) => {
                         if result.as_bool() == Some(true) {
-                            TimeoutFuture::new(100).await;
+                            crate::platform::timer::sleep_ms(100).await;
                             let check_script = "window.__voice_preview_playing === true";
                             if let Ok(playing) = js_sys::eval(check_script) {
                                 let actual_playing = playing.as_bool().unwrap_or(false);

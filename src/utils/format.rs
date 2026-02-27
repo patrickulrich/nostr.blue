@@ -113,7 +113,7 @@ pub fn shorten_url(url: &str, max_len: usize) -> String {
 /// Format a Unix timestamp as a relative time string (e.g., "5m ago", "2d ago")
 ///
 /// Returns `None` for invalid timestamps (0 or far in the future).
-/// Uses WASM-compatible `js_sys::Date::now()` for current time.
+/// Uses cross-platform `crate::platform::timestamp::now_secs()` for current time.
 ///
 /// # Examples
 /// ```
@@ -125,7 +125,7 @@ pub fn format_relative_time(timestamp: u64) -> Option<String> {
     if timestamp == 0 {
         return None;
     }
-    let now = (js_sys::Date::now() / 1000.0) as u64;
+    let now = crate::platform::timestamp::now_secs();
     if timestamp > now.saturating_add(86400) {
         return None;
     }
@@ -194,7 +194,7 @@ pub fn truncate_id(id: &str, len: usize) -> String {
 /// This function uses cryptographically secure random number generation
 /// suitable for order IDs, review IDs, and other security-sensitive identifiers.
 pub fn generate_unique_id() -> String {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use js_sys::{Math, Uint8Array};
         use wasm_bindgen::JsCast;
@@ -218,7 +218,7 @@ pub fn generate_unique_id() -> String {
         let bytes: Vec<u8> = array.to_vec();
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         use rand::Rng;
         let bytes: [u8; 16] = rand::thread_rng().gen();

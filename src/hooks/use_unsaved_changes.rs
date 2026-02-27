@@ -5,9 +5,9 @@
 use dioxus::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Result of the unsaved changes hook
 ///
@@ -82,7 +82,7 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
             }
         }
     });
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use_effect(move || {
             register_beforeunload(is_dirty);
@@ -109,14 +109,14 @@ pub fn calculate_multi_hash(fields: &[&str]) -> u64 {
     }
     hasher.finish()
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     #[allow(clippy::type_complexity)]
     static BEFOREUNLOAD_CLOSURE: std::cell::RefCell<
         Option<Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>,
     > = const { std::cell::RefCell::new(None) };
 }
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn register_beforeunload(is_dirty: Signal<bool>) {
     use web_sys::BeforeUnloadEvent;
     let window = match web_sys::window() {
@@ -160,7 +160,7 @@ fn register_beforeunload(is_dirty: Signal<bool>) {
 /// Unregister the beforeunload handler (call on component unmount if needed)
 /// Kept for future explicit cleanup when needed
 #[allow(dead_code)]
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn unregister_beforeunload() {
     let window = match web_sys::window() {
         Some(w) => w,
@@ -178,7 +178,7 @@ pub fn unregister_beforeunload() {
         });
 }
 #[allow(dead_code)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn unregister_beforeunload() {}
 /// State for showing a leave confirmation dialog
 /// Kept for future in-app navigation warning implementation

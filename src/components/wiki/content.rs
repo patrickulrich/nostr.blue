@@ -35,7 +35,7 @@ pub fn WikiPageContent(
                     Ok(_) => {
                         copied.set(true);
                         spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }

@@ -176,7 +176,7 @@ pub fn PRReviewSection(
                 body
             };
             let review_state = state.to_review_state();
-            let now = js_sys::Date::now() as u64 / 1000;
+            let now = crate::platform::timestamp::now_secs();
             // Capture prior review for rollback
             let prior_review = {
                 let current = reviews.read();

@@ -3,29 +3,20 @@
 //! Shared date manipulation functions for calendar components.
 //! All functions work with YYYY-MM-DD format strings.
 use crate::stores::calendar_store::UnifiedEvent;
+use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+
 /// Get date string (YYYY-MM-DD) from a UnifiedEvent
 pub fn get_event_date(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();
     if ts == 0 {
         return String::new();
     }
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    format!(
-        "{:04}-{:02}-{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date(),
-    )
+    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+    dt.format("%Y-%m-%d").to_string()
 }
 /// Get today's date as YYYY-MM-DD string
 pub fn get_today() -> String {
-    let date = js_sys::Date::new_0();
-    format!(
-        "{:04}-{:02}-{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date(),
-    )
+    Utc::now().format("%Y-%m-%d").to_string()
 }
 /// Get month number (1-12) from a date string in YYYY-MM-DD format
 pub fn get_month_from_date(date: &str) -> u32 {
@@ -45,24 +36,18 @@ pub fn get_month_dates(date: &str) -> Vec<String> {
         return vec![];
     }
     let year: i32 = parts[0].parse().unwrap_or(2024);
-    let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1;
-    let first = js_sys::Date::new_with_year_month_day(year as u32, month, 1);
-    let first_weekday = first.get_day() as i32;
-    let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
-    let sunday_ms = first.get_time() - (first_weekday as f64 * ms_per_day);
-    first.set_time(sunday_ms);
+    let month: u32 = parts[1].parse::<u32>().unwrap_or(1);
+    let first = match NaiveDate::from_ymd_opt(year, month, 1) {
+        Some(d) => d,
+        None => return vec![],
+    };
+    // Find Sunday before (or on) the first day of the month
+    let first_weekday = first.weekday().num_days_from_sunday() as i64;
+    let sunday = first - chrono::Duration::days(first_weekday);
     let mut dates = Vec::with_capacity(42);
-    for _ in 0..42 {
-        dates
-            .push(
-                format!(
-                    "{:04}-{:02}-{:02}",
-                    first.get_full_year(),
-                    first.get_month() + 1,
-                    first.get_date(),
-                ),
-            );
-        first.set_time(first.get_time() + ms_per_day);
+    for i in 0..42 {
+        let d = sunday + chrono::Duration::days(i);
+        dates.push(d.format("%Y-%m-%d").to_string());
     }
     dates
 }

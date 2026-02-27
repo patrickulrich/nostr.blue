@@ -72,8 +72,8 @@ pub fn Chats() -> Element {
         });
         search_loading.set(true);
         spawn(async move {
-            #[cfg(target_arch = "wasm32")]
-            gloo_timers::future::TimeoutFuture::new(300).await;
+            #[cfg(feature = "web")]
+            crate::platform::timer::sleep_ms(300).await;
             if *search_version.peek() != version {
                 return;
             }

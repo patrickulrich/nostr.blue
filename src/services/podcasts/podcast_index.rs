@@ -3,14 +3,10 @@
 //! Client for the Podcast Index proxy at podnostrblue.ulrich-patrickr.workers.dev
 //! Provides podcast search, trending, categories, and episode discovery.
 //! Uses NIP-98 HTTP Authentication for API access.
-use gloo_net::http::Request;
-use gloo_timers::callback::Timeout;
 use nostr_sdk::nips::nip98;
 use serde::{Deserialize, Serialize};
 use crate::utils::nip98 as nip98_utils;
 use crate::utils::validation::parse_http_url;
-/// Timeout for proxy fetch requests (30 seconds)
-const PROXY_TIMEOUT_MS: u32 = 30_000;
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
 /// Make an authenticated GET request to the Podcast Index proxy
@@ -19,12 +15,13 @@ async fn authenticated_get<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET)
         .await?;
-    let response = Request::get(&auth_result.signed_url)
+    let response = reqwest::Client::new()
+        .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(format!("API error {}: {}", status, body));
@@ -429,29 +426,13 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController")?;
-    let signal = controller.signal();
-    let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(
-        PROXY_TIMEOUT_MS,
-        move || {
-            controller_for_timeout.abort();
-        },
-    );
-    let response = Request::get(&auth_result.signed_url)
+    let response = reqwest::Client::new()
+        .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .abort_signal(Some(&signal))
         .send()
         .await
-        .map_err(|e| {
-            if signal.aborted() {
-                format!("{} fetch timed out", resource_type)
-            } else {
-                format!("Failed to fetch {}: {}", resource_type, e)
-            }
-        })?;
-    if !response.ok() {
+        .map_err(|e| format!("Failed to fetch {}: {}", resource_type, e))?;
+    if !response.status().is_success() {
         let status = response.status();
         return Err(format!("{} fetch failed with status {}", resource_type, status));
     }
@@ -469,29 +450,13 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
-    let controller = web_sys::AbortController::new()
-        .map_err(|_| "Failed to create AbortController")?;
-    let signal = controller.signal();
-    let controller_for_timeout = controller.clone();
-    let _timeout = Timeout::new(
-        PROXY_TIMEOUT_MS,
-        move || {
-            controller_for_timeout.abort();
-        },
-    );
-    let response = Request::get(&auth_result.signed_url)
+    let response = reqwest::Client::new()
+        .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
-        .abort_signal(Some(&signal))
         .send()
         .await
-        .map_err(|e| {
-            if signal.aborted() {
-                format!("{} fetch timed out", resource_type)
-            } else {
-                format!("Failed to fetch {}: {}", resource_type, e)
-            }
-        })?;
-    if !response.ok() {
+        .map_err(|e| format!("Failed to fetch {}: {}", resource_type, e))?;
+    if !response.status().is_success() {
         let status = response.status();
         return Err(format!("{} fetch failed with status {}", resource_type, status));
     }

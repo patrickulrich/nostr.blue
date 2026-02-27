@@ -323,14 +323,14 @@ pub async fn load_in_flight_melt_requests() {
 /// This ensures pending-at-mint state survives app restarts.
 /// Uses spawn to avoid blocking the caller.
 pub fn schedule_persist_pending_secrets() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use dioxus::prelude::spawn;
         spawn(async move {
             persist_pending_secrets_impl().await;
         });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         log::debug!("schedule_persist_pending_secrets: no-op on non-WASM target");
     }

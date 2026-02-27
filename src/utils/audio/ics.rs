@@ -111,29 +111,17 @@ fn format_vevent(event: &CalendarEvent) -> String {
 }
 /// Format Unix timestamp as ICS UTC datetime (YYYYMMDDTHHmmssZ)
 fn format_timestamp(ts: u64) -> String {
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    format!(
-        "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-        date.get_utc_full_year(),
-        date.get_utc_month() + 1,
-        date.get_utc_date(),
-        date.get_utc_hours(),
-        date.get_utc_minutes(),
-        date.get_utc_seconds(),
-    )
+    use chrono::{TimeZone, Utc};
+    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+    dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 /// Format Unix timestamp as local datetime (YYYYMMDDTHHmmss)
 fn format_local_datetime(ts: u64) -> String {
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    format!(
-        "{:04}{:02}{:02}T{:02}{:02}{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date(),
-        date.get_hours(),
-        date.get_minutes(),
-        date.get_seconds(),
-    )
+    use chrono::{TimeZone, Utc};
+    // Note: without timezone info, we format as UTC (same as the original behavior
+    // when running in a UTC environment; for WASM the browser provided local time)
+    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+    dt.format("%Y%m%dT%H%M%S").to_string()
 }
 /// Escape special characters in ICS text
 fn escape_ics_text(text: &str) -> String {
@@ -225,6 +213,7 @@ impl IcsDateTime {
     }
 }
 /// Parse ICS content and extract events
+#[cfg(feature = "web")]
 pub fn parse_ics(content: &str) -> Vec<IcsEvent> {
     let mut events = Vec::new();
     let mut current_event: Option<IcsEvent> = None;
@@ -251,6 +240,7 @@ pub fn parse_ics(content: &str) -> Vec<IcsEvent> {
     events
 }
 /// Unfold ICS lines (handle line continuations)
+#[cfg(feature = "web")]
 fn unfold_ics_lines(content: &str) -> String {
     let mut result = String::new();
     let mut prev_line = String::new();
@@ -271,6 +261,7 @@ fn unfold_ics_lines(content: &str) -> String {
     result
 }
 /// Parse a single ICS property line
+#[cfg(feature = "web")]
 fn parse_ics_property(line: &str, event: &mut IcsEvent) {
     let (name_params, value) = match line.find(':') {
         Some(idx) => (&line[..idx], &line[idx + 1..]),
@@ -313,6 +304,7 @@ fn parse_ics_property(line: &str, event: &mut IcsEvent) {
     }
 }
 /// Parse ICS datetime value
+#[cfg(feature = "web")]
 fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     let is_date_only = params.to_uppercase().contains("VALUE=DATE");
     let tzid = params
@@ -340,48 +332,43 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     None
 }
 /// Parse UTC datetime: YYYYMMDDTHHmmssZ
+#[cfg(feature = "web")]
 fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     if value.len() < 15 {
         return None;
     }
-    let year: i32 = value[0..4].parse().ok()?;
-    let month: u32 = value[4..6].parse().ok()?;
-    let day: u32 = value[6..8].parse().ok()?;
-    let hour: u32 = value[9..11].parse().ok()?;
-    let minute: u32 = value[11..13].parse().ok()?;
-    let second: u32 = value[13..15].parse().ok()?;
-    let date = js_sys::Date::new_with_year_month_day_hr_min_sec(
-        year as u32,
-        (month - 1) as i32,
-        day as i32,
-        hour as i32,
-        minute as i32,
-        second as i32,
+    use chrono::NaiveDateTime;
+    // Strip trailing 'Z' if present for parsing
+    let clean = value.trim_end_matches('Z');
+    if clean.len() < 15 {
+        return None;
+    }
+    let formatted = format!(
+        "{}-{}-{}T{}:{}:{}",
+        &clean[0..4], &clean[4..6], &clean[6..8],
+        &clean[9..11], &clean[11..13], &clean[13..15]
     );
-    Some((date.get_time() / 1000.0) as u64)
+    let ndt = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%dT%H:%M:%S").ok()?;
+    Some(ndt.and_utc().timestamp() as u64)
 }
 /// Parse local datetime: YYYYMMDDTHHmmss
+#[cfg(feature = "web")]
 fn parse_ics_local_datetime(value: &str) -> Option<u64> {
     if value.len() < 15 {
         return None;
     }
-    let year: i32 = value[0..4].parse().ok()?;
-    let month: u32 = value[4..6].parse().ok()?;
-    let day: u32 = value[6..8].parse().ok()?;
-    let hour: u32 = value[9..11].parse().ok()?;
-    let minute: u32 = value[11..13].parse().ok()?;
-    let second: u32 = value[13..15].parse().ok()?;
-    let date = js_sys::Date::new_with_year_month_day_hr_min_sec(
-        year as u32,
-        (month - 1) as i32,
-        day as i32,
-        hour as i32,
-        minute as i32,
-        second as i32,
+    use chrono::NaiveDateTime;
+    let formatted = format!(
+        "{}-{}-{}T{}:{}:{}",
+        &value[0..4], &value[4..6], &value[6..8],
+        &value[9..11], &value[11..13], &value[13..15]
     );
-    Some((date.get_time() / 1000.0) as u64)
+    let ndt = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%dT%H:%M:%S").ok()?;
+    // Treat as UTC when no timezone info is available
+    Some(ndt.and_utc().timestamp() as u64)
 }
 /// Unescape ICS text
+#[cfg(feature = "web")]
 fn unescape_ics_text(text: &str) -> String {
     text.replace("\\n", "\n")
         .replace("\\,", ",")
@@ -434,6 +421,7 @@ impl From<IcsEvent> for Option<IcsImportData> {
     }
 }
 /// Trigger browser download of ICS file
+#[cfg(feature = "web")]
 pub fn download_ics(filename: &str, content: &str) {
     use wasm_bindgen::prelude::*;
     #[wasm_bindgen]
@@ -464,6 +452,12 @@ pub fn download_ics(filename: &str, content: &str) {
     click_fn.call0(&a).ok();
     revoke_object_url(&url);
 }
+
+/// Trigger download of ICS file (native stub)
+#[cfg(not(feature = "web"))]
+pub fn download_ics(_filename: &str, _content: &str) {
+    log::warn!("ICS download not supported on native desktop");
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,6 +467,7 @@ mod tests {
         assert_eq!(escape_ics_text("Line1\nLine2"), "Line1\\nLine2");
         assert_eq!(escape_ics_text("Test;value"), "Test\\;value");
     }
+    #[cfg(feature = "web")]
     #[test]
     fn test_unescape_ics_text() {
         assert_eq!(unescape_ics_text("Hello\\, World"), "Hello, World");
@@ -487,6 +482,7 @@ mod tests {
         assert!((lat - 57.65).abs() < 0.1);
         assert!((lon - 10.41).abs() < 0.1);
     }
+    #[cfg(feature = "web")]
     #[test]
     fn test_parse_ics_basic() {
         let ics = r#"BEGIN:VCALENDAR

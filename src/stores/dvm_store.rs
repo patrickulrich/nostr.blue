@@ -196,12 +196,11 @@ pub async fn request_content_feed(
             *DVM_FEED_ERROR.write() = Some("DVM response timeout".to_string());
             return Err("DVM response timeout - no response received".to_string());
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
-            use gloo_timers::future::TimeoutFuture;
-            TimeoutFuture::new(1000).await;
+            crate::platform::timer::sleep_ms(1000).await;
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(feature = "web"))]
         {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }

@@ -1,9 +1,17 @@
 [application]
 name = "nostrblue"
 default_platform = "web"
-
-# Copy files from public/ to build output root
 asset_dir = "public"
+android_manifest = "android/AndroidManifest.xml"
+android_main_activity = "android/MainActivity.kt"
+android_min_sdk_version = 24
+
+[bundle]
+identifier = "dev.dioxus.main"
+publisher = "nostr.blue"
+icon = ["public/icons/icon-512.png"]
+resources = ["public/*"]
+short_description = "Decentralized social client for Nostr"
 
 [web.app]
 title = "nostr.blue - Decentralized Social Network"
@@ -24,3 +32,9 @@ script = []
 
 # [[web.proxy]]
 # backend = "http://localhost:8000/api"
+
+[desktop.window]
+title = "nostr.blue"
+width = 1280
+height = 800
+resizable = true

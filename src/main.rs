@@ -8,6 +8,7 @@ mod components;
 mod context;
 mod error;
 mod hooks;
+pub mod platform;
 mod routes;
 mod services;
 mod stores;
@@ -15,10 +16,16 @@ mod utils;
 pub use error::{NostrBlueError, Result};
 use components::toast::ToastProvider;
 fn main() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         console_error_panic_hook::set_once();
         wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
+    }
+    #[cfg(feature = "native")]
+    {
+        env_logger::Builder::from_default_env()
+            .filter_level(log::LevelFilter::Info)
+            .init();
     }
     log::info!("Starting nostr.blue Rust client");
     dioxus::launch(App);

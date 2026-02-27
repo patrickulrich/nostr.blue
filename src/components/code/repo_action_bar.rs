@@ -101,7 +101,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
         }
     });
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let pubkey = repo_pubkey_signal.read().clone();
             let id = repo_id_signal.read().clone();
@@ -185,7 +185,7 @@ pub fn RepoActionBar(repo: Repository, naddr: String) -> Element {
     let handle_watch = {
         move |_| {
             let currently_watching = *is_watching.read();
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 let repo_coord = format!(
                     "{}:{}",

@@ -132,12 +132,13 @@ pub async fn resolve_lightning_address(
 ) -> Result<LnurlPayResponse, String> {
     let url = address.lnurlp_url().ok_or("Not a Lightning Address")?;
     log::info!("Resolving Lightning Address: {}", address.original);
-    let response = gloo_net::http::Request::get(&url)
+    let response = reqwest::Client::new()
+        .get(&url)
         .header("Accept", "application/json")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let lnurl_response: LnurlPayResponse = response
@@ -186,12 +187,13 @@ pub async fn request_invoice(
         }
     }
     log::info!("Requesting invoice from: {}", url);
-    let response = gloo_net::http::Request::get(&url)
+    let response = reqwest::Client::new()
+        .get(&url)
         .header("Accept", "application/json")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let invoice_response: LnurlInvoiceResponse = response

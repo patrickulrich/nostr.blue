@@ -1,12 +1,15 @@
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 /// Cleanup guard that destroys player on drop
 #[derive(Clone)]
 struct CleanupGuard {
+    #[allow(dead_code)]
     video_id: String,
 }
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
+        #[cfg(feature = "web")]
         destroyVideoJsPlayer(&self.video_id);
     }
 }
@@ -22,6 +25,7 @@ pub struct LiveStreamPlayerProps {
     #[props(default = true)]
     pub autoplay: bool,
 }
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 // Store for Video.js player instances
@@ -182,29 +186,69 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut loading = use_signal(|| true);
     let mut mounted = use_signal(|| false);
+    #[allow(unused_mut, unused_variables)]
     let mut cleanup_guard = use_signal(|| None::<CleanupGuard>);
     let video_id_str = video_id.read().clone();
     let stream_url_for_effect = stream_url.clone();
     use_effect(move || {
         let video_id = video_id_str.clone();
-        let stream_url = stream_url_for_effect.clone();
+        let _stream_url = stream_url_for_effect.clone();
         if *url_valid.read() {
             mounted.set(true);
+            #[cfg(feature = "web")]
+            {
+                let stream_url = _stream_url;
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(300).await;
+                    if !*mounted.peek() {
+                        return;
+                    }
+                    match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
+                        Ok(_) => {
+                            loading.set(false);
+                            error.set(None);
+                            cleanup_guard
+                                .set(
+                                    Some(CleanupGuard {
+                                        video_id: video_id.clone(),
+                                    }),
+                                );
+                        }
+                        Err(e) => {
+                            let error_msg = format!("Failed to load stream: {:?}", e);
+                            log::error!("{}", error_msg);
+                            error.set(Some(error_msg));
+                            loading.set(false);
+                        }
+                    }
+                });
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = (video_id, _stream_url, autoplay);
+                error.set(Some("Video.js player not supported on native desktop".to_string()));
+                loading.set(false);
+            }
+        } else {
+            error.set(Some("Invalid stream URL".to_string()));
+            loading.set(false);
+        }
+    });
+    let handle_retry = move |_| {
+        error.set(None);
+        loading.set(true);
+        let _video_id = video_id.peek().clone();
+        let _stream_url = stream_url.clone();
+        #[cfg(feature = "web")]
+        {
+            let video_id = _video_id;
+            let stream_url = _stream_url;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(300).await;
-                if !*mounted.peek() {
-                    return;
-                }
+                crate::platform::timer::sleep_ms(100).await;
                 match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
                     Ok(_) => {
                         loading.set(false);
                         error.set(None);
-                        cleanup_guard
-                            .set(
-                                Some(CleanupGuard {
-                                    video_id: video_id.clone(),
-                                }),
-                            );
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to load stream: {:?}", e);
@@ -214,31 +258,13 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
                 }
             });
-        } else {
-            error.set(Some("Invalid stream URL".to_string()));
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            let _ = (_video_id, _stream_url, autoplay);
+            error.set(Some("Video.js player not supported on native desktop".to_string()));
             loading.set(false);
         }
-    });
-    let handle_retry = move |_| {
-        error.set(None);
-        loading.set(true);
-        let video_id = video_id.peek().clone();
-        let stream_url = stream_url.clone();
-        spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(100).await;
-            match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
-                Ok(_) => {
-                    loading.set(false);
-                    error.set(None);
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to load stream: {:?}", e);
-                    log::error!("{}", error_msg);
-                    error.set(Some(error_msg));
-                    loading.set(false);
-                }
-            }
-        });
     };
     if !*url_valid.read() {
         return rsx! {

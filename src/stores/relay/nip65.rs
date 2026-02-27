@@ -13,11 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::stores::nostr_client;
-#[cfg(target_arch = "wasm32")]
-use gloo_storage::{LocalStorage, Storage};
-#[cfg(target_arch = "wasm32")]
-use js_sys;
-#[cfg(not(target_arch = "wasm32"))]
+use crate::platform::storage;
+#[cfg(not(feature = "web"))]
 use std::fs;
 /// Configuration for a single relay with read/write permissions
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -346,13 +343,7 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("No relay lists found: {}, using defaults for Settings", e);
-            #[cfg(target_arch = "wasm32")]
-            let now_secs = (js_sys::Date::now() / 1000.0) as u64;
-            #[cfg(not(target_arch = "wasm32"))]
-            let now_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or(std::time::Duration::ZERO)
-                .as_secs();
+            let now_secs = crate::platform::timestamp::now_secs();
             let default = RelayListMetadata {
                 relays: default_relays(),
                 dm_relays: default_dm_relays(),
@@ -464,14 +455,14 @@ pub async fn fetch_blocked_relays(
 }
 const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
 /// Load local relays from browser LocalStorage
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn load_local_relays() -> Vec<String> {
-    LocalStorage::get::<String>(LOCAL_RELAYS_KEY)
+    storage::get::<String>(LOCAL_RELAYS_KEY)
         .ok()
         .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default()
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn load_local_relays() -> Vec<String> {
     let path = dirs::config_dir()
         .map(|p| { p.join("nostr_blue").join(format!("{}.json", LOCAL_RELAYS_KEY)) });
@@ -486,13 +477,13 @@ pub fn load_local_relays() -> Vec<String> {
     }
 }
 /// Save local relays to browser LocalStorage
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn save_local_relays(relays: &[String]) {
     if let Ok(json) = serde_json::to_string(relays) {
-        let _ = LocalStorage::set(LOCAL_RELAYS_KEY, json);
+        let _ = storage::set(LOCAL_RELAYS_KEY, &json);
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn save_local_relays(relays: &[String]) {
     let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
         return;

@@ -8,7 +8,6 @@ use crate::stores::publication_store::{
 use crate::utils::nkbip08::BookReference;
 use dioxus::prelude::*;
 use dioxus_core::Task;
-use gloo_timers::future::TimeoutFuture;
 /// Validate book identifier (d-tag or chapter) against NKBIP-08 format.
 /// Only lowercase letters, digits, and hyphens are allowed.
 fn is_valid_book_id(input: &str) -> bool {
@@ -194,7 +193,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
             task.cancel();
         }
         let new_task = spawn(async move {
-            TimeoutFuture::new(300).await;
+            crate::platform::timer::sleep_ms(300).await;
             if debounce_counter() != current_counter {
                 return;
             }
@@ -283,13 +282,16 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
     });
     let close_modal = move |_| {
         if *is_searching.read() {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("A search is in progress. Close anyway?").ok()
-                })
-                .unwrap_or(false);
-            if !confirmed {
-                return;
+            #[cfg(feature = "web")]
+            {
+                let confirmed = web_sys::window()
+                    .and_then(|w| {
+                        w.confirm_with_message("A search is in progress. Close anyway?").ok()
+                    })
+                    .unwrap_or(false);
+                if !confirmed {
+                    return;
+                }
             }
         }
         props.show.set(false);
@@ -332,7 +334,7 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 "aria-labelledby": "book-picker-title",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();
@@ -343,14 +345,17 @@ pub fn BookPickerModal(mut props: BookPickerModalProps) -> Element {
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape {
                         if *is_searching.read() {
-                            let confirmed = web_sys::window()
-                                .and_then(|w| {
-                                    w.confirm_with_message("A search is in progress. Close anyway?")
-                                        .ok()
-                                })
-                                .unwrap_or(false);
-                            if !confirmed {
-                                return;
+                            #[cfg(feature = "web")]
+                            {
+                                let confirmed = web_sys::window()
+                                    .and_then(|w| {
+                                        w.confirm_with_message("A search is in progress. Close anyway?")
+                                            .ok()
+                                    })
+                                    .unwrap_or(false);
+                                if !confirmed {
+                                    return;
+                                }
                             }
                         }
                         props.show.set(false);
