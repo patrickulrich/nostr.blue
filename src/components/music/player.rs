@@ -22,6 +22,7 @@ fn format_time(seconds: f64) -> String {
 pub fn PersistentMusicPlayer() -> Element {
     let state = MUSIC_PLAYER.read().clone();
     let mut is_seeking = use_signal(|| false);
+    let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
     let audio_id = "global-music-player-audio";
     // Inject HLS manager JS on non-web platforms.
@@ -172,6 +173,7 @@ pub fn PersistentMusicPlayer() -> Element {
         let last_time = last_synced_time();
         if (current_time - last_time).abs() > 0.5 {
             last_synced_time.set(current_time);
+            let gen = seek_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
             is_seeking.set(true);
             spawn(async move {
                 {
@@ -193,15 +195,11 @@ pub fn PersistentMusicPlayer() -> Element {
                     );
                     let _ = document::eval(&script);
                 }
-                #[cfg(feature = "web")]
-                {
-                    crate::platform::timer::sleep_ms(500).await;
+                crate::platform::timer::sleep_ms(500).await;
+                // Only clear is_seeking if no newer seek has started
+                if *seek_gen.peek() == gen {
+                    is_seeking.set(false);
                 }
-                #[cfg(not(feature = "web"))]
-                {
-                    crate::platform::timer::sleep_ms(500).await;
-                }
-                is_seeking.set(false);
             });
         }
     });

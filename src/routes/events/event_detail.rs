@@ -877,7 +877,7 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
     } else {
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
-        format!("{} {}, {} at {}:{:02} {}", month_names[m], d + 1, y, hour_12, minutes, am_pm)
+        format!("{} {}, {} at {}:{:02} {} UTC", month_names[m], d + 1, y, hour_12, minutes, am_pm)
     }
 }
 
