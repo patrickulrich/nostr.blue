@@ -445,8 +445,9 @@ fn add_days(date: &str, days: i32) -> String {
     #[cfg(feature = "web")]
     {
         let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
-        let ms_per_day = 24.0 * 60.0 * 60.0 * 1000.0;
-        js_date.set_time(js_date.get_time() + (days as f64 * ms_per_day));
+        // Use set_date() for proper date arithmetic instead of millisecond calculations
+        let new_day = (js_date.get_date() as i32 + days).max(1) as u32;
+        js_date.set_date(new_day);
         format!(
             "{:04}-{:02}-{:02}",
             js_date.get_full_year(),
@@ -500,6 +501,11 @@ fn add_months(date: &str, months: i32) -> String {
     #[cfg(feature = "web")]
     {
         let js_date = js_sys::Date::new_with_year_month_day(new_year as u32, new_month, day);
+        // JavaScript Date automatically clamps to month end (e.g., Jan 31 + 1 month = Feb 28/29)
+        // But we need to ensure the day is valid for the target month
+        let max_day = crate::utils::date_helpers::days_in_month(new_year, new_month + 1);
+        let clamped_day = day.min(max_day) as u32;
+        js_date.set_date(clamped_day);
         format!(
             "{:04}-{:02}-{:02}",
             js_date.get_full_year(),
@@ -509,7 +515,10 @@ fn add_months(date: &str, months: i32) -> String {
     }
     #[cfg(not(feature = "web"))]
     {
-        format!("{:04}-{:02}-{:02}", new_year, new_month + 1, day.min(crate::utils::date_helpers::days_in_month(new_year, new_month + 1)))
+        // Clamp day to target month's max days for proper month-end handling
+        let max_day = crate::utils::date_helpers::days_in_month(new_year, new_month + 1);
+        let clamped_day = day.min(max_day);
+        format!("{:04}-{:02}-{:02}", new_year, new_month + 1, clamped_day)
     }
 }
 /// Props for EventTypeFilterRow

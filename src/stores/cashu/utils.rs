@@ -214,14 +214,7 @@ where
                         return Err(e);
                     }
                     heal_attempt += 1;
-                    #[cfg(feature = "web")]
-                    {
-                        crate::platform::timer::sleep_ms(500).await;
-                    }
-                    #[cfg(not(feature = "web"))]
-                    {
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    }
+                    crate::platform::timer::sleep_ms(500).await;
                 } else {
                     return Err(e);
                 }

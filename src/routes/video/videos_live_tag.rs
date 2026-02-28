@@ -14,6 +14,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    let mut fetch_gen = use_signal(|| 0u32);
     use_effect(
         use_reactive(
             (&tag, &*refresh_trigger.read()),
@@ -86,9 +87,18 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 let until = *oldest_timestamp.read();
                                 let current_tag = tag_for_callback.clone();
                                 loading.set(true);
+                                // Increment generation to invalidate any pending fetches
+                                fetch_gen.with_mut(|g| *g = g.wrapping_add(1));
+                                let this_gen = *fetch_gen.read();
                                 spawn(async move {
                                     match load_streams_by_tag(&current_tag, until).await {
                                         Ok((new_events, hit_limit)) => {
+                                            // Verify generation before updating state
+                                            if *fetch_gen.read() != this_gen {
+                                                log::debug!("Stale fetch detected, discarding results");
+                                                loading.set(false);
+                                                return;
+                                            }
                                             let existing_ids: std::collections::HashSet<_> = {
                                                 let current = stream_events.read();
                                                 current.iter().map(|e| e.id).collect()
@@ -106,9 +116,8 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                                             }
                                             has_more.set(hit_limit);
-                                            let mut current = stream_events.read().clone();
-                                            current.extend(unique_events);
-                                            stream_events.set(current);
+                                            // Use write() to extend in place instead of clone
+                                            stream_events.write().extend(unique_events);
                                             loading.set(false);
                                         }
                                         Err(e) => {

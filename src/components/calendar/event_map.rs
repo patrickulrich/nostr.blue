@@ -235,6 +235,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut processed_event_ids = use_signal(String::new);
     let mut geocode_cancelled = use_signal(|| false);
     let mut unmounted = use_signal(|| false);
+    let mut geocode_gen = use_signal(|| 0u32);
     use_drop(move || {
         geocode_cancelled.set(true);
         unmounted.set(true);
@@ -345,6 +346,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     return;
                 }
                 loading_geo.set(true);
+                // Increment generation counter to invalidate any pending tasks
+                geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
+                let this_gen = *geocode_gen.read();
                 let key_to_store = key.clone();
                 let events_to_process = events_for_geocode.clone();
                 spawn(async move {
@@ -406,6 +410,12 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     }
                     if *geocode_cancelled.read() {
                         log::debug!("Geocoding cancelled, not updating signals");
+                        loading_geo.set(false);
+                        return;
+                    }
+                    // Verify generation before updating state
+                    if *geocode_gen.read() != this_gen {
+                        log::debug!("Geocoding generation stale, discarding results");
                         loading_geo.set(false);
                         return;
                     }

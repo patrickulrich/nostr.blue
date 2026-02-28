@@ -142,16 +142,18 @@ generate_icons() {
                 "$dir/ic_launcher_foreground.webp"
         elif [ "$tool" = "cwebp" ]; then
             # cwebp: need intermediate PNG via ffmpeg or other
-            local tmp_png="/tmp/ic_launcher_${density}.png"
+            local tmp_png
+            tmp_png=$(mktemp "/tmp/ic_launcher_${density}.XXXXXX.png")
+            local tmp_fg_png
+            tmp_fg_png=$(mktemp "/tmp/ic_launcher_fg_${density}.XXXXXX.png")
+            trap "rm -f '$tmp_png' '$tmp_fg_png'" RETURN
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$tmp_png" 2>/dev/null
             cwebp -q 90 "$tmp_png" -o "$dir/ic_launcher.webp"
             cp "$dir/ic_launcher.webp" "$dir/ic_launcher_round.webp"
             # Foreground layer
             local fg_size=$((size * 108 / 72))
-            local tmp_fg_png="/tmp/ic_launcher_fg_${density}.png"
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" "$tmp_fg_png" 2>/dev/null
             cwebp -q 90 "$tmp_fg_png" -o "$dir/ic_launcher_foreground.webp"
-            rm -f "$tmp_png" "$tmp_fg_png"
         elif [ "$tool" = "ffmpeg" ]; then
             # ffmpeg can output webp directly
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$dir/ic_launcher.webp" 2>/dev/null

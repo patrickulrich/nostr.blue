@@ -272,15 +272,7 @@ fn detect_mention(
             let mut searching_signal = state.is_searching;
             let mut task_signal = state.relay_search_task;
             let new_task = spawn(async move {
-                #[cfg(feature = "web")]
-                {
-                    crate::platform::timer::sleep_ms(300).await;
-                }
-                #[cfg(not(feature = "web"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+                crate::platform::timer::sleep_ms(300).await;
                 let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {

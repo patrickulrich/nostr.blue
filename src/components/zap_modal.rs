@@ -252,18 +252,12 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             match payment_preference.as_str() {
                 "cashu_first" => {
                     use futures::future::{select, Either};
-                    let timeout = {
-                        #[cfg(feature = "web")]
-                        { gloo_timers::future::TimeoutFuture::new(5000) }
-                        #[cfg(not(feature = "web"))]
-                        { tokio::time::sleep(std::time::Duration::from_millis(5000)) }
+                    let timeout = async {
+                        crate::platform::timer::sleep_ms(5000).await;
                     };
                     let check_done = async {
                         while *checking_nutzap.peek() {
-                            #[cfg(feature = "web")]
-                            gloo_timers::future::TimeoutFuture::new(100).await;
-                            #[cfg(not(feature = "web"))]
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            crate::platform::timer::sleep_ms(100).await;
                         }
                     };
                     match select(Box::pin(timeout), Box::pin(check_done)).await {

@@ -105,14 +105,15 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         selected_verses.set(Vec::new());
         show_toolbar.set(false);
     };
-    #[allow(unused_variables, unused_mut)]
+    #[allow(unused_variables)]
     let copy_verses = {
         let translation = translation_for_copy;
-        let mut selected_verses = selected_verses;
-        let mut show_toolbar = show_toolbar;
+        let selected_verses_for_copy = selected_verses;
+        let mut selected_verses_for_clear = selected_verses;
+        let mut show_toolbar_for_clear = show_toolbar;
         move |_| {
             if let Some(Ok(ref data)) = *chapter_data.read() {
-                let verses = selected_verses.read().clone();
+                let verses = selected_verses_for_copy.read().clone();
                 if verses.is_empty() {
                     return;
                 }
@@ -172,10 +173,11 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         {
                             log::error!("Clipboard write failed: {:?}", e);
                         }
+                        // Clear selection after clipboard operation
+                        selected_verses_for_clear.set(Vec::new());
+                        show_toolbar_for_clear.set(false);
                     });
                 }
-                selected_verses.set(Vec::new());
-                show_toolbar.set(false);
             }
         }
     };

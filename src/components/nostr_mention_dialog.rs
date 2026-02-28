@@ -149,10 +149,7 @@ pub fn NostrMentionDialog(props: NostrMentionDialogProps) -> Element {
                 user_results.set(mapped);
                 is_searching_users.set(true);
                 let new_task = spawn(async move {
-                    #[cfg(feature = "web")]
                     crate::platform::timer::sleep_ms(300).await;
-                    #[cfg(not(feature = "web"))]
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                     match search_profiles(&query_snapshot, 20, true).await {
                         Ok(results) => {
                             if search_query.read().as_str() == query_snapshot.as_str() {

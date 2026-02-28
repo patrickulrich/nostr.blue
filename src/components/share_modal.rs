@@ -215,15 +215,7 @@ pub fn ShareModal(
                         copied.set(true);
                         log::info!("Link copied to clipboard");
                         spawn(async move {
-                            #[cfg(feature = "web")]
-                            {
-                                crate::platform::timer::sleep_ms(2000).await;
-                            }
-                            #[cfg(not(feature = "web"))]
-                            {
-                                tokio::time::sleep(std::time::Duration::from_millis(2000))
-                                    .await;
-                            }
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }

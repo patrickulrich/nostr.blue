@@ -46,7 +46,9 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
             }
             #[cfg(not(feature = "web"))]
             {
-                log::warn!("Clipboard paste not available on this platform");
+                pay_state.set(PayState::Error {
+                    message: "Clipboard paste is only available on web".to_string(),
+                });
             }
         });
     };

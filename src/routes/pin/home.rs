@@ -24,7 +24,7 @@ pub fn PinBoardsHome() -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| None::<Vec<Pinboard>>);
     let mut search_loading = use_signal(|| false);
-    let mut search_version = use_signal(|| 0u64);
+    let mut search_version = use_signal(|| 0u32);
     let mut selected_tag = use_signal(|| None::<String>);
     let mut selected_board = use_signal(|| None::<Pinboard>);
     let mut show_slideover = use_signal(|| false);

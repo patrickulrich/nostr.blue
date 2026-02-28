@@ -1980,10 +1980,7 @@ pub fn start_quote_processor() {
     spawn(async move {
         log::info!("Starting quote state machine processor");
         loop {
-            #[cfg(feature = "web")]
             crate::platform::timer::sleep_ms(30_000).await;
-            #[cfg(not(feature = "web"))]
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             match process_pending_mint_quotes().await {
                 Ok((_checked, paid, amount)) => {
                     if paid > 0 {

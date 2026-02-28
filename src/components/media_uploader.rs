@@ -241,7 +241,7 @@ async fn read_file_as_bytes(
 }
 
 /// Stub for non-web platforms
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 async fn read_file_as_bytes(
     _file_name: &str,
     _input_id: &str,

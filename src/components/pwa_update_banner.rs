@@ -4,28 +4,6 @@ use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
-/// Guard struct that removes the event listener on drop
-#[cfg(feature = "web")]
-#[derive(Clone)]
-struct SwUpdateGuard {
-    callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,
-}
-
-#[cfg(feature = "web")]
-impl Drop for SwUpdateGuard {
-    fn drop(&mut self) {
-        if let Some(callback) = self.callback.write().take() {
-            if let Some(window) = web_sys::window() {
-                let _ = window
-                    .remove_event_listener_with_callback(
-                        "sw-update-available",
-                        callback.as_ref().unchecked_ref(),
-                    );
-            }
-        }
-    }
-}
-
 /// PWA update banner that listens for service worker updates
 #[component]
 pub fn PwaUpdateBanner() -> Element {
@@ -33,9 +11,6 @@ pub fn PwaUpdateBanner() -> Element {
 
     #[cfg(feature = "web")]
     {
-        let mut sw_callback = use_signal(|| {
-            None::<wasm_bindgen::closure::Closure<dyn FnMut()>>
-        });
         use_effect(move || {
             let Some(window) = web_sys::window() else {
                 return;
@@ -51,11 +26,10 @@ pub fn PwaUpdateBanner() -> Element {
                 callback.as_ref().unchecked_ref(),
             ) {
                 log::warn!("Failed to register SW update listener: {:?}", e);
+                return;
             }
-            sw_callback.set(Some(callback));
-        });
-        use_hook(move || SwUpdateGuard {
-            callback: sw_callback,
+            // Forget the closure - the listener lives for the app lifetime
+            callback.forget();
         });
     }
 

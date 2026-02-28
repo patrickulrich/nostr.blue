@@ -508,7 +508,9 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
             #[cfg(not(feature = "web"))]
             {
                 use chrono::{Local, TimeZone, Timelike};
-                let dt = match Local.timestamp_opt(ts as i64, 0).single() {
+                // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
+                let ts_clamped = (ts as u64).min(253_402_300_799) as i64;
+                let dt = match Local.timestamp_opt(ts_clamped, 0).single() {
                     Some(dt) => dt,
                     None => {
                         log::warn!("Invalid timestamp {} fell back to epoch", ts);

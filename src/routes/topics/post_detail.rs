@@ -21,7 +21,7 @@ pub fn TopicPostDetail(topic: String, post_id: String) -> Element {
     use_effect(use_reactive!(|post_id| { post_id_sig.set(post_id); }));
 
     let mut post = use_signal(|| None::<TopicPost>);
-    let mut replies = use_signal(Vec::<TopicThread>::new);
+    let mut replies = use_signal(Vec::<Rc<TopicThread>>::new);
     let mut vote_counts = use_signal(HashMap::<String, VoteCounts>::new);
     let mut loading = use_signal(|| true);
     let has_signer = *HAS_SIGNER.read();

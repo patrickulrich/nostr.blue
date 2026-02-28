@@ -119,7 +119,7 @@ pub fn ArticleNew() -> Element {
         }
         let now = crate::platform::timestamp::now_secs();
         let last_save = *last_auto_save.read();
-        if now - last_save < 30 {
+        if now.saturating_sub(last_save) < 30 {
             return;
         }
         let draft = ArticleDraft {

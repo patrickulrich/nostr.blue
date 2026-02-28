@@ -1092,8 +1092,7 @@ pub async fn consolidate_proofs(
             }
             #[cfg(not(feature = "web"))]
             {
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64))
-                    .await;
+                crate::platform::timer::sleep_ms(delay_ms as u64).await;
             }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }

@@ -169,7 +169,7 @@ pub fn CodeFileViewer(
                                         copied.set(false);
                                     }
                                     Err(e) => {
-                                        log::debug!("Clipboard write failed: {:?}", e);
+                                        log::error!("Clipboard write failed: {:?}", e);
                                     }
                                 }
                             });

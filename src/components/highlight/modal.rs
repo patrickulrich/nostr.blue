@@ -163,7 +163,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                                 }
                             },
                         }
-                        p { class: "text-xs text-muted-foreground", "Press Ctrl+Enter to save" }
+                        p { class: "text-xs text-muted-foreground", "Press Ctrl/⌘+Enter to save" }
                     }
                 }
                 div { class: "flex justify-end gap-3 p-4 border-t border-border",

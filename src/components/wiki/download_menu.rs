@@ -63,7 +63,6 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                 div { class: "absolute right-0 mt-2 w-56 bg-background border border-border rounded-lg shadow-lg z-50 py-1 overflow-hidden",
                     // Print to PDF option
                     {
-                        let toast_api = toast;
                         rsx! {
                             button {
                                 class: "w-full text-left px-4 py-2.5 hover:bg-accent transition-colors flex items-center gap-3",
@@ -71,14 +70,16 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     e.stop_propagation();
                                     is_open.set(false);
                                     #[cfg(feature = "web")]
-                                    trigger_print();
-                                    toast_api.info(
-                                        "Print dialog opened".to_string(),
-                                        ToastOptions::new()
-                                            .description("Select 'Save as PDF' to download".to_string())
-                                            .duration(Duration::from_secs(3))
-                                            .permanent(false),
-                                    );
+                                    {
+                                        trigger_print();
+                                        toast.info(
+                                            "Print dialog opened".to_string(),
+                                            ToastOptions::new()
+                                                .description("Select 'Save as PDF' to download".to_string())
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                    }
                                 },
                                 PrinterIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                                 div { class: "flex-1",

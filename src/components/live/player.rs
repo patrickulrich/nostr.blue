@@ -194,7 +194,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     use_effect(move || {
         let video_id = video_id_str.clone();
         let _stream_url = stream_url_for_effect.clone();
-        let gen = init_gen.with_mut(|g| { *g += 1; *g });
+        let gen = init_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
         if *url_valid.read() {
             mounted.set(true);
             #[cfg(feature = "web")]

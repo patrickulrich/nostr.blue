@@ -417,9 +417,12 @@ async fn generate_wavlake_lnurl_invoice(
         .map_err(|e| format!("Failed to decode LNURL: {}", e))?;
     log::info!("Decoded LNURL to: {}", lnurl_pay_url);
     log::info!("Fetching LNURL-pay parameters from: {}", lnurl_pay_url);
-    let params: LnurlPayParams = reqwest::get(&lnurl_pay_url)
+    let response = crate::platform::http::http_client()
+        .get(&lnurl_pay_url)
+        .send()
         .await
-        .map_err(|e| format!("Failed to fetch LNURL-pay params: {}", e))?
+        .map_err(|e| format!("Failed to fetch LNURL-pay params: {}", e))?;
+    let params: LnurlPayParams = response
         .error_for_status()
         .map_err(|e| format!("LNURL-pay server error: {}", e))?
         .json()

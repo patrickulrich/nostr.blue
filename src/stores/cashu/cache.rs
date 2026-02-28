@@ -468,7 +468,7 @@ pub async fn cached_fetch(url: &str, default_ttl: u64) -> Result<String, String>
         }
     }
     log::debug!("Cache miss for {}, fetching...", url);
-    let response = reqwest::Client::new()
+    let response = crate::platform::http::http_client()
         .get(url)
         .header("Accept", "application/json")
         .send()

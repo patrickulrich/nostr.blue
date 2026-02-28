@@ -78,7 +78,11 @@ pub fn close_connection(mint_url: &str) {
     }
     WS_CLOSURES
         .with(|closures| {
-            closures.borrow_mut().remove(mint_url);
+            let mut map = closures.borrow_mut();
+            map.remove(mint_url);
+            // Also remove proof-states subscription if present
+            let proof_states_key = format!("{}:proof_states", mint_url);
+            map.remove(&proof_states_key);
         });
     log::info!("Cleaned up WebSocket resources for {}", mint_url);
 }
@@ -477,7 +481,9 @@ pub async fn poll_quote_status(
     } else {
         format!("{}/v1/melt/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
     };
-    let response = reqwest::get(&endpoint)
+    let response = crate::platform::http::http_client()
+        .get(&endpoint)
+        .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
     if !response.status().is_success() {

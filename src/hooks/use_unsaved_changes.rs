@@ -3,6 +3,7 @@
 //! Provides dirty state tracking and browser navigation warnings
 //! for forms with important content (articles, drafts, etc.)
 use dioxus::prelude::*;
+use dioxus_core::use_drop;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 #[cfg(feature = "web")]
@@ -86,6 +87,9 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
     {
         use_effect(move || {
             register_beforeunload(is_dirty);
+            use_drop(|| {
+                unregister_beforeunload();
+            });
         });
     }
     UseUnsavedChanges {
