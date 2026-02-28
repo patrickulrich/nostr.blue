@@ -14,6 +14,24 @@ use crate::utils::podcast::{
     ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
 };
 use serde::{Deserialize, Serialize};
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            reqwest::Client::new()
+        }
+    })
+}
+
 /// Full Podcasting 2.0 podcast representation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RssPodcast {
@@ -148,7 +166,9 @@ pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
     } else {
         url.to_string()
     };
-    let response = reqwest::get(&fetch_url)
+    let response = http_client()
+        .get(&fetch_url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch RSS feed from {}: {}", fetch_url, e))?;
     if !response.status().is_success() {
@@ -418,7 +438,9 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
 /// Note: For browser use, prefer podcast_index::fetch_chapters_proxied
 #[allow(dead_code)]
 pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
-    let response = reqwest::get(url)
+    let response = http_client()
+        .get(url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch chapters: {}", e))?;
     if !response.status().is_success() {
@@ -433,7 +455,9 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
 /// Note: For browser use, prefer podcast_index::fetch_transcript_proxied
 #[allow(dead_code)]
 pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, String> {
-    let response = reqwest::get(&transcript.url)
+    let response = http_client()
+        .get(&transcript.url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch transcript: {}", e))?;
     if !response.status().is_success() {

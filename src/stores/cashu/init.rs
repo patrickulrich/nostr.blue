@@ -146,7 +146,6 @@ pub async fn init_wallet() -> Result<(), String> {
                         start_pending_events_processor();
                         *WALLET_STATUS.write() = WalletStatus::Recovering;
                         spawn(async move {
-                            #[cfg(feature = "web")]
                             crate::platform::timer::sleep_ms(500).await;
                             super::signals::cleanup_expired_pending_secrets().await;
                             match super::recovery::sync_orphaned_cdk_proofs_to_nostr()

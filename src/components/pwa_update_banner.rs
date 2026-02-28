@@ -46,12 +46,12 @@ pub fn PwaUpdateBanner() -> Element {
                     update_available.set(true);
                 }) as Box<dyn FnMut()>,
             );
-            window
-                .add_event_listener_with_callback(
-                    "sw-update-available",
-                    callback.as_ref().unchecked_ref(),
-                )
-                .ok();
+            if let Err(e) = window.add_event_listener_with_callback(
+                "sw-update-available",
+                callback.as_ref().unchecked_ref(),
+            ) {
+                log::warn!("Failed to register SW update listener: {:?}", e);
+            }
             sw_callback.set(Some(callback));
         });
         use_hook(move || SwUpdateGuard {

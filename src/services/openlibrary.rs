@@ -4,6 +4,23 @@
 //! No API key required. Covers can be fetched via direct URL construction.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            reqwest::Client::new()
+        }
+    })
+}
 /// Base URL for OpenLibrary covers
 const COVERS_BASE_URL: &str = "https://covers.openlibrary.org/b";
 /// Base URL for OpenLibrary API
@@ -138,14 +155,7 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
         API_BASE_URL,
         bibkey,
     );
-    #[cfg(not(feature = "web"))]
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-    #[cfg(feature = "web")]
-    let client = reqwest::Client::new();
-    let response = client.get(&url).send()
+    let response = http_client().get(&url).send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {

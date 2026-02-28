@@ -40,7 +40,10 @@ pub fn get_month_from_date(date: &str) -> u32 {
 }
 /// Get day number as display string (leading zeros stripped) from a date string
 pub fn get_day_number(date: &str) -> String {
-    date.split('-').nth(2).map(|d| d.trim_start_matches('0')).unwrap_or("?").to_string()
+    date.split('-').nth(2).map(|d| {
+        let trimmed = d.trim_start_matches('0');
+        if trimmed.is_empty() { "?" } else { trimmed }
+    }).unwrap_or("?").to_string()
 }
 /// Generate a 6-week calendar grid (42 dates) starting from the Sunday
 /// before the first day of the month containing the given date.

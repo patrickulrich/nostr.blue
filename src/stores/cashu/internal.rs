@@ -190,7 +190,7 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
 }
 #[cfg(not(feature = "web"))]
 pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
-    Err("Seed derivation only available in WASM".to_string())
+    Err("Seed derivation requires the \"web\" feature (NIP-07 browser extension)".to_string())
 }
 pub(crate) use super::errors::{
     is_insufficient_funds_error_string, is_token_already_spent_error,

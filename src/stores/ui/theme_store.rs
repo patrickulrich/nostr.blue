@@ -46,7 +46,9 @@ pub fn set_theme_internal(theme: Theme) {
         return;
     }
     *THEME.write() = theme;
-    storage::set(STORAGE_KEY, &theme.as_str()).ok();
+    if let Err(e) = storage::set(STORAGE_KEY, &theme.as_str()) {
+        log::warn!("Failed to persist theme to storage: {}", e);
+    }
     log::info!("Theme changed to: {:?}", theme);
     apply_theme();
 }
@@ -102,7 +104,9 @@ pub fn apply_theme() {
         };
         let js = format!("document.documentElement.setAttribute('class', '{}')", class);
         dioxus::prelude::spawn(async move {
-            let _ = dioxus::prelude::document::eval(&js).await;
+            if let Err(e) = dioxus::prelude::document::eval(&js).await {
+                log::warn!("Failed to apply theme on native: {:?}", e);
+            }
         });
     }
 }

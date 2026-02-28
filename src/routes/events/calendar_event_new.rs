@@ -980,7 +980,8 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
     let era_days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + day - 1;
     let days = era_days - 719468; // days_from_civil(1970, 1, 1) = 719468
-    (days * 86400 + hours * 3600 + minutes * 60) as u64
+    let total_secs = days * 86400 + hours * 3600 + minutes * 60;
+    if total_secs < 0 { 0u64 } else { total_secs as u64 }
 }
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in local time
 #[cfg(feature = "web")]

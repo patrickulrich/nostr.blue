@@ -9,13 +9,29 @@ use crate::utils::nip98 as nip98_utils;
 use crate::utils::validation::parse_http_url;
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            reqwest::Client::new()
+        }
+    })
+}
 /// Make an authenticated GET request to the Podcast Index proxy
 async fn authenticated_get<T: for<'de> Deserialize<'de>>(
     url: &str,
 ) -> Result<T, String> {
     let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET)
         .await?;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
@@ -426,7 +442,7 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
@@ -450,7 +466,7 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
     log::debug!("[podcast_index] fetching {} via proxy", resource_type);
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()

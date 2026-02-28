@@ -3,7 +3,13 @@ set -e
 
 # Android SDK/NDK paths
 ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
-ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/27.0.12077973}"
+if [ -z "$ANDROID_NDK_HOME" ]; then
+    if [ -d "$ANDROID_HOME/ndk" ] && [ "$(ls -A "$ANDROID_HOME/ndk" 2>/dev/null)" ]; then
+        ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | sort -V | tail -n1)"
+    else
+        ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+    fi
+fi
 ANDROID_SDK_ROOT="$ANDROID_HOME"
 export ANDROID_HOME ANDROID_NDK_HOME ANDROID_SDK_ROOT
 

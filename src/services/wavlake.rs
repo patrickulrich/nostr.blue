@@ -1,4 +1,20 @@
 use serde::{Deserialize, Serialize};
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            reqwest::Client::new()
+        }
+    })
+}
 /// Wavlake API base URL
 const WAVLAKE_API_BASE: &str = "https://wavlake.com/api/v1";
 /// A track from Wavlake
@@ -141,7 +157,9 @@ impl WavlakeAPI {
             self.base_url,
             urlencoding::encode(term),
         );
-        let response = reqwest::get(&url)
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("Search request failed: {}", e))?;
         if !response.status().is_success() {
@@ -184,7 +202,9 @@ impl WavlakeAPI {
             .collect::<Vec<_>>()
             .join("&");
         let url = format!("{}/content/rankings?{}", self.base_url, query_string);
-        let response = reqwest::get(&url)
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("Rankings request failed: {}", e))?;
         if !response.status().is_success() {
@@ -195,7 +215,9 @@ impl WavlakeAPI {
     /// Get a specific track
     pub async fn get_track(&self, track_id: &str) -> Result<WavlakeTrack, String> {
         let url = format!("{}/content/track/{}", self.base_url, track_id);
-        let response = reqwest::get(&url)
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("Track request failed: {}", e))?;
         if !response.status().is_success() {
@@ -210,7 +232,9 @@ impl WavlakeAPI {
     /// Get an artist's information
     pub async fn get_artist(&self, artist_id: &str) -> Result<WavlakeArtist, String> {
         let url = format!("{}/content/artist/{}", self.base_url, artist_id);
-        let response = reqwest::get(&url)
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("Artist request failed: {}", e))?;
         if !response.status().is_success() {
@@ -221,7 +245,9 @@ impl WavlakeAPI {
     /// Get an album's information
     pub async fn get_album(&self, album_id: &str) -> Result<WavlakeAlbum, String> {
         let url = format!("{}/content/album/{}", self.base_url, album_id);
-        let response = reqwest::get(&url)
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("Album request failed: {}", e))?;
         if !response.status().is_success() {
@@ -235,7 +261,9 @@ impl WavlakeAPI {
         playlist_id: &str,
     ) -> Result<WavlakePlaylist, String> {
         let url = format!("{}/content/playlist/{}", self.base_url, playlist_id);
-        let response = reqwest::get(&url)
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("Playlist request failed: {}", e))?;
         if !response.status().is_success() {
@@ -254,8 +282,10 @@ impl WavlakeAPI {
         } else {
             format!("{}/lnurl?contentId={}", self.base_url, content_id)
         };
-        log::info!("Requesting LNURL from: {}", url);
-        let response = reqwest::get(&url)
+        log::debug!("Requesting LNURL from: {}", url);
+        let response = http_client()
+            .get(&url)
+            .send()
             .await
             .map_err(|e| format!("LNURL request failed: {}", e))?;
         if !response.status().is_success() {

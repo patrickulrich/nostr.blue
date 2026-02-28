@@ -289,6 +289,8 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
             return Some(IcsDateTime::DateTime(ts));
         }
     } else if let Some(tz) = tzid {
+        // TODO: TZID datetime is treated as UTC. Proper conversion requires chrono-tz.
+        // The timezone string is preserved in DateTimeWithTz for display purposes.
         if let Some(ts) = parse_ics_local_datetime(value) {
             return Some(IcsDateTime::DateTimeWithTz {
                 timestamp: ts,
@@ -312,12 +314,7 @@ fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     if clean.len() < 15 {
         return None;
     }
-    let formatted = format!(
-        "{}-{}-{}T{}:{}:{}",
-        &clean[0..4], &clean[4..6], &clean[6..8],
-        &clean[9..11], &clean[11..13], &clean[13..15]
-    );
-    let ndt = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%dT%H:%M:%S").ok()?;
+    let ndt = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S").ok()?;
     let ts = ndt.and_utc().timestamp();
     if ts < 0 { return None; }
     Some(ts as u64)
@@ -329,12 +326,8 @@ fn parse_ics_local_datetime(value: &str) -> Option<u64> {
         return None;
     }
     use chrono::NaiveDateTime;
-    let formatted = format!(
-        "{}-{}-{}T{}:{}:{}",
-        &value[0..4], &value[4..6], &value[6..8],
-        &value[9..11], &value[11..13], &value[13..15]
-    );
-    let ndt = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%dT%H:%M:%S").ok()?;
+    let clean = value.trim_end_matches('Z');
+    let ndt = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S").ok()?;
     // Treat as UTC when no timezone info is available
     let ts = ndt.and_utc().timestamp();
     if ts < 0 { return None; }

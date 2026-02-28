@@ -399,14 +399,20 @@ fn format_day_header(date_str: &str) -> String {
     }
     #[cfg(not(feature = "web"))]
     {
-        let year: u32 = parts[0].parse().unwrap_or(2024);
+        let year: i32 = parts[0].parse().unwrap_or(2024);
+        let (y, m) = if month <= 2 { (year - 1, month + 12) } else { (year, month) };
+        let weekday = ((day + (13 * (m + 1)) / 5 + y + y / 4 - y / 100 + y / 400) % 7 + 6) % 7;
+        const WEEKDAY_NAMES: [&str; 7] = [
+            "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+        ];
         const MONTH_NAMES: [&str; 12] = [
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
         ];
+        let weekday_name = WEEKDAY_NAMES.get(weekday as usize).unwrap_or(&"");
         let month_idx = month.saturating_sub(1) as usize;
         let month_name = MONTH_NAMES.get(month_idx).unwrap_or(&"");
-        format!("{} {}, {}", month_name, day, year)
+        format!("{}, {} {}, {}", weekday_name, month_name, day, year)
     }
 }
 /// Get week dates for a given date
@@ -502,7 +508,13 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
             #[cfg(not(feature = "web"))]
             {
                 use chrono::{Local, TimeZone, Timelike};
-                let dt = Local.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+                let dt = match Local.timestamp_opt(ts as i64, 0).single() {
+                    Some(dt) => dt,
+                    None => {
+                        log::warn!("Invalid timestamp {} fell back to epoch", ts);
+                        Local.timestamp_opt(0, 0).single().unwrap_or_default()
+                    }
+                };
                 (dt.hour() * 60 + dt.minute()) as f32
             }
         };

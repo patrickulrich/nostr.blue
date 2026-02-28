@@ -77,7 +77,9 @@ pub fn CommunityPostComposer(
                 }
                 #[cfg(not(feature = "web"))]
                 {
-                    true // On native, just allow closing
+                    // TODO: Native dialog support — implement crate::platform::dialog::confirm_discard
+                    log::debug!("Native confirm dialog not available, allowing close");
+                    true
                 }
             };
             if confirmed {

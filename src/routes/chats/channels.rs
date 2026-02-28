@@ -29,8 +29,8 @@ pub fn Chats() -> Element {
     let mut search_query = use_signal(String::new);
     let mut search_results = use_signal(|| None::<Vec<Channel>>);
     let mut search_loading = use_signal(|| false);
-    let mut search_version = use_signal(|| 0u64);
-    let mut load_request_id = use_signal(|| 0u64);
+    let mut search_version = use_signal(|| 0u32);
+    let mut load_request_id = use_signal(|| 0u32);
 
     // Initial load
     use_effect(move || {

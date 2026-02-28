@@ -74,7 +74,7 @@ pub fn VoiceRecorder(
                                 let monitor_state = state;
                                 let monitor_is_mounted = is_mounted;
                                 spawn(async move {
-                                    let started_at = crate::platform::timestamp::now_secs() as f64;
+                                    let started_at = crate::platform::timestamp::now_millis() as f64;
                                     log::info!("Monitoring loop started at: {}", started_at);
                                     let mut last_logged_second: i32 = -1;
                                     loop {
@@ -87,7 +87,7 @@ pub fn VoiceRecorder(
                                         }
                                         let current_state = monitor_state.read().clone();
                                         if let RecorderState::Recording { .. } = current_state {
-                                            let elapsed = (crate::platform::timestamp::now_secs() as f64) - started_at;
+                                            let elapsed = (crate::platform::timestamp::now_millis() as f64 - started_at) / 1000.0;
                                             monitor_current_time.set(elapsed);
                                             let current_second = elapsed as i32;
                                             if current_second != last_logged_second {

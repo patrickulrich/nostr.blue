@@ -6,28 +6,6 @@ use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-/// Guard struct that removes scroll listener on drop
-/// Note: Clone is required by use_hook but should not be manually called.
-/// The Signal ensures cleanup happens correctly even if cloned by the hook.
-#[cfg(feature = "web")]
-#[derive(Clone)]
-struct ScrollListenerGuard {
-    callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,
-}
-#[cfg(feature = "web")]
-impl Drop for ScrollListenerGuard {
-    fn drop(&mut self) {
-        if let Some(callback) = self.callback.write().take() {
-            if let Some(window) = web_sys::window() {
-                let _ = window
-                    .remove_event_listener_with_callback(
-                        "scroll",
-                        callback.as_ref().unchecked_ref(),
-                    );
-            }
-        }
-    }
-}
 #[component]
 pub fn VideosLiveTag(tag: String) -> Element {
     let mut stream_events = use_signal(Vec::<Event>::new);
@@ -87,19 +65,19 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 .ok();
                         }
                     }
-                    let window = web_sys::window().expect("no global window");
+                    let Some(window) = web_sys::window() else { return; };
                     let tag_for_callback = current_tag.clone();
                     let callback = wasm_bindgen::closure::Closure::wrap(
                         Box::new(move || {
-                            let window = web_sys::window().expect("no global window");
+                            let Some(window) = web_sys::window() else { return; };
                             let scroll_y = window.scroll_y().unwrap_or(0.0);
                             let inner_height = window
                                 .inner_height()
-                                .unwrap()
-                                .as_f64()
+                                .ok()
+                                .and_then(|v| v.as_f64())
                                 .unwrap_or(0.0);
-                            let document = window.document().expect("no document");
-                            let body = document.body().expect("no body");
+                            let Some(document) = window.document() else { return; };
+                            let Some(body) = document.body() else { return; };
                             let scroll_height = body.scroll_height() as f64;
                             if scroll_y + inner_height >= scroll_height - 1000.0 {
                                 if *loading.read() || !*has_more.read() {
@@ -152,8 +130,15 @@ pub fn VideosLiveTag(tag: String) -> Element {
                 },
             ),
         );
-        use_hook(move || ScrollListenerGuard {
-            callback: scroll_callback,
+        use_drop(move || {
+            if let Some(callback) = scroll_callback.write().take() {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.remove_event_listener_with_callback(
+                        "scroll",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                }
+            }
         });
     }
     rsx! {

@@ -161,17 +161,26 @@ pub fn PinBoardsHome() -> Element {
     let mut fetch_zap_metadata = move |board: Pinboard| {
         let pubkey_str = board.pubkey.clone();
         zap_board.set(Some(board));
+        zap_author_metadata.set(None); // Clear stale metadata
         show_zap_modal.set(true);
         spawn(async move {
             if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
                 if let Some(client) = get_client() {
-                    if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
-                        zap_author_metadata.set(Some(metadata));
-                    } else if let Ok(Some(metadata)) = client
+                    let metadata = if let Ok(Some(m)) = client.database().metadata(pubkey).await {
+                        Some(m)
+                    } else if let Ok(Some(m)) = client
                         .fetch_metadata(pubkey, Duration::from_secs(5))
                         .await
                     {
-                        zap_author_metadata.set(Some(metadata));
+                        Some(m)
+                    } else {
+                        None
+                    };
+                    if let Some(m) = metadata {
+                        // Only set if board hasn't changed
+                        if zap_board.read().as_ref().map(|b| b.pubkey.as_str()) == Some(pubkey_str.as_str()) {
+                            zap_author_metadata.set(Some(m));
+                        }
                     }
                 }
             }

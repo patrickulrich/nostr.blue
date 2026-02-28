@@ -384,6 +384,9 @@ pub fn VoiceMessageCard(
     };
     let navigator = use_navigator();
     let voice_id_for_nav = event_id_str.clone();
+    // TODO: Native click guard — on native platforms, clicks on interactive elements
+    // (links, buttons, audio controls) should not trigger navigation. Requires a
+    // non-web-sys approach to detect interactive targets.
     let navigate_to_detail = move |_evt: Event<MouseData>| {
         #[cfg(feature = "web")]
         {

@@ -11,10 +11,26 @@ use crate::services::git_hosting::{
 };
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use reqwest::Client;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            reqwest::Client::new()
+        }
+    })
+}
 
 /// Single commit detail with diff
 #[derive(Debug, Clone, PartialEq)]
@@ -336,7 +352,7 @@ async fn fetch_commit_detail(
     );
 
     // Fetch JSON metadata (includes files[].patch for diff)
-    let meta_resp = Client::new()
+    let meta_resp = http_client()
         .get(&api_url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")

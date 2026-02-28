@@ -204,8 +204,13 @@ pub fn MusicZapDialog() -> Element {
                         inv_json,
                     );
                     match js_sys::eval(&script) {
-                        Ok(_) => log::info!("WebLN payment initiated"),
-                        Err(e) => log::error!("WebLN payment failed: {:?}", e),
+                        Ok(promise) => {
+                            match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise)).await {
+                                Ok(result) => log::info!("WebLN payment completed: {:?}", result),
+                                Err(e) => log::error!("WebLN payment rejected: {:?}", e),
+                            }
+                        }
+                        Err(e) => log::error!("WebLN eval failed: {:?}", e),
                     }
                 }
                 #[cfg(not(feature = "web"))]
@@ -415,6 +420,8 @@ async fn generate_wavlake_lnurl_invoice(
     let params: LnurlPayParams = reqwest::get(&lnurl_pay_url)
         .await
         .map_err(|e| format!("Failed to fetch LNURL-pay params: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("LNURL-pay server error: {}", e))?
         .json()
         .await
         .map_err(|e| format!("Failed to parse LNURL-pay params: {}", e))?;

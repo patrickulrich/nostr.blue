@@ -3,6 +3,22 @@
 //! Supports human-readable payment addresses like user@domain.com
 //! which can be resolved to Lightning invoices or LNURL endpoints.
 #![allow(dead_code)]
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            reqwest::Client::new()
+        }
+    })
+}
 /// Type of payment address
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddressType {
@@ -132,7 +148,7 @@ pub async fn resolve_lightning_address(
 ) -> Result<LnurlPayResponse, String> {
     let url = address.lnurlp_url().ok_or("Not a Lightning Address")?;
     log::info!("Resolving Lightning Address: {}", address.original);
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(&url)
         .header("Accept", "application/json")
         .send()
@@ -187,7 +203,7 @@ pub async fn request_invoice(
         }
     }
     log::info!("Requesting invoice from: {}", url);
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(&url)
         .header("Accept", "application/json")
         .send()
