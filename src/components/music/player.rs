@@ -384,33 +384,20 @@ pub fn PersistentMusicPlayer() -> Element {
         0.0
     };
     let onerror_handler = move |_evt| {
+        // On mobile, playback is managed entirely via document::eval.
+        // The RSX audio element has src="" which fires onerror immediately.
+        // Suppress all DOM onerror on mobile — eval handles its own errors.
         #[cfg(not(feature = "web"))]
         {
-            // On mobile, suppress errors from empty src and HLS-managed streams
-            let is_hls = MUSIC_PLAYER
-                .read()
-                .current_track
-                .as_ref()
-                .map(|t| t.media_url.contains(".m3u8"))
-                .unwrap_or(false);
-            if is_hls {
-                return; // HLS errors handled by hlsManager
-            }
-            // Empty src="" fires onerror on mobile — ignore it
-            let has_src = MUSIC_PLAYER
-                .read()
-                .current_track
-                .as_ref()
-                .map(|t| !t.media_url.is_empty())
-                .unwrap_or(false);
-            if !has_src {
-                return;
-            }
+            return;
         }
-        log::warn!("Audio playback error, attempting fallback...");
-        music_player::set_buffering(false);
-        if !music_player::try_next_stream() {
-            log::error!("All streams failed");
+        #[cfg(feature = "web")]
+        {
+            log::warn!("Audio playback error, attempting fallback...");
+            music_player::set_buffering(false);
+            if !music_player::try_next_stream() {
+                log::error!("All streams failed");
+            }
         }
     };
     rsx! {
