@@ -428,8 +428,7 @@ fn WalletSection() -> Element {
         let toast = toast;
         spawn(async move {
             if let Err(e) = nwc_store::refresh_balance().await {
-                #[cfg(feature = "web")]
-                web_sys::console::error_1(&format!("Failed to refresh balance: {}", e).into());
+                log::error!("Failed to refresh balance: {}", e);
                 toast.error(
                     format!("Failed to refresh balance: {}", e),
                     ToastOptions::new()
