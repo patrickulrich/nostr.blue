@@ -931,13 +931,15 @@ pub fn CalendarEventNew() -> Element {
 }
 #[cfg(feature = "web")]
 fn get_local_timezone() -> String {
-    let result = js_sys::eval("Intl.DateTimeFormat().resolvedOptions().timeZone");
-    if let Ok(tz) = result {
-        if let Some(s) = tz.as_string() {
-            return s;
-        }
-    }
-    "UTC".to_string()
+    let formatter = js_sys::Intl::DateTimeFormat::new(
+        &js_sys::Array::new(),
+        &js_sys::Object::new(),
+    );
+    let resolved = formatter.resolved_options();
+    js_sys::Reflect::get(&resolved, &"timeZone".into())
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_else(|| "UTC".to_string())
 }
 
 #[cfg(not(feature = "web"))]
@@ -1103,8 +1105,8 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
 }
 
 #[cfg(not(feature = "web"))]
-fn timestamp_to_date_time_in_tz(ts: u64, _tz: &str) -> (String, String) {
-    // On native, fall back to UTC conversion
+fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
+    log::debug!("Timezone '{}' ignored on native, using UTC for ts={}", tz, ts);
     timestamp_to_date_time(ts)
 }
 

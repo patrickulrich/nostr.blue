@@ -101,7 +101,7 @@ pub fn PinBoardsHome() -> Element {
         }
         let version = search_version
             .with_mut(|v| {
-                *v += 1;
+                *v = v.wrapping_add(1);
                 *v
             });
         search_loading.set(true);
@@ -157,6 +157,25 @@ pub fn PinBoardsHome() -> Element {
         tags.sort();
         tags.dedup();
         tags.into_iter().take(20).collect()
+    };
+    let mut fetch_zap_metadata = move |board: Pinboard| {
+        let pubkey_str = board.pubkey.clone();
+        zap_board.set(Some(board));
+        show_zap_modal.set(true);
+        spawn(async move {
+            if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
+                if let Some(client) = get_client() {
+                    if let Ok(Some(metadata)) = client.database().metadata(pubkey).await {
+                        zap_author_metadata.set(Some(metadata));
+                    } else if let Ok(Some(metadata)) = client
+                        .fetch_metadata(pubkey, Duration::from_secs(5))
+                        .await
+                    {
+                        zap_author_metadata.set(Some(metadata));
+                    }
+                }
+            }
+        });
     };
     #[allow(clippy::type_complexity)]
     let zap_modal_data: Option<
@@ -304,24 +323,7 @@ pub fn PinBoardsHome() -> Element {
                                     show_slideover.set(true);
                                 },
                                 on_zap_request: move |board: Pinboard| {
-                                    let pubkey_str = board.pubkey.clone();
-                                    zap_board.set(Some(board));
-                                    show_zap_modal.set(true);
-                                    spawn(async move {
-                                        if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
-                                            if let Some(client) = get_client() {
-                                                if let Ok(Some(metadata)) = client.database().metadata(pubkey).await
-                                                {
-                                                    zap_author_metadata.set(Some(metadata));
-                                                } else if let Ok(Some(metadata)) = client
-                                                    .fetch_metadata(pubkey, Duration::from_secs(5))
-                                                    .await
-                                                {
-                                                    zap_author_metadata.set(Some(metadata));
-                                                }
-                                            }
-                                        }
-                                    });
+                                    fetch_zap_metadata(board);
                                 },
                                 loading: false,
                                 has_more: false,
@@ -364,24 +366,7 @@ pub fn PinBoardsHome() -> Element {
                                 show_slideover.set(true);
                             },
                             on_zap_request: move |board: Pinboard| {
-                                let pubkey_str = board.pubkey.clone();
-                                zap_board.set(Some(board));
-                                show_zap_modal.set(true);
-                                spawn(async move {
-                                    if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
-                                        if let Some(client) = get_client() {
-                                            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await
-                                            {
-                                                zap_author_metadata.set(Some(metadata));
-                                            } else if let Ok(Some(metadata)) = client
-                                                .fetch_metadata(pubkey, Duration::from_secs(5))
-                                                .await
-                                            {
-                                                zap_author_metadata.set(Some(metadata));
-                                            }
-                                        }
-                                    }
-                                });
+                                fetch_zap_metadata(board);
                             },
                             loading: false,
                             on_load_more: Some(handle_load_more),

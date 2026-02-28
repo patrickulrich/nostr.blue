@@ -433,18 +433,6 @@ fn format_month_header(date: &str) -> String {
     ];
     format!("{} {}", month_names[(month - 1) as usize], year)
 }
-#[cfg(not(feature = "web"))]
-fn is_leap_year(year: i32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
-}
-#[cfg(not(feature = "web"))]
-fn days_in_month_for(year: i32, month: i32) -> i32 {
-    match month {
-        1 => if is_leap_year(year) { 29 } else { 28 },
-        3 | 5 | 8 | 10 => 30,
-        _ => 31,
-    }
-}
 /// Add days to a date
 fn add_days(date: &str, days: i32) -> String {
     let parts: Vec<&str> = date.split('-').collect();
@@ -473,8 +461,8 @@ fn add_days(date: &str, days: i32) -> String {
         let mut y = year;
         let mut m = month; // 0-indexed
         let mut d = total_days;
-        while d > days_in_month_for(y, m) {
-            d -= days_in_month_for(y, m);
+        while d > crate::utils::date_helpers::days_in_month(y, m + 1) {
+            d -= crate::utils::date_helpers::days_in_month(y, m + 1);
             m += 1;
             if m >= 12 {
                 m -= 12;
@@ -487,7 +475,7 @@ fn add_days(date: &str, days: i32) -> String {
                 m += 12;
                 y -= 1;
             }
-            d += days_in_month_for(y, m);
+            d += crate::utils::date_helpers::days_in_month(y, m + 1);
         }
         format!("{:04}-{:02}-{:02}", y, m + 1, d)
     }
@@ -521,7 +509,7 @@ fn add_months(date: &str, months: i32) -> String {
     }
     #[cfg(not(feature = "web"))]
     {
-        format!("{:04}-{:02}-{:02}", new_year, new_month + 1, day.min(days_in_month_for(new_year, new_month)))
+        format!("{:04}-{:02}-{:02}", new_year, new_month + 1, day.min(crate::utils::date_helpers::days_in_month(new_year, new_month + 1)))
     }
 }
 /// Props for EventTypeFilterRow

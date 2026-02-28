@@ -4,6 +4,23 @@
 #![allow(dead_code)]
 use reqwest::Client;
 use serde::Deserialize;
+
+fn github_client() -> &'static Client {
+    static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .expect("Failed to create GitHub HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            Client::new()
+        }
+    })
+}
 /// GitHub repository metadata
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GitHubRepo {
@@ -73,7 +90,7 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 /// Fetch repository metadata from GitHub
 pub async fn fetch_github_repo(owner: &str, repo: &str) -> Result<GitHubRepo, String> {
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-    let response = Client::new()
+    let response = github_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -106,7 +123,7 @@ pub async fn fetch_user_repos(
         username,
         limit,
     );
-    let response = Client::new()
+    let response = github_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -125,7 +142,7 @@ pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, 
         urlencoding::encode(query),
         limit,
     );
-    let response = Client::new()
+    let response = github_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -176,7 +193,7 @@ pub async fn fetch_commits(
         repo,
         limit,
     );
-    let response = Client::new()
+    let response = github_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -204,7 +221,7 @@ pub async fn fetch_file_commits(
         urlencoding::encode(git_ref),
         limit,
     );
-    let response = Client::new()
+    let response = github_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -219,7 +236,7 @@ pub async fn fetch_file_commits(
 /// Fetch branches
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);
-    let response = Client::new()
+    let response = github_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")

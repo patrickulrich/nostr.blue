@@ -138,7 +138,14 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
         API_BASE_URL,
         bibkey,
     );
-    let response = reqwest::get(&url)
+    #[cfg(not(feature = "web"))]
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    #[cfg(feature = "web")]
+    let client = reqwest::Client::new();
+    let response = client.get(&url).send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {

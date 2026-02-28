@@ -2,7 +2,7 @@
 set -e
 
 # Android SDK/NDK paths
-ANDROID_HOME="${ANDROID_HOME:-/home/patrick/android-sdk}"
+ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
 ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/27.0.12077973}"
 ANDROID_SDK_ROOT="$ANDROID_HOME"
 export ANDROID_HOME ANDROID_NDK_HOME ANDROID_SDK_ROOT
@@ -135,7 +135,12 @@ generate_icons() {
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$tmp_png" 2>/dev/null
             cwebp -q 90 "$tmp_png" -o "$dir/ic_launcher.webp"
             cp "$dir/ic_launcher.webp" "$dir/ic_launcher_round.webp"
-            rm -f "$tmp_png"
+            # Foreground layer
+            local fg_size=$((size * 108 / 72))
+            local tmp_fg_png="/tmp/ic_launcher_fg_${density}.png"
+            ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" "$tmp_fg_png" 2>/dev/null
+            cwebp -q 90 "$tmp_fg_png" -o "$dir/ic_launcher_foreground.webp"
+            rm -f "$tmp_png" "$tmp_fg_png"
         elif [ "$tool" = "ffmpeg" ]; then
             # ffmpeg can output webp directly
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$dir/ic_launcher.webp" 2>/dev/null
@@ -153,12 +158,12 @@ generate_icons() {
 if command -v convert &>/dev/null; then
     echo "Using ImageMagick"
     generate_icons "convert"
-elif command -v ffmpeg &>/dev/null; then
-    echo "Using ffmpeg"
-    generate_icons "ffmpeg"
 elif command -v cwebp &>/dev/null && command -v ffmpeg &>/dev/null; then
     echo "Using cwebp + ffmpeg"
     generate_icons "cwebp"
+elif command -v ffmpeg &>/dev/null; then
+    echo "Using ffmpeg"
+    generate_icons "ffmpeg"
 else
     echo "WARNING: No image tools found (install imagemagick, ffmpeg, or cwebp)"
     echo "  Skipping icon generation. Install with:"
@@ -176,7 +181,7 @@ cd "$DX_ANDROID"
 echo ""
 echo "--- Step 7: Copy APK ---"
 APK_SRC="$DX_ANDROID/app/build/outputs/apk/debug/app-debug.apk"
-APK_DST="$PROJECT_ROOT/nostrblue-release.apk"
+APK_DST="$PROJECT_ROOT/nostrblue-debug.apk"
 if [ -f "$APK_SRC" ]; then
     cp "$APK_SRC" "$APK_DST"
     echo "APK: $APK_DST"

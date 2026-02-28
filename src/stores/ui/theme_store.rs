@@ -139,7 +139,7 @@ pub fn is_dark_mode() -> bool {
                     }
                 }
             }
-            false
+            true // Default to dark on native (matches apply_theme)
         }
     }
 }

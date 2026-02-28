@@ -88,7 +88,6 @@ pub fn VideosLiveTag(tag: String) -> Element {
                         }
                     }
                     let window = web_sys::window().expect("no global window");
-                    let _document = window.document().expect("no document");
                     let tag_for_callback = current_tag.clone();
                     let callback = wasm_bindgen::closure::Closure::wrap(
                         Box::new(move || {

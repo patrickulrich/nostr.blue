@@ -61,13 +61,13 @@ pub fn Chats() -> Element {
     use_effect(move || {
         let query = search_query.read().clone();
         if query.len() < 2 {
-            search_version.with_mut(|v| *v += 1);
+            search_version.with_mut(|v| *v = v.wrapping_add(1));
             search_results.set(None);
             search_loading.set(false);
             return;
         }
         let version = search_version.with_mut(|v| {
-            *v += 1;
+            *v = v.wrapping_add(1);
             *v
         });
         search_loading.set(true);

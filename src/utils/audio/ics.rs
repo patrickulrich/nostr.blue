@@ -40,18 +40,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
             vevent.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", d.replace('-', "")));
         }
         EventTime::Timestamp(ts) => {
-            if let Some(tz) = &event.start_tzid {
-                vevent
-                    .push_str(
-                        &format!(
-                            "DTSTART;TZID={}:{}\r\n",
-                            tz,
-                            format_local_datetime(*ts),
-                        ),
-                    );
-            } else {
-                vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
-            }
+            vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
         }
     }
     if let Some(end) = &event.end {
@@ -60,19 +49,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
                 vevent.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", d.replace('-', "")));
             }
             EventTime::Timestamp(ts) => {
-                if let Some(tz) = &event.end_tzid.as_ref().or(event.start_tzid.as_ref())
-                {
-                    vevent
-                        .push_str(
-                            &format!(
-                                "DTEND;TZID={}:{}\r\n",
-                                tz,
-                                format_local_datetime(*ts),
-                            ),
-                        );
-                } else {
-                    vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
-                }
+                vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
             }
         }
     }
@@ -114,14 +91,6 @@ fn format_timestamp(ts: u64) -> String {
     use chrono::{TimeZone, Utc};
     let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
     dt.format("%Y%m%dT%H%M%SZ").to_string()
-}
-/// Format Unix timestamp as local datetime (YYYYMMDDTHHmmss)
-fn format_local_datetime(ts: u64) -> String {
-    use chrono::{TimeZone, Utc};
-    // Note: without timezone info, we format as UTC (same as the original behavior
-    // when running in a UTC environment; for WASM the browser provided local time)
-    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
-    dt.format("%Y%m%dT%H%M%S").to_string()
 }
 /// Escape special characters in ICS text
 fn escape_ics_text(text: &str) -> String {
@@ -349,7 +318,9 @@ fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
         &clean[9..11], &clean[11..13], &clean[13..15]
     );
     let ndt = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%dT%H:%M:%S").ok()?;
-    Some(ndt.and_utc().timestamp() as u64)
+    let ts = ndt.and_utc().timestamp();
+    if ts < 0 { return None; }
+    Some(ts as u64)
 }
 /// Parse local datetime: YYYYMMDDTHHmmss
 #[cfg(feature = "web")]
@@ -365,7 +336,9 @@ fn parse_ics_local_datetime(value: &str) -> Option<u64> {
     );
     let ndt = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%dT%H:%M:%S").ok()?;
     // Treat as UTC when no timezone info is available
-    Some(ndt.and_utc().timestamp() as u64)
+    let ts = ndt.and_utc().timestamp();
+    if ts < 0 { return None; }
+    Some(ts as u64)
 }
 /// Unescape ICS text
 #[cfg(feature = "web")]

@@ -324,87 +324,96 @@ pub fn EventMap(props: EventMapProps) -> Element {
     use_effect({
         let events_for_geocode = events_for_geocode.clone();
         move || {
-            let key = events_key.read().clone();
-            if key == *processed_event_ids.read() {
-                return;
-            }
-            if events_for_geocode.is_empty() {
+            #[cfg(not(feature = "web"))]
+            {
+                let key = events_key.read().clone();
                 processed_event_ids.set(key);
-                geocoded_events.set(Vec::new());
                 return;
             }
-            if *loading_geo.read() {
-                return;
-            }
-            loading_geo.set(true);
-            let key_to_store = key.clone();
-            let events_to_process = events_for_geocode.clone();
-            spawn(async move {
-                let mut results = Vec::new();
-                const BATCH_SIZE: usize = 5;
-                const BATCH_DELAY_MS: u32 = 200;
-                for (idx, event) in events_to_process.iter().enumerate() {
-                    if *geocode_cancelled.read() {
-                        log::debug!("Geocoding cancelled, stopping processing");
-                        loading_geo.set(false);
-                        return;
-                    }
-                    if idx > 0 && idx % BATCH_SIZE == 0 {
-                        crate::platform::timer::sleep_ms(BATCH_DELAY_MS).await;
-                    }
-                    if let Some(geohash) = event.geohash() {
-                        if let Some((lat, lon)) = geohash_to_coords(geohash) {
-                            results
-                                .push(GeocodedEvent {
-                                    event: event.clone(),
-                                    location: GeoLocation {
-                                        lat,
-                                        lon,
-                                        display_name: event.location().unwrap_or("").to_string(),
-                                        city: None,
-                                        state: None,
-                                        country: None,
-                                        country_code: None,
-                                        place_type: None,
-                                    },
-                                });
-                            continue;
+            #[cfg(feature = "web")]
+            {
+                let key = events_key.read().clone();
+                if key == *processed_event_ids.read() {
+                    return;
+                }
+                if events_for_geocode.is_empty() {
+                    processed_event_ids.set(key);
+                    geocoded_events.set(Vec::new());
+                    return;
+                }
+                if *loading_geo.read() {
+                    return;
+                }
+                loading_geo.set(true);
+                let key_to_store = key.clone();
+                let events_to_process = events_for_geocode.clone();
+                spawn(async move {
+                    let mut results = Vec::new();
+                    const BATCH_SIZE: usize = 5;
+                    const BATCH_DELAY_MS: u32 = 200;
+                    for (idx, event) in events_to_process.iter().enumerate() {
+                        if *geocode_cancelled.read() {
+                            log::debug!("Geocoding cancelled, stopping processing");
+                            loading_geo.set(false);
+                            return;
                         }
-                    }
-                    if let Some(location_str) = event.location() {
-                        if crate::utils::nip52::is_online_location(location_str) {
-                            continue;
+                        if idx > 0 && idx % BATCH_SIZE == 0 {
+                            crate::platform::timer::sleep_ms(BATCH_DELAY_MS).await;
                         }
-                        match geocode(location_str).await {
-                            Ok(Some(loc)) => {
+                        if let Some(geohash) = event.geohash() {
+                            if let Some((lat, lon)) = geohash_to_coords(geohash) {
                                 results
                                     .push(GeocodedEvent {
                                         event: event.clone(),
-                                        location: loc,
+                                        location: GeoLocation {
+                                            lat,
+                                            lon,
+                                            display_name: event.location().unwrap_or("").to_string(),
+                                            city: None,
+                                            state: None,
+                                            country: None,
+                                            country_code: None,
+                                            place_type: None,
+                                        },
                                     });
+                                continue;
                             }
-                            Ok(None) => {
-                                log::debug!(
-                                    "Geocoding returned no results for: {}", location_str
-                                );
+                        }
+                        if let Some(location_str) = event.location() {
+                            if crate::utils::nip52::is_online_location(location_str) {
+                                continue;
                             }
-                            Err(e) => {
-                                log::warn!(
-                                    "Geocoding failed for '{}': {}", location_str, e
-                                );
+                            match geocode(location_str).await {
+                                Ok(Some(loc)) => {
+                                    results
+                                        .push(GeocodedEvent {
+                                            event: event.clone(),
+                                            location: loc,
+                                        });
+                                }
+                                Ok(None) => {
+                                    log::debug!(
+                                        "Geocoding returned no results for: {}", location_str
+                                    );
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Geocoding failed for '{}': {}", location_str, e
+                                    );
+                                }
                             }
                         }
                     }
-                }
-                if *geocode_cancelled.read() {
-                    log::debug!("Geocoding cancelled, not updating signals");
+                    if *geocode_cancelled.read() {
+                        log::debug!("Geocoding cancelled, not updating signals");
+                        loading_geo.set(false);
+                        return;
+                    }
+                    geocoded_events.set(results);
+                    processed_event_ids.set(key_to_store);
                     loading_geo.set(false);
-                    return;
-                }
-                geocoded_events.set(results);
-                processed_event_ids.set(key_to_store);
-                loading_geo.set(false);
-            });
+                });
+            }
         }
     });
     use_effect(move || {

@@ -23,7 +23,14 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
         "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={}",
         SUPPORTED_CURRENCIES,
     );
-    let response = reqwest::get(&url)
+    #[cfg(not(feature = "web"))]
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    #[cfg(feature = "web")]
+    let client = reqwest::Client::new();
+    let response = client.get(&url).send()
         .await
         .map_err(|e| format!("Failed to fetch prices: {}", e))?;
     if !response.status().is_success() {

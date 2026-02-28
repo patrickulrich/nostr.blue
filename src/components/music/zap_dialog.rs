@@ -184,13 +184,14 @@ pub fn MusicZapDialog() -> Element {
             spawn(async move {
                 #[cfg(feature = "web")]
                 {
+                    let inv_json = serde_json::to_string(&inv).unwrap_or_default();
                     let script = format!(
                         r#"
                         (async function() {{
                             if (typeof window.webln !== 'undefined') {{
                                 try {{
                                     await window.webln.enable();
-                                    const result = await window.webln.sendPayment('{}');
+                                    const result = await window.webln.sendPayment({});
                                     return {{ success: true, preimage: result.preimage }};
                                 }} catch (e) {{
                                     return {{ success: false, error: e.message }};
@@ -200,7 +201,7 @@ pub fn MusicZapDialog() -> Element {
                             }}
                         }})()
                         "#,
-                        inv,
+                        inv_json,
                     );
                     match js_sys::eval(&script) {
                         Ok(_) => log::info!("WebLN payment initiated"),

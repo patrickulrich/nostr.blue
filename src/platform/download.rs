@@ -21,7 +21,7 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
         let filename_json = serde_json::to_string(filename).unwrap_or_default();
         let mime_json = serde_json::to_string(_mime_type).unwrap_or_default();
         let js = format!(
-            r#"(function(){{var b=new Blob([{content_json}],{{type:{mime_json}}});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download={filename_json};document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);}})();"#,
+            r#"(function(){{var b=new Blob([{content_json}],{{type:{mime_json}}});var u=URL.createObjectURL(b);try{{var a=document.createElement('a');a.href=u;a.download={filename_json};document.body.appendChild(a);a.click();document.body.removeChild(a);}}finally{{URL.revokeObjectURL(u);}}}})();"#,
         );
         dioxus::prelude::document::eval(&js);
         Ok(())

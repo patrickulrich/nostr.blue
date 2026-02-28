@@ -9,8 +9,8 @@ android_min_sdk_version = 24
 [bundle]
 identifier = "blue.nostr.app"
 publisher = "nostr.blue"
-icon = ["public/icons/icon-512.png"]
-resources = ["public/*"]
+icon = ["public/icons/icon-512.png", "public/icons/icon-192.png"]
+resources = ["public/**/*"]
 short_description = "Decentralized social client for Nostr"
 
 [web.app]

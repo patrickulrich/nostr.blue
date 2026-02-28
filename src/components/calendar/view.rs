@@ -501,9 +501,9 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
             }
             #[cfg(not(feature = "web"))]
             {
-                // Extract hours/minutes from timestamp
-                let secs_in_day = (ts % 86400) as f32;
-                secs_in_day / 60.0
+                use chrono::{Local, TimeZone, Timelike};
+                let dt = Local.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+                (dt.hour() * 60 + dt.minute()) as f32
             }
         };
         let duration_minutes = get_event_duration(event);
@@ -753,9 +753,10 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     }
     #[cfg(not(feature = "web"))]
     {
-        let secs_in_day = ts % 86400;
-        let hours = secs_in_day / 3600;
-        let minutes = (secs_in_day % 3600) / 60;
+        use chrono::{Local, TimeZone, Timelike};
+        let dt = Local.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+        let hours = dt.hour();
+        let minutes = dt.minute();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };
         let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
         if minutes == 0 {

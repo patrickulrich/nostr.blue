@@ -102,10 +102,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                 Ok(_) => {
                     log::debug!("Added person to list (private: {})", is_private);
                     success_msg.set(Some(format!("Added to \"{}\"", list.name)));
-                    #[cfg(feature = "web")]
-                    {
-                        crate::platform::timer::sleep_ms(1000).await;
-                    }
+                    crate::platform::timer::sleep_ms(1000).await;
                     loading.set(false);
                     on_added.call(());
                 }
@@ -148,10 +145,7 @@ pub fn AddToPeopleListModal(props: AddToPeopleListModalProps) -> Element {
                                 log::debug!("Added person to new list");
                                 success_msg
                                     .set(Some(format!("Created \"{}\" and added", name)));
-                                #[cfg(feature = "web")]
-                                {
-                                    crate::platform::timer::sleep_ms(1000).await;
-                                }
+                                crate::platform::timer::sleep_ms(1000).await;
                                 loading.set(false);
                                 on_added.call(());
                             }

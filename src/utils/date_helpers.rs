@@ -5,6 +5,22 @@
 use crate::stores::calendar_store::UnifiedEvent;
 use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 
+/// Check if a year is a leap year
+#[allow(dead_code)]
+pub fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+/// Get the number of days in a month (1-indexed months)
+#[allow(dead_code)]
+pub fn days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        2 => if is_leap_year(year) { 29 } else { 28 },
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 /// Get date string (YYYY-MM-DD) from a UnifiedEvent
 pub fn get_event_date(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();

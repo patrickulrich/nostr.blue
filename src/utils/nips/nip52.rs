@@ -673,7 +673,7 @@ fn days_since_epoch(year: i32, month: u32, day: u32) -> Option<i64> {
     Some(days)
 }
 fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    crate::utils::date_helpers::is_leap_year(year)
 }
 /// Online location patterns for detection
 const ONLINE_PATTERNS: &[&str] = &[

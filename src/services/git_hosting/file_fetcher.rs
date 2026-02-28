@@ -6,6 +6,23 @@
 use reqwest::Client;
 use serde::Deserialize;
 use crate::utils::nip34::Repository;
+
+fn http_client() -> &'static Client {
+    static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        #[cfg(not(feature = "web"))]
+        {
+            Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("Failed to create HTTP client")
+        }
+        #[cfg(feature = "web")]
+        {
+            Client::new()
+        }
+    })
+}
 /// A file or directory entry in the repository tree
 #[derive(Debug, Clone)]
 pub struct TreeEntry {
@@ -176,7 +193,7 @@ async fn fetch_github_file(
         path,
         git_ref,
     );
-    let response = Client::new()
+    let response = http_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -216,7 +233,7 @@ async fn fetch_github_tree(
         repo,
         git_ref,
     );
-    let response = Client::new()
+    let response = http_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -278,7 +295,9 @@ async fn fetch_gitlab_file(
         encoded_path,
         git_ref,
     );
-    let response = reqwest::get(&url)
+    let response = http_client()
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {
@@ -299,7 +318,9 @@ async fn fetch_gitlab_tree(
         git_ref,
         urlencoding::encode(path),
     );
-    let response = reqwest::get(&url)
+    let response = http_client()
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {
@@ -344,7 +365,9 @@ async fn fetch_codeberg_file(
         path,
         git_ref,
     );
-    let response = reqwest::get(&url)
+    let response = http_client()
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {
@@ -365,7 +388,9 @@ async fn fetch_codeberg_tree(
         path,
         git_ref,
     );
-    let response = reqwest::get(&url)
+    let response = http_client()
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {
@@ -436,7 +461,7 @@ async fn fetch_github_all_paths(
         "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
         owner, repo, git_ref,
     );
-    let response = Client::new()
+    let response = http_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
