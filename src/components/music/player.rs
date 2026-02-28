@@ -199,7 +199,7 @@ pub fn PersistentMusicPlayer() -> Element {
                 }
                 #[cfg(not(feature = "web"))]
                 {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    crate::platform::timer::sleep_ms(500).await;
                 }
                 is_seeking.set(false);
             });

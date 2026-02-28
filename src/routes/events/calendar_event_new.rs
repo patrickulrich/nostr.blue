@@ -1003,7 +1003,7 @@ fn timestamp_to_date_time(ts: u64) -> (String, String) {
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings (UTC fallback)
 #[cfg(not(feature = "web"))]
 fn timestamp_to_date_time(ts: u64) -> (String, String) {
-    let secs = ts;
+    let secs = ts.min(253_402_300_799); // Cap at 9999-12-31T23:59:59Z (matches nostr SDK's Timestamp bound)
     let days = secs / 86400;
     let remaining = secs % 86400;
     let hours = remaining / 3600;
