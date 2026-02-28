@@ -1,24 +1,8 @@
 //! Bible API client for fetching translations, books, and chapters.
 //!
 //! Uses reqwest for cross-platform HTTP (works on web, desktop, and mobile).
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            reqwest::Client::new()
-        }
-    })
-}
 
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";

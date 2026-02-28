@@ -27,7 +27,10 @@ pub fn get_event_date(event: &UnifiedEvent) -> String {
     if ts == 0 {
         return String::new();
     }
-    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+    let ts_i64 = i64::try_from(ts).unwrap_or(0);
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+        return String::new();
+    };
     dt.format("%Y-%m-%d").to_string()
 }
 /// Get today's date as YYYY-MM-DD string
@@ -54,8 +57,9 @@ pub fn get_month_dates(date: &str) -> Vec<String> {
     if parts.len() < 2 {
         return vec![];
     }
-    let year: i32 = parts[0].parse().unwrap_or(2024);
-    let month: u32 = parts[1].parse::<u32>().unwrap_or(1);
+    let (Ok(year), Ok(month)) = (parts[0].parse::<i32>(), parts[1].parse::<u32>()) else {
+        return vec![];
+    };
     let first = match NaiveDate::from_ymd_opt(year, month, 1) {
         Some(d) => d,
         None => return vec![],

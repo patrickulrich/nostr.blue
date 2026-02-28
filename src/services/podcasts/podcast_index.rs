@@ -3,28 +3,13 @@
 //! Client for the Podcast Index proxy at podnostrblue.ulrich-patrickr.workers.dev
 //! Provides podcast search, trending, categories, and episode discovery.
 //! Uses NIP-98 HTTP Authentication for API access.
+use crate::platform::http::http_client;
 use nostr_sdk::nips::nip98;
 use serde::{Deserialize, Serialize};
 use crate::utils::nip98 as nip98_utils;
 use crate::utils::validation::parse_http_url;
 /// Base URL for the Podcast Index proxy
 const API_BASE: &str = "https://podnostrblue.ulrich-patrickr.workers.dev";
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            reqwest::Client::new()
-        }
-    })
-}
 /// Make an authenticated GET request to the Podcast Index proxy
 async fn authenticated_get<T: for<'de> Deserialize<'de>>(
     url: &str,
@@ -427,10 +412,10 @@ pub async fn search_music(
     let data: ApiResponse<SearchData> = authenticated_get(&url).await?;
     Ok(data.data.feeds)
 }
-/// Generic helper to fetch JSON content through the proxy with timeout and proper cancellation.
+/// Generic helper to fetch JSON content through the proxy.
 ///
 /// Validates the input URL, builds the proxy URL, handles NIP-98 authentication,
-/// sets up request cancellation via AbortController, and parses the JSON response.
+/// and parses the JSON response. Timeout is handled by the shared HTTP client.
 async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
     url: &str,
     resource_type: &str,
@@ -457,7 +442,7 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
         .await
         .map_err(|e| format!("Failed to parse {} JSON: {}", resource_type, e))
 }
-/// Helper to fetch text content through the proxy with timeout and proper cancellation.
+/// Helper to fetch text content through the proxy.
 async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, String> {
     if parse_http_url(url).is_none() {
         return Err(format!("Invalid {} URL - must be http or https", resource_type));

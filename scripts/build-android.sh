@@ -11,6 +11,11 @@ if [ -z "$ANDROID_NDK_HOME" ]; then
     fi
 fi
 ANDROID_SDK_ROOT="$ANDROID_HOME"
+if [ ! -d "$ANDROID_NDK_HOME" ]; then
+    echo "ERROR: ANDROID_NDK_HOME does not exist: $ANDROID_NDK_HOME" >&2
+    echo "  Install NDK via: sdkmanager --install 'ndk;27.0.12077973'" >&2
+    exit 1
+fi
 export ANDROID_HOME ANDROID_NDK_HOME ANDROID_SDK_ROOT
 
 # Project paths

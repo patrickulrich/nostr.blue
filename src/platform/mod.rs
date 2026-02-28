@@ -1,5 +1,6 @@
 pub mod clipboard;
 pub mod download;
+pub(crate) mod http;
 pub mod spawn;
 pub mod storage;
 pub mod timer;

@@ -2,24 +2,8 @@
 //!
 //! Fetches Bitcoin transaction and address data from mempool.space.
 //! Supports custom endpoints for self-hosted instances.
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            reqwest::Client::new()
-        }
-    })
-}
 
 /// Default mempool.space API endpoint
 pub const DEFAULT_ENDPOINT: &str = "https://mempool.space/api";

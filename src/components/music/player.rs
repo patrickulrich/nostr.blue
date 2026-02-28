@@ -46,6 +46,9 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         });
     }
+    // No Rust-side generation counter needed — the JS IIFEs guard against stale
+    // execution via audio.dataset.currentUrl checks, making them idempotent
+    // even when multiple async tasks overlap from rapid effect re-runs.
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         if let Some(ref track) = state.current_track {

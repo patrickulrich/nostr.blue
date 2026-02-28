@@ -2,25 +2,9 @@
 //!
 //! Fetches book metadata and covers from OpenLibrary.org.
 //! No API key required. Covers can be fetched via direct URL construction.
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            reqwest::Client::new()
-        }
-    })
-}
 /// Base URL for OpenLibrary covers
 const COVERS_BASE_URL: &str = "https://covers.openlibrary.org/b";
 /// Base URL for OpenLibrary API

@@ -94,7 +94,7 @@ pub fn CommunityPostComposer(
     let on_close_for_cancel = on_close;
     rsx! {
         div {
-            class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
             onclick: move |_| confirm_close(on_close_for_backdrop),
             div {
                 class: "bg-background rounded-lg p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",

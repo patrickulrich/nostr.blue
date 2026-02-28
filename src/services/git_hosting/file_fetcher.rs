@@ -3,26 +3,9 @@
 //! Multi-source file fetching with fallback chain:
 //! GitHub API → GitLab API → Codeberg API → Generic HTTP
 #![allow(dead_code)]
-use reqwest::Client;
+use crate::platform::http::http_client;
 use serde::Deserialize;
 use crate::utils::nip34::Repository;
-
-fn http_client() -> &'static Client {
-    static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            Client::new()
-        }
-    })
-}
 /// A file or directory entry in the repository tree
 #[derive(Debug, Clone)]
 pub struct TreeEntry {

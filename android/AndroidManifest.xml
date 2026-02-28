@@ -16,6 +16,9 @@
         android:supportsRtl="true"
         android:icon="@mipmap/ic_launcher"
         android:extractNativeLibs="true"
+        <!-- TODO: Re-enable heap pointer tagging once Rust NDK/android-activity
+             crate is compatible with ARM MTE. Required for current native builds.
+             See: https://developer.android.com/ndk/guides/tagged-pointers -->
         android:allowNativeHeapPointerTagging="false"
         android:label="@string/app_name"
         android:theme="@style/AppTheme"

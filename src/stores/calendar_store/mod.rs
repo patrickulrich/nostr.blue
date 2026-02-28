@@ -123,7 +123,10 @@ fn get_date_key(time: &EventTime) -> String {
         EventTime::Date(d) => d.clone(),
         EventTime::Timestamp(ts) => {
             use chrono::{TimeZone, Utc};
-            let dt = Utc.timestamp_opt(*ts as i64, 0).single().unwrap_or_default();
+            let ts_i64 = i64::try_from(*ts).unwrap_or(0);
+            let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+                return String::new();
+            };
             dt.format("%Y-%m-%d").to_string()
         }
     }

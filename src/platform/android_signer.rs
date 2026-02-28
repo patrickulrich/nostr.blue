@@ -66,6 +66,9 @@ impl Nip55Signer {
     }
 
     /// Get package names of all installed NIP-55 signer apps.
+    ///
+    /// Splits on comma — safe because Android package names are restricted to
+    /// `[a-zA-Z0-9_.]` per the Android manifest spec.
     pub fn get_signer_packages() -> Vec<String> {
         call_static_string("getSignerPackages")
             .unwrap_or_default()

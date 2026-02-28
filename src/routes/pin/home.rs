@@ -164,7 +164,8 @@ pub fn PinBoardsHome() -> Element {
         zap_author_metadata.set(None); // Clear stale metadata
         show_zap_modal.set(true);
         spawn(async move {
-            if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
+            match PublicKey::from_hex(&pubkey_str) {
+                Ok(pubkey) => {
                 if let Some(client) = get_client() {
                     let metadata = if let Ok(Some(m)) = client.database().metadata(pubkey).await {
                         Some(m)
@@ -182,6 +183,10 @@ pub fn PinBoardsHome() -> Element {
                             zap_author_metadata.set(Some(m));
                         }
                     }
+                }
+                }
+                Err(e) => {
+                    log::warn!("Pin board zap: invalid pubkey '{}': {}", pubkey_str, e);
                 }
             }
         });

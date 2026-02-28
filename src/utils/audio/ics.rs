@@ -89,7 +89,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
 /// Format Unix timestamp as ICS UTC datetime (YYYYMMDDTHHmmssZ)
 fn format_timestamp(ts: u64) -> String {
     use chrono::{TimeZone, Utc};
-    let dt = Utc.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+    let ts_i64 = i64::try_from(ts).unwrap_or(0);
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+        return "19700101T000000Z".to_string();
+    };
     dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 /// Escape special characters in ICS text

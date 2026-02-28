@@ -23,9 +23,9 @@ fn main() {
     }
     #[cfg(feature = "native")]
     {
-        env_logger::Builder::from_default_env()
+        let _ = env_logger::Builder::from_default_env()
             .filter_level(log::LevelFilter::Info)
-            .init();
+            .try_init();
     }
     log::info!("Starting nostr.blue Rust client");
     dioxus::launch(App);

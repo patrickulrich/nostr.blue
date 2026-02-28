@@ -1,20 +1,5 @@
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            reqwest::Client::new()
-        }
-    })
-}
 /// Wavlake API base URL
 const WAVLAKE_API_BASE: &str = "https://wavlake.com/api/v1";
 /// A track from Wavlake
@@ -294,11 +279,8 @@ impl WavlakeAPI {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unable to read body".to_string());
-            let error_msg = format!(
-                "LNURL fetch failed: {}. Body: {}",
-                status,
-                body,
-            );
+            log::debug!("LNURL error body (status {}): {}", status, &body[..body.len().min(200)]);
+            let error_msg = format!("LNURL fetch failed with status {}", status);
             log::error!("{}", error_msg);
             return Err(error_msg);
         }

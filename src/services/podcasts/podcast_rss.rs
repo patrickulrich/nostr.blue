@@ -10,27 +10,11 @@
 //! - podcast:funding
 //!
 //! Reference: https://github.com/Podcastindex-org/podcast-namespace
+use crate::platform::http::http_client;
 use crate::utils::podcast::{
     ChaptersFile, FundingLink, Person, Soundbite, TranscriptRef, ValueBlock,
 };
 use serde::{Deserialize, Serialize};
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        #[cfg(not(feature = "web"))]
-        {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("Failed to create HTTP client")
-        }
-        #[cfg(feature = "web")]
-        {
-            reqwest::Client::new()
-        }
-    })
-}
 
 /// Full Podcasting 2.0 podcast representation
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

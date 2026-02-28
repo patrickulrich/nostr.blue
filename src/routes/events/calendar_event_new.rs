@@ -970,9 +970,12 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     if parts.len() != 3 {
         return 0;
     }
-    let year: i64 = parts[0].parse().unwrap_or(2024);
-    let month: i64 = parts[1].parse::<i64>().unwrap_or(1);
-    let day: i64 = parts[2].parse().unwrap_or(1);
+    let year: i64 = parts[0].parse().unwrap_or(0);
+    let month: i64 = parts[1].parse::<i64>().unwrap_or(0);
+    let day: i64 = parts[2].parse().unwrap_or(0);
+    if !(1970..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return 0;
+    }
     let time_parts: Vec<&str> = time.split(':').collect();
     let hours: i64 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minutes: i64 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
