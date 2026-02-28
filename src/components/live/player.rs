@@ -225,15 +225,114 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             }
             #[cfg(not(feature = "web"))]
             {
-                let _ = (video_id, _stream_url, autoplay);
-                error.set(Some("Video.js player not supported on native desktop".to_string()));
-                loading.set(false);
+                let stream_url = _stream_url;
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(300).await;
+                    if !*mounted.peek() {
+                        return;
+                    }
+
+                    // Ensure hlsManager is available
+                    let check = document::eval(
+                        "return typeof window.hlsManager !== 'undefined'",
+                    )
+                    .await;
+                    let hls_loaded =
+                        check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                    if !hls_loaded {
+                        log::info!("[Live] Injecting HLS manager into WebView");
+                        let hls_js = include_str!("../../../public/hls-manager.js");
+                        if let Err(e) = document::eval(hls_js).await {
+                            log::error!("[Live] Failed to inject HLS manager: {:?}", e);
+                            error.set(Some(format!(
+                                "Failed to load HLS support: {:?}",
+                                e
+                            )));
+                            loading.set(false);
+                            return;
+                        }
+                    }
+
+                    // Set up the video element via eval
+                    let video_id_json =
+                        serde_json::to_string(&video_id).unwrap_or_default();
+                    let stream_url_json =
+                        serde_json::to_string(&stream_url).unwrap_or_default();
+                    let autoplay_str = if autoplay { "true" } else { "false" };
+
+                    let setup_script = format!(
+                        r#"
+                        try {{
+                            let video = document.getElementById({video_id});
+                            if (!video) return "error:Video element not found";
+
+                            let url = {stream_url};
+                            let isHls = url.toLowerCase().includes('.m3u8');
+
+                            if (isHls && window.hlsManager) {{
+                                let result = await window.hlsManager.attachToAudio({video_id}, url);
+                                console.log('[Live] HLS stream attached:', result);
+                            }} else {{
+                                video.src = url;
+                            }}
+
+                            if ({autoplay}) {{
+                                await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                            }}
+                            return "ok";
+                        }} catch (e) {{
+                            console.error('[Live] Setup error:', e);
+                            return "error:" + e.message;
+                        }}
+                        "#,
+                        video_id = video_id_json,
+                        stream_url = stream_url_json,
+                        autoplay = autoplay_str,
+                    );
+
+                    match document::eval(&setup_script).await {
+                        Ok(val) => {
+                            let result = val.as_str().unwrap_or("ok");
+                            if let Some(err_msg) = result.strip_prefix("error:") {
+                                error.set(Some(err_msg.to_string()));
+                            } else {
+                                error.set(None);
+                            }
+                            loading.set(false);
+                        }
+                        Err(e) => {
+                            error.set(Some(format!(
+                                "Failed to setup stream: {:?}",
+                                e
+                            )));
+                            loading.set(false);
+                        }
+                    }
+                });
             }
         } else {
             error.set(Some("Invalid stream URL".to_string()));
             loading.set(false);
         }
     });
+    // Cleanup HLS on unmount for native platforms.
+    // Can't use struct Drop (document::eval becomes NoOp there).
+    // use_drop runs while the Dioxus runtime is still active.
+    #[cfg(not(feature = "web"))]
+    {
+        let video_id_for_cleanup = video_id.read().clone();
+        use_drop(move || {
+            let video_id_json =
+                serde_json::to_string(&video_id_for_cleanup).unwrap_or_default();
+            spawn(async move {
+                let _ = document::eval(&format!(
+                    "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
+                    video_id_json
+                ))
+                .await;
+            });
+        });
+    }
     let handle_retry = move |_| {
         error.set(None);
         loading.set(true);
@@ -261,9 +360,91 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
         }
         #[cfg(not(feature = "web"))]
         {
-            let _ = (_video_id, _stream_url, autoplay);
-            error.set(Some("Video.js player not supported on native desktop".to_string()));
-            loading.set(false);
+            let video_id = _video_id;
+            let stream_url = _stream_url;
+            spawn(async move {
+                crate::platform::timer::sleep_ms(100).await;
+
+                let video_id_json =
+                    serde_json::to_string(&video_id).unwrap_or_default();
+                let stream_url_json =
+                    serde_json::to_string(&stream_url).unwrap_or_default();
+                let autoplay_str = if autoplay { "true" } else { "false" };
+
+                // Ensure hlsManager is available
+                let check = document::eval(
+                    "return typeof window.hlsManager !== 'undefined'",
+                )
+                .await;
+                let hls_loaded =
+                    check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                if !hls_loaded {
+                    let hls_js = include_str!("../../../public/hls-manager.js");
+                    if let Err(e) = document::eval(hls_js).await {
+                        log::error!("[Live] Failed to inject HLS manager: {:?}", e);
+                        error.set(Some(format!(
+                            "Failed to load HLS support: {:?}",
+                            e
+                        )));
+                        loading.set(false);
+                        return;
+                    }
+                }
+
+                let setup_script = format!(
+                    r#"
+                    try {{
+                        let video = document.getElementById({video_id});
+                        if (!video) return "error:Video element not found";
+
+                        // Detach any existing HLS stream first
+                        if (window.hlsManager) {{
+                            window.hlsManager.detach({video_id});
+                        }}
+
+                        let url = {stream_url};
+                        let isHls = url.toLowerCase().includes('.m3u8');
+
+                        if (isHls && window.hlsManager) {{
+                            let result = await window.hlsManager.attachToAudio({video_id}, url);
+                            console.log('[Live] HLS stream re-attached:', result);
+                        }} else {{
+                            video.src = url;
+                        }}
+
+                        if ({autoplay}) {{
+                            await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                        }}
+                        return "ok";
+                    }} catch (e) {{
+                        console.error('[Live] Retry error:', e);
+                        return "error:" + e.message;
+                    }}
+                    "#,
+                    video_id = video_id_json,
+                    stream_url = stream_url_json,
+                    autoplay = autoplay_str,
+                );
+
+                match document::eval(&setup_script).await {
+                    Ok(val) => {
+                        let result = val.as_str().unwrap_or("ok");
+                        if let Some(err_msg) = result.strip_prefix("error:") {
+                            error.set(Some(err_msg.to_string()));
+                        } else {
+                            error.set(None);
+                        }
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(format!(
+                            "Failed to setup stream: {:?}",
+                            e
+                        )));
+                        loading.set(false);
+                    }
+                }
+            });
         }
     };
     if !*url_valid.read() {

@@ -383,12 +383,44 @@ pub fn PersistentMusicPlayer() -> Element {
     } else {
         0.0
     };
+    let onerror_handler = move |_evt| {
+        #[cfg(not(feature = "web"))]
+        {
+            // On mobile, suppress errors from empty src and HLS-managed streams
+            let is_hls = MUSIC_PLAYER
+                .read()
+                .current_track
+                .as_ref()
+                .map(|t| t.media_url.contains(".m3u8"))
+                .unwrap_or(false);
+            if is_hls {
+                return; // HLS errors handled by hlsManager
+            }
+            // Empty src="" fires onerror on mobile — ignore it
+            let has_src = MUSIC_PLAYER
+                .read()
+                .current_track
+                .as_ref()
+                .map(|t| !t.media_url.is_empty())
+                .unwrap_or(false);
+            if !has_src {
+                return;
+            }
+        }
+        log::warn!("Audio playback error, attempting fallback...");
+        music_player::set_buffering(false);
+        if !music_player::try_next_stream() {
+            log::error!("All streams failed");
+        }
+    };
     rsx! {
         audio {
             id: "{audio_id}",
             preload: if track.is_live_stream { "none" } else { "metadata" },
             style: "display: none;",
-            src: "{track.media_url}",
+            // On mobile, empty src prevents mixed content blocking.
+            // The use_effect sets audio.src via document::eval dynamically.
+            src: if cfg!(feature = "web") { track.media_url.as_str() } else { "" },
             ontimeupdate: move |_evt| {
                 if !*is_seeking.read() {
                     #[cfg(feature = "web")]
@@ -417,13 +449,7 @@ pub fn PersistentMusicPlayer() -> Element {
             onended: move |_| {
                 music_player::next_track();
             },
-            onerror: move |_evt| {
-                log::warn!("Audio playback error, attempting fallback...");
-                music_player::set_buffering(false);
-                if !music_player::try_next_stream() {
-                    log::error!("All streams failed");
-                }
-            },
+            onerror: onerror_handler,
             onwaiting: move |_| {
                 music_player::set_buffering(true);
             },
