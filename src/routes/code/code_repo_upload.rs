@@ -683,7 +683,7 @@ async fn read_files_from_input(input_id: &str) -> Result<Vec<SelectedFile>, Stri
 
 #[cfg(not(feature = "web"))]
 async fn read_files_from_input(_input_id: &str) -> Result<Vec<SelectedFile>, String> {
-    Err("File reading is only supported in WASM".to_string())
+    Err("File reading requires the 'web' feature".to_string())
 }
 
 /// Programmatically click a file input element

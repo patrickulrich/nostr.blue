@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::stores::nostr_client;
+#[cfg(feature = "web")]
 use crate::platform::storage;
 #[cfg(not(feature = "web"))]
 use std::fs;

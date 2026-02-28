@@ -1,6 +1,9 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+#[cfg(feature = "native")]
+static STORAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Get a value from persistent key-value storage.
 pub fn get<T: DeserializeOwned>(key: &str) -> Result<T, String> {
     #[cfg(all(feature = "web", not(feature = "native")))]
@@ -27,6 +30,7 @@ pub fn set<T: Serialize + ?Sized>(key: &str, value: &T) -> Result<(), String> {
     }
     #[cfg(feature = "native")]
     {
+        let _guard = STORAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut store = load_store();
         let json_value = serde_json::to_value(value).map_err(|e| e.to_string())?;
         store.insert(key.to_string(), json_value);
@@ -43,6 +47,7 @@ pub fn delete(key: &str) {
     }
     #[cfg(feature = "native")]
     {
+        let _guard = STORAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut store = load_store();
         store.remove(key);
         let _ = save_store(&store);

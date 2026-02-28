@@ -121,8 +121,7 @@ pub fn CodeSettings() -> Element {
             Err(e) => {
                 save_success.set(false);
                 save_error.set(Some(e.clone()));
-                #[cfg(feature = "web")]
-                web_sys::console::error_1(&format!("Settings save failed: {}", e).into());
+                log::error!("Settings save failed: {}", e);
                 spawn(async move {
                     crate::platform::timer::sleep_ms(2500).await;
                     save_error.set(None);
