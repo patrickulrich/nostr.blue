@@ -26,7 +26,6 @@ pub enum ContentType {
     PodcastEpisode,
     MusicAlbum,
     MusicTrack,
-    #[cfg(feature = "web")]
     BibleVerse,
 }
 impl ContentType {
@@ -36,7 +35,6 @@ impl ContentType {
             ContentType::PodcastEpisode => "Episode",
             ContentType::MusicAlbum => "Album",
             ContentType::MusicTrack => "Track",
-            #[cfg(feature = "web")]
             ContentType::BibleVerse => "Bible",
         }
     }
@@ -46,7 +44,6 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share Episode",
             ContentType::MusicAlbum => "Share Album",
             ContentType::MusicTrack => "Share Track",
-            #[cfg(feature = "web")]
             ContentType::BibleVerse => "Share Verses",
         }
     }
@@ -56,7 +53,6 @@ impl ContentType {
             ContentType::PodcastEpisode => "Share your thoughts about this episode...",
             ContentType::MusicAlbum => "Share your thoughts about this album...",
             ContentType::MusicTrack => "Share your thoughts about this track...",
-            #[cfg(feature = "web")]
             ContentType::BibleVerse => "Share your thoughts about these verses...",
         }
     }
@@ -74,7 +70,6 @@ impl ContentType {
             ContentType::MusicTrack => {
                 format!("Check out this track on nostr.blue: {}", url)
             }
-            #[cfg(feature = "web")]
             ContentType::BibleVerse => {
                 format!("Check out this Bible passage on nostr.blue: {}", url)
             }
@@ -201,7 +196,6 @@ pub fn ContentShareModal(
         show_poll_modal.set(false);
     };
     let handle_copy_link = {
-        #[cfg(feature = "web")]
         let copy_text = if matches!(content_type, ContentType::BibleVerse) {
             if let Some(ref text) = content {
                 format!("{}\n\n— {}", text, title)
@@ -211,8 +205,6 @@ pub fn ContentShareModal(
         } else {
             url.clone()
         };
-        #[cfg(not(feature = "web"))]
-        let copy_text = url.clone();
         move |_| {
             let text_to_copy = copy_text.clone();
             spawn(async move {
@@ -375,7 +367,6 @@ pub fn ContentShareModal(
                                         ContentType::MusicAlbum | ContentType::MusicTrack => rsx! {
                                             MusicIcon { class: "w-6 h-6 text-white" }
                                         },
-                                        #[cfg(feature = "web")]
                                         ContentType::BibleVerse => rsx! {
                                             BookOpenIcon { class: "w-6 h-6 text-white" }
                                         },
@@ -489,10 +480,7 @@ pub fn ContentShareModal(
                             }
                             div { class: "flex flex-wrap gap-2",
                                 {
-                                    #[cfg(feature = "web")]
                                     let show_verse_button = matches!(content_type, ContentType::BibleVerse);
-                                    #[cfg(not(feature = "web"))]
-                                    let show_verse_button = false;
                                     if show_verse_button {
                                         if let Some(ref verse_content) = content {
                                             let verse_text = verse_content.clone();

@@ -1,7 +1,6 @@
 //! Bible API client for fetching translations, books, and chapters.
 //!
-//! This module is WASM-only as it uses web_sys::AbortController and gloo_net.
-//! (Gated in services/mod.rs)
+//! Uses reqwest for cross-platform HTTP (works on web, desktop, and mobile).
 use serde::{Deserialize, Serialize};
 /// HelloAO Bible API base URL
 const BIBLE_API_BASE: &str = "https://bible.helloao.org/api";

@@ -25,31 +25,7 @@ pub mod wiki;
 pub mod blossom;
 pub mod music;
 pub mod radio;
-#[cfg(feature = "web")]
 pub mod bible;
-#[cfg(not(feature = "web"))]
-pub mod bible {
-    use dioxus::prelude::*;
-    #[component]
-    pub fn BibleHome() -> Element {
-        rsx! {
-            div { "Bible requires WASM target" }
-        }
-    }
-    #[component]
-    pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element {
-        let _ = (translation, book, chapter);
-        rsx! {
-            div { "Bible requires WASM target" }
-        }
-    }
-    #[component]
-    pub fn BibleSearch() -> Element {
-        rsx! {
-            div { "Bible requires WASM target" }
-        }
-    }
-}
 pub mod topics;
 pub mod about;
 pub mod bookmarks;

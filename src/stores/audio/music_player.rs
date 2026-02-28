@@ -840,16 +840,18 @@ pub fn set_playback_speed(speed: f64) {
 }
 /// Skip forward by specified seconds (for podcasts)
 pub fn skip_forward(seconds: f64) {
-    let mut state = MUSIC_PLAYER.write();
+    let state = MUSIC_PLAYER.read();
     let new_time = (state.current_time + seconds).min(state.duration);
-    state.current_time = new_time;
+    drop(state);
+    seek_to(new_time);
     log::debug!("Skipped forward {} seconds to {}", seconds, new_time);
 }
 /// Skip backward by specified seconds (for podcasts)
 pub fn skip_backward(seconds: f64) {
-    let mut state = MUSIC_PLAYER.write();
+    let state = MUSIC_PLAYER.read();
     let new_time = (state.current_time - seconds).max(0.0);
-    state.current_time = new_time;
+    drop(state);
+    seek_to(new_time);
     log::debug!("Skipped backward {} seconds to {}", seconds, new_time);
 }
 /// Set playback error message

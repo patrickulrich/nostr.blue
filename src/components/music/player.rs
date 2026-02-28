@@ -2,13 +2,10 @@ use crate::components::icons;
 use crate::components::{ContentShareModal, ContentType};
 use crate::routes::Route;
 use crate::stores::music_player::{self, MUSIC_PLAYER};
-#[cfg(feature = "web")]
 use crate::utils::radio::NowPlaying;
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
-#[cfg(feature = "web")]
-use js_sys::eval;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Format seconds as M:SS
@@ -27,16 +24,35 @@ pub fn PersistentMusicPlayer() -> Element {
     let mut is_seeking = use_signal(|| false);
     let mut show_share_modal = use_signal(|| false);
     let audio_id = "global-music-player-audio";
+    // Inject HLS manager JS on non-web platforms.
+    // On web, it loads via <script> tag in index.html.
+    // On mobile, index.html is not used — Dioxus generates its own HTML.
+    #[cfg(not(feature = "web"))]
+    {
+        use_effect(move || {
+            spawn(async move {
+                let check = document::eval(
+                    "return typeof window.hlsManager !== 'undefined'",
+                )
+                .await;
+                let loaded = check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                if !loaded {
+                    log::info!("[Audio] Injecting HLS manager into WebView");
+                    let hls_js = include_str!("../../../public/hls-manager.js");
+                    if let Err(e) = document::eval(hls_js).await {
+                        log::error!("[Audio] Failed to inject HLS manager: {:?}", e);
+                    }
+                }
+            });
+        });
+    }
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         if let Some(ref track) = state.current_track {
-            let _media_url = track.media_url.clone();
-            let _is_playing = state.is_playing;
+            let media_url = track.media_url.clone();
+            let is_playing = state.is_playing;
             let _is_live_stream = track.is_live_stream;
-            #[cfg(feature = "web")]
             {
-                let media_url = _media_url;
-                let is_playing = _is_playing;
                 spawn(async move {
                     let audio_id_json = serde_json::to_string(&audio_id)
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -120,17 +136,15 @@ pub fn PersistentMusicPlayer() -> Element {
                             is_playing = is_playing_literal,
                         )
                     };
-                    let _ = eval(&script);
+                    let _ = document::eval(&script);
                 });
             }
         }
     });
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
-        let _volume = if state.is_muted { 0.0 } else { state.volume };
-        #[cfg(feature = "web")]
+        let volume = if state.is_muted { 0.0 } else { state.volume };
         {
-            let volume = _volume;
             spawn(async move {
                 let audio_id_json = serde_json::to_string(&audio_id)
                     .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -144,7 +158,7 @@ pub fn PersistentMusicPlayer() -> Element {
                     audio_id = audio_id_json,
                     volume = volume,
                 );
-                let _ = eval(&script);
+                let _ = document::eval(&script);
             });
         }
     });
@@ -157,7 +171,6 @@ pub fn PersistentMusicPlayer() -> Element {
             last_synced_time.set(current_time);
             is_seeking.set(true);
             spawn(async move {
-                #[cfg(feature = "web")]
                 {
                     let audio_id_json = serde_json::to_string(&audio_id)
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -175,7 +188,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         audio_id = audio_id_json,
                         current_time = current_time,
                     );
-                    let _ = eval(&script);
+                    let _ = document::eval(&script);
                 }
                 #[cfg(feature = "web")]
                 {
@@ -189,12 +202,59 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         }
     });
+    // Poll currentTime/duration on non-web platforms (Android/desktop) since
+    // ontimeupdate/onloadedmetadata use web_sys which is WASM-only.
+    // NOTE: Bare `return` (no IIFE) — Dioxus wraps eval scripts in an AsyncFunction,
+    // so IIFE return values are lost. Bare return exits the outer AsyncFunction correctly.
+    #[cfg(not(feature = "web"))]
+    {
+        let _time_poller = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
+            loop {
+                crate::platform::timer::sleep_ms(250).await;
+                if !MUSIC_PLAYER.read().is_playing || *is_seeking.read() {
+                    continue;
+                }
+                let result = document::eval(
+                    r#"
+                    let a = document.getElementById("global-music-player-audio");
+                    if (!a) return [0, 0];
+                    return [a.currentTime || 0, a.duration || 0];
+                    "#,
+                )
+                .await;
+                match result {
+                    Ok(val) => {
+                        let (time, dur) = if let Some(arr) = val.as_array() {
+                            let t = arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            let d = arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            (t, d)
+                        } else if let Some(s) = val.as_str() {
+                            serde_json::from_str::<[f64; 2]>(s)
+                                .map(|[t, d]| (t, d))
+                                .unwrap_or((0.0, 0.0))
+                        } else {
+                            log::warn!("Unexpected time poll result: {:?}", val);
+                            continue;
+                        };
+                        if !time.is_nan() && time > 0.0 {
+                            last_synced_time.set(time);
+                            music_player::set_current_time(time);
+                        }
+                        if !dur.is_nan() && dur > 0.0 {
+                            music_player::set_duration(dur);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Time poll eval error: {:?}", e);
+                    }
+                }
+            }
+        });
+    }
     let playback_speed = use_memo(move || MUSIC_PLAYER.read().playback_speed);
     use_effect(move || {
-        let _speed = playback_speed();
-        #[cfg(feature = "web")]
+        let speed = playback_speed();
         {
-            let speed = _speed;
             spawn(async move {
                 let audio_id_json = serde_json::to_string(&audio_id)
                     .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
@@ -208,7 +268,7 @@ pub fn PersistentMusicPlayer() -> Element {
                     audio_id = audio_id_json,
                     speed = speed,
                 );
-                let _ = eval(&script);
+                let _ = document::eval(&script);
             });
         }
     });
@@ -231,23 +291,22 @@ pub fn PersistentMusicPlayer() -> Element {
             if !is_live() {
                 continue;
             }
-            #[cfg(feature = "web")]
             {
-                let result = eval(
+                // Bare return (no IIFE) — Dioxus wraps eval in AsyncFunction on mobile
+                let result = document::eval(
                     r#"
-                    (function() {
-                        if (window.hlsManager && window.hlsManager.nowPlaying) {
-                            return JSON.stringify(window.hlsManager.nowPlaying);
-                        }
-                        return null;
-                    })()
-                "#,
-                );
-                if let Ok(js_value) = result {
-                    if let Some(json_str) = js_value.as_string() {
+                    if (window.hlsManager && window.hlsManager.nowPlaying) {
+                        return JSON.stringify(window.hlsManager.nowPlaying);
+                    }
+                    return null;
+                    "#,
+                )
+                .await;
+                if let Ok(json_val) = result {
+                    if let Some(json_str) = json_val.as_str() {
                         if let Ok(now_playing) = serde_json::from_str::<
                             NowPlaying,
-                        >(&json_str) {
+                        >(json_str) {
                             if now_playing.has_data() {
                                 music_player::set_now_playing(Some(now_playing));
                             }
@@ -513,83 +572,38 @@ pub fn PersistentMusicPlayer() -> Element {
                             div {
                                 class: "flex-1 relative h-2 bg-secondary rounded-full overflow-hidden cursor-pointer",
                                 onclick: move |evt| {
-                                    let _client_x = evt.client_coordinates().x;
-                                    let _client_y = evt.client_coordinates().y;
-                                    let _audio_id_str = audio_id.to_string();
-                                    #[cfg(feature = "web")]
+                                    let client_x = evt.client_coordinates().x;
+                                    let client_y = evt.client_coordinates().y;
+                                    let audio_id_str = audio_id.to_string();
                                     {
-                                    let client_x = _client_x;
-                                    let client_y = _client_y;
-                                    let audio_id_str = _audio_id_str;
                                     spawn(async move {
                                         let audio_id_json = serde_json::to_string(&audio_id_str)
                                             .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                                         let script = format!(
                                             r#"
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    (function() {{
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        let audio = document.getElementById({audio_id});
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        if (!audio) return;
+                                            (function() {{
+                                                let audio = document.getElementById({audio_id});
+                                                if (!audio) return;
 
+                                                let element = document.elementFromPoint({client_x}, {client_y});
+                                                if (!element) return;
 
+                                                let progressBar = element.closest('.cursor-pointer') || element;
+                                                let rect = progressBar.getBoundingClientRect();
 
+                                                let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
+                                                let newTime = percent * audio.duration;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        let element = document.elementFromPoint({client_x}, {client_y});
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        if (!element) return;
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        let progressBar = element.closest('.cursor-pointer') || element;
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        let rect = progressBar.getBoundingClientRect();
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        let percent = Math.max(0, Math.min(1, ({client_x} - rect.left) / rect.width));
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        let newTime = percent * audio.duration;
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        if (!isNaN(newTime) && isFinite(newTime)) {{
-                                                                                                                                                                                                                                                                                                                                                                                                                                                            audio.currentTime = newTime;
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        }}
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    }})();
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    "#,
+                                                if (!isNaN(newTime) && isFinite(newTime)) {{
+                                                    audio.currentTime = newTime;
+                                                }}
+                                            }})();
+                                            "#,
                                             audio_id = audio_id_json,
                                             client_x = client_x,
                                             client_y = client_y,
                                         );
-                                        let _ = eval(&script);
+                                        let _ = document::eval(&script);
                                     });
                                     }
                                 },

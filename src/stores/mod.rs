@@ -38,7 +38,6 @@ pub use ui::notifications;
 pub use ui::emoji_store;
 
 pub mod auth_store;
-#[cfg(feature = "web")]
 pub mod bible_store;
 pub mod bookmarks;
 pub mod calendar_store;

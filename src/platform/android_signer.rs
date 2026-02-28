@@ -1,7 +1,8 @@
 //! NIP-55 Android Signer
 //!
 //! Implements `NostrSigner` trait by communicating with external Android
-//! signer applications (e.g. Amber) via JNI calls to ContentResolver.
+//! signer applications (e.g. Amber) via JNI calls to ContentResolver
+//! and Intent-based approval flows.
 //!
 //! Protocol reference: NIP-55 (Android Signer Application)
 
@@ -10,6 +11,19 @@ use std::pin::Pin;
 
 use nostr::signer::{NostrSigner, SignerBackend, SignerError};
 use nostr::{Event, PublicKey, UnsignedEvent};
+
+/// Result of polling for a pending Intent result from the signer app.
+#[derive(Debug, Clone)]
+pub enum IntentPollResult {
+    /// The signer returned a public key and package name.
+    Ready { pubkey: PublicKey, package: String },
+    /// An Intent is currently in flight (user hasn't returned yet).
+    InFlight,
+    /// No pending result and no Intent in flight.
+    None,
+    /// The Intent failed or was rejected by the user.
+    Error(String),
+}
 
 /// NIP-55 Android signer that delegates cryptographic operations
 /// to an external signer app via Android's ContentResolver.
@@ -49,6 +63,100 @@ impl Nip55Signer {
     /// Check if a NIP-55 signer application is installed on the device.
     pub fn is_signer_installed() -> bool {
         call_static_bool("isSignerInstalled").unwrap_or(false)
+    }
+
+    /// Get package names of all installed NIP-55 signer apps.
+    pub fn get_signer_packages() -> Vec<String> {
+        call_static_string("getSignerPackages")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Request the user's public key from a signer app via ContentResolver.
+    ///
+    /// Only succeeds if the user has previously approved this app in the signer.
+    /// Returns `None` for first-time connections (Intent-based approval needed).
+    pub fn request_public_key(signer_package: &str) -> Option<PublicKey> {
+        let hex = call_content_resolver_simple("getPublicKeyViaContentResolver", signer_package)?;
+        match PublicKey::parse(&hex) {
+            Ok(pk) => Some(pk),
+            Err(e) => {
+                log::error!("NIP-55 JNI: failed to parse public key '{}': {}", hex, e);
+                None
+            }
+        }
+    }
+
+    /// Launch the get_public_key Intent to open the signer app for user approval.
+    ///
+    /// Returns `Ok(true)` if the Intent was launched, `Ok(false)` if already in flight.
+    /// Returns `Err` on failure.
+    pub fn launch_get_public_key() -> Result<bool, String> {
+        let result = call_static_string("launchGetPublicKey")
+            .unwrap_or_else(|| "error:JNI call failed".to_string());
+
+        match result.as_str() {
+            "launched" => {
+                log::info!("NIP-55: get_public_key Intent launched");
+                Ok(true)
+            }
+            "already_in_flight" => {
+                log::info!("NIP-55: Intent already in flight");
+                Ok(false)
+            }
+            "no_instance" => {
+                log::error!("NIP-55: no Activity instance available");
+                Err("No Activity instance available".to_string())
+            }
+            other if other.starts_with("error:") => {
+                let msg = other.strip_prefix("error:").unwrap_or(other);
+                log::error!("NIP-55: launchGetPublicKey error: {}", msg);
+                Err(msg.to_string())
+            }
+            other => {
+                log::error!("NIP-55: unexpected launchGetPublicKey result: {}", other);
+                Err(format!("Unexpected result: {}", other))
+            }
+        }
+    }
+
+    /// Poll for the result of a previously launched get_public_key Intent.
+    pub fn poll_intent_result() -> IntentPollResult {
+        // Check if Intent is still in flight
+        let in_flight = call_static_bool("isIntentInFlight").unwrap_or(false);
+        if in_flight {
+            return IntentPollResult::InFlight;
+        }
+
+        // Check for error
+        if let Some(err) = call_static_string("pollIntentError") {
+            log::warn!("NIP-55: Intent error: {}", err);
+            return IntentPollResult::Error(err);
+        }
+
+        // Check for pubkey result
+        if let Some(pubkey_hex) = call_static_string("pollPublicKeyResult") {
+            let package = call_static_string("pollPackageResult")
+                .unwrap_or_else(|| Self::default_package().to_string());
+            match PublicKey::parse(&pubkey_hex) {
+                Ok(pubkey) => IntentPollResult::Ready { pubkey, package },
+                Err(e) => {
+                    log::error!("NIP-55: failed to parse Intent pubkey '{}': {}", pubkey_hex, e);
+                    IntentPollResult::Error(format!("Invalid pubkey from signer: {}", e))
+                }
+            }
+        } else {
+            IntentPollResult::None
+        }
+    }
+
+    /// Clear any pending Intent result state.
+    pub fn clear_pending_result() {
+        call_static_void("clearPendingResult");
+        log::debug!("NIP-55: cleared pending Intent state");
     }
 
     /// Get the signer package name.
@@ -182,26 +290,181 @@ fn find_app_class<'a>(
 ) -> Option<jni::objects::JClass<'a>> {
     use jni::objects::JValue;
 
-    let context_class = env.get_object_class(context).ok()?;
-    let class_loader = env
+    let context_class = match env.get_object_class(context) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("NIP-55 JNI: get_object_class failed: {}", e);
+            return None;
+        }
+    };
+    let class_loader = match env
         .call_method(&context_class, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
-        .ok()?
-        .l()
-        .ok()?;
+    {
+        Ok(v) => match v.l() {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("NIP-55 JNI: getClassLoader .l() failed: {}", e);
+                return None;
+            }
+        },
+        Err(e) => {
+            log::error!("NIP-55 JNI: getClassLoader call failed: {}", e);
+            return None;
+        }
+    };
 
-    let j_name = env.new_string(class_name).ok()?;
-    let loaded = env
-        .call_method(
-            &class_loader,
-            "loadClass",
-            "(Ljava/lang/String;)Ljava/lang/Class;",
-            &[JValue::Object(&j_name)],
-        )
-        .ok()?
-        .l()
-        .ok()?;
+    let j_name = match env.new_string(class_name) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("NIP-55 JNI: new_string('{}') failed: {}", class_name, e);
+            return None;
+        }
+    };
+    let loaded = match env.call_method(
+        &class_loader,
+        "loadClass",
+        "(Ljava/lang/String;)Ljava/lang/Class;",
+        &[JValue::Object(&j_name)],
+    ) {
+        Ok(v) => match v.l() {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("NIP-55 JNI: loadClass .l() failed for '{}': {}", class_name, e);
+                return None;
+            }
+        },
+        Err(e) => {
+            log::error!("NIP-55 JNI: loadClass('{}') failed: {}", class_name, e);
+            return None;
+        }
+    };
 
     Some(loaded.into())
+}
+
+/// Call a static method on MainActivity that takes Context and returns String.
+fn call_static_string(method_name: &str) -> Option<String> {
+    use jni::objects::JValue;
+
+    let ctx = ndk_context::android_context();
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
+
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")?;
+
+    let result = match env.call_static_method(
+        class,
+        method_name,
+        "(Landroid/content/Context;)Ljava/lang/String;",
+        &[JValue::Object(&context)],
+    ) {
+        Ok(v) => match v.l() {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                return None;
+            }
+        },
+        Err(e) => {
+            log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+            return None;
+        }
+    };
+
+    if result.is_null() {
+        return None;
+    }
+
+    let ret = match env.get_string((&result).into()) {
+        Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+        Err(e) => {
+            log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+            None
+        }
+    };
+    ret
+}
+
+/// Call a ContentResolver method that takes (Context, String signerPackage) and returns String?.
+fn call_content_resolver_simple(method_name: &str, signer_package: &str) -> Option<String> {
+    use jni::objects::{JObject, JValue};
+
+    let ctx = ndk_context::android_context();
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
+
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+
+    let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")?;
+
+    let j_signer_package = match env.new_string(signer_package) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("NIP-55 JNI: new_string('{}') failed in {}: {}", signer_package, method_name, e);
+            return None;
+        }
+    };
+
+    let result = match env.call_static_method(
+        class,
+        method_name,
+        "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+        &[
+            JValue::Object(&context),
+            JValue::Object(&j_signer_package),
+        ],
+    ) {
+        Ok(v) => match v.l() {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                return None;
+            }
+        },
+        Err(e) => {
+            log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+            return None;
+        }
+    };
+
+    if result.is_null() {
+        return None;
+    }
+
+    let ret = match env.get_string((&result).into()) {
+        Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+        Err(e) => {
+            log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+            None
+        }
+    };
+    ret
 }
 
 /// Call a static boolean method on MainActivity companion object.
@@ -209,25 +472,83 @@ fn call_static_bool(method_name: &str) -> Option<bool> {
     use jni::objects::JValue;
 
     let ctx = ndk_context::android_context();
-    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.ok()?;
-    let mut env = vm.attach_current_thread().ok()?;
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
 
     let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
 
     let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")?;
 
-    let result = env
-        .call_static_method(
-            class,
-            method_name,
-            "(Landroid/content/Context;)Z",
-            &[JValue::Object(&context)],
-        )
-        .ok()?
-        .z()
-        .ok()?;
+    match env.call_static_method(
+        class,
+        method_name,
+        "(Landroid/content/Context;)Z",
+        &[JValue::Object(&context)],
+    ) {
+        Ok(v) => match v.z() {
+            Ok(b) => Some(b),
+            Err(e) => {
+                log::error!("NIP-55 JNI: {}.z() failed: {}", method_name, e);
+                None
+            }
+        },
+        Err(e) => {
+            log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+            None
+        }
+    }
+}
 
-    Some(result)
+/// Call a static void method on MainActivity that takes Context.
+fn call_static_void(method_name: &str) {
+    use jni::objects::JValue;
+
+    let ctx = ndk_context::android_context();
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            return;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            return;
+        }
+    };
+
+    let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+
+    let class = match find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity") {
+        Some(c) => c,
+        None => return,
+    };
+
+    match env.call_static_method(
+        class,
+        method_name,
+        "(Landroid/content/Context;)V",
+        &[JValue::Object(&context)],
+    ) {
+        Ok(_) => {}
+        Err(e) => {
+            log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+        }
+    }
 }
 
 /// Call a ContentResolver-based static method on MainActivity companion object.
@@ -242,75 +563,154 @@ fn call_content_resolver(
     use jni::objects::{JObject, JValue};
 
     let ctx = ndk_context::android_context();
-    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.ok()?;
-    let mut env = vm.attach_current_thread().ok()?;
+    let vm = match unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) } {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("NIP-55 JNI: JavaVM::from_raw failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
+    let mut env = match vm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            log::error!("NIP-55 JNI: attach_current_thread failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
 
     let context = unsafe { JObject::from_raw(ctx.context().cast()) };
 
     let class = find_app_class(&mut env, &context, "dev.dioxus.main.MainActivity")?;
 
-    let j_signer_package = env.new_string(signer_package).ok()?;
+    let j_signer_package = match env.new_string(signer_package) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("NIP-55 JNI: new_string signer_package failed in {}: {}", method_name, e);
+            return None;
+        }
+    };
 
     // Build JNI signature and arguments based on method
     match args.len() {
         // sign_event: (Context, String signerPackage, String eventJson, String currentUser) -> String?
         2 => {
-            let j_arg0 = env.new_string(args[0]).ok()?;
-            let j_arg1 = env.new_string(args[1]).ok()?;
+            let j_arg0 = match env.new_string(args[0]) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("NIP-55 JNI: new_string arg0 failed in {}: {}", method_name, e);
+                    return None;
+                }
+            };
+            let j_arg1 = match env.new_string(args[1]) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("NIP-55 JNI: new_string arg1 failed in {}: {}", method_name, e);
+                    return None;
+                }
+            };
 
-            let result = env
-                .call_static_method(
-                    class,
-                    method_name,
-                    "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                    &[
-                        JValue::Object(&context),
-                        JValue::Object(&j_signer_package),
-                        JValue::Object(&j_arg0),
-                        JValue::Object(&j_arg1),
-                    ],
-                )
-                .ok()?
-                .l()
-                .ok()?;
+            let result = match env.call_static_method(
+                class,
+                method_name,
+                "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&context),
+                    JValue::Object(&j_signer_package),
+                    JValue::Object(&j_arg0),
+                    JValue::Object(&j_arg1),
+                ],
+            ) {
+                Ok(v) => match v.l() {
+                    Ok(l) => l,
+                    Err(e) => {
+                        log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                        return None;
+                    }
+                },
+                Err(e) => {
+                    log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+                    return None;
+                }
+            };
 
             if result.is_null() {
                 return None;
             }
 
-            let jstr = env.get_string((&result).into()).ok()?;
-            Some(jstr.to_string_lossy().into_owned())
+            let ret = match env.get_string((&result).into()) {
+                Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+                Err(e) => {
+                    log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+                    None
+                }
+            };
+            ret
         }
         // encrypt/decrypt: (Context, String signerPackage, String content, String pubkey, String currentUser) -> String?
         3 => {
-            let j_arg0 = env.new_string(args[0]).ok()?;
-            let j_arg1 = env.new_string(args[1]).ok()?;
-            let j_arg2 = env.new_string(args[2]).ok()?;
+            let j_arg0 = match env.new_string(args[0]) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("NIP-55 JNI: new_string arg0 failed in {}: {}", method_name, e);
+                    return None;
+                }
+            };
+            let j_arg1 = match env.new_string(args[1]) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("NIP-55 JNI: new_string arg1 failed in {}: {}", method_name, e);
+                    return None;
+                }
+            };
+            let j_arg2 = match env.new_string(args[2]) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("NIP-55 JNI: new_string arg2 failed in {}: {}", method_name, e);
+                    return None;
+                }
+            };
 
-            let result = env
-                .call_static_method(
-                    class,
-                    method_name,
-                    "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                    &[
-                        JValue::Object(&context),
-                        JValue::Object(&j_signer_package),
-                        JValue::Object(&j_arg0),
-                        JValue::Object(&j_arg1),
-                        JValue::Object(&j_arg2),
-                    ],
-                )
-                .ok()?
-                .l()
-                .ok()?;
+            let result = match env.call_static_method(
+                class,
+                method_name,
+                "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&context),
+                    JValue::Object(&j_signer_package),
+                    JValue::Object(&j_arg0),
+                    JValue::Object(&j_arg1),
+                    JValue::Object(&j_arg2),
+                ],
+            ) {
+                Ok(v) => match v.l() {
+                    Ok(l) => l,
+                    Err(e) => {
+                        log::error!("NIP-55 JNI: {}.l() failed: {}", method_name, e);
+                        return None;
+                    }
+                },
+                Err(e) => {
+                    log::error!("NIP-55 JNI: {} call failed: {}", method_name, e);
+                    return None;
+                }
+            };
 
             if result.is_null() {
                 return None;
             }
 
-            let jstr = env.get_string((&result).into()).ok()?;
-            Some(jstr.to_string_lossy().into_owned())
+            let ret = match env.get_string((&result).into()) {
+                Ok(jstr) => Some(jstr.to_string_lossy().into_owned()),
+                Err(e) => {
+                    log::error!("NIP-55 JNI: get_string failed in {}: {}", method_name, e);
+                    None
+                }
+            };
+            ret
         }
-        _ => None,
+        _ => {
+            log::error!("NIP-55 JNI: unexpected arg count {} for {}", args.len(), method_name);
+            None
+        }
     }
 }

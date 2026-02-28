@@ -18,6 +18,19 @@ use nostr_sdk::{Filter, Kind, PublicKey, Timestamp};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
+/// NIP-55 Android signer connection UI state machine.
+#[derive(Clone, PartialEq, Debug)]
+enum Nip55State {
+    /// Initial state — "Connect Signer" button shown.
+    Idle,
+    /// Auto-detection in progress.
+    Checking,
+    /// Intent launched, waiting for user to approve in signer app and return.
+    WaitingForApproval,
+    /// An error occurred.
+    Error(String),
+}
+
 #[derive(Clone, PartialEq, Debug)]
 enum FeedType {
     Following,
@@ -1569,15 +1582,71 @@ fn LoginSection() -> Element {
     };
     let has_extension = auth_store::is_browser_extension_available();
     let has_android_signer = auth_store::is_android_signer_available();
-    let mut nip55_npub_input = use_signal(String::new);
-    let login_with_android_signer = move |_| {
-        let npub = nip55_npub_input.read().clone();
+    // NIP-55 UI state machine: Idle → Checking → WaitingForApproval/Error
+    let mut nip55_state = use_signal(|| Nip55State::Idle);
+    let nip55_connect = move |_| {
+        nip55_state.set(Nip55State::Checking);
         spawn(async move {
-            match auth_store::login_with_android_signer(&npub).await {
-                Ok(_) => error.set(None),
-                Err(e) => error.set(Some(e)),
+            match auth_store::login_with_android_signer_auto().await {
+                Ok(result) => {
+                    match result {
+                        auth_store::AndroidSignerAutoResult::LoggedIn(package) => {
+                            log::info!("NIP-55: auto-connected to signer: {}", package);
+                            error.set(None);
+                            nip55_state.set(Nip55State::Idle);
+                        }
+                        auth_store::AndroidSignerAutoResult::IntentLaunched => {
+                            log::info!("NIP-55: Intent launched, waiting for user approval");
+                            nip55_state.set(Nip55State::WaitingForApproval);
+                        }
+                        auth_store::AndroidSignerAutoResult::IntentInFlight => {
+                            log::info!("NIP-55: Intent already in flight");
+                            nip55_state.set(Nip55State::WaitingForApproval);
+                        }
+                        auth_store::AndroidSignerAutoResult::Error(e) => {
+                            log::error!("NIP-55: auto-detect error: {}", e);
+                            nip55_state.set(Nip55State::Error(e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("NIP-55: auto-detect failed: {}", e);
+                    nip55_state.set(Nip55State::Error(e));
+                }
             }
         });
+    };
+    let nip55_poll_and_connect = move |_| {
+        nip55_state.set(Nip55State::Checking);
+        spawn(async move {
+            match auth_store::login_with_android_signer_auto().await {
+                Ok(result) => {
+                    match result {
+                        auth_store::AndroidSignerAutoResult::LoggedIn(package) => {
+                            log::info!("NIP-55: connected after approval: {}", package);
+                            error.set(None);
+                            nip55_state.set(Nip55State::Idle);
+                        }
+                        auth_store::AndroidSignerAutoResult::IntentInFlight => {
+                            log::info!("NIP-55: still waiting for approval");
+                            nip55_state.set(Nip55State::WaitingForApproval);
+                        }
+                        auth_store::AndroidSignerAutoResult::IntentLaunched => {
+                            nip55_state.set(Nip55State::WaitingForApproval);
+                        }
+                        auth_store::AndroidSignerAutoResult::Error(e) => {
+                            nip55_state.set(Nip55State::Error(e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    nip55_state.set(Nip55State::Error(e));
+                }
+            }
+        });
+    };
+    let nip55_retry = move |_| {
+        nip55_state.set(Nip55State::Idle);
     };
     rsx! {
         div { class: "p-6 max-w-lg mx-auto",
@@ -1645,20 +1714,50 @@ fn LoginSection() -> Element {
                                     }
                                 }
                             }
-                            div { class: "space-y-2",
-                                input {
-                                    class: "w-full px-3 py-2 text-sm border border-primary/50 rounded-lg bg-card text-foreground focus:ring-2 focus:ring-primary focus:border-transparent",
-                                    r#type: "text",
-                                    placeholder: "npub1...",
-                                    value: "{nip55_npub_input}",
-                                    oninput: move |evt| nip55_npub_input.set(evt.value()),
-                                }
-                                button {
-                                    class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed",
-                                    onclick: login_with_android_signer,
-                                    disabled: nip55_npub_input.read().is_empty(),
-                                    "Connect Signer"
-                                }
+                            match &*nip55_state.read() {
+                                Nip55State::Idle => rsx! {
+                                    button {
+                                        class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs",
+                                        onclick: nip55_connect,
+                                        "Connect Signer"
+                                    }
+                                },
+                                Nip55State::Checking => rsx! {
+                                    button {
+                                        class: "w-full px-4 py-2.5 bg-primary/70 text-primary-foreground rounded-lg font-medium transition shadow-xs cursor-not-allowed",
+                                        disabled: true,
+                                        "Checking..."
+                                    }
+                                },
+                                Nip55State::WaitingForApproval => rsx! {
+                                    div { class: "space-y-3",
+                                        div { class: "p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg",
+                                            p { class: "text-sm text-foreground font-medium mb-1",
+                                                "Approve in your signer app"
+                                            }
+                                            p { class: "text-xs text-muted-foreground",
+                                                "Open Amber and approve the connection request, then come back and tap below."
+                                            }
+                                        }
+                                        button {
+                                            class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs",
+                                            onclick: nip55_poll_and_connect,
+                                            "I've Approved — Connect"
+                                        }
+                                    }
+                                },
+                                Nip55State::Error(msg) => rsx! {
+                                    div { class: "space-y-3",
+                                        div { class: "p-3 bg-destructive/10 border border-destructive/30 rounded-lg",
+                                            p { class: "text-sm text-destructive", "{msg}" }
+                                        }
+                                        button {
+                                            class: "w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition shadow-xs",
+                                            onclick: nip55_retry,
+                                            "Try Again"
+                                        }
+                                    }
+                                },
                             }
                         }
                     }

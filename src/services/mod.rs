@@ -15,7 +15,6 @@ pub use payments::lnurl;
 
 pub mod admission_policy;
 pub mod aggregation;
-#[cfg(feature = "web")]
 pub mod bible_api;
 pub mod geocoding;
 pub mod git_hosting;

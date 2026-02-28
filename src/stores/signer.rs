@@ -209,8 +209,14 @@ pub async fn restore_session() -> Result<(), String> {
             }
             #[cfg(feature = "mobile")]
             SignerBackend::AndroidSigner => {
-                clear_signer();
-                return Err("Android signer session requires re-login".to_string());
+                let pubkey = PublicKey::parse(&info.public_key)
+                    .map_err(|e| format!("Invalid stored public key: {}", e))?;
+                let package = crate::platform::storage::get::<String>("signer_package")
+                    .unwrap_or_else(|_| Nip55Signer::default_package().to_string());
+                let signer = Nip55Signer::new(pubkey, package);
+                let signer_type = SignerType::AndroidSigner(Arc::new(signer));
+                *CURRENT_SIGNER.write() = Some(signer_type);
+                return Ok(());
             }
         }
     }

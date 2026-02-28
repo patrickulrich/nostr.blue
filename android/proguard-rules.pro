@@ -1,9 +1,5 @@
 # nostr.blue ProGuard rules
-# Keep all static JNI bridge methods in MainActivity companion object
-# These are called from Rust via jni::call_static_method()
--keep class dev.dioxus.main.MainActivity {
-    static <methods>;
-}
--keepclassmembers class dev.dioxus.main.MainActivity {
-    static <methods>;
-}
+# Keep all JNI bridge members in MainActivity (static + instance)
+# Static methods are called from Rust via jni::call_static_method()
+# Instance fields/methods are needed for ActivityResultLauncher and Intent flow
+-keep class dev.dioxus.main.MainActivity { *; }

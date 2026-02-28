@@ -37,6 +37,7 @@ const STORAGE_KEY_NPUB: &str = "nostr_npub";
 const STORAGE_KEY_METHOD: &str = "nostr_login_method";
 const STORAGE_KEY_BUNKER_URI: &str = "nostr_bunker_uri";
 const STORAGE_KEY_APP_KEYS: &str = "nostr_app_keys";
+const STORAGE_KEY_SIGNER_PACKAGE: &str = "signer_package";
 /// State for password prompt modal (NIP-49 decryption)
 #[derive(Clone, Debug, Default)]
 pub struct PasswordPromptState {
@@ -120,6 +121,17 @@ pub fn init_auth() {
                     }
                 }
             }
+            #[cfg(feature = "mobile")]
+            "android_signer" => {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
+                    log::info!("Found stored Android signer session");
+                    *AUTH_STATE.write() = AuthState {
+                        pubkey: Some(npub),
+                        is_authenticated: true,
+                        login_method: Some(LoginMethod::AndroidSigner),
+                    };
+                }
+            }
             _ => {}
         }
     }
@@ -170,6 +182,17 @@ pub async fn restore_session_async() {
                 if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
                     if let Err(e) = login_with_npub(&npub).await {
                         log::error!("Failed to restore read-only session: {}", e);
+                        clear_auth();
+                    }
+                }
+            }
+            #[cfg(feature = "mobile")]
+            "android_signer" => {
+                if let Ok(npub) = crate::platform::storage::get::<String>(STORAGE_KEY_NPUB) {
+                    let package = crate::platform::storage::get::<String>(STORAGE_KEY_SIGNER_PACKAGE)
+                        .unwrap_or_else(|_| crate::platform::Nip55Signer::default_package().to_string());
+                    if let Err(e) = login_with_android_signer(&npub, Some(&package)).await {
+                        log::error!("Failed to restore Android signer session: {}", e);
                         clear_auth();
                     }
                 }
@@ -500,6 +523,7 @@ pub async fn logout() {
     crate::platform::storage::delete(STORAGE_KEY_METHOD);
     crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
     crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
+    crate::platform::storage::delete(STORAGE_KEY_SIGNER_PACKAGE);
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
 }
 /// Clear authentication state
@@ -604,6 +628,20 @@ pub fn export_npub() -> Result<String, String> {
     let pubkey = PublicKey::parse(&pubkey_hex).map_err(|e| e.to_string())?;
     pubkey.to_bech32().map_err(|e| e.to_string())
 }
+/// Result of the auto-detection flow for Android signer login.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Variants used on mobile but not on desktop/WASM targets
+pub enum AndroidSignerAutoResult {
+    /// Successfully logged in; contains the signer package name.
+    LoggedIn(String),
+    /// Intent launched — Amber opened, user must approve and return.
+    IntentLaunched,
+    /// An Intent is already in flight (user hasn't come back yet).
+    IntentInFlight,
+    /// An error occurred during auto-detection.
+    Error(String),
+}
+
 /// Check if an Android signer (NIP-55) is available
 pub fn is_android_signer_available() -> bool {
     #[cfg(feature = "mobile")]
@@ -612,16 +650,119 @@ pub fn is_android_signer_available() -> bool {
     { false }
 }
 /// Login with Android signer (NIP-55)
-pub async fn login_with_android_signer(npub: &str) -> Result<(), String> {
+///
+/// `npub` can be bech32 npub or hex public key.
+/// `signer_package` overrides the default Amber package if provided.
+#[allow(dead_code)] // Called on mobile but not on desktop/WASM targets
+pub async fn login_with_android_signer(npub: &str, signer_package: Option<&str>) -> Result<(), String> {
     #[cfg(feature = "mobile")]
     {
-        let _ = npub;
-        // TODO: Implement AndroidSigner login once SignerType::AndroidSigner is added
-        Err("Android signer login not yet implemented".to_string())
+        use crate::platform::Nip55Signer;
+
+        log::info!("Attempting Android signer login...");
+
+        let public_key = PublicKey::parse(npub)
+            .map_err(|e| format!("Invalid public key: {}", e))?;
+        let pubkey_hex = public_key.to_hex();
+
+        let package = signer_package
+            .unwrap_or_else(|| Nip55Signer::default_package())
+            .to_string();
+
+        let signer = Nip55Signer::new(public_key, package.clone());
+        let signer_type = SignerType::AndroidSigner(Arc::new(signer));
+
+        store_signer(signer_type.clone()).await?;
+        nostr_client::set_signer(signer_type).await?;
+
+        *AUTH_STATE.write() = AuthState {
+            pubkey: Some(pubkey_hex.clone()),
+            is_authenticated: true,
+            login_method: Some(LoginMethod::AndroidSigner),
+        };
+
+        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_hex).ok();
+        crate::platform::storage::set(STORAGE_KEY_METHOD, "android_signer").ok();
+        crate::platform::storage::set(STORAGE_KEY_SIGNER_PACKAGE, &package).ok();
+
+        log::info!("Successfully logged in via Android signer with pubkey: {}", pubkey_hex);
+        run_post_login_init().await;
+        Ok(())
     }
     #[cfg(not(feature = "mobile"))]
     {
-        let _ = npub;
+        let _ = (npub, signer_package);
         Err("Android signer is only available on mobile".to_string())
     }
+}
+
+/// Auto-detect and login with Android signer (NIP-55)
+///
+/// Implements a 3-phase detection flow:
+/// 1. **Poll**: Check for pending Intent result from a previous launch
+/// 2. **ContentResolver**: Try to get pubkey from already-approved signers
+/// 3. **Intent**: Launch get_public_key Intent to open signer for first-time approval
+#[cfg(feature = "mobile")]
+pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
+    use crate::platform::{IntentPollResult, Nip55Signer};
+
+    log::info!("NIP-55 auto-detect: starting 3-phase flow");
+
+    // Phase 1: Poll for pending Intent result from previous launch
+    log::info!("NIP-55 auto-detect: phase 1 — polling for pending Intent result");
+    match Nip55Signer::poll_intent_result() {
+        IntentPollResult::Ready { pubkey, package } => {
+            let pubkey_hex = pubkey.to_hex();
+            log::info!("NIP-55 auto-detect: found pending result from {}: {}", package, pubkey_hex);
+            Nip55Signer::clear_pending_result();
+            login_with_android_signer(&pubkey_hex, Some(&package)).await?;
+            return Ok(AndroidSignerAutoResult::LoggedIn(package));
+        }
+        IntentPollResult::InFlight => {
+            log::info!("NIP-55 auto-detect: Intent still in flight");
+            return Ok(AndroidSignerAutoResult::IntentInFlight);
+        }
+        IntentPollResult::Error(e) => {
+            log::warn!("NIP-55 auto-detect: previous Intent error: {}", e);
+            Nip55Signer::clear_pending_result();
+            // Fall through to try ContentResolver / new Intent
+        }
+        IntentPollResult::None => {
+            log::debug!("NIP-55 auto-detect: no pending Intent result");
+        }
+    }
+
+    // Phase 2: Try ContentResolver for already-approved signers
+    log::info!("NIP-55 auto-detect: phase 2 — trying ContentResolver");
+    let packages = Nip55Signer::get_signer_packages();
+    if packages.is_empty() {
+        return Err("No NIP-55 signer apps installed".to_string());
+    }
+
+    for package in &packages {
+        log::info!("NIP-55 auto-detect: trying ContentResolver for {}", package);
+        if let Some(pubkey) = Nip55Signer::request_public_key(package) {
+            let pubkey_hex = pubkey.to_hex();
+            log::info!("NIP-55 auto-detect: ContentResolver success from {}: {}", package, pubkey_hex);
+            login_with_android_signer(&pubkey_hex, Some(package)).await?;
+            return Ok(AndroidSignerAutoResult::LoggedIn(package.clone()));
+        }
+    }
+
+    // Phase 3: Launch Intent for first-time approval
+    log::info!("NIP-55 auto-detect: phase 3 — launching get_public_key Intent");
+    match Nip55Signer::launch_get_public_key() {
+        Ok(true) => Ok(AndroidSignerAutoResult::IntentLaunched),
+        Ok(false) => Ok(AndroidSignerAutoResult::IntentInFlight),
+        Err(e) => {
+            log::error!("NIP-55 auto-detect: failed to launch Intent: {}", e);
+            Ok(AndroidSignerAutoResult::Error(e))
+        }
+    }
+}
+
+/// Auto-detect and login with Android signer (NIP-55) — non-mobile stub.
+#[cfg(not(feature = "mobile"))]
+pub async fn login_with_android_signer_auto() -> Result<AndroidSignerAutoResult, String> {
+    Err("Android signer is only available on mobile".to_string())
 }
