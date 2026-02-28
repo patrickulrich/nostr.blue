@@ -15,12 +15,7 @@ use serde::{Deserialize, Serialize};
 /// Get current Unix timestamp in seconds
 /// Uses js_sys for WASM environments, std::time for native builds
 pub fn now_secs() -> u64 {
-    #[cfg(target_arch = "wasm32")] { (js_sys::Date::now() / 1000.0) as u64 }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
-    }
+    crate::platform::timestamp::now_secs()
 }
 /// Extract product display name from NIP-99 coordinate (30402:pubkey:d-tag)
 ///

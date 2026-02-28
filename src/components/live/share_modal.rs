@@ -8,9 +8,8 @@ use crate::stores::{dms, nostr_client};
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, Kind, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-use wasm_bindgen::JsValue;
 /// Global counter for generating unique modal IDs
 static LIVE_SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 #[derive(Clone, Copy, PartialEq)]
@@ -48,7 +47,7 @@ pub fn LiveStreamShareModal(
     let has_signer = use_memo(move || *HAS_SIGNER.read());
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str) -> usize {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
@@ -84,7 +83,7 @@ pub fn LiveStreamShareModal(
     }
     #[allow(unused_variables, dead_code)]
     fn set_cursor_position(textarea_id: &str, utf16_pos: usize) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
@@ -102,7 +101,7 @@ pub fn LiveStreamShareModal(
     }
     #[allow(unused_variables)]
     fn set_cursor_position_deferred(textarea_id: String, utf16_pos: usize) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             use wasm_bindgen::prelude::*;
             if let Some(window) = web_sys::window() {
@@ -200,7 +199,7 @@ pub fn LiveStreamShareModal(
                         copied.set(true);
                         log::info!("Link copied to clipboard");
                         spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(2000).await;
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }
@@ -573,9 +572,6 @@ pub fn LiveStreamShareModal(
         PollCreatorModal { show: show_poll_modal, on_poll_created: handle_poll_created }
     }
 }
-async fn copy_to_clipboard(text: &str) -> Result<(), JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
-    let navigator = window.navigator();
-    let clipboard = navigator.clipboard();
-    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await.map(|_| ())
+async fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    crate::platform::clipboard::copy_to_clipboard(text).await
 }

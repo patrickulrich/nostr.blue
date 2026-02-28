@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use dioxus_core::Task;
 use nostr_sdk::prelude::*;
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 use crate::services::profile_search::{
     get_contact_pubkeys, search_cached_profiles, search_profiles, ProfileSearchResult,
@@ -117,7 +117,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current < max {
                     let new_index = current + 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(target_family = "wasm")]
+                    #[cfg(feature = "web")]
                     {
                         use dioxus::document;
                         let _ = document::eval(
@@ -135,7 +135,7 @@ pub fn MentionAutocomplete(props: MentionAutocompleteProps) -> Element {
                 if current > 0 {
                     let new_index = current - 1;
                     autocomplete.selected_index.set(new_index);
-                    #[cfg(target_family = "wasm")]
+                    #[cfg(feature = "web")]
                     {
                         use dioxus::document;
                         let _ = document::eval(
@@ -272,11 +272,11 @@ fn detect_mention(
             let mut searching_signal = state.is_searching;
             let mut task_signal = state.relay_search_task;
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
+                #[cfg(feature = "web")]
                 {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
+                    crate::platform::timer::sleep_ms(300).await;
                 }
-                #[cfg(not(target_family = "wasm"))]
+                #[cfg(not(feature = "web"))]
                 {
                     use std::time::Duration;
                     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -369,7 +369,7 @@ fn insert_mention(
         if let Some(mut signal) = external_cursor_position {
             signal.set(new_cursor_byte_pos);
         }
-        #[cfg(target_family = "wasm")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
@@ -425,7 +425,7 @@ fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
 /// Get cursor position from textarea
 #[allow(unused_variables)]
 fn get_cursor_position(textarea_id: &str) -> usize {
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
@@ -451,7 +451,7 @@ fn update_dropdown_position(
     show_below: &mut Signal<bool>,
     is_mobile: &mut Signal<bool>,
 ) {
-    #[cfg(target_family = "wasm")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {

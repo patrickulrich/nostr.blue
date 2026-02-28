@@ -22,7 +22,7 @@ pub fn NwcSetupModal(
                     log::info!("NWC connected successfully");
                     connection_success.set(true);
                     spawn(async move {
-                        gloo_timers::future::TimeoutFuture::new(1500).await;
+                        crate::platform::timer::sleep_ms(1500).await;
                         on_close.call(());
                     });
                 }

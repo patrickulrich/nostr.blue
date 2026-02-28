@@ -59,7 +59,7 @@ pub fn NoteComposer() -> Element {
                         content.set(String::new());
                         show_image_uploader.set(false);
                         is_publishing.set(false);
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {
                             publish_feedback.set(None);
                         }
@@ -71,7 +71,7 @@ pub fn NoteComposer() -> Element {
                                 Some((false, "Failed to publish to any relay".to_string())),
                             );
                         is_publishing.set(false);
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {
                             publish_feedback.set(None);
                         }
@@ -87,7 +87,7 @@ pub fn NoteComposer() -> Element {
                     let current_version = feedback_version();
                     publish_feedback.set(Some((false, format!("Error: {}", e))));
                     is_publishing.set(false);
-                    gloo_timers::future::TimeoutFuture::new(5000).await;
+                    crate::platform::timer::sleep_ms(5000).await;
                     if feedback_version() == current_version {
                         publish_feedback.set(None);
                     }

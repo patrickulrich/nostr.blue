@@ -365,13 +365,13 @@ pub async fn receive_tokens_with_options(
         .enumerate()
     {
         if attempt > 0 {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 let jitter = (js_sys::Math::random() * 200.0) as u32;
                 let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                gloo_timers::future::TimeoutFuture::new(actual_delay).await;
+                crate::platform::timer::sleep_ms(actual_delay).await;
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(feature = "web"))]
             {
                 use rand::Rng;
                 let jitter = rand::thread_rng().gen_range(0..200);

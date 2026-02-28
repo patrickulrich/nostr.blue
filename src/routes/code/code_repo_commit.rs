@@ -9,9 +9,9 @@ use crate::services::git_hosting::{
     fetch_repository,
     github_import::{parse_github_url, GitHubCommitAuthor, GitHubOwner},
 };
+use crate::platform::http::http_client;
 use crate::stores::nostr_client;
 use dioxus::prelude::*;
-use gloo_net::http::Request;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -336,14 +336,15 @@ async fn fetch_commit_detail(
     );
 
     // Fetch JSON metadata (includes files[].patch for diff)
-    let meta_resp = Request::get(&api_url)
+    let meta_resp = http_client()
+        .get(&api_url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    if !meta_resp.ok() {
+    if !meta_resp.status().is_success() {
         return Err(format!("GitHub API error: {}", meta_resp.status()));
     }
 

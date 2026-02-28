@@ -121,7 +121,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
                 if *nostr_client::CLIENT_INITIALIZED.read() {
                     break;
                 }
-                gloo_timers::future::TimeoutFuture::new(100).await;
+                crate::platform::timer::sleep_ms(100).await;
                 if *request_id.peek() != current_id { return; }
             }
             if *request_id.peek() != current_id { return; }
@@ -254,7 +254,7 @@ pub fn CodeUserProfile(pubkey: String) -> Element {
         spawn(async move {
             if copy_to_clipboard(&npub).await.is_ok() {
                 npub_copied.set(true);
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                crate::platform::timer::sleep_ms(2000).await;
                 npub_copied.set(false);
             }
         });

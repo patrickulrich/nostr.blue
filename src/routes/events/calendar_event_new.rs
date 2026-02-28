@@ -9,14 +9,19 @@ use crate::services::profile_search::{
 };
 use crate::stores::{auth_store, calendar_store};
 use crate::utils::date_helpers::get_today;
-use crate::utils::ics::{parse_ics, IcsDateTime, IcsEvent};
+#[cfg(feature = "web")]
+use crate::utils::ics::parse_ics;
+use crate::utils::ics::{IcsDateTime, IcsEvent};
 use crate::utils::validation::is_valid_http_url;
 use dioxus::events::MouseData;
 use dioxus::prelude::*;
 use nostr_sdk::prelude::ToBech32;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
 /// Maximum ICS file size (1MB)
+#[cfg(feature = "web")]
 const MAX_ICS_FILE_SIZE: u64 = 1_048_576;
 /// Valid participant roles per NIP-52
 const VALID_ROLES: &[&str] = &["participant", "speaker", "organizer", "moderator"];
@@ -45,6 +50,7 @@ pub fn CalendarEventNew() -> Element {
     let mut timezone = use_signal(get_local_timezone);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| None::<String>);
+    #[allow(unused_mut)]
     let mut ics_events = use_signal(Vec::<IcsEvent>::new);
     let mut show_ics_selector = use_signal(|| false);
     let mut participants = use_signal(Vec::<(String, String, String)>::new);
@@ -153,60 +159,67 @@ pub fn CalendarEventNew() -> Element {
         participants.set(parts);
     };
     let handle_ics_upload = move |_evt: Event<FormData>| {
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => {
-                error_message.set(Some("Failed to access window".to_string()));
-                return;
-            }
-        };
-        let document = match window.document() {
-            Some(d) => d,
-            None => {
-                error_message.set(Some("Failed to access document".to_string()));
-                return;
-            }
-        };
-        if let Some(input) = document
-            .get_element_by_id("ics-file-input")
-            .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+        #[cfg(feature = "web")]
         {
-            if let Some(files) = input.files() {
-                if let Some(file) = files.get(0) {
-                    let size = file.size() as u64;
-                    if size > MAX_ICS_FILE_SIZE {
-                        error_message
-                            .set(
-                                Some(
-                                    format!(
-                                        "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
-                                        size as f64 / 1_048_576.0,
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => {
+                    error_message.set(Some("Failed to access window".to_string()));
+                    return;
+                }
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => {
+                    error_message.set(Some("Failed to access document".to_string()));
+                    return;
+                }
+            };
+            if let Some(input) = document
+                .get_element_by_id("ics-file-input")
+                .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
+            {
+                if let Some(files) = input.files() {
+                    if let Some(file) = files.get(0) {
+                        let size = file.size() as u64;
+                        if size > MAX_ICS_FILE_SIZE {
+                            error_message
+                                .set(
+                                    Some(
+                                        format!(
+                                            "ICS file too large ({:.1} MB). Maximum size is 1 MB.",
+                                            size as f64 / 1_048_576.0,
+                                        ),
                                     ),
-                                ),
-                            );
-                        clear_file_input("ics-file-input");
-                        return;
+                                );
+                            clear_file_input("ics-file-input");
+                            return;
+                        }
                     }
                 }
             }
-        }
-        spawn(async move {
-            if let Ok(content) = read_ics_file_content("ics-file-input").await {
-                let events = parse_ics(&content);
-                if events.is_empty() {
-                    error_message.set(Some("No events found in ICS file".to_string()));
-                    clear_file_input("ics-file-input");
+            spawn(async move {
+                if let Ok(content) = read_ics_file_content("ics-file-input").await {
+                    let events = parse_ics(&content);
+                    if events.is_empty() {
+                        error_message.set(Some("No events found in ICS file".to_string()));
+                        clear_file_input("ics-file-input");
+                    } else {
+                        error_message.set(None);
+                        ics_events.set(events);
+                        show_ics_selector.set(true);
+                        clear_file_input("ics-file-input");
+                    }
                 } else {
-                    error_message.set(None);
-                    ics_events.set(events);
-                    show_ics_selector.set(true);
+                    error_message.set(Some("Failed to read ICS file".to_string()));
                     clear_file_input("ics-file-input");
                 }
-            } else {
-                error_message.set(Some("Failed to read ICS file".to_string()));
-                clear_file_input("ics-file-input");
-            }
-        });
+            });
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            error_message.set(Some("ICS upload is not supported on this platform".to_string()));
+        }
     };
     let mut apply_ics_event = move |evt: &IcsEvent| {
         title.set(evt.title.clone());
@@ -615,7 +628,7 @@ pub fn CalendarEventNew() -> Element {
                                             location_debounce.set(current_id);
                                             let query = val.trim().to_string();
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(300).await;
+                                                crate::platform::timer::sleep_ms(300).await;
                                                 if *location_debounce.peek() != current_id { return; }
                                                 if let Ok(results) = geocoding::geocode_suggestions(&query, 10).await {
                                                     if *location_debounce.peek() != current_id { return; }
@@ -632,7 +645,7 @@ pub fn CalendarEventNew() -> Element {
                                     onfocusout: move |_| {
                                         // Delay hiding to allow click on suggestion
                                         spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(200).await;
+                                            crate::platform::timer::sleep_ms(200).await;
                                             show_location_dropdown.set(false);
                                         });
                                     },
@@ -757,7 +770,7 @@ pub fn CalendarEventNew() -> Element {
                                                 participant_debounce.set(current_id);
                                                 let query_snapshot = q.clone();
                                                 spawn(async move {
-                                                    gloo_timers::future::TimeoutFuture::new(300).await;
+                                                    crate::platform::timer::sleep_ms(300).await;
                                                     if *participant_debounce.peek() != current_id { return; }
                                                     if let Ok(results) = search_profiles(&query_snapshot, 8, true).await {
                                                         if *participant_debounce.peek() != current_id { return; }
@@ -782,7 +795,7 @@ pub fn CalendarEventNew() -> Element {
                                     },
                                     onfocusout: move |_| {
                                         spawn(async move {
-                                            gloo_timers::future::TimeoutFuture::new(200).await;
+                                            crate::platform::timer::sleep_ms(200).await;
                                             show_participant_dropdown.set(false);
                                         });
                                     },
@@ -916,15 +929,24 @@ pub fn CalendarEventNew() -> Element {
         }
     }
 }
+#[cfg(feature = "web")]
 fn get_local_timezone() -> String {
-    let result = js_sys::eval("Intl.DateTimeFormat().resolvedOptions().timeZone");
-    if let Ok(tz) = result {
-        if let Some(s) = tz.as_string() {
-            return s;
-        }
-    }
+    let formatter = js_sys::Intl::DateTimeFormat::new(
+        &js_sys::Array::new(),
+        &js_sys::Object::new(),
+    );
+    let resolved = formatter.resolved_options();
+    js_sys::Reflect::get(&resolved, &"timeZone".into())
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_else(|| "UTC".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+fn get_local_timezone() -> String {
     "UTC".to_string()
 }
+#[cfg(feature = "web")]
 fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {
@@ -941,7 +963,31 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     js_date.set_minutes(minutes);
     (js_date.get_time() / 1000.0) as u64
 }
+
+#[cfg(not(feature = "web"))]
+fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() != 3 {
+        return 0;
+    }
+    let year: i64 = parts[0].parse().unwrap_or(0);
+    let month: i64 = parts[1].parse::<i64>().unwrap_or(0);
+    let day: i64 = parts[2].parse().unwrap_or(0);
+    if !(1970..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return 0;
+    }
+    let time_parts: Vec<&str> = time.split(':').collect();
+    let hours: i64 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minutes: i64 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // Accurate days since Unix epoch using Hinnant's civil calendar algorithm
+    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
+    let era_days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + day - 1;
+    let days = era_days - 719468; // days_from_civil(1970, 1, 1) = 719468
+    let total_secs = days * 86400 + hours * 3600 + minutes * 60;
+    if total_secs < 0 { 0u64 } else { total_secs as u64 }
+}
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in local time
+#[cfg(feature = "web")]
 fn timestamp_to_date_time(ts: u64) -> (String, String) {
     let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
     let year = date.get_full_year();
@@ -953,8 +999,37 @@ fn timestamp_to_date_time(ts: u64) -> (String, String) {
     let time_str = format!("{:02}:{:02}", hours, minutes);
     (date_str, time_str)
 }
+
+/// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings (UTC fallback)
+#[cfg(not(feature = "web"))]
+fn timestamp_to_date_time(ts: u64) -> (String, String) {
+    let secs = ts.min(253_402_300_799); // Cap at 9999-12-31T23:59:59Z (matches nostr SDK's Timestamp bound)
+    let days = secs / 86400;
+    let remaining = secs % 86400;
+    let hours = remaining / 3600;
+    let minutes = (remaining % 3600) / 60;
+    // Approximate date from days since epoch
+    let mut y = 1970i32;
+    let mut d = days as i32;
+    loop {
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if d < days_in_year { break; }
+        d -= days_in_year;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days_in_months = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0u32;
+    for dim in &days_in_months {
+        if d < *dim { break; }
+        d -= dim;
+        m += 1;
+    }
+    (format!("{:04}-{:02}-{:02}", y, m + 1, d + 1), format!("{:02}:{:02}", hours, minutes))
+}
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in a specific timezone
 /// Uses JavaScript's Intl.DateTimeFormat for proper timezone handling
+#[cfg(feature = "web")]
 fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     use wasm_bindgen::JsValue;
     if tz.is_empty() || tz.len() > 64
@@ -1032,7 +1107,15 @@ fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
     }
     timestamp_to_date_time(ts)
 }
+
+#[cfg(not(feature = "web"))]
+fn timestamp_to_date_time_in_tz(ts: u64, tz: &str) -> (String, String) {
+    log::debug!("Timezone '{}' ignored on native, using UTC for ts={}", tz, ts);
+    timestamp_to_date_time(ts)
+}
+
 /// Format ICS datetime for display
+#[cfg(feature = "web")]
 fn format_ics_datetime(dt: &IcsDateTime) -> String {
     match dt {
         IcsDateTime::Date(d) => d.clone(),
@@ -1050,7 +1133,21 @@ fn format_ics_datetime(dt: &IcsDateTime) -> String {
         }
     }
 }
+
+#[cfg(not(feature = "web"))]
+fn format_ics_datetime(dt: &IcsDateTime) -> String {
+    match dt {
+        IcsDateTime::Date(d) => d.clone(),
+        IcsDateTime::DateTime(ts)
+        | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
+            let (date_str, time_str) = timestamp_to_date_time(*ts);
+            format!("{} {}", date_str, time_str)
+        }
+    }
+}
+
 /// Read ICS file content from file input
+#[cfg(feature = "web")]
 async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
@@ -1068,6 +1165,7 @@ async fn read_ics_file_content(element_id: &str) -> Result<String, String> {
     result.as_string().ok_or("Could not convert to string".to_string())
 }
 /// Clear file input value to allow re-selecting the same file
+#[cfg(feature = "web")]
 fn clear_file_input(input_id: &str) {
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -1078,4 +1176,14 @@ fn clear_file_input(input_id: &str) {
             }
         }
     }
+}
+
+#[cfg(not(feature = "web"))]
+#[allow(dead_code)]
+fn clear_file_input(_input_id: &str) {}
+
+#[cfg(not(feature = "web"))]
+#[allow(dead_code)]
+async fn read_ics_file_content(_element_id: &str) -> Result<String, String> {
+    Err("ICS file reading requires web platform".to_string())
 }

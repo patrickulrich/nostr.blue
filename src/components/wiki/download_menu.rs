@@ -6,6 +6,7 @@
 
 use crate::components::icons::{ChevronDownIcon, DownloadIcon, FileTextIcon, PrinterIcon};
 use crate::stores::wiki_store::CachedWikiPage;
+#[cfg(feature = "web")]
 use crate::utils::download::{download_markdown, trigger_print};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{consume_toast, ToastOptions};
@@ -69,6 +70,7 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     is_open.set(false);
+                                    #[cfg(feature = "web")]
                                     trigger_print();
                                     toast_api.info(
                                         "Print dialog opened".to_string(),
@@ -105,7 +107,10 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
 
                                     // Generate filename from identifier
                                     let filename = format!("{}.md", identifier_md);
+                                    #[cfg(feature = "web")]
                                     download_markdown(&filename, &title_md, &content_md);
+                                    #[cfg(not(feature = "web"))]
+                                    { let _ = (&title_md, &content_md); }
 
                                     toast_api.success(
                                         "Downloaded!".to_string(),

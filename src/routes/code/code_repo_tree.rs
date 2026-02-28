@@ -11,9 +11,9 @@ use crate::stores::nostr_client;
 use crate::utils::nip34::Repository;
 use dioxus::prelude::*;
 use dioxus_core::use_drop;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -29,11 +29,15 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
 
     // Store cleanup function for "t" key listener removal
     #[allow(unused_variables, unused_mut)]
+    #[cfg(feature = "web")]
     let mut t_key_cleanup = use_signal(|| None::<(js_sys::Function, web_sys::Window)>);
+    #[allow(unused_variables, unused_mut)]
+    #[cfg(not(feature = "web"))]
+    let mut t_key_cleanup = use_signal(|| None::<()>);
 
     // Keyboard shortcut: press 't' to open fuzzy finder (one-time registration)
     use_hook(move || {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let window = web_sys::window().expect("no global window");
             let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
@@ -67,7 +71,7 @@ pub fn CodeRepoTree(naddr: String, git_ref: String, path: Vec<String>) -> Elemen
     });
 
     use_drop(move || {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         if let Some((func, win)) = t_key_cleanup.peek().as_ref() {
             win.remove_event_listener_with_callback("keydown", func).ok();
         }

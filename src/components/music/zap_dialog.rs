@@ -7,7 +7,6 @@ use crate::stores::profiles;
 use crate::stores::relay::DEFAULT_RELAYS;
 use crate::utils::podcast::ValueBlock;
 use dioxus::prelude::*;
-use gloo_net::http::Request;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{PublicKey, RelayUrl};
 use serde::{Deserialize, Serialize};
@@ -183,28 +182,39 @@ pub fn MusicZapDialog() -> Element {
         e.stop_propagation();
         if let Some(inv) = invoice.read().clone() {
             spawn(async move {
-                let script = format!(
-                    r#"
-                    (async function() {{
-                        if (typeof window.webln !== 'undefined') {{
-                            try {{
-                                await window.webln.enable();
-                                const result = await window.webln.sendPayment('{}');
-                                return {{ success: true, preimage: result.preimage }};
-                            }} catch (e) {{
-                                return {{ success: false, error: e.message }};
+                #[cfg(feature = "web")]
+                {
+                    let inv_json = serde_json::to_string(&inv).unwrap_or_default();
+                    let script = format!(
+                        r#"
+                        (async function() {{
+                            if (typeof window.webln !== 'undefined') {{
+                                try {{
+                                    await window.webln.enable();
+                                    const result = await window.webln.sendPayment({});
+                                    return {{ success: true, preimage: result.preimage }};
+                                }} catch (e) {{
+                                    return {{ success: false, error: e.message }};
+                                }}
+                            }} else {{
+                                return {{ success: false, error: 'WebLN not available' }};
                             }}
-                        }} else {{
-                            return {{ success: false, error: 'WebLN not available' }};
-                        }}
-                    }})()
-                    "#,
-                    inv,
-                );
-                match js_sys::eval(&script) {
-                    Ok(_) => log::info!("WebLN payment initiated"),
-                    Err(e) => log::error!("WebLN payment failed: {:?}", e),
+                        }})()
+                        "#,
+                        inv_json,
+                    );
+                    match js_sys::eval(&script) {
+                        Ok(promise) => {
+                            match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise)).await {
+                                Ok(result) => log::info!("WebLN payment completed: {:?}", result),
+                                Err(e) => log::error!("WebLN payment rejected: {:?}", e),
+                            }
+                        }
+                        Err(e) => log::error!("WebLN eval failed: {:?}", e),
+                    }
                 }
+                #[cfg(not(feature = "web"))]
+                let _ = inv;
             });
         }
     };
@@ -337,25 +347,37 @@ pub fn MusicZapDialog() -> Element {
                                     }
                                 }
                                 div { class: "space-y-2",
-                                    button {
-                                        class: "w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
-                                        onclick: pay_with_webln,
-                                        "⚡ Pay with WebLN"
-                                    }
-                                    button {
-                                        class: "w-full py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors",
-                                        onclick: {
-                                            let inv = invoice.read().clone();
-                                            move |e: Event<MouseData>| {
-                                                e.stop_propagation();
-                                                if let Some(invoice_str) = inv.as_ref() {
-                                                    let url = format!("lightning:{}", invoice_str);
-                                                    let _ = web_sys::window()
-                                                        .and_then(|w| w.open_with_url_and_target(&url, "_blank").ok());
+                                    if cfg!(feature = "web") {
+                                        button {
+                                            class: "w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
+                                            onclick: pay_with_webln,
+                                            "⚡ Pay with WebLN"
+                                        }
+                                        button {
+                                            class: "w-full py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors",
+                                            onclick: {
+                                                let inv = invoice.read().clone();
+                                                move |e: Event<MouseData>| {
+                                                    e.stop_propagation();
+                                                    if let Some(invoice_str) = inv.as_ref() {
+                                                        let url = format!("lightning:{}", invoice_str);
+                                                        #[cfg(feature = "web")]
+                                                        {
+                                                            let _ = web_sys::window()
+                                                                .and_then(|w| w.open_with_url_and_target(&url, "_blank").ok());
+                                                        }
+                                                        #[cfg(not(feature = "web"))]
+                                                        let _ = url;
+                                                    }
                                                 }
-                                            }
-                                        },
-                                        "Open in Wallet"
+                                            },
+                                            "Open in Wallet"
+                                        }
+                                    } else {
+                                        p {
+                                            class: "text-sm text-muted-foreground text-center py-2",
+                                            "Copy the invoice above to pay with your Lightning wallet."
+                                        }
                                     }
                                     button {
                                         class: "w-full py-2 bg-muted text-foreground rounded-md hover:bg-muted/80 transition-colors",
@@ -395,10 +417,11 @@ async fn generate_wavlake_lnurl_invoice(
         .map_err(|e| format!("Failed to decode LNURL: {}", e))?;
     log::info!("Decoded LNURL to: {}", lnurl_pay_url);
     log::info!("Fetching LNURL-pay parameters from: {}", lnurl_pay_url);
-    let params: LnurlPayParams = Request::get(&lnurl_pay_url)
-        .send()
+    let params: LnurlPayParams = reqwest::get(&lnurl_pay_url)
         .await
         .map_err(|e| format!("Failed to fetch LNURL-pay params: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("LNURL-pay server error: {}", e))?
         .json()
         .await
         .map_err(|e| format!("Failed to parse LNURL-pay params: {}", e))?;
@@ -428,8 +451,7 @@ async fn generate_wavlake_lnurl_invoice(
         }
     }
     log::info!("Requesting invoice from callback: {}", callback_url);
-    let response = Request::get(&callback_url)
-        .send()
+    let response = reqwest::get(&callback_url)
         .await
         .map_err(|e| format!("Failed to request invoice: {}", e))?;
     let response_text = response
@@ -643,8 +665,7 @@ async fn generate_v4v_invoice(
         }
     }
     log::info!("Requesting invoice from: {}", callback_url);
-    let response = Request::get(&callback_url)
-        .send()
+    let response = reqwest::get(&callback_url)
         .await
         .map_err(|e| format!("Failed to request invoice: {}", e))?;
     let invoice_response: InvoiceResponse = response

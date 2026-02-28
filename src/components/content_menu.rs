@@ -271,21 +271,8 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                     return;
                                 };
                                 spawn(async move {
-                                    let Some(window) = web_sys::window() else {
-                                        toast_api
-                                            .error(
-                                                "Clipboard not available".to_string(),
-                                                ToastOptions::new()
-                                                    .description("Browser window not accessible".to_string())
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
-                                        return;
-                                    };
-                                    let clipboard = window.navigator().clipboard();
-                                    let promise = clipboard.write_text(&nostr_uri);
-                                    match wasm_bindgen_futures::JsFuture::from(promise).await {
-                                        Ok(_) => {
+                                    match crate::platform::clipboard::copy_to_clipboard(&nostr_uri).await {
+                                        Ok(()) => {
                                             toast_api
                                                 .success(
                                                     "Copied!".to_string(),

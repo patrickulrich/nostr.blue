@@ -129,7 +129,7 @@ pub fn LabelPicker(
                         // Delay hiding to check if focus moved within the component
                         let gen = *focus_gen.peek();
                         spawn(async move {
-                            gloo_timers::future::TimeoutFuture::new(200).await;
+                            crate::platform::timer::sleep_ms(200).await;
                             if *focus_gen.peek() == gen {
                                 show_suggestions.set(false);
                             }
@@ -171,7 +171,7 @@ pub fn LabelPicker(
                                         onfocusout: move |_| {
                                             let gen = *focus_gen.peek();
                                             spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(200).await;
+                                                crate::platform::timer::sleep_ms(200).await;
                                                 if *focus_gen.peek() == gen {
                                                     show_suggestions.set(false);
                                                 }

@@ -1,15 +1,16 @@
 # nostr.blue
 
-A nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
+A multi-platform Nostr client built using **Rust + Dioxus + rust-nostr** with integrated CDK wallet.
 
 ![Version](https://img.shields.io/badge/version-0.7.14-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange)
+![Platforms](https://img.shields.io/badge/platforms-Web%20%7C%20Android%20%7C%20Desktop-blue)
 ![CDK](https://img.shields.io/badge/CDK-0.14.2-purple)
 
 ## 🌟 Overview
 
-nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAssembly. It provides a comprehensive social networking experience on the Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, and Data Vending Machines.
+nostr.blue is a modern Nostr client built entirely in Rust. It runs as a WebAssembly app in browsers, as a native Android app via WebView, and as a Linux desktop application. It provides a comprehensive social networking experience on the Nostr protocol with advanced features like communities, Lightning zaps, encrypted messaging, NIP-55 Android signer integration, and Data Vending Machines.
 
 ## ⚡ Nostr Features
 
@@ -25,7 +26,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **Marketplace** - NIP-99 classified listings with product browse, cart, and Cashu/Lightning checkout
 - **Code Collaboration** - Git repositories (NIP-34), code snippets (NIP-C0), issues, and pull requests
 - **Social Organization** - Communities (NIP-72), Lists (NIP-51), Data Vending Machines (NIP-90)
-- **Secure Authentication** - Browser extension (NIP-07) and remote signer (NIP-46) with Amber/nsecBunker
+- **Secure Authentication** - Browser extension (NIP-07), remote signer (NIP-46), and Android signer (NIP-55) with Amber/nsecBunker
 - **Cross-device Sync** - Settings synchronized across devices via Nostr (NIP-78)
 
 ## 💰 Cashu Features
@@ -42,18 +43,25 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 ## 🛠 Technology Stack
 
 ### Core Framework
-- **[Dioxus 0.7.2](https://dioxuslabs.com/)** - Modern reactive web framework for Rust
+- **[Dioxus 0.7.2](https://dioxuslabs.com/)** - Multi-platform reactive UI framework for Rust
 - **dioxus-stores** - Advanced state management library for reactive global state
-- **WebAssembly** - Compiled to WASM for near-native browser performance
-- **[Dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI)** - Development server and WASM bundler
+- **[Dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI)** - Development server, WASM bundler, and native build tooling
+
+### Platform Targets
+| Platform | Backend | Database | Feature Flag |
+|----------|---------|----------|-------------|
+| Web (default) | WebAssembly | IndexedDB | `web` |
+| Android | WebView via Dioxus mobile | nostrdb (LMDB) + SQLite | `mobile` |
+| Linux Desktop | WebView via Dioxus desktop | nostrdb (LMDB) + SQLite | `desktop` |
 
 ### Nostr Protocol
 - **[rust-nostr SDK](https://rust-nostr.org/)** - Comprehensive Nostr implementation
   - `nostr-sdk` - High-level client with relay pool management
   - `nostr` - Core protocol types and event handling
   - `nostr-database` - Database abstraction layer
-  - `nostr-indexeddb` - IndexedDB persistent storage
-  - `nostr-browser-signer` - NIP-07 browser extension integration
+  - `nostr-indexeddb` - IndexedDB persistent storage (web)
+  - `nostr-ndb` - nostrdb/LMDB persistent storage (native)
+  - `nostr-browser-signer` - NIP-07 browser extension integration (web)
   - `nostr-connect` - NIP-46 remote signer protocol (Amber, nsecBunker)
   - `nwc` - NIP-47 Nostr Wallet Connect for remote Lightning wallet integration
 
@@ -61,6 +69,7 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **[CDK](https://github.com/cashubtc/cdk)** - Cashu Development Kit for ecash wallet functionality
   - `cdk` - Core Cashu wallet implementation with mint/melt operations, quote management, and proof handling (with `auth` feature for NUT-21/22 protected mints)
   - `cdk-common` - Common types, database traits, and utilities for Cashu protocol
+  - `cdk-sqlite` - SQLite wallet database (native platforms)
   - Custom IndexedDB implementation of `WalletDatabase` trait for browser persistence
   - Atomic keyset counter management prevents "Blinded Message already signed" errors
 
@@ -74,14 +83,29 @@ nostr.blue is a modern Nostr client built entirely in Rust and compiled to WebAs
 - **pulldown-cmark** - Markdown parsing
 - **ammonia** - HTML sanitization
 - **reqwest** - HTTP client for LNURL and external services
-- **gloo-storage** - LocalStorage API wrapper
+- **gloo-storage** - LocalStorage API wrapper (web)
 - **tokio** - Async runtime for parallel operations
+- **jni** / **ndk-context** - Android JNI bridge (mobile)
+- **git2** - Native git operations (native platforms)
 
 ## 📦 Project Structure
 
 ```
 nostr.blue/
+├── android/                 # Android platform files
+│   ├── AndroidManifest.xml  # App manifest (permissions, NIP-55 queries)
+│   ├── MainActivity.kt      # NIP-55 signer JNI bridge
+│   ├── proguard-rules.pro   # R8 keep rules for JNI methods
+│   └── res/                 # App resources (strings, icons)
+├── scripts/
+│   └── build-android.sh     # Android APK build script
 ├── src/
+│   ├── platform/            # Platform abstraction layer
+│   │   ├── mod.rs           # Conditional module exports
+│   │   ├── android_signer.rs # NIP-55 Nip55Signer + JNI calls (mobile)
+│   │   ├── storage.rs       # Storage (localStorage / JSON file)
+│   │   ├── clipboard.rs     # Clipboard access
+│   │   └── ...
 │   ├── components/          # Reusable UI components
 │   │   ├── note.rs         # Note/event display
 │   │   ├── note_card.rs    # Compact note card
@@ -273,12 +297,11 @@ nostr.blue/
 
 ## 🚦 Getting Started
 
-### Prerequisites
+### Prerequisites (All Platforms)
 
 - **Rust 1.82+** (install via [rustup](https://rustup.rs/))
 - **Node.js 18+** and **npm** (for TailwindCSS)
-- **Dioxus CLI** (development server and bundler)
-- **wasm32-unknown-unknown** target
+- **Dioxus CLI 0.7.x** (development server and bundler)
 
 ### Installation
 
@@ -290,7 +313,7 @@ cd nostr.blue
 # Install Rust (if needed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Add WASM target
+# Add WASM target (for web builds)
 rustup target add wasm32-unknown-unknown
 
 # Install Dioxus CLI (0.7.x required)
@@ -308,7 +331,7 @@ npm run tailwind:build
 
 Run `git submodule update --init --recursive` again when new submodules are added. See `.gitmodules` for the list of submodules.
 
-### Development
+### Web Development
 
 ```bash
 # Terminal 1: Watch and rebuild CSS
@@ -325,7 +348,7 @@ The development server includes:
 - Auto-rebuild on file modifications
 - Source maps for debugging
 
-### Building for Production
+### Web Production Build
 
 ```bash
 # Build optimized CSS
@@ -342,6 +365,65 @@ Production builds are optimized with:
 - Size optimization (`opt-level = "z"`)
 - Single codegen unit for minimal binary size
 - Panic abort for smaller WASM binaries
+
+### Android Build
+
+#### Prerequisites
+
+- **Android SDK** with platform tools and build tools
+- **Android NDK 27** (27.0.12077973 or compatible)
+- **aarch64-linux-android** Rust target
+- **ImageMagick** or **ffmpeg** (for app icon generation)
+
+```bash
+# Install Android Rust target
+rustup target add aarch64-linux-android
+
+# Set environment variables (adjust paths to your setup)
+export ANDROID_HOME="$HOME/android-sdk"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+```
+
+#### Building the APK
+
+The build script handles everything: Rust cross-compilation, Gradle build, OpenSSL library bundling, ProGuard rules, app name/icons, and APK packaging.
+
+```bash
+# Build the Android APK (ARM64)
+./scripts/build-android.sh
+
+# Output: ./nostrblue-release.apk
+```
+
+#### What the build script does
+
+1. Cleans stale JNI libraries from previous builds
+2. Runs `dx build --platform android --release --target aarch64-linux-android --no-default-features --features mobile`
+3. Ensures OpenSSL shared libraries (`libssl.so`, `libcrypto.so`) are in `jniLibs/arm64-v8a`
+4. Copies ProGuard rules to keep JNI bridge methods from R8 stripping
+5. Applies app name ("nostr.blue") and generates app icons at all density sizes
+6. Re-runs Gradle (`assembleDebug`) to package everything into the final APK
+7. Copies the APK to project root as `nostrblue-release.apk`
+
+#### Installing on a device
+
+```bash
+# Via USB or wireless ADB
+adb install -r nostrblue-release.apk
+```
+
+#### Android-specific features
+
+- **NIP-55 Signer Integration** — Login via Amber or other NIP-55 signer apps using Android's ContentResolver. Auto-detects installed signers and can retrieve public keys without manual npub entry.
+- **Native Storage** — Uses the app-private files directory (`context.filesDir`) for persistent data, resolved via JNI since `dirs::data_dir()` returns `None` on Android.
+- **ProGuard/R8 Safe** — Custom keep rules in `android/proguard-rules.pro` prevent code stripping of JNI-called static methods in `MainActivity.kt`.
+
+### Desktop Build (Linux)
+
+```bash
+# Build and run the desktop app
+dx serve --platform desktop --no-default-features --features desktop
+```
 
 ## 🔌 Protocol Support
 
@@ -396,6 +478,7 @@ Production builds are optimized with:
 | [NIP-52](https://github.com/nostr-protocol/nips/blob/master/52.md) | Calendar Events | ✅ |
 | [NIP-53](https://github.com/nostr-protocol/nips/blob/master/53.md) | Live Activities | ✅ |
 | [NIP-54](https://github.com/nostr-protocol/nips/blob/master/54.md) | Wiki | ✅ |
+| [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) | Android Signer Application | ✅ |
 | [NIP-56](https://github.com/nostr-protocol/nips/blob/master/56.md) | Reporting | ✅ |
 | [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps | ✅ |
 | [NIP-58](https://github.com/nostr-protocol/nips/blob/master/58.md) | Badges | ✅ |
@@ -420,7 +503,7 @@ Production builds are optimized with:
 | [NIP-86](https://github.com/nostr-protocol/nips/blob/master/86.md) | Relay Management API | ❌ |
 | [NIP-87](https://github.com/nostr-protocol/nips/blob/master/87.md) | Mint Discoverability | ✅ |
 | [NIP-88](https://github.com/nostr-protocol/nips/blob/master/88.md) | Polls | ✅ |
-| [NIP-89](https://github.com/nostr-protocol/nips/blob/master/89.md) | App Handlers | ❌ |
+| [NIP-89](https://github.com/nostr-protocol/nips/blob/master/89.md) | App Handlers | ✅ |
 | [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) | Data Vending Machines | ✅ |
 | [NIP-92](https://github.com/nostr-protocol/nips/blob/master/92.md) | Media Attachments | ✅ |
 | [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata | ✅ |
@@ -516,7 +599,19 @@ Contributions are welcome! Please follow these guidelines:
 - Utilize hooks for reusable reactive logic
 - Document public APIs with doc comments
 - Write meaningful commit messages
-- Test on multiple browsers and screen sizes
+- Test on multiple browsers, screen sizes, and platforms
+
+### Verification
+
+Run these checks before submitting PRs:
+
+```bash
+cargo check                                                  # Type checking
+dx check                                                     # Dioxus RSX validation
+cargo clippy -- -D warnings                                  # Native lints
+cargo clippy --target wasm32-unknown-unknown -- -D warnings  # WASM lints (CI enforced)
+cargo test                                                   # Unit tests
+```
 
 ### Pull Request Process
 

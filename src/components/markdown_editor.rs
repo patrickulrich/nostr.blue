@@ -68,8 +68,8 @@ pub fn MarkdownEditor(mut props: MarkdownEditorProps) -> Element {
             content.set(new_content.clone());
             let id_clone = id_str.clone();
             spawn(async move {
-                #[cfg(target_family = "wasm")]
-                gloo_timers::future::TimeoutFuture::new(10).await;
+                #[cfg(feature = "web")]
+                crate::platform::timer::sleep_ms(10).await;
                 set_textarea_cursor(&id_clone, new_cursor, &new_content);
             });
         }
@@ -257,7 +257,7 @@ pub fn insert_at_cursor(
     content.set(new_content.clone());
     let id = textarea_id.to_string();
     spawn(async move {
-        #[cfg(target_family = "wasm")] gloo_timers::future::TimeoutFuture::new(10).await;
+        #[cfg(feature = "web")] crate::platform::timer::sleep_ms(10).await;
         set_textarea_cursor(&id, new_cursor, &new_content);
     });
 }

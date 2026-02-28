@@ -1,7 +1,7 @@
 /// NIP-78: Preferred Reactions Storage
 /// Stores user's preferred reaction emojis on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -97,14 +97,14 @@ pub fn get_default_reaction() -> Option<PreferredReaction> {
 }
 /// Load cached reaction preferences from localStorage
 fn load_cached_reactions() -> Option<ReactionsData> {
-    LocalStorage::get::<String>(REACTIONS_LOCAL_STORAGE_KEY)
+    storage::get::<String>(REACTIONS_LOCAL_STORAGE_KEY)
         .ok()
         .and_then(|json| serde_json::from_str(&json).ok())
 }
 /// Save reaction preferences to localStorage
 fn cache_reactions(data: &ReactionsData) {
     if let Ok(json) = serde_json::to_string(data) {
-        let _ = LocalStorage::set(REACTIONS_LOCAL_STORAGE_KEY, json);
+        let _ = storage::set(REACTIONS_LOCAL_STORAGE_KEY, &json);
     }
 }
 /// Initialize reactions from localStorage cache (synchronous, for instant UI)

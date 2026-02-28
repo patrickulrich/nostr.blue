@@ -40,18 +40,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
             vevent.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", d.replace('-', "")));
         }
         EventTime::Timestamp(ts) => {
-            if let Some(tz) = &event.start_tzid {
-                vevent
-                    .push_str(
-                        &format!(
-                            "DTSTART;TZID={}:{}\r\n",
-                            tz,
-                            format_local_datetime(*ts),
-                        ),
-                    );
-            } else {
-                vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
-            }
+            vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
         }
     }
     if let Some(end) = &event.end {
@@ -60,19 +49,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
                 vevent.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", d.replace('-', "")));
             }
             EventTime::Timestamp(ts) => {
-                if let Some(tz) = &event.end_tzid.as_ref().or(event.start_tzid.as_ref())
-                {
-                    vevent
-                        .push_str(
-                            &format!(
-                                "DTEND;TZID={}:{}\r\n",
-                                tz,
-                                format_local_datetime(*ts),
-                            ),
-                        );
-                } else {
-                    vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
-                }
+                vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
             }
         }
     }
@@ -111,29 +88,12 @@ fn format_vevent(event: &CalendarEvent) -> String {
 }
 /// Format Unix timestamp as ICS UTC datetime (YYYYMMDDTHHmmssZ)
 fn format_timestamp(ts: u64) -> String {
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    format!(
-        "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-        date.get_utc_full_year(),
-        date.get_utc_month() + 1,
-        date.get_utc_date(),
-        date.get_utc_hours(),
-        date.get_utc_minutes(),
-        date.get_utc_seconds(),
-    )
-}
-/// Format Unix timestamp as local datetime (YYYYMMDDTHHmmss)
-fn format_local_datetime(ts: u64) -> String {
-    let date = js_sys::Date::new(&(ts as f64 * 1000.0).into());
-    format!(
-        "{:04}{:02}{:02}T{:02}{:02}{:02}",
-        date.get_full_year(),
-        date.get_month() + 1,
-        date.get_date(),
-        date.get_hours(),
-        date.get_minutes(),
-        date.get_seconds(),
-    )
+    use chrono::{TimeZone, Utc};
+    let ts_i64 = i64::try_from(ts).unwrap_or(0);
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+        return "19700101T000000Z".to_string();
+    };
+    dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 /// Escape special characters in ICS text
 fn escape_ics_text(text: &str) -> String {
@@ -225,6 +185,7 @@ impl IcsDateTime {
     }
 }
 /// Parse ICS content and extract events
+#[cfg(feature = "web")]
 pub fn parse_ics(content: &str) -> Vec<IcsEvent> {
     let mut events = Vec::new();
     let mut current_event: Option<IcsEvent> = None;
@@ -251,6 +212,7 @@ pub fn parse_ics(content: &str) -> Vec<IcsEvent> {
     events
 }
 /// Unfold ICS lines (handle line continuations)
+#[cfg(feature = "web")]
 fn unfold_ics_lines(content: &str) -> String {
     let mut result = String::new();
     let mut prev_line = String::new();
@@ -271,6 +233,7 @@ fn unfold_ics_lines(content: &str) -> String {
     result
 }
 /// Parse a single ICS property line
+#[cfg(feature = "web")]
 fn parse_ics_property(line: &str, event: &mut IcsEvent) {
     let (name_params, value) = match line.find(':') {
         Some(idx) => (&line[..idx], &line[idx + 1..]),
@@ -313,6 +276,7 @@ fn parse_ics_property(line: &str, event: &mut IcsEvent) {
     }
 }
 /// Parse ICS datetime value
+#[cfg(feature = "web")]
 fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     let is_date_only = params.to_uppercase().contains("VALUE=DATE");
     let tzid = params
@@ -328,6 +292,8 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
             return Some(IcsDateTime::DateTime(ts));
         }
     } else if let Some(tz) = tzid {
+        // TODO: TZID datetime is treated as UTC. Proper conversion requires chrono-tz.
+        // The timezone string is preserved in DateTimeWithTz for display purposes.
         if let Some(ts) = parse_ics_local_datetime(value) {
             return Some(IcsDateTime::DateTimeWithTz {
                 timestamp: ts,
@@ -340,48 +306,38 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     None
 }
 /// Parse UTC datetime: YYYYMMDDTHHmmssZ
+#[cfg(feature = "web")]
 fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     if value.len() < 15 {
         return None;
     }
-    let year: i32 = value[0..4].parse().ok()?;
-    let month: u32 = value[4..6].parse().ok()?;
-    let day: u32 = value[6..8].parse().ok()?;
-    let hour: u32 = value[9..11].parse().ok()?;
-    let minute: u32 = value[11..13].parse().ok()?;
-    let second: u32 = value[13..15].parse().ok()?;
-    let date = js_sys::Date::new_with_year_month_day_hr_min_sec(
-        year as u32,
-        (month - 1) as i32,
-        day as i32,
-        hour as i32,
-        minute as i32,
-        second as i32,
-    );
-    Some((date.get_time() / 1000.0) as u64)
+    use chrono::NaiveDateTime;
+    // Strip trailing 'Z' if present for parsing
+    let clean = value.trim_end_matches('Z');
+    if clean.len() < 15 {
+        return None;
+    }
+    let ndt = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S").ok()?;
+    let ts = ndt.and_utc().timestamp();
+    if ts < 0 { return None; }
+    Some(ts as u64)
 }
 /// Parse local datetime: YYYYMMDDTHHmmss
+#[cfg(feature = "web")]
 fn parse_ics_local_datetime(value: &str) -> Option<u64> {
     if value.len() < 15 {
         return None;
     }
-    let year: i32 = value[0..4].parse().ok()?;
-    let month: u32 = value[4..6].parse().ok()?;
-    let day: u32 = value[6..8].parse().ok()?;
-    let hour: u32 = value[9..11].parse().ok()?;
-    let minute: u32 = value[11..13].parse().ok()?;
-    let second: u32 = value[13..15].parse().ok()?;
-    let date = js_sys::Date::new_with_year_month_day_hr_min_sec(
-        year as u32,
-        (month - 1) as i32,
-        day as i32,
-        hour as i32,
-        minute as i32,
-        second as i32,
-    );
-    Some((date.get_time() / 1000.0) as u64)
+    use chrono::NaiveDateTime;
+    let clean = value.trim_end_matches('Z');
+    let ndt = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S").ok()?;
+    // Treat as UTC when no timezone info is available
+    let ts = ndt.and_utc().timestamp();
+    if ts < 0 { return None; }
+    Some(ts as u64)
 }
 /// Unescape ICS text
+#[cfg(feature = "web")]
 fn unescape_ics_text(text: &str) -> String {
     text.replace("\\n", "\n")
         .replace("\\,", ",")
@@ -434,6 +390,7 @@ impl From<IcsEvent> for Option<IcsImportData> {
     }
 }
 /// Trigger browser download of ICS file
+#[cfg(feature = "web")]
 pub fn download_ics(filename: &str, content: &str) {
     use wasm_bindgen::prelude::*;
     #[wasm_bindgen]
@@ -464,6 +421,12 @@ pub fn download_ics(filename: &str, content: &str) {
     click_fn.call0(&a).ok();
     revoke_object_url(&url);
 }
+
+/// Trigger download of ICS file (native stub)
+#[cfg(not(feature = "web"))]
+pub fn download_ics(_filename: &str, _content: &str) {
+    log::warn!("ICS download not supported on native desktop");
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,6 +436,7 @@ mod tests {
         assert_eq!(escape_ics_text("Line1\nLine2"), "Line1\\nLine2");
         assert_eq!(escape_ics_text("Test;value"), "Test\\;value");
     }
+    #[cfg(feature = "web")]
     #[test]
     fn test_unescape_ics_text() {
         assert_eq!(unescape_ics_text("Hello\\, World"), "Hello, World");
@@ -487,6 +451,7 @@ mod tests {
         assert!((lat - 57.65).abs() < 0.1);
         assert!((lon - 10.41).abs() < 0.1);
     }
+    #[cfg(feature = "web")]
     #[test]
     fn test_parse_ics_basic() {
         let ics = r#"BEGIN:VCALENDAR

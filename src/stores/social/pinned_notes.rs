@@ -4,11 +4,11 @@ use dioxus::signals::ReadableExt;
 use dioxus_stores::Store;
 use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::spawn_local;
 /// Store for pinned event IDs with fine-grained reactivity
 #[derive(Clone, Debug, Default, Store)]
@@ -41,7 +41,7 @@ pub static PINNED_SYNC_STATUS: GlobalSignal<PinnedSyncStatus> = Signal::global(|
 /// Previous pinned notes state for rollback on failure
 pub static PINNED_ROLLBACK_STATE: GlobalSignal<Store<PinnedRollbackStore>> = Signal::global(||
 Store::new(PinnedRollbackStore::default()));
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     /// Pending pinned notes publish timeout (for debouncing)
     static PINNED_PUBLISH_TIMEOUT: RefCell<Option<Timeout>> = const {
@@ -142,7 +142,7 @@ pub async fn pin_event(event_id: String) -> Result<(), String> {
     }
     pins.push(event_id);
     *PINNED_EVENTS.read().data().write() = pins.clone();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         PINNED_PUBLISH_TIMEOUT
             .with(|timeout| {
@@ -158,7 +158,7 @@ pub async fn pin_event(event_id: String) -> Result<(), String> {
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         publish_with_retry(pins, 0).await;
     }
@@ -172,7 +172,7 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
     }
     pins.retain(|id| id != &event_id);
     *PINNED_EVENTS.read().data().write() = pins.clone();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         PINNED_PUBLISH_TIMEOUT
             .with(|timeout| {
@@ -188,7 +188,7 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         publish_with_retry(pins, 0).await;
     }
@@ -218,7 +218,7 @@ fn publish_with_retry(
                         "Retrying pinned notes publish in {}ms (attempt {}/{})",
                         delay_ms, retry_count + 1, MAX_RETRIES
                     );
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         let timeout_handle = Timeout::new(
                             delay_ms,
@@ -228,7 +228,7 @@ fn publish_with_retry(
                         );
                         std::mem::forget(timeout_handle);
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
+                    #[cfg(not(feature = "web"))]
                     {
                         tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
                         publish_with_retry(pins, retry_count + 1).await;

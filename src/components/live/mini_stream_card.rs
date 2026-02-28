@@ -86,7 +86,7 @@ pub fn MiniLiveStreamCard(event: NostrEvent) -> Element {
         .and_then(|m| m.display_name.clone().or(m.name.clone()))
         .unwrap_or_else(|| truncate_pubkey(&author_pubkey));
     let format_time_ago = |timestamp: u64| -> String {
-        let now = (js_sys::Date::now() / 1000.0) as u64;
+        let now = crate::platform::timestamp::now_secs();
         let diff = now.saturating_sub(timestamp);
         match diff {
             0..=59 => "just now".to_string(),

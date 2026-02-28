@@ -1,7 +1,7 @@
 /// NIP-78: Sidebar Preferences Storage
 /// Stores user's sidebar layout preferences on Nostr relays using kind 30078 events
 use dioxus::prelude::*;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use nostr_sdk::{EventBuilder, Filter, FromBech32, Kind, Tag};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -351,14 +351,14 @@ pub fn get_total_pages(is_authenticated: bool) -> usize {
 }
 /// Load cached sidebar preferences from localStorage
 fn load_cached_sidebar() -> Option<SidebarPreferencesData> {
-    LocalStorage::get::<String>(SIDEBAR_LOCAL_STORAGE_KEY)
+    storage::get::<String>(SIDEBAR_LOCAL_STORAGE_KEY)
         .ok()
         .and_then(|json| serde_json::from_str(&json).ok())
 }
 /// Save sidebar preferences to localStorage
 fn cache_sidebar(data: &SidebarPreferencesData) {
     if let Ok(json) = serde_json::to_string(data) {
-        let _ = LocalStorage::set(SIDEBAR_LOCAL_STORAGE_KEY, json);
+        let _ = storage::set(SIDEBAR_LOCAL_STORAGE_KEY, &json);
     }
 }
 /// Initialize sidebar from localStorage cache (synchronous, for instant UI)

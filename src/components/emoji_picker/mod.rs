@@ -80,7 +80,7 @@ pub fn EmojiPicker(props: EmojiPickerProps) -> Element {
                     let current = *show_picker.read();
                     show_picker.set(!current);
                     if !current {
-                        #[cfg(target_family = "wasm")]
+                        #[cfg(feature = "web")]
                         {
                             let btn_id = button_id.read().clone();
                             if let Some(window) = web_sys::window() {

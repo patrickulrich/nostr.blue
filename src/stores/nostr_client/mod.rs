@@ -49,10 +49,11 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(target_arch = "wasm32")]
 use nostr_indexeddb::WebDatabase;
+#[cfg(feature = "native")]
+use nostr_ndb::NdbDatabase;
 use crate::stores::pinned_notes;
 use crate::stores::relay;
 use crate::stores::signer::SignerType;
-#[cfg(target_arch = "wasm32")]
 use crate::services::admission_policy::NostrBlueAdmissionPolicy;
 mod articles;
 mod contacts;
@@ -176,7 +177,29 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
             .opts(client_opts)
             .build()
     };
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "native")]
+    let client = {
+        let db_path = crate::platform::storage::data_dir().join("nostr-blue-ndb");
+        std::fs::create_dir_all(&db_path)
+            .map_err(|e| format!("Failed to create NDB dir: {}", e))?;
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let database = NdbDatabase::open(&db_path_str)
+            .map_err(|e| format!("Failed to open NDB: {}", e))?;
+        let gossip = nostr_gossip_memory::store::NostrGossipMemory::bounded(
+            NonZeroUsize::new(10_000).expect("10_000 is non-zero"),
+        );
+        let client_opts = ClientOptions::new()
+            .verify_subscriptions(true)
+            .ban_relay_on_mismatch(true)
+            .max_avg_latency(Duration::from_secs(2));
+        Client::builder()
+            .database(database)
+            .gossip(gossip)
+            .admit_policy(NostrBlueAdmissionPolicy)
+            .opts(client_opts)
+            .build()
+    };
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "native")))]
     let client = Client::builder().build();
     let client = Arc::new(client);
     let relay_futures: Vec<_> = DEFAULT_RELAYS
@@ -231,7 +254,10 @@ pub async fn initialize_client() -> std::result::Result<Arc<Client>, String> {
     {
         let client_for_connect = client.clone();
         tokio::spawn(async move {
-            relay::connection::ensure_relays_ready(&client_for_connect).await;
+            // Don't call ensure_relays_ready here — it accesses Dioxus GlobalSignals
+            // which aren't available on tokio worker threads (no Dioxus runtime).
+            // Just attempt the connection; signal updates happen on the UI thread.
+            let _ = client_for_connect.try_connect(Duration::from_secs(3)).await;
             log::info!("Background relay connections completed");
         });
     }

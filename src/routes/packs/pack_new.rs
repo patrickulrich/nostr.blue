@@ -49,7 +49,7 @@ pub fn PackNew() -> Element {
             return;
         }
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {

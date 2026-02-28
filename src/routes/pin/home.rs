@@ -101,13 +101,12 @@ pub fn PinBoardsHome() -> Element {
         }
         let version = search_version
             .with_mut(|v| {
-                *v += 1;
+                *v = v.wrapping_add(1);
                 *v
             });
         search_loading.set(true);
         spawn(async move {
-            #[cfg(target_arch = "wasm32")]
-            gloo_timers::future::TimeoutFuture::new(300).await;
+            crate::platform::timer::sleep_ms(300).await;
             if *search_version.peek() != version {
                 return;
             }
@@ -158,6 +157,39 @@ pub fn PinBoardsHome() -> Element {
         tags.sort();
         tags.dedup();
         tags.into_iter().take(20).collect()
+    };
+    let mut fetch_zap_metadata = move |board: Pinboard| {
+        let pubkey_str = board.pubkey.clone();
+        zap_board.set(Some(board));
+        zap_author_metadata.set(None); // Clear stale metadata
+        show_zap_modal.set(true);
+        spawn(async move {
+            match PublicKey::from_hex(&pubkey_str) {
+                Ok(pubkey) => {
+                if let Some(client) = get_client() {
+                    let metadata = if let Ok(Some(m)) = client.database().metadata(pubkey).await {
+                        Some(m)
+                    } else if let Ok(Some(m)) = client
+                        .fetch_metadata(pubkey, Duration::from_secs(5))
+                        .await
+                    {
+                        Some(m)
+                    } else {
+                        None
+                    };
+                    if let Some(m) = metadata {
+                        // Only set if board hasn't changed
+                        if zap_board.read().as_ref().map(|b| b.pubkey.as_str()) == Some(pubkey_str.as_str()) {
+                            zap_author_metadata.set(Some(m));
+                        }
+                    }
+                }
+                }
+                Err(e) => {
+                    log::warn!("Pin board zap: invalid pubkey '{}': {}", pubkey_str, e);
+                }
+            }
+        });
     };
     #[allow(clippy::type_complexity)]
     let zap_modal_data: Option<
@@ -305,24 +337,7 @@ pub fn PinBoardsHome() -> Element {
                                     show_slideover.set(true);
                                 },
                                 on_zap_request: move |board: Pinboard| {
-                                    let pubkey_str = board.pubkey.clone();
-                                    zap_board.set(Some(board));
-                                    show_zap_modal.set(true);
-                                    spawn(async move {
-                                        if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
-                                            if let Some(client) = get_client() {
-                                                if let Ok(Some(metadata)) = client.database().metadata(pubkey).await
-                                                {
-                                                    zap_author_metadata.set(Some(metadata));
-                                                } else if let Ok(Some(metadata)) = client
-                                                    .fetch_metadata(pubkey, Duration::from_secs(5))
-                                                    .await
-                                                {
-                                                    zap_author_metadata.set(Some(metadata));
-                                                }
-                                            }
-                                        }
-                                    });
+                                    fetch_zap_metadata(board);
                                 },
                                 loading: false,
                                 has_more: false,
@@ -365,24 +380,7 @@ pub fn PinBoardsHome() -> Element {
                                 show_slideover.set(true);
                             },
                             on_zap_request: move |board: Pinboard| {
-                                let pubkey_str = board.pubkey.clone();
-                                zap_board.set(Some(board));
-                                show_zap_modal.set(true);
-                                spawn(async move {
-                                    if let Ok(pubkey) = PublicKey::from_hex(&pubkey_str) {
-                                        if let Some(client) = get_client() {
-                                            if let Ok(Some(metadata)) = client.database().metadata(pubkey).await
-                                            {
-                                                zap_author_metadata.set(Some(metadata));
-                                            } else if let Ok(Some(metadata)) = client
-                                                .fetch_metadata(pubkey, Duration::from_secs(5))
-                                                .await
-                                            {
-                                                zap_author_metadata.set(Some(metadata));
-                                            }
-                                        }
-                                    }
-                                });
+                                fetch_zap_metadata(board);
                             },
                             loading: false,
                             on_load_more: Some(handle_load_more),

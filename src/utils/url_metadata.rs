@@ -31,9 +31,9 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
         format!("https://{}", url)
     };
     log::info!("Fetching metadata for URL: {}", full_url);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     let html = fetch_html_wasm(&full_url).await?;
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     let html = fetch_html_native(&full_url).await?;
     let metadata = parse_html_metadata(&html, full_url);
     log::info!(
@@ -44,21 +44,19 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
     );
     Ok(metadata)
 }
-/// Fetch HTML content using gloo-net (WASM)
-#[cfg(target_arch = "wasm32")]
+/// Fetch HTML content (WASM)
+#[cfg(feature = "web")]
 async fn fetch_html_wasm(url: &str) -> Result<String, String> {
-    use gloo_net::http::Request;
-    let response = Request::get(url)
-        .send()
+    let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     response.text().await.map_err(|e| format!("Failed to read response body: {}", e))
 }
 /// Fetch HTML content using reqwest (native)
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 async fn fetch_html_native(url: &str) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; NostrBlueBot/1.0)")

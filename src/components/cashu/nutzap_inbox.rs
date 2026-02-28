@@ -89,11 +89,11 @@ pub fn NutzapInbox(on_close: EventHandler<()>) -> Element {
                     }
                 }
                 redeeming_ids.write().remove(&event_id);
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
-                    gloo_timers::future::TimeoutFuture::new(100).await;
+                    crate::platform::timer::sleep_ms(100).await;
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }

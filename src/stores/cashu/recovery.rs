@@ -103,7 +103,7 @@ pub async fn sync_state_with_mint(mint_url: &str) -> CashuResult<SyncResult> {
                             "Lock busy for {}, retrying in {}ms (attempt {}/{})",
                             mint_url, delay_ms, attempt + 1, MAX_RETRIES
                         );
-                        gloo_timers::future::TimeoutFuture::new(delay_ms).await;
+                        crate::platform::timer::sleep_ms(delay_ms).await;
                     }
                 }
             }
@@ -660,7 +660,7 @@ pub async fn recover_mint_quote(
         }
         MintQuoteState::Unpaid => {
             if let Some(expiry) = quote_state.expiry {
-                let now = js_sys::Date::now() as u64 / 1000;
+                let now = crate::platform::timestamp::now_secs();
                 if now >= expiry {
                     log::info!("Quote {} expired", quote_id);
                     return Ok(RecoveryResult {
@@ -1346,7 +1346,7 @@ pub async fn recover_active_melt_quotes() -> CashuResult<MeltRecoveryResult> {
 /// Check if a quote has expired
 pub fn is_quote_expired(expiry: Option<u64>) -> bool {
     if let Some(exp) = expiry {
-        let now = js_sys::Date::now() as u64 / 1000;
+        let now = crate::platform::timestamp::now_secs();
         now >= exp
     } else {
         false
@@ -1360,7 +1360,7 @@ pub fn is_quote_expired(expiry: Option<u64>) -> bool {
 pub fn is_quote_about_to_expire(expiry: Option<u64>) -> bool {
     const QUOTE_SAFETY_MARGIN_SECS: u64 = 30;
     if let Some(exp) = expiry {
-        let now = js_sys::Date::now() as u64 / 1000;
+        let now = crate::platform::timestamp::now_secs();
         now + QUOTE_SAFETY_MARGIN_SECS >= exp
     } else {
         false
@@ -1694,7 +1694,7 @@ pub async fn process_pending_mint_quotes() -> Result<(usize, usize, u64), String
     }
     log::info!("Processing {} pending mint quotes", quotes.len());
     let checked = quotes.len();
-    let now = js_sys::Date::now() as u64 / 1000;
+    let now = crate::platform::timestamp::now_secs();
     let mut expired_ids = Vec::new();
     for quote in &quotes {
         if let Some(expiry) = quote.expiry {
@@ -1799,7 +1799,7 @@ pub async fn process_pending_melt_quotes() -> Result<(usize, usize, usize), Stri
     log::info!("Processing {} pending melt quotes", quotes.len());
     let mut checked = 0;
     let mut expired = 0;
-    let now = js_sys::Date::now() as u64 / 1000;
+    let now = crate::platform::timestamp::now_secs();
     for quote in quotes {
         checked += 1;
         if let Some(expiry) = quote.expiry {
@@ -1980,9 +1980,9 @@ pub fn start_quote_processor() {
     spawn(async move {
         log::info!("Starting quote state machine processor");
         loop {
-            #[cfg(target_arch = "wasm32")]
-            gloo_timers::future::TimeoutFuture::new(30_000).await;
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "web")]
+            crate::platform::timer::sleep_ms(30_000).await;
+            #[cfg(not(feature = "web"))]
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             match process_pending_mint_quotes().await {
                 Ok((_checked, paid, amount)) => {

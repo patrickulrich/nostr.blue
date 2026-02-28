@@ -36,7 +36,7 @@ pub fn ConfirmModal(
                 aria_describedby: "{message_id}",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();

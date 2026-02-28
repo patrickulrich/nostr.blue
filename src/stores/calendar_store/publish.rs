@@ -98,7 +98,7 @@ pub async fn publish_date_event(
 
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let d_tag = format!("event-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
+    let d_tag = format!("event-{}-{}", crate::platform::timestamp::now_millis(), rand::random::<f64>());
     let mut builder = EventBuilder::new(
             Kind::Custom(KIND_DATE_CALENDAR_EVENT),
             content.unwrap_or(""),
@@ -170,7 +170,7 @@ pub async fn publish_time_event(
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let d_tag = format!("event-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
+    let d_tag = format!("event-{}-{}", crate::platform::timestamp::now_millis(), rand::random::<f64>());
     let mut builder = EventBuilder::new(
             Kind::Custom(KIND_TIME_CALENDAR_EVENT),
             content.unwrap_or(""),
@@ -253,7 +253,7 @@ pub async fn publish_rsvp(
     use nostr::nips::nip01::Coordinate;
     Coordinate::parse(event_coordinate)
         .map_err(|_| format!("Invalid event coordinate: {}", event_coordinate))?;
-    let d_tag = format!("rsvp-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
+    let d_tag = format!("rsvp-{}-{}", crate::platform::timestamp::now_millis(), rand::random::<f64>());
     let free_busy = FreeBusy::from_rsvp_status(status);
     let event = EventBuilder::new(Kind::Custom(KIND_CALENDAR_RSVP), note)
         .tag(Tag::identifier(&d_tag))
@@ -299,7 +299,7 @@ pub async fn publish_availability_template(
 ) -> StdResult<String, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let d_tag = format!("avail-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
+    let d_tag = format!("avail-{}-{}", crate::platform::timestamp::now_millis(), rand::random::<f64>());
     let mut builder = EventBuilder::new(Kind::Custom(KIND_AVAILABILITY_TEMPLATE), "")
         .tag(Tag::identifier(&d_tag))
         .tag(Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]))
@@ -405,7 +405,7 @@ pub async fn publish_availability_block(
     }
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let d_tag = format!("block-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
+    let d_tag = format!("block-{}-{}", crate::platform::timestamp::now_millis(), rand::random::<f64>());
     let mut builder = EventBuilder::new(Kind::Custom(KIND_AVAILABILITY_BLOCK), "")
         .tag(Tag::identifier(&d_tag))
         .tag(Tag::custom(TagKind::Custom("start".into()), vec![start.to_string()]))
@@ -431,7 +431,7 @@ pub async fn publish_calendar(
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
     use nostr::nips::nip01::Coordinate;
-    let d_tag = format!("calendar-{}-{}", js_sys::Date::now() as u64, js_sys::Math::random());
+    let d_tag = format!("calendar-{}-{}", crate::platform::timestamp::now_millis(), rand::random::<f64>());
     let mut builder = EventBuilder::new(Kind::Custom(KIND_CALENDAR), description)
         .tag(Tag::identifier(&d_tag))
         .tag(Tag::custom(TagKind::Custom("title".into()), vec![title.to_string()]));

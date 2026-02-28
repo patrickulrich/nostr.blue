@@ -30,11 +30,11 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
         let query = search_query.read().clone();
         if *initialized.read() {
             spawn(async move {
-                #[cfg(target_family = "wasm")]
+                #[cfg(feature = "web")]
                 {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
+                    crate::platform::timer::sleep_ms(300).await;
                 }
-                #[cfg(not(target_family = "wasm"))]
+                #[cfg(not(feature = "web"))]
                 {
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 }

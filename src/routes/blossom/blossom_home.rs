@@ -554,7 +554,7 @@ fn FileDetailModal(
     let handle_copy = {
         let url_for_copy = item.url.clone();
         move |_| {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 let url = url_for_copy.clone();
                 spawn(async move {
@@ -567,7 +567,7 @@ fn FileDetailModal(
                         {
                             Ok(_) => {
                                 copied.set(true);
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
+                                crate::platform::timer::sleep_ms(2000).await;
                                 copied.set(false);
                             }
                             Err(e) => {
@@ -761,7 +761,7 @@ fn UploadModal(
     let mut error = use_signal(|| None::<String>);
     let upload_progress = *UPLOAD_PROGRESS.read();
     let handle_file_select = move |_| {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let mut error = error;
             spawn(async move {
@@ -808,8 +808,7 @@ fn UploadModal(
                 );
                 input.click();
                 use futures::future::{select, Either};
-                use gloo_timers::future::TimeoutFuture;
-                let timeout = TimeoutFuture::new(300_000);
+                let timeout = crate::platform::timer::sleep_ms(300_000);
                 let file = match select(std::pin::pin!(rx), std::pin::pin!(timeout))
                     .await
                 {

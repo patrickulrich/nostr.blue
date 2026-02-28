@@ -1,10 +1,6 @@
-#[cfg(target_arch = "wasm32")]
 use nostr::util::BoxedFuture;
-#[cfg(target_arch = "wasm32")]
 use nostr_relay_pool::policy::{AdmitPolicy, AdmitStatus, PolicyError};
-#[cfg(target_arch = "wasm32")]
 use nostr_sdk::prelude::*;
-#[cfg(target_arch = "wasm32")]
 use nostr_sdk::FromBech32;
 /// Custom admission policy for nostr.blue
 ///
@@ -13,10 +9,9 @@ use nostr_sdk::FromBech32;
 /// - Reduce database size
 /// - Improve query performance
 /// - Enhance user experience
-#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct NostrBlueAdmissionPolicy;
-#[cfg(target_arch = "wasm32")]
 impl AdmitPolicy for NostrBlueAdmissionPolicy {
     fn admit_event<'a>(
         &'a self,

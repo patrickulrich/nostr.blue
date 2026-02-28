@@ -1,10 +1,16 @@
+#[cfg(feature = "web")]
 use crate::stores::nostr_client::get_client;
 use crate::utils::truncate_pubkey;
+#[cfg(feature = "web")]
 use nostr_sdk::{EventId, Filter, Kind};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
+#[cfg(feature = "web")]
 use web_sys::{Request, RequestInit, RequestMode, Response};
+#[cfg(feature = "web")]
 const NOSTR_WINE_API: &str = "https://api.nostr.wine";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendingNote {
@@ -43,6 +49,7 @@ pub struct TrendingStats {
     pub zaps: Option<u32>,
 }
 /// Response item from nostr.wine trending API
+#[cfg(feature = "web")]
 #[derive(Debug, Clone, Deserialize)]
 struct NostrWineTrendingItem {
     event_id: String,
@@ -60,6 +67,7 @@ struct NostrWineTrendingItem {
 /// - limit: Number of events to return (1-200, default 10)
 ///
 /// Note: Hours is fixed at 24 and order is fixed to "reactions" for best engagement signal.
+#[cfg(feature = "web")]
 pub async fn get_trending_notes(
     limit: Option<usize>,
 ) -> Result<Vec<TrendingNote>, String> {
@@ -169,6 +177,15 @@ pub async fn get_trending_notes(
     log::info!("Built {} trending notes from nostr.wine", trending_notes.len());
     Ok(trending_notes)
 }
+
+/// Fetch trending notes (native stub)
+#[cfg(not(feature = "web"))]
+pub async fn get_trending_notes(
+    _limit: Option<usize>,
+) -> Result<Vec<TrendingNote>, String> {
+    Err("Trending notes not yet supported on native".to_string())
+}
+
 /// Get display name for a trending note author
 #[allow(dead_code)]
 pub fn get_display_name(note: &TrendingNote) -> String {

@@ -152,7 +152,7 @@ pub(crate) async fn create_ephemeral_wallet(
     Ok(wallet)
 }
 /// Derive deterministic wallet seed from Nostr private key or signer
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     use sha2::{Digest, Sha256};
     if let Some(keys) = auth_store::get_keys() {
@@ -188,9 +188,9 @@ pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
     log::info!("Wallet seed derived from NIP-07 signature");
     Ok(seed)
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub(crate) async fn derive_wallet_seed() -> Result<[u8; 64], String> {
-    Err("Seed derivation only available in WASM".to_string())
+    Err("Seed derivation requires the \"web\" feature (NIP-07 browser extension)".to_string())
 }
 pub(crate) use super::errors::{
     is_insufficient_funds_error_string, is_token_already_spent_error,

@@ -117,13 +117,7 @@ pub fn ArticleNew() -> Element {
         if title_val.is_empty() {
             return;
         }
-        #[cfg(target_family = "wasm")]
-        let now = (js_sys::Date::now() / 1000.0) as u64;
-        #[cfg(not(target_family = "wasm"))]
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let now = crate::platform::timestamp::now_secs();
         let last_save = *last_auto_save.read();
         if now - last_save < 30 {
             return;
@@ -203,13 +197,7 @@ pub fn ArticleNew() -> Element {
         let saved_hash = *content_hash.read();
         draft_status.set(DraftStatus::Saving);
         spawn(async move {
-            #[cfg(target_family = "wasm")]
-            let now = (js_sys::Date::now() / 1000.0) as u64;
-            #[cfg(not(target_family = "wasm"))]
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            let now = crate::platform::timestamp::now_secs();
             match save_draft(&draft).await {
                 Ok(event_id) => {
                     last_auto_save.set(now);

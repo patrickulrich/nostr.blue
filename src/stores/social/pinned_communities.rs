@@ -14,11 +14,11 @@ use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey};
 use std::collections::HashSet;
 use std::time::Duration;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use std::cell::RefCell;
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::spawn_local;
 use super::community_store::KIND_COMMUNITY_DEFINITION;
 /// Store for pinned community a_tags with fine-grained reactivity
@@ -51,7 +51,7 @@ PinnedCommunitiesSyncStatus::Idle);
 pub static PINNED_COMMUNITIES_ROLLBACK: GlobalSignal<
     Store<PinnedCommunitiesRollbackStore>,
 > = Signal::global(|| Store::new(PinnedCommunitiesRollbackStore::default()));
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 thread_local! {
     /// Pending pinned communities publish timeout (for debouncing)
     static PINNED_COMMUNITIES_TIMEOUT: RefCell<Option<Timeout>> = const {
@@ -118,7 +118,7 @@ pub async fn pin_community(a_tag: String) -> Result<(), String> {
     }
     pins.push(a_tag);
     *PINNED_COMMUNITIES.read().data().write() = pins.clone();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         PINNED_COMMUNITIES_TIMEOUT
             .with(|timeout| {
@@ -134,7 +134,7 @@ pub async fn pin_community(a_tag: String) -> Result<(), String> {
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         publish_with_retry(pins, 0).await;
     }
@@ -148,7 +148,7 @@ pub async fn unpin_community(a_tag: String) -> Result<(), String> {
     }
     pins.retain(|tag| tag != &a_tag);
     *PINNED_COMMUNITIES.read().data().write() = pins.clone();
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         PINNED_COMMUNITIES_TIMEOUT
             .with(|timeout| {
@@ -164,7 +164,7 @@ pub async fn unpin_community(a_tag: String) -> Result<(), String> {
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         publish_with_retry(pins, 0).await;
     }
@@ -195,7 +195,7 @@ fn publish_with_retry(
                         "Retrying pinned communities publish in {}ms (attempt {}/{})",
                         delay_ms, retry_count + 1, MAX_RETRIES
                     );
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         let timeout_handle = Timeout::new(
                             delay_ms,
@@ -205,7 +205,7 @@ fn publish_with_retry(
                         );
                         std::mem::forget(timeout_handle);
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
+                    #[cfg(not(feature = "web"))]
                     {
                         tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
                         publish_with_retry(pins, retry_count + 1).await;

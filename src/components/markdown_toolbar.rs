@@ -555,7 +555,7 @@ pub fn apply_markdown_format(
     }
 }
 /// Set cursor position in a textarea element (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
@@ -571,10 +571,10 @@ pub fn set_textarea_cursor(textarea_id: &str, position: usize, content: &str) {
         }
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn set_textarea_cursor(_textarea_id: &str, _position: usize, _content: &str) {}
 /// Get cursor position from a textarea element (WASM only)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
     use wasm_bindgen::JsCast;
     if let Some(window) = web_sys::window() {
@@ -595,12 +595,12 @@ pub fn get_textarea_cursor(textarea_id: &str, content: &str) -> (usize, usize) {
     }
     (0, 0)
 }
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "web"))]
 pub fn get_textarea_cursor(_textarea_id: &str, _content: &str) -> (usize, usize) {
     (0, 0)
 }
 /// Convert UTF-16 code unit index (from DOM) to UTF-8 byte index (for Rust string slicing)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
     let mut utf16_count = 0;
     let mut utf8_byte_index = 0;
@@ -614,7 +614,7 @@ fn utf16_to_utf8_index(text: &str, utf16_index: usize) -> usize {
     utf8_byte_index.min(text.len())
 }
 /// Convert UTF-8 byte index (from Rust string) to UTF-16 code unit index (for DOM)
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 fn utf8_to_utf16_index(text: &str, utf8_index: usize) -> usize {
     let utf8_index = utf8_index.min(text.len());
     let mut utf16_count = 0;

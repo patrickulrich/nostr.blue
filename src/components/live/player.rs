@@ -1,12 +1,15 @@
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 /// Cleanup guard that destroys player on drop
 #[derive(Clone)]
 struct CleanupGuard {
+    #[allow(dead_code)]
     video_id: String,
 }
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
+        #[cfg(feature = "web")]
         destroyVideoJsPlayer(&self.video_id);
     }
 }
@@ -22,6 +25,7 @@ pub struct LiveStreamPlayerProps {
     #[props(default = true)]
     pub autoplay: bool,
 }
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 // Store for Video.js player instances
@@ -182,29 +186,184 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut loading = use_signal(|| true);
     let mut mounted = use_signal(|| false);
+    #[allow(unused_mut, unused_variables)]
     let mut cleanup_guard = use_signal(|| None::<CleanupGuard>);
+    let mut init_gen = use_signal(|| 0u32);
     let video_id_str = video_id.read().clone();
     let stream_url_for_effect = stream_url.clone();
     use_effect(move || {
         let video_id = video_id_str.clone();
-        let stream_url = stream_url_for_effect.clone();
+        let _stream_url = stream_url_for_effect.clone();
+        let gen = init_gen.with_mut(|g| { *g += 1; *g });
         if *url_valid.read() {
             mounted.set(true);
+            #[cfg(feature = "web")]
+            {
+                let stream_url = _stream_url;
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(300).await;
+                    if !*mounted.peek() {
+                        return;
+                    }
+                    match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
+                        Ok(_) => {
+                            if *init_gen.peek() == gen {
+                                loading.set(false);
+                                error.set(None);
+                                cleanup_guard
+                                    .set(
+                                        Some(CleanupGuard {
+                                            video_id: video_id.clone(),
+                                        }),
+                                    );
+                            }
+                        }
+                        Err(e) => {
+                            if *init_gen.peek() == gen {
+                                let error_msg = format!("Failed to load stream: {:?}", e);
+                                log::error!("{}", error_msg);
+                                error.set(Some(error_msg));
+                                loading.set(false);
+                            }
+                        }
+                    }
+                });
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let stream_url = _stream_url;
+                spawn(async move {
+                    crate::platform::timer::sleep_ms(300).await;
+                    if !*mounted.peek() {
+                        return;
+                    }
+
+                    // Ensure hlsManager is available
+                    let check = document::eval(
+                        "return typeof window.hlsManager !== 'undefined'",
+                    )
+                    .await;
+                    let hls_loaded =
+                        check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                    if !hls_loaded {
+                        log::info!("[Live] Injecting HLS manager into WebView");
+                        let hls_js = include_str!("../../../public/hls-manager.js");
+                        if let Err(e) = document::eval(hls_js).await {
+                            log::error!("[Live] Failed to inject HLS manager: {:?}", e);
+                            error.set(Some(format!(
+                                "Failed to load HLS support: {:?}",
+                                e
+                            )));
+                            loading.set(false);
+                            return;
+                        }
+                    }
+
+                    // Set up the video element via eval
+                    let video_id_json =
+                        serde_json::to_string(&video_id).unwrap_or_default();
+                    let stream_url_json =
+                        serde_json::to_string(&stream_url).unwrap_or_default();
+                    let autoplay_str = if autoplay { "true" } else { "false" };
+
+                    let setup_script = format!(
+                        r#"
+                        try {{
+                            let video = document.getElementById({video_id});
+                            if (!video) return "error:Video element not found";
+
+                            let url = {stream_url};
+                            let isHls = url.toLowerCase().includes('.m3u8');
+
+                            if (isHls && window.hlsManager) {{
+                                let result = await window.hlsManager.attachToAudio({video_id}, url);
+                                console.log('[Live] HLS stream attached:', result);
+                            }} else {{
+                                video.src = url;
+                            }}
+
+                            if ({autoplay}) {{
+                                await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                            }}
+                            return "ok";
+                        }} catch (e) {{
+                            console.error('[Live] Setup error:', e);
+                            return "error:" + e.message;
+                        }}
+                        "#,
+                        video_id = video_id_json,
+                        stream_url = stream_url_json,
+                        autoplay = autoplay_str,
+                    );
+
+                    if *init_gen.peek() != gen {
+                        return;
+                    }
+                    match document::eval(&setup_script).await {
+                        Ok(val) => {
+                            if *init_gen.peek() == gen {
+                                let result = val.as_str().unwrap_or("ok");
+                                if let Some(err_msg) = result.strip_prefix("error:") {
+                                    error.set(Some(err_msg.to_string()));
+                                } else {
+                                    error.set(None);
+                                }
+                                loading.set(false);
+                            }
+                        }
+                        Err(e) => {
+                            if *init_gen.peek() == gen {
+                                error.set(Some(format!(
+                                    "Failed to setup stream: {:?}",
+                                    e
+                                )));
+                                loading.set(false);
+                            }
+                        }
+                    }
+                });
+            }
+        } else {
+            error.set(Some("Invalid stream URL".to_string()));
+            loading.set(false);
+        }
+    });
+    // Cleanup HLS on unmount for native platforms.
+    // Can't use struct Drop (document::eval becomes NoOp there).
+    // use_drop runs while the Dioxus runtime is still active.
+    #[cfg(not(feature = "web"))]
+    {
+        let video_id_for_cleanup = video_id.read().clone();
+        use_drop(move || {
+            let video_id_json =
+                serde_json::to_string(&video_id_for_cleanup).unwrap_or_default();
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(300).await;
-                if !*mounted.peek() {
-                    return;
-                }
+                let _ = document::eval(&format!(
+                    "if (window.hlsManager) {{ window.hlsManager.detach({}); }}",
+                    video_id_json
+                ))
+                .await;
+            });
+        });
+    }
+    let handle_retry = move |_| {
+        error.set(None);
+        loading.set(true);
+        let _video_id = video_id.peek().clone();
+        let _stream_url = stream_url.clone();
+        #[cfg(feature = "web")]
+        {
+            let video_id = _video_id;
+            let stream_url = _stream_url;
+            spawn(async move {
+                crate::platform::timer::sleep_ms(100).await;
                 match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
                     Ok(_) => {
                         loading.set(false);
                         error.set(None);
-                        cleanup_guard
-                            .set(
-                                Some(CleanupGuard {
-                                    video_id: video_id.clone(),
-                                }),
-                            );
+                        if cleanup_guard.peek().is_none() {
+                            cleanup_guard.set(Some(CleanupGuard { video_id: video_id.clone() }));
+                        }
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to load stream: {:?}", e);
@@ -214,31 +373,95 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
                 }
             });
-        } else {
-            error.set(Some("Invalid stream URL".to_string()));
-            loading.set(false);
         }
-    });
-    let handle_retry = move |_| {
-        error.set(None);
-        loading.set(true);
-        let video_id = video_id.peek().clone();
-        let stream_url = stream_url.clone();
-        spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(100).await;
-            match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
-                Ok(_) => {
-                    loading.set(false);
-                    error.set(None);
+        #[cfg(not(feature = "web"))]
+        {
+            let video_id = _video_id;
+            let stream_url = _stream_url;
+            spawn(async move {
+                crate::platform::timer::sleep_ms(100).await;
+
+                let video_id_json =
+                    serde_json::to_string(&video_id).unwrap_or_default();
+                let stream_url_json =
+                    serde_json::to_string(&stream_url).unwrap_or_default();
+                let autoplay_str = if autoplay { "true" } else { "false" };
+
+                // Ensure hlsManager is available
+                let check = document::eval(
+                    "return typeof window.hlsManager !== 'undefined'",
+                )
+                .await;
+                let hls_loaded =
+                    check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                if !hls_loaded {
+                    let hls_js = include_str!("../../../public/hls-manager.js");
+                    if let Err(e) = document::eval(hls_js).await {
+                        log::error!("[Live] Failed to inject HLS manager: {:?}", e);
+                        error.set(Some(format!(
+                            "Failed to load HLS support: {:?}",
+                            e
+                        )));
+                        loading.set(false);
+                        return;
+                    }
                 }
-                Err(e) => {
-                    let error_msg = format!("Failed to load stream: {:?}", e);
-                    log::error!("{}", error_msg);
-                    error.set(Some(error_msg));
-                    loading.set(false);
+
+                let setup_script = format!(
+                    r#"
+                    try {{
+                        let video = document.getElementById({video_id});
+                        if (!video) return "error:Video element not found";
+
+                        // Detach any existing HLS stream first
+                        if (window.hlsManager) {{
+                            window.hlsManager.detach({video_id});
+                        }}
+
+                        let url = {stream_url};
+                        let isHls = url.toLowerCase().includes('.m3u8');
+
+                        if (isHls && window.hlsManager) {{
+                            let result = await window.hlsManager.attachToAudio({video_id}, url);
+                            console.log('[Live] HLS stream re-attached:', result);
+                        }} else {{
+                            video.src = url;
+                        }}
+
+                        if ({autoplay}) {{
+                            await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                        }}
+                        return "ok";
+                    }} catch (e) {{
+                        console.error('[Live] Retry error:', e);
+                        return "error:" + e.message;
+                    }}
+                    "#,
+                    video_id = video_id_json,
+                    stream_url = stream_url_json,
+                    autoplay = autoplay_str,
+                );
+
+                match document::eval(&setup_script).await {
+                    Ok(val) => {
+                        let result = val.as_str().unwrap_or("ok");
+                        if let Some(err_msg) = result.strip_prefix("error:") {
+                            error.set(Some(err_msg.to_string()));
+                        } else {
+                            error.set(None);
+                        }
+                        loading.set(false);
+                    }
+                    Err(e) => {
+                        error.set(Some(format!(
+                            "Failed to setup stream: {:?}",
+                            e
+                        )));
+                        loading.set(false);
+                    }
                 }
-            }
-        });
+            });
+        }
     };
     if !*url_valid.read() {
         return rsx! {

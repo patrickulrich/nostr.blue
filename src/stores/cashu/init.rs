@@ -69,7 +69,7 @@ pub async fn accept_terms() -> Result<(), String> {
         .ok_or("Client not initialized")?
         .clone();
     nostr_client::ensure_relays_ready(&client).await;
-    let now = (js_sys::Date::now() / 1000.0) as u64;
+    let now = crate::platform::timestamp::now_secs();
     let content = serde_json::json!({ "accepted_at" : now, "version" : 1 }).to_string();
     let builder = EventBuilder::new(Kind::from(30078), content)
         .tag(Tag::identifier(TERMS_D_TAG));
@@ -146,8 +146,7 @@ pub async fn init_wallet() -> Result<(), String> {
                         start_pending_events_processor();
                         *WALLET_STATUS.write() = WalletStatus::Recovering;
                         spawn(async move {
-                            #[cfg(target_arch = "wasm32")]
-                            gloo_timers::future::TimeoutFuture::new(500).await;
+                            crate::platform::timer::sleep_ms(500).await;
                             super::signals::cleanup_expired_pending_secrets().await;
                             match super::recovery::sync_orphaned_cdk_proofs_to_nostr()
                                 .await

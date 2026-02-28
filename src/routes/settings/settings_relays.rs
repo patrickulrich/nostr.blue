@@ -336,16 +336,7 @@ pub fn SettingsRelays() -> Element {
                 return;
             }
             let mut metadata = relay::USER_RELAY_METADATA.write();
-            #[cfg(target_arch = "wasm32")]
-            let now_secs = (js_sys::Date::now() / 1000.0) as u64;
-            #[cfg(not(target_arch = "wasm32"))]
-            let now_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or_else(|e| {
-                    log::warn!("System time before UNIX_EPOCH: {}", e);
-                    0
-                });
+            let now_secs = crate::platform::timestamp::now_secs();
             *metadata = Some(relay::RelayListMetadata {
                 relays: general,
                 dm_relays: dm,
@@ -355,7 +346,7 @@ pub fn SettingsRelays() -> Element {
             *relay::BLOCKED_RELAYS.write() = blocked;
             crate::services::search_relays::invalidate_search_relay_cache().await;
             save_status.set(Some("Relay lists published successfully!".to_string()));
-            gloo_timers::future::TimeoutFuture::new(3000).await;
+            crate::platform::timer::sleep_ms(3000).await;
             save_status.set(None);
             publishing.set(false);
         });

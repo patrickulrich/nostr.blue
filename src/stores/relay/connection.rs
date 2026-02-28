@@ -151,9 +151,8 @@ pub async fn reconnect(client: &Client) -> bool {
     client.connect().await;
     const TIMEOUT_MS: u64 = 3000;
     const POLL_INTERVAL_MS: u64 = 100;
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
-        use gloo_timers::future::TimeoutFuture;
         let start = instant::Instant::now();
         loop {
             let relays = client.relays().await;
@@ -173,10 +172,10 @@ pub async fn reconnect(client: &Client) -> bool {
             if start.elapsed().as_millis() > TIMEOUT_MS as u128 {
                 break;
             }
-            TimeoutFuture::new(POLL_INTERVAL_MS as u32).await;
+            crate::platform::timer::sleep_ms(POLL_INTERVAL_MS as u32).await;
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(feature = "web"))]
     {
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(TIMEOUT_MS);

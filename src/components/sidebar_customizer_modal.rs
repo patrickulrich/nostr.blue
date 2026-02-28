@@ -183,7 +183,7 @@ pub fn SidebarCustomizerModal(props: SidebarCustomizerModalProps) -> Element {
                                             return;
                                         }
                                         e.prevent_default();
-                                        #[cfg(target_family = "wasm")]
+                                        #[cfg(feature = "web")]
                                         if let Some(touch) = e.touches().first() {
                                             let coords = touch.client_coordinates();
                                             let x = coords.x;

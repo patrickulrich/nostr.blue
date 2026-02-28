@@ -755,7 +755,7 @@ pub async fn fetch_room_presence(
 ) -> StdResult<Vec<RoomPresence>, String> {
     let client = crate::stores::nostr_client::get_client()
         .ok_or("Client not initialized")?;
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let since_ts = now_secs.saturating_sub(max_age_secs);
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_ROOM_PRESENCE))

@@ -8,6 +8,7 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
+#[cfg(feature = "web")]
 use crate::services::git_worker::GitWorkerManager;
 use crate::stores::grasp_servers;
 use crate::utils::nip34::{Bounty, Discussion, DisplaySnippet, Issue, IssueStatus, PersistedReview, PullRequest, Release, Repository};
@@ -88,6 +89,7 @@ pub fn cache_repo_events(events: &[NostrEvent]) {
             cache.put(coord_str, repo);
         }
     }
+    #[cfg(feature = "web")]
     if GitWorkerManager::is_initialized() {
         GitWorkerManager::update_grasp_servers();
     }
@@ -335,7 +337,7 @@ pub fn get_watched_repos() -> Vec<Repository> {
 }
 /// Load watched repos from localStorage
 pub fn load_watched_repos() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Ok(Some(storage)) = window.local_storage() {
@@ -358,7 +360,7 @@ pub fn load_watched_repos() {
 }
 /// Persist watched repos to localStorage
 fn persist_watched_repos() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Ok(Some(storage)) = window.local_storage() {
@@ -387,7 +389,7 @@ pub fn track_fork(coordinate: &str) {
 }
 /// Load forked repos from localStorage
 pub fn load_forked_repos() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Ok(Some(storage)) = window.local_storage() {
@@ -410,7 +412,7 @@ pub fn load_forked_repos() {
 }
 /// Persist forked repos to localStorage
 fn persist_forked_repos() {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         if let Some(window) = web_sys::window() {
             if let Ok(Some(storage)) = window.local_storage() {

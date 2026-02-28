@@ -90,11 +90,11 @@ pub fn Events() -> Element {
         search_debounce_id.set(current_id);
         searching.set(true);
         spawn(async move {
-            #[cfg(target_family = "wasm")]
+            #[cfg(feature = "web")]
             {
-                gloo_timers::future::TimeoutFuture::new(SEARCH_DEBOUNCE_MS).await;
+                crate::platform::timer::sleep_ms(SEARCH_DEBOUNCE_MS).await;
             }
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(not(feature = "web"))]
             {
                 use std::time::Duration;
                 tokio::time::sleep(Duration::from_millis(SEARCH_DEBOUNCE_MS as u64))

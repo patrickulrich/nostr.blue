@@ -391,7 +391,7 @@ async fn publish_station(form: StationFormData) -> std::result::Result<String, S
         .filter(|c| c.is_alphanumeric() || *c == ' ')
         .collect::<String>()
         .replace(' ', "-");
-    let timestamp_ms = js_sys::Date::now() as u64;
+    let timestamp_ms = crate::platform::timestamp::now_millis();
     let random_component = uuid::Uuid::new_v4()
         .to_string()
         .split('-')

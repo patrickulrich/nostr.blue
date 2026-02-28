@@ -2,8 +2,7 @@
 //!
 //! Uses Photon API (based on OpenStreetMap) for geocoding.
 //! Includes localStorage caching to reduce API calls.
-use gloo_net::http::Request;
-use gloo_storage::{LocalStorage, Storage};
+use crate::platform::storage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 /// Photon API endpoint
@@ -95,17 +94,17 @@ thread_local! {
 }
 /// Load cache from localStorage
 fn load_cache() -> GeoCache {
-    LocalStorage::get(CACHE_KEY).unwrap_or_default()
+    storage::get(CACHE_KEY).unwrap_or_default()
 }
 /// Save cache to localStorage
 fn save_cache(cache: &GeoCache) {
-    if let Err(e) = LocalStorage::set(CACHE_KEY, cache) {
+    if let Err(e) = storage::set(CACHE_KEY, cache) {
         log::warn!("Failed to save geocode cache: {}", e);
     }
 }
 /// Get current Unix timestamp
 fn now_secs() -> u64 {
-    (js_sys::Date::now() / 1000.0) as u64
+    crate::platform::timestamp::now_secs()
 }
 /// Check if a cached result is still valid
 fn is_valid_cache(cached: &CachedGeoResult) -> bool {
@@ -149,11 +148,10 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
 async fn query_photon(query: &str) -> Result<Option<GeoLocation>, String> {
     let encoded = urlencoding::encode(query);
     let url = format!("{}?q={}&limit=1", PHOTON_API_URL, encoded);
-    let response = Request::get(&url)
-        .send()
+    let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Failed to fetch geocode: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("Geocode API error: {}", response.status()));
     }
     let photon: PhotonResponse = response
@@ -235,11 +233,11 @@ struct NominatimResult {
 
 /// Load suggestion cache from localStorage
 fn load_suggest_cache() -> SuggestCache {
-    LocalStorage::get(SUGGEST_CACHE_KEY).unwrap_or_default()
+    storage::get(SUGGEST_CACHE_KEY).unwrap_or_default()
 }
 /// Save suggestion cache to localStorage
 fn save_suggest_cache(cache: &SuggestCache) {
-    if let Err(e) = LocalStorage::set(SUGGEST_CACHE_KEY, cache) {
+    if let Err(e) = storage::set(SUGGEST_CACHE_KEY, cache) {
         log::warn!("Failed to save suggest cache: {}", e);
     }
 }
@@ -268,7 +266,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
         }
     }
     // Enforce 1-second throttle between Nominatim requests
-    let now_ms = js_sys::Date::now();
+    let now_ms = crate::platform::timestamp::now_millis() as f64;
     let elapsed = LAST_NOMINATIM_REQUEST.with(|last| {
         let prev = last.get();
         now_ms - prev
@@ -286,13 +284,14 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
         "{}?format=json&q={}&limit={}&addressdetails=1&email=contact@nostr.blue",
         NOMINATIM_API_URL, encoded, limit
     );
-    let response = Request::get(&url)
+    let response = reqwest::Client::new()
+        .get(&url)
         .header("Accept-Language", "en-US,en;q=0.9")
         .header("User-Agent", "nostr.blue/0.8 (https://nostr.blue)")
         .send()
         .await
         .map_err(|e| format!("Failed to fetch suggestions: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("Geocode API error: {}", response.status()));
     }
     let results: Vec<NominatimResult> = response
