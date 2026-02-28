@@ -389,21 +389,8 @@ pub fn VoiceMessageCard(
         {
             if let Some(target) = _evt.data.as_web_event().target() {
                 if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                    let tag_name = element.tag_name().to_lowercase();
-                    if tag_name == "button" || tag_name == "a" || tag_name == "audio" {
+                    if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
                         return;
-                    }
-                    let mut current = element.clone();
-                    for _ in 0..5 {
-                        if let Some(parent) = current.parent_element() {
-                            let parent_tag = parent.tag_name().to_lowercase();
-                            if parent_tag == "button" || parent_tag == "a" {
-                                return;
-                            }
-                            current = parent;
-                        } else {
-                            break;
-                        }
                     }
                 }
             }

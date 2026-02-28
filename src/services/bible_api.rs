@@ -177,7 +177,14 @@ async fn fetch_with_timeout(
     url: &str,
     error_context: &str,
 ) -> Result<reqwest::Response, String> {
-    let response = reqwest::Client::new()
+    #[cfg(not(feature = "web"))]
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    #[cfg(feature = "web")]
+    let client = reqwest::Client::new();
+    let response = client
         .get(url)
         .send()
         .await

@@ -7,7 +7,7 @@ android_main_activity = "android/MainActivity.kt"
 android_min_sdk_version = 24
 
 [bundle]
-identifier = "dev.dioxus.main"
+identifier = "blue.nostr.app"
 publisher = "nostr.blue"
 icon = ["public/icons/icon-512.png"]
 resources = ["public/*"]

@@ -42,7 +42,22 @@ find "$DX_ANDROID" -name "CLAUDE.md" -type f -delete 2>/dev/null && echo "Cleane
 # the linker wrapper to not run, leaving link_args empty)
 echo ""
 echo "--- Step 2c: Ensure OpenSSL libs ---"
-OPENSSL_PREBUILT="$HOME/.local/share/.dx/prebuilt/openssl-1.1.1q-beta-1/ssl/libs/android.arm64-v8a"
+OPENSSL_SEARCH="$HOME/.local/share/.dx/prebuilt"
+OPENSSL_PREBUILT=""
+if [ -d "$OPENSSL_SEARCH" ]; then
+    for dir in "$OPENSSL_SEARCH"/openssl*/ssl/libs/android.arm64-v8a; do
+        if [ -f "$dir/libssl.so" ] && [ -f "$dir/libcrypto.so" ]; then
+            OPENSSL_PREBUILT="$dir"
+            break
+        fi
+    done
+fi
+if [ -z "$OPENSSL_PREBUILT" ]; then
+    echo "ERROR: No OpenSSL prebuilt with libssl.so and libcrypto.so found in $OPENSSL_SEARCH"
+    echo "  Run 'dx build --platform android' once to extract prebuilt libs"
+    exit 1
+fi
+echo "Found OpenSSL prebuilt at: $OPENSSL_PREBUILT"
 JNILIBS="$DX_ANDROID/app/src/main/jniLibs/arm64-v8a"
 
 if [ ! -f "$JNILIBS/libssl.so" ] || [ ! -f "$JNILIBS/libcrypto.so" ]; then

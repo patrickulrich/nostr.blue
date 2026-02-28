@@ -974,8 +974,10 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     let time_parts: Vec<&str> = time.split(':').collect();
     let hours: i64 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minutes: i64 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-    // Simple approximation: days since epoch
-    let days = (year - 1970) * 365 + (year - 1969) / 4 + (month - 1) * 30 + day - 1;
+    // Accurate days since Unix epoch using Hinnant's civil calendar algorithm
+    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
+    let era_days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + day - 1;
+    let days = era_days - 719468; // days_from_civil(1970, 1, 1) = 719468
     (days * 86400 + hours * 3600 + minutes * 60) as u64
 }
 /// Convert Unix timestamp to date (YYYY-MM-DD) and time (HH:MM) strings in local time

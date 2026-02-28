@@ -471,9 +471,8 @@ fn get_week_dates(date: &str) -> Vec<String> {
     }
 
     let total_days = days_from_civil(year, month, day);
-    // Day of week: 0=Mon ... 6=Sun for epoch-based, adjust for Sunday=0
-    let dow = ((total_days % 7) + 7) % 7; // 0=Mon
-    let sunday_offset = if dow == 6 { 0 } else { dow + 1 }; // days since Sunday
+    let dow = ((total_days % 7) + 7) % 7; // 0=Wed in Hinnant's civil calendar
+    let sunday_offset = (dow + 3) % 7; // days since previous Sunday
     let sunday_days = total_days - sunday_offset;
 
     let mut dates = Vec::with_capacity(7);

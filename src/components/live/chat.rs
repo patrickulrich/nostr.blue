@@ -45,10 +45,9 @@ pub fn LiveChat(stream_author_pubkey: String, stream_d_tag: String) -> Element {
     let mut expanded = use_signal(|| false);
     let mut chat_sub_id: Signal<Option<SubscriptionId>> = use_signal(|| None);
     let has_signer = use_memo(move || *HAS_SIGNER.read());
-    let chat_container_id = {
-        let timestamp = crate::platform::timestamp::now_millis();
-        format!("live-chat-messages-{}", timestamp)
-    };
+    let chat_container_id = use_hook(|| {
+        format!("live-chat-messages-{}-{}", stream_author_pubkey, stream_d_tag)
+    });
     let a_tag = format!("30311:{}:{}", stream_author_pubkey, stream_d_tag);
     let a_tag_for_send_keydown = a_tag.clone();
     let a_tag_for_send_click = a_tag.clone();

@@ -225,7 +225,10 @@ impl GitService {
         {
             match GitWorkerManager::diff_refs(&dir, base, head).await {
                 Ok(diff) => Ok(diff),
-                Err(_) => compare_refs_github(repo, base, head).await,
+                Err(e) => {
+                    log::warn!("Local diff failed, falling back to GitHub API: {e}");
+                    compare_refs_github(repo, base, head).await
+                }
             }
         }
         #[cfg(not(feature = "web"))]
@@ -240,7 +243,10 @@ impl GitService {
             .map_err(|e| e.to_string())?
             {
                 Ok(diff) => Ok(diff),
-                Err(_) => compare_refs_github(repo, base, head).await,
+                Err(e) => {
+                    log::warn!("Native diff failed, falling back to GitHub API: {e}");
+                    compare_refs_github(repo, base, head).await
+                }
             }
         }
     }

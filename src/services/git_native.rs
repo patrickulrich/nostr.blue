@@ -112,7 +112,7 @@ pub fn get_log(
             message: commit.message().unwrap_or("").to_string(),
             author: author.name().unwrap_or("").to_string(),
             email: author.email().unwrap_or("").to_string(),
-            timestamp: commit.time().seconds() as u64,
+            timestamp: commit.time().seconds().max(0) as u64,
             parent: commit.parent_id(0).ok().map(|id| id.to_string()),
         });
     }

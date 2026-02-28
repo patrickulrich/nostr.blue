@@ -79,11 +79,8 @@ pub fn PinToBoardModal(props: PinToBoardModalProps) -> Element {
                     if let Some(handler) = on_success {
                         handler.call(());
                     }
-                    #[cfg(feature = "web")]
-                    {
-                        crate::platform::timer::sleep_ms(1500).await;
-                        on_close.call(());
-                    }
+                    crate::platform::timer::sleep_ms(1500).await;
+                    on_close.call(());
                 }
                 Err(e) => {
                     log::error!("Failed to publish pin: {}", e);

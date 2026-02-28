@@ -271,57 +271,29 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
                                     return;
                                 };
                                 spawn(async move {
-                                    #[cfg(feature = "web")]
-                                    {
-                                        let Some(window) = web_sys::window() else {
+                                    match crate::platform::clipboard::copy_to_clipboard(&nostr_uri).await {
+                                        Ok(()) => {
                                             toast_api
-                                                .error(
-                                                    "Clipboard not available".to_string(),
+                                                .success(
+                                                    "Copied!".to_string(),
                                                     ToastOptions::new()
-                                                        .description("Browser window not accessible".to_string())
+                                                        .description(
+                                                            format!("Link to {} copied to clipboard", content_name),
+                                                        )
                                                         .duration(Duration::from_secs(2))
                                                         .permanent(false),
                                                 );
-                                            return;
-                                        };
-                                        let clipboard = window.navigator().clipboard();
-                                        let promise = clipboard.write_text(&nostr_uri);
-                                        match wasm_bindgen_futures::JsFuture::from(promise).await {
-                                            Ok(_) => {
-                                                toast_api
-                                                    .success(
-                                                        "Copied!".to_string(),
-                                                        ToastOptions::new()
-                                                            .description(
-                                                                format!("Link to {} copied to clipboard", content_name),
-                                                            )
-                                                            .duration(Duration::from_secs(2))
-                                                            .permanent(false),
-                                                    );
-                                            }
-                                            Err(_) => {
-                                                toast_api
-                                                    .error(
-                                                        "Failed to copy".to_string(),
-                                                        ToastOptions::new()
-                                                            .description("Could not access clipboard".to_string())
-                                                            .duration(Duration::from_secs(2))
-                                                            .permanent(false),
-                                                    );
-                                            }
                                         }
-                                    }
-                                    #[cfg(not(feature = "web"))]
-                                    {
-                                        let _ = (&nostr_uri, &content_name);
-                                        toast_api
-                                            .error(
-                                                "Clipboard not available".to_string(),
-                                                ToastOptions::new()
-                                                    .description("Not supported on this platform".to_string())
-                                                    .duration(Duration::from_secs(2))
-                                                    .permanent(false),
-                                            );
+                                        Err(_) => {
+                                            toast_api
+                                                .error(
+                                                    "Failed to copy".to_string(),
+                                                    ToastOptions::new()
+                                                        .description("Could not access clipboard".to_string())
+                                                        .duration(Duration::from_secs(2))
+                                                        .permanent(false),
+                                                );
+                                        }
                                     }
                                 });
                             },

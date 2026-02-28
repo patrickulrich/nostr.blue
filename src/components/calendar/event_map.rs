@@ -288,6 +288,10 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 leaflet_loading.set(false);
             });
         }
+        #[cfg(not(feature = "web"))]
+        {
+            leaflet_error.set(Some("Map view is only available in the web version.".to_string()));
+        }
     });
     use_effect(move || {
         #[cfg(feature = "web")]

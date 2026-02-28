@@ -208,10 +208,7 @@ pub fn MusicZapDialog() -> Element {
                     }
                 }
                 #[cfg(not(feature = "web"))]
-                {
-                    let _ = inv;
-                    log::warn!("WebLN payments are only available on web");
-                }
+                let _ = inv;
             });
         }
     };
@@ -344,33 +341,37 @@ pub fn MusicZapDialog() -> Element {
                                     }
                                 }
                                 div { class: "space-y-2",
-                                    button {
-                                        class: "w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
-                                        onclick: pay_with_webln,
-                                        "⚡ Pay with WebLN"
-                                    }
-                                    button {
-                                        class: "w-full py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors",
-                                        onclick: {
-                                            let inv = invoice.read().clone();
-                                            move |e: Event<MouseData>| {
-                                                e.stop_propagation();
-                                                if let Some(invoice_str) = inv.as_ref() {
-                                                    let url = format!("lightning:{}", invoice_str);
-                                                    #[cfg(feature = "web")]
-                                                    {
-                                                        let _ = web_sys::window()
-                                                            .and_then(|w| w.open_with_url_and_target(&url, "_blank").ok());
-                                                    }
-                                                    #[cfg(not(feature = "web"))]
-                                                    {
+                                    if cfg!(feature = "web") {
+                                        button {
+                                            class: "w-full py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors",
+                                            onclick: pay_with_webln,
+                                            "⚡ Pay with WebLN"
+                                        }
+                                        button {
+                                            class: "w-full py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors",
+                                            onclick: {
+                                                let inv = invoice.read().clone();
+                                                move |e: Event<MouseData>| {
+                                                    e.stop_propagation();
+                                                    if let Some(invoice_str) = inv.as_ref() {
+                                                        let url = format!("lightning:{}", invoice_str);
+                                                        #[cfg(feature = "web")]
+                                                        {
+                                                            let _ = web_sys::window()
+                                                                .and_then(|w| w.open_with_url_and_target(&url, "_blank").ok());
+                                                        }
+                                                        #[cfg(not(feature = "web"))]
                                                         let _ = url;
-                                                        log::warn!("Open wallet not supported on this platform");
                                                     }
                                                 }
-                                            }
-                                        },
-                                        "Open in Wallet"
+                                            },
+                                            "Open in Wallet"
+                                        }
+                                    } else {
+                                        p {
+                                            class: "text-sm text-muted-foreground text-center py-2",
+                                            "Copy the invoice above to pay with your Lightning wallet."
+                                        }
                                     }
                                     button {
                                         class: "w-full py-2 bg-muted text-foreground rounded-md hover:bg-muted/80 transition-colors",

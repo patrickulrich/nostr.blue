@@ -188,11 +188,13 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let mut mounted = use_signal(|| false);
     #[allow(unused_mut, unused_variables)]
     let mut cleanup_guard = use_signal(|| None::<CleanupGuard>);
+    let mut init_gen = use_signal(|| 0u32);
     let video_id_str = video_id.read().clone();
     let stream_url_for_effect = stream_url.clone();
     use_effect(move || {
         let video_id = video_id_str.clone();
         let _stream_url = stream_url_for_effect.clone();
+        let gen = init_gen.with_mut(|g| { *g += 1; *g });
         if *url_valid.read() {
             mounted.set(true);
             #[cfg(feature = "web")]
@@ -205,20 +207,24 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
                     match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
                         Ok(_) => {
-                            loading.set(false);
-                            error.set(None);
-                            cleanup_guard
-                                .set(
-                                    Some(CleanupGuard {
-                                        video_id: video_id.clone(),
-                                    }),
-                                );
+                            if *init_gen.peek() == gen {
+                                loading.set(false);
+                                error.set(None);
+                                cleanup_guard
+                                    .set(
+                                        Some(CleanupGuard {
+                                            video_id: video_id.clone(),
+                                        }),
+                                    );
+                            }
                         }
                         Err(e) => {
-                            let error_msg = format!("Failed to load stream: {:?}", e);
-                            log::error!("{}", error_msg);
-                            error.set(Some(error_msg));
-                            loading.set(false);
+                            if *init_gen.peek() == gen {
+                                let error_msg = format!("Failed to load stream: {:?}", e);
+                                log::error!("{}", error_msg);
+                                error.set(Some(error_msg));
+                                loading.set(false);
+                            }
                         }
                     }
                 });
@@ -290,22 +296,29 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         autoplay = autoplay_str,
                     );
 
+                    if *init_gen.peek() != gen {
+                        return;
+                    }
                     match document::eval(&setup_script).await {
                         Ok(val) => {
-                            let result = val.as_str().unwrap_or("ok");
-                            if let Some(err_msg) = result.strip_prefix("error:") {
-                                error.set(Some(err_msg.to_string()));
-                            } else {
-                                error.set(None);
+                            if *init_gen.peek() == gen {
+                                let result = val.as_str().unwrap_or("ok");
+                                if let Some(err_msg) = result.strip_prefix("error:") {
+                                    error.set(Some(err_msg.to_string()));
+                                } else {
+                                    error.set(None);
+                                }
+                                loading.set(false);
                             }
-                            loading.set(false);
                         }
                         Err(e) => {
-                            error.set(Some(format!(
-                                "Failed to setup stream: {:?}",
-                                e
-                            )));
-                            loading.set(false);
+                            if *init_gen.peek() == gen {
+                                error.set(Some(format!(
+                                    "Failed to setup stream: {:?}",
+                                    e
+                                )));
+                                loading.set(false);
+                            }
                         }
                     }
                 });
@@ -348,6 +361,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     Ok(_) => {
                         loading.set(false);
                         error.set(None);
+                        if cleanup_guard.peek().is_none() {
+                            cleanup_guard.set(Some(CleanupGuard { video_id: video_id.clone() }));
+                        }
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to load stream: {:?}", e);

@@ -1,12 +1,12 @@
 /// Save text content to a file. On web, triggers a browser download.
 /// On desktop, opens a save dialog. On mobile, uses WebView eval to trigger download.
 pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), String> {
-    #[cfg(feature = "web")]
+    #[cfg(all(feature = "web", not(feature = "desktop")))]
     {
         crate::utils::download::download_blob(filename, content, _mime_type);
         Ok(())
     }
-    #[cfg(feature = "desktop")]
+    #[cfg(all(feature = "desktop", not(feature = "web")))]
     {
         let path = rfd::FileDialog::new()
             .set_file_name(filename)
@@ -17,9 +17,11 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
     #[cfg(all(feature = "mobile", not(feature = "desktop"), not(feature = "web")))]
     {
         // On mobile WebView, trigger a download via JavaScript blob URL
-        let escaped_content = content.replace('\\', "\\\\").replace('`', "\\`");
+        let content_json = serde_json::to_string(content).unwrap_or_default();
+        let filename_json = serde_json::to_string(filename).unwrap_or_default();
+        let mime_json = serde_json::to_string(_mime_type).unwrap_or_default();
         let js = format!(
-            r#"(function(){{var b=new Blob([`{escaped_content}`],{{type:'{_mime_type}'}});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download='{filename}';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);}})();"#,
+            r#"(function(){{var b=new Blob([{content_json}],{{type:{mime_json}}});var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download={filename_json};document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);}})();"#,
         );
         dioxus::prelude::document::eval(&js);
         Ok(())

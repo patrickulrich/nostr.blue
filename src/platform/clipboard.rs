@@ -29,4 +29,8 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
         );
         eval.await.map(|_| ()).map_err(|e| format!("{e:?}"))
     }
+    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+    {
+        Err("clipboard not supported on this platform".to_string())
+    }
 }
