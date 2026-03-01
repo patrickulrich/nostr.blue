@@ -14,7 +14,7 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
             .ok_or_else(|| "Save cancelled".to_string())?;
         std::fs::write(&path, content).map_err(|e| e.to_string())
     }
-    #[cfg(all(feature = "mobile", not(feature = "desktop"), not(feature = "web")))]
+    #[cfg(feature = "mobile")]
     {
         // On mobile WebView, trigger a download via JavaScript blob URL
         // serde_json::to_string on &str produces a valid JS string literal (quoted + escaped)

@@ -196,14 +196,7 @@ pub async fn request_content_feed(
             *DVM_FEED_ERROR.write() = Some("DVM response timeout".to_string());
             return Err("DVM response timeout - no response received".to_string());
         }
-        #[cfg(feature = "web")]
-        {
-            crate::platform::timer::sleep_ms(1000).await;
-        }
-        #[cfg(not(feature = "web"))]
-        {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
+        crate::platform::timer::sleep_ms(1000).await;
         if let Ok(responses) = client
             .fetch_events(response_filter.clone(), Duration::from_secs(2))
             .await

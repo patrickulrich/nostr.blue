@@ -21,7 +21,7 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?
     }
-    #[cfg(all(feature = "mobile", not(feature = "desktop"), not(feature = "web")))]
+    #[cfg(feature = "mobile")]
     {
         // On mobile, clipboard is handled via WebView's JavaScript bridge
         let eval = dioxus::prelude::document::eval(

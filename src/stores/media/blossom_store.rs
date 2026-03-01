@@ -416,10 +416,7 @@ async fn upload_blob_with_auth(
     UPLOAD_PROGRESS.write().replace(100.0);
     log::info!("Upload successful: {}", descriptor.url);
     spawn(async move {
-        #[cfg(feature = "web")]
-        gloo_timers::future::TimeoutFuture::new(1000).await;
-        #[cfg(not(feature = "web"))]
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        crate::platform::timer::sleep_ms(1000).await;
         *UPLOAD_PROGRESS.write() = None;
     });
     Ok(descriptor.url.to_string())

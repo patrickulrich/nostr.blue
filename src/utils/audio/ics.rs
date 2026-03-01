@@ -89,7 +89,8 @@ fn format_vevent(event: &CalendarEvent) -> String {
 /// Format Unix timestamp as ICS UTC datetime (YYYYMMDDTHHmmssZ)
 fn format_timestamp(ts: u64) -> String {
     use chrono::{TimeZone, Utc};
-    let ts_i64 = i64::try_from(ts).unwrap_or(0);
+    const MAX_TIMESTAMP: i64 = 253_402_300_799; // Far future limit (year 9999)
+    let ts_i64 = i64::try_from(ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
     let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return "19700101T000000Z".to_string();
     };
@@ -422,10 +423,10 @@ pub fn download_ics(filename: &str, content: &str) {
     revoke_object_url(&url);
 }
 
-/// Trigger download of ICS file (native stub)
-#[cfg(not(feature = "web"))]
-pub fn download_ics(_filename: &str, _content: &str) {
-    log::warn!("ICS download not supported on native desktop");
+/// Trigger download of ICS file (native)
+#[cfg(feature = "native")]
+pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
+    crate::platform::download::save_file(filename, content, "text/calendar;charset=utf-8")
 }
 #[cfg(test)]
 mod tests {

@@ -15,7 +15,7 @@ use std::time::Duration;
 use crate::stores::nostr_client;
 #[cfg(feature = "web")]
 use crate::platform::storage;
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 use std::fs;
 /// Configuration for a single relay with read/write permissions
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -463,7 +463,7 @@ pub fn load_local_relays() -> Vec<String> {
         .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default()
 }
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 pub fn load_local_relays() -> Vec<String> {
     let path = dirs::config_dir()
         .map(|p| { p.join("nostr_blue").join(format!("{}.json", LOCAL_RELAYS_KEY)) });
@@ -484,7 +484,7 @@ pub fn save_local_relays(relays: &[String]) {
         let _ = storage::set(LOCAL_RELAYS_KEY, &json);
     }
 }
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 pub fn save_local_relays(relays: &[String]) {
     let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
         return;
