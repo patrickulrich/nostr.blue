@@ -277,7 +277,7 @@ fn clear_file_input(input_id: &str) {
 }
 
 /// Stub for non-web platforms
-#[cfg(not(feature = "web"))]
+#[cfg(feature = "native")]
 fn clear_file_input(_input_id: &str) {
     // No-op on native
 }

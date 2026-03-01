@@ -207,7 +207,7 @@ fn publish_with_retry(
                     }
                     #[cfg(not(feature = "web"))]
                     {
-                        tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
+                        crate::platform::timer::sleep_ms(delay_ms).await;
                         publish_with_retry(pins, retry_count + 1).await;
                     }
                 } else {
