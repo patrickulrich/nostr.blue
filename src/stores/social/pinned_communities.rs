@@ -203,6 +203,9 @@ fn publish_with_retry(
                                 spawn_local(publish_with_retry(pins, retry_count + 1));
                             },
                         );
+                        // Intentionally forget timeout_handle to avoid dropping/cancelling the timer.
+                        // This is a fire-and-forget pattern for WASM timers where the handle must
+                        // outlive this scope. Memory is reclaimed when the module unloads.
                         std::mem::forget(timeout_handle);
                     }
                     #[cfg(not(feature = "web"))]

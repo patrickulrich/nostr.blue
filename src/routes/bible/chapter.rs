@@ -144,11 +144,10 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                     text_parts.join(" "),
                     reference,
                 );
-                wasm_bindgen_futures::spawn_local(async move {
+                spawn(async move {
                     if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await {
                         log::error!("Clipboard write failed: {:?}", e);
                     }
-                    // Clear selection after clipboard operation
                     selected_verses_for_clear.set(Vec::new());
                     show_toolbar_for_clear.set(false);
                 });

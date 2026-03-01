@@ -47,7 +47,9 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
 /// Fetch HTML content (WASM)
 #[cfg(feature = "web")]
 async fn fetch_html_wasm(url: &str) -> Result<String, String> {
-    let response = reqwest::get(url)
+    let response = crate::platform::http::http_client()
+        .get(url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;
     if !response.status().is_success() {
@@ -58,12 +60,7 @@ async fn fetch_html_wasm(url: &str) -> Result<String, String> {
 /// Fetch HTML content using reqwest (native)
 #[cfg(not(feature = "web"))]
 async fn fetch_html_native(url: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; NostrBlueBot/1.0)")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-    let response = client
+    let response = crate::platform::http::http_client()
         .get(url)
         .send()
         .await

@@ -18,8 +18,9 @@ pub mod recorder_stub {
 
     #[component]
     pub fn VoiceRecorder(
-        _on_recording_complete: EventHandler<(Vec<u8>, f64, Vec<u8>, String)>,
+        on_recording_complete: EventHandler<(Vec<u8>, f64, Vec<u8>, String)>,
     ) -> Element {
+        let _ = on_recording_complete;
         rsx! {
             div { class: "bg-card border border-border rounded-lg p-4 text-muted-foreground text-sm",
                 "Voice recording is not yet available on this platform."

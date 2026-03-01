@@ -376,7 +376,7 @@ pub async fn receive_tokens_with_options(
                 use rand::Rng;
                 let jitter = rand::thread_rng().gen_range(0..200);
                 let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                crate::platform::timer::sleep_ms(actual_delay as u64).await;
+                crate::platform::timer::sleep_ms(actual_delay).await;
             }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }

@@ -32,4 +32,8 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
         });
         Ok(())
     }
+    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+    {
+        Err("File download not supported on this platform".to_string())
+    }
 }

@@ -221,7 +221,9 @@ pub fn Calendar() -> Element {
                                                 let ics_content = export_events_to_ics(&calendar_events);
                                                 let today = get_today();
                                                 let filename = format!("nostr_calendar_{}.ics", today);
-                                                download_ics(&filename, &ics_content);
+                                                if let Err(e) = download_ics(&filename, &ics_content) {
+                                                    log::error!("Failed to download calendar: {}", e);
+                                                }
                                             }
                                         },
                                         svg {
@@ -257,7 +259,9 @@ pub fn Calendar() -> Element {
                                                 let ics_content = export_events_to_ics(&calendar_events);
                                                 let today = get_today();
                                                 let filename = format!("nostr_calendar_{}.ics", today);
-                                                download_ics(&filename, &ics_content);
+                                                if let Err(e) = download_ics(&filename, &ics_content) {
+                                                    log::error!("Failed to download calendar: {}", e);
+                                                }
                                             }
                                         },
                                         svg {
@@ -445,7 +449,8 @@ fn add_days(date: &str, days: i32) -> String {
     #[cfg(feature = "web")]
     {
         let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
-        // Use set_date() for proper date arithmetic - it handles negative values and overflow correctly
+        // JavaScript Date.setDate() handles month boundary crossing with wrapped values
+        // e.g., setDate(32) rolls to next month, setDate(0) goes to last day of previous month
         js_date.set_date(js_date.get_date().wrapping_add(days as u32));
         format!(
             "{:04}-{:02}-{:02}",

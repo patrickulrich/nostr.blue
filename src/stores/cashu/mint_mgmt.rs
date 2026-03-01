@@ -1092,7 +1092,7 @@ pub async fn consolidate_proofs(
             }
             #[cfg(not(feature = "web"))]
             {
-                crate::platform::timer::sleep_ms(delay_ms as u64).await;
+                crate::platform::timer::sleep_ms(delay_ms).await;
             }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }

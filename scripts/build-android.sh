@@ -4,8 +4,14 @@ set -e
 # Android SDK/NDK paths
 ANDROID_HOME="${ANDROID_HOME:-${HOME}/Android/Sdk}"
 if [ -z "$ANDROID_NDK_HOME" ]; then
-    if [ -d "$ANDROID_HOME/ndk" ] && [ "$(ls -A "$ANDROID_HOME/ndk" 2>/dev/null)" ]; then
-        ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | sort -V | tail -n1)"
+    if [ -d "$ANDROID_HOME/ndk" ]; then
+        # Use find to robustly handle directories with special characters
+        NDK_VERSION=$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | sort -V | tail -n1)
+        if [ -n "$NDK_VERSION" ]; then
+            ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+        else
+            ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+        fi
     else
         ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
     fi
@@ -115,7 +121,7 @@ echo ""
 echo "--- Step 5: Generate app icons ---"
 MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
 
-generate_icons() {
+ generate_icons() {
     local tool="$1"
     # Android mipmap density -> pixel size mapping
     declare -A SIZES=(
@@ -129,7 +135,6 @@ generate_icons() {
     # Create single temp directory for all temporary files
     local tmp_dir
     tmp_dir=$(mktemp -d "/tmp/ic_launcher_XXXXXX")
-    trap "rm -rf '$tmp_dir'" EXIT
 
     for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
         local size=${SIZES[$density]}
@@ -144,18 +149,17 @@ generate_icons() {
             local fg_size=$((size * 108 / 72))
             convert "$ICON_SOURCE" -resize "${size}x${size}" \
                 -gravity center -background none -extent "${fg_size}x${fg_size}" \
-                "$dir/ic_launcher_foreground.webp"
+                "$dir/ic_launcher_foreground.webp" 2>/dev/null
         elif [ "$tool" = "cwebp" ]; then
             # cwebp: need intermediate PNG via ffmpeg or other
             local tmp_png="$tmp_dir/ic_launcher_${density}.png"
             local tmp_fg_png="$tmp_dir/ic_launcher_fg_${density}.png"
-            ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$tmp_png" 2>/dev/null
             cwebp -q 90 "$tmp_png" -o "$dir/ic_launcher.webp"
             cp "$dir/ic_launcher.webp" "$dir/ic_launcher_round.webp"
-            # Foreground layer
+            # Foreground
             local fg_size=$((size * 108 / 72))
-            ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" "$tmp_fg_png" 2>/dev/null
-            cwebp -q 90 "$tmp_fg_png" -o "$dir/ic_launcher_foreground.webp"
+            ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" \
+                "$dir/ic_launcher_foreground.webp" 2>/dev/null
         elif [ "$tool" = "ffmpeg" ]; then
             # ffmpeg can output webp directly
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$dir/ic_launcher.webp" 2>/dev/null
@@ -166,6 +170,25 @@ generate_icons() {
                 -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" \
                 "$dir/ic_launcher_foreground.webp" 2>/dev/null
         fi
+        echo "  ${density}: ${size}x${size}px"
+    done
+}
+
+if command -v convert &>/dev/null; then
+    echo "Using ImageMagick"
+    generate_icons "convert"
+elif command -v cwebp &>/dev/null && command -v ffmpeg &>/dev/null; then
+    echo "Using cwebp + ffmpeg"
+    generate_icons "cwebp"
+elif command -v ffmpeg &>/dev/null; then
+    echo "Using ffmpeg"
+    generate_icons "ffmpeg"
+else
+    echo "WARNING: No image tools found (install imagemagick, ffmpeg, or cwebp)"
+    echo "  Skipping icon generation. Install with:"
+    echo "    sudo apt install imagemagick   # or"
+    echo "    sudo apt install ffmpeg"
+fi
         echo "  ${density}: ${size}x${size}px"
     done
 }

@@ -3,13 +3,12 @@
 //! Handles quote lifecycle, expiry detection, and cleanup.
 //! Implements proactive quote management to prevent stale quotes.
 #![allow(dead_code)]
-use dioxus::prelude::*;
 use super::signals::{PENDING_MELT_QUOTES, PENDING_MINT_QUOTES};
 use super::types::{
-    MeltQuoteInfo, MintQuoteInfo, PendingMeltQuotesStoreStoreExt,
-    PendingMintQuotesStoreStoreExt,
+    MeltQuoteInfo, MintQuoteInfo, PendingMeltQuotesStoreStoreExt, PendingMintQuotesStoreStoreExt,
 };
 use super::utils::now_secs;
+use dioxus::prelude::*;
 /// Quote validity status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuoteValidity {
@@ -56,11 +55,14 @@ pub fn check_quote_validity(expiry: Option<u64>) -> QuoteValidity {
 }
 /// Get seconds until quote expires (None if expired or no expiry)
 pub fn seconds_until_expiry(expiry: Option<u64>) -> Option<u64> {
-    expiry
-        .and_then(|exp| {
-            let now = now_secs();
-            if now >= exp { None } else { Some(exp - now) }
-        })
+    expiry.and_then(|exp| {
+        let now = now_secs();
+        if now >= exp {
+            None
+        } else {
+            Some(exp - now)
+        }
+    })
 }
 /// Format time until expiry as human-readable string
 pub fn format_expiry(expiry: Option<u64>) -> String {
@@ -204,11 +206,15 @@ pub fn find_melt_quote(quote_id: &str) -> Option<MeltQuoteInfo> {
 }
 /// Check if a mint quote exists and is valid
 pub fn is_mint_quote_valid(quote_id: &str) -> bool {
-    find_mint_quote(quote_id).map(|q| !is_quote_expired(q.expiry)).unwrap_or(false)
+    find_mint_quote(quote_id)
+        .map(|q| !is_quote_expired(q.expiry))
+        .unwrap_or(false)
 }
 /// Check if a melt quote exists and is valid
 pub fn is_melt_quote_valid(quote_id: &str) -> bool {
-    find_melt_quote(quote_id).map(|q| !is_quote_expired(q.expiry)).unwrap_or(false)
+    find_melt_quote(quote_id)
+        .map(|q| !is_quote_expired(q.expiry))
+        .unwrap_or(false)
 }
 /// Quote stats for display
 #[derive(Debug, Clone, Default)]
@@ -224,8 +230,14 @@ pub struct QuoteStats {
 pub fn get_quote_stats() -> QuoteStats {
     let mint_quotes = PENDING_MINT_QUOTES.read().data().read().clone();
     let melt_quotes = PENDING_MELT_QUOTES.read().data().read().clone();
-    let expired_mint = mint_quotes.iter().filter(|q| is_quote_expired(q.expiry)).count();
-    let expired_melt = melt_quotes.iter().filter(|q| is_quote_expired(q.expiry)).count();
+    let expired_mint = mint_quotes
+        .iter()
+        .filter(|q| is_quote_expired(q.expiry))
+        .count();
+    let expired_melt = melt_quotes
+        .iter()
+        .filter(|q| is_quote_expired(q.expiry))
+        .count();
     let expiring_mint = mint_quotes
         .iter()
         .filter(|q| check_quote_validity(q.expiry) == QuoteValidity::ExpiringSoon)
@@ -243,20 +255,34 @@ pub fn get_quote_stats() -> QuoteStats {
         expiring_soon_melt: expiring_melt,
     }
 }
-#[cfg(all(test, target_arch = "wasm32"))]
+#[cfg(all(test, not(feature = "web")))]
 mod tests {
     use super::*;
+
+    fn now_secs_test() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
     #[test]
     fn test_check_quote_validity() {
-        let now = now_secs();
-        assert_eq!(check_quote_validity(Some(now - 100)), QuoteValidity::Expired);
-        assert_eq!(check_quote_validity(Some(now + 30)), QuoteValidity::ExpiringSoon);
+        let now = now_secs_test();
+        assert_eq!(
+            check_quote_validity(Some(now - 100)),
+            QuoteValidity::Expired
+        );
+        assert_eq!(
+            check_quote_validity(Some(now + 30)),
+            QuoteValidity::ExpiringSoon
+        );
         assert_eq!(check_quote_validity(Some(now + 300)), QuoteValidity::Valid);
         assert_eq!(check_quote_validity(None), QuoteValidity::NoExpiry);
     }
     #[test]
     fn test_format_expiry() {
-        let now = now_secs();
+        let now = now_secs_test();
         assert_eq!(format_expiry(Some(now + 90)), "1m 30s");
         assert_eq!(format_expiry(Some(now + 45)), "45s");
         assert_eq!(format_expiry(Some(now - 10)), "Expired");

@@ -332,7 +332,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     // use_drop runs while the Dioxus runtime is still active.
     #[cfg(not(feature = "web"))]
     {
-        let video_id_for_cleanup = video_id.read().clone();
+        let video_id_for_cleanup = video_id.clone();
         use_drop(move || {
             let video_id_json =
                 serde_json::to_string(&video_id_for_cleanup).unwrap_or_default();

@@ -24,9 +24,11 @@ pub async fn copy_to_clipboard(text: &str) -> Result<(), String> {
     #[cfg(feature = "mobile")]
     {
         // On mobile, clipboard is handled via WebView's JavaScript bridge
-        let eval = dioxus::prelude::document::eval(
-            &format!("navigator.clipboard.writeText({})", serde_json::json!(text)),
-        );
+        // Wrap in async IIFE to properly await the clipboard Promise
+        let eval = dioxus::prelude::document::eval(&format!(
+            "(async () => {{ await navigator.clipboard.writeText({}); }})()",
+            serde_json::json!(text)
+        ));
         eval.await.map(|_| ()).map_err(|e| format!("{e:?}"))
     }
     #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]

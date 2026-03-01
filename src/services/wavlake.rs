@@ -262,10 +262,12 @@ impl WavlakeAPI {
         content_id: &str,
         app_id: Option<&str>,
     ) -> Result<WavlakeLnurlResponse, String> {
+        let encoded_content_id = urlencoding::encode(content_id);
         let url = if let Some(app) = app_id {
-            format!("{}/lnurl?contentId={}&appId={}", self.base_url, content_id, app)
+            let encoded_app_id = urlencoding::encode(app);
+            format!("{}/lnurl?contentId={}&appId={}", self.base_url, encoded_content_id, encoded_app_id)
         } else {
-            format!("{}/lnurl?contentId={}", self.base_url, content_id)
+            format!("{}/lnurl?contentId={}", self.base_url, encoded_content_id)
         };
         log::debug!("Requesting LNURL from: {}", url);
         let response = http_client()

@@ -207,16 +207,20 @@ pub fn MusicZapDialog() -> Element {
                         Ok(promise) => {
                             match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise)).await {
                                 Ok(result) => {
-                                    // Check success field in WebLN result
-                                    if let Some(_success) = js_sys::Reflect::get(&result, &"success".into()).ok().and_then(|v| v.as_bool()) {
+                                    // Check success field in WebLN result - must be explicitly true
+                                    let success = js_sys::Reflect::get(&result, &"success".into())
+                                        .ok()
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    if success {
                                         log::info!("WebLN payment completed successfully");
                                     } else {
                                         // Extract error message if present
-                                        let error_msg = js_sys::Reflect::get(&result, &"error".into())
+                                        let js_error = js_sys::Reflect::get(&result, &"error".into())
                                             .ok()
                                             .and_then(|v| v.as_string())
                                             .unwrap_or_else(|| "Unknown error".to_string());
-                                        log::warn!("WebLN payment returned success=false: {}", error_msg);
+                                        log::warn!("WebLN payment returned success=false: {}", js_error);
                                     }
                                 }
                                 Err(e) => log::error!("WebLN payment rejected: {:?}", e),

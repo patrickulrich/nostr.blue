@@ -34,7 +34,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
     let mut vevent = String::new();
     vevent.push_str("BEGIN:VEVENT\r\n");
     vevent.push_str(&format!("UID:{}\r\n", escape_ics_text(&event.coordinate)));
-    vevent.push_str(&format!("DTSTAMP:{}\r\n", format_timestamp(event.created_at)));
+    vevent.push_str(&format!(
+        "DTSTAMP:{}\r\n",
+        format_timestamp(event.created_at)
+    ));
     match &event.start {
         EventTime::Date(d) => {
             vevent.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", d.replace('-', "")));
@@ -68,7 +71,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
         vevent.push_str(&format!("LOCATION:{}\r\n", escape_ics_text(location)));
     }
     if !event.naddr.is_empty() {
-        vevent.push_str(&format!("URL:https://nostr.blue/events/{}\r\n", &event.naddr));
+        vevent.push_str(&format!(
+            "URL:https://nostr.blue/events/{}\r\n",
+            &event.naddr
+        ));
     }
     if !event.hashtags.is_empty() {
         vevent.push_str(&format!("CATEGORIES:{}\r\n", event.hashtags.join(",")));
@@ -78,10 +84,10 @@ fn format_vevent(event: &CalendarEvent) -> String {
             vevent.push_str(&format!("GEO:{};{}\r\n", lat, lon));
         }
     }
-    vevent
-        .push_str(
-            &format!("X-NOSTR-COORDINATE:{}\r\n", escape_ics_text(&event.coordinate)),
-        );
+    vevent.push_str(&format!(
+        "X-NOSTR-COORDINATE:{}\r\n",
+        escape_ics_text(&event.coordinate)
+    ));
     vevent.push_str(&format!("X-NOSTR-PUBKEY:{}\r\n", &event.pubkey));
     vevent.push_str("END:VEVENT\r\n");
     vevent
@@ -90,7 +96,9 @@ fn format_vevent(event: &CalendarEvent) -> String {
 fn format_timestamp(ts: u64) -> String {
     use chrono::{TimeZone, Utc};
     const MAX_TIMESTAMP: i64 = 253_402_300_799; // Far future limit (year 9999)
-    let ts_i64 = i64::try_from(ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
+    let ts_i64 = i64::try_from(ts)
+        .unwrap_or(MAX_TIMESTAMP)
+        .min(MAX_TIMESTAMP);
     let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return "19700101T000000Z".to_string();
     };
@@ -172,9 +180,7 @@ impl IcsDateTime {
                 }
             }
             IcsDateTime::DateTime(ts) => EventTime::Timestamp(*ts),
-            IcsDateTime::DateTimeWithTz { timestamp, .. } => {
-                EventTime::Timestamp(*timestamp)
-            }
+            IcsDateTime::DateTimeWithTz { timestamp, .. } => EventTime::Timestamp(*timestamp),
         }
     }
     /// Get timezone if present
@@ -259,10 +265,7 @@ fn parse_ics_property(line: &str, event: &mut IcsEvent) {
         "GEO" => {
             let parts: Vec<&str> = value.split(';').collect();
             if parts.len() == 2 {
-                if let (Ok(lat), Ok(lon)) = (
-                    parts[0].parse::<f64>(),
-                    parts[1].parse::<f64>(),
-                ) {
+                if let (Ok(lat), Ok(lon)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
                     event.geo = Some((lat, lon));
                 }
             }
@@ -320,7 +323,9 @@ fn parse_ics_utc_datetime(value: &str) -> Option<u64> {
     }
     let ndt = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S").ok()?;
     let ts = ndt.and_utc().timestamp();
-    if ts < 0 { return None; }
+    if ts < 0 {
+        return None;
+    }
     Some(ts as u64)
 }
 /// Parse local datetime: YYYYMMDDTHHmmss
@@ -334,7 +339,9 @@ fn parse_ics_local_datetime(value: &str) -> Option<u64> {
     let ndt = NaiveDateTime::parse_from_str(clean, "%Y%m%dT%H%M%S").ok()?;
     // Treat as UTC when no timezone info is available
     let ts = ndt.and_utc().timestamp();
-    if ts < 0 { return None; }
+    if ts < 0 {
+        return None;
+    }
     Some(ts as u64)
 }
 /// Unescape ICS text
@@ -370,7 +377,10 @@ impl From<IcsEvent> for Option<IcsImportData> {
             .start
             .as_ref()
             .and_then(|dt| dt.timezone().map(String::from));
-        let end_tzid = event.end.as_ref().and_then(|dt| dt.timezone().map(String::from));
+        let end_tzid = event
+            .end
+            .as_ref()
+            .and_then(|dt| dt.timezone().map(String::from));
         let locations = if event.location.is_empty() {
             vec![]
         } else {
@@ -392,7 +402,7 @@ impl From<IcsEvent> for Option<IcsImportData> {
 }
 /// Trigger browser download of ICS file
 #[cfg(feature = "web")]
-pub fn download_ics(filename: &str, content: &str) {
+pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     use wasm_bindgen::prelude::*;
     #[wasm_bindgen]
     extern "C" {
@@ -401,26 +411,35 @@ pub fn download_ics(filename: &str, content: &str) {
         #[wasm_bindgen(js_namespace = URL, js_name = revokeObjectURL)]
         fn revoke_object_url(url: &str);
     }
-    let window = web_sys::window().expect("no window");
-    let document = window.document().expect("no document");
+    let window = web_sys::window().ok_or("No window available")?;
+    let document = window.document().ok_or("No document available")?;
     let parts = js_sys::Array::new();
     parts.push(&wasm_bindgen::JsValue::from_str(content));
     let options = js_sys::Object::new();
-    js_sys::Reflect::set(&options, &"type".into(), &"text/calendar;charset=utf-8".into())
-        .ok();
-    let blob = web_sys::Blob::new_with_str_sequence_and_options(
-            &parts,
-            &options.unchecked_into(),
-        )
-        .expect("failed to create blob");
+    js_sys::Reflect::set(
+        &options,
+        &"type".into(),
+        &"text/calendar;charset=utf-8".into(),
+    )
+    .map_err(|e| format!("Failed to set blob type: {:?}", e))?;
+    let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options.unchecked_into())
+        .map_err(|e| format!("Failed to create blob: {:?}", e))?;
     let url = create_object_url(&blob);
-    let a = document.create_element("a").expect("failed to create anchor");
-    a.set_attribute("href", &url).ok();
-    a.set_attribute("download", filename).ok();
-    let click_fn = js_sys::Reflect::get(&a, &"click".into()).expect("no click method");
+    let a = document
+        .create_element("a")
+        .map_err(|e| format!("Failed to create anchor: {:?}", e))?;
+    a.set_attribute("href", &url)
+        .map_err(|e| format!("Failed to set href: {:?}", e))?;
+    a.set_attribute("download", filename)
+        .map_err(|e| format!("Failed to set download: {:?}", e))?;
+    let click_fn = js_sys::Reflect::get(&a, &"click".into())
+        .map_err(|e| format!("No click method on anchor: {:?}", e))?;
     let click_fn: js_sys::Function = click_fn.unchecked_into();
-    click_fn.call0(&a).ok();
+    click_fn
+        .call0(&a)
+        .map_err(|e| format!("Failed to trigger download: {:?}", e))?;
     revoke_object_url(&url);
+    Ok(())
 }
 
 /// Trigger download of ICS file (native)

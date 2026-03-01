@@ -12,10 +12,17 @@ pub fn is_leap_year(year: i32) -> bool {
 }
 
 /// Get the number of days in a month (1-indexed months)
+/// Returns 0 for invalid month values (outside 1-12 range)
 #[allow(dead_code)]
 pub fn days_in_month(year: i32, month: i32) -> i32 {
     match month {
-        2 => if is_leap_year(year) { 29 } else { 28 },
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     }
@@ -28,7 +35,9 @@ pub fn get_event_date(event: &UnifiedEvent) -> String {
         return String::new();
     }
     const MAX_TIMESTAMP: i64 = 253_402_300_799; // Year 9999
-    let ts_i64 = i64::try_from(ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
+    let ts_i64 = i64::try_from(ts)
+        .unwrap_or(MAX_TIMESTAMP)
+        .min(MAX_TIMESTAMP);
     let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return String::new();
     };
@@ -40,14 +49,25 @@ pub fn get_today() -> String {
 }
 /// Get month number (1-12) from a date string in YYYY-MM-DD format
 pub fn get_month_from_date(date: &str) -> u32 {
-    date.split('-').nth(1).and_then(|m| m.parse().ok()).unwrap_or(0)
+    date.split('-')
+        .nth(1)
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(0)
 }
 /// Get day number as display string (leading zeros stripped) from a date string
 pub fn get_day_number(date: &str) -> String {
-    date.split('-').nth(2).map(|d| {
-        let trimmed = d.trim_start_matches('0');
-        if trimmed.is_empty() { "?" } else { trimmed }
-    }).unwrap_or("?").to_string()
+    date.split('-')
+        .nth(2)
+        .map(|d| {
+            let trimmed = d.trim_start_matches('0');
+            if trimmed.is_empty() {
+                "?"
+            } else {
+                trimmed
+            }
+        })
+        .unwrap_or("?")
+        .to_string()
 }
 /// Generate a 6-week calendar grid (42 dates) starting from the Sunday
 /// before the first day of the month containing the given date.

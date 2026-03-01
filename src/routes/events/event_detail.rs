@@ -591,7 +591,9 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 "{}.ics",
                                                 cal_event.title.replace(" ", "_").replace("/", "-"),
                                             );
-                                            download_ics(&filename, &ics_content);
+                                            if let Err(e) = download_ics(&filename, &ics_content) {
+                                                log::error!("Failed to download event: {}", e);
+                                            }
                                         }
                                     },
                                     svg {

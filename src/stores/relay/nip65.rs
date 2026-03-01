@@ -458,10 +458,21 @@ const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
 /// Load local relays from browser LocalStorage
 #[cfg(feature = "web")]
 pub fn load_local_relays() -> Vec<String> {
-    storage::get::<String>(LOCAL_RELAYS_KEY)
-        .ok()
-        .and_then(|json| serde_json::from_str(&json).ok())
-        .unwrap_or_default()
+    match storage::get::<String>(LOCAL_RELAYS_KEY) {
+        Ok(json) => {
+            match serde_json::from_str(&json) {
+                Ok(relays) => relays,
+                Err(e) => {
+                    log::error!("Failed to parse local relays JSON: {}. Raw: {}", e, &json[..json.len().min(200)]);
+                    Vec::new()
+                }
+            }
+        }
+        Err(e) => {
+            log::debug!("Could not load local relays: {}", e);
+            Vec::new()
+        }
+    }
 }
 #[cfg(feature = "native")]
 pub fn load_local_relays() -> Vec<String> {
@@ -469,10 +480,21 @@ pub fn load_local_relays() -> Vec<String> {
         .map(|p| { p.join("nostr_blue").join(format!("{}.json", LOCAL_RELAYS_KEY)) });
     match path {
         Some(p) if p.exists() => {
-            fs::read_to_string(&p)
-                .ok()
-                .and_then(|json| serde_json::from_str(&json).ok())
-                .unwrap_or_default()
+            match fs::read_to_string(&p) {
+                Ok(json) => {
+                    match serde_json::from_str(&json) {
+                        Ok(relays) => relays,
+                        Err(e) => {
+                            log::error!("Failed to parse local relays JSON from {:?}: {}", p, e);
+                            Vec::new()
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to read local relays file {:?}: {}", p, e);
+                    Vec::new()
+                }
+            }
         }
         _ => Vec::new(),
     }
@@ -480,19 +502,37 @@ pub fn load_local_relays() -> Vec<String> {
 /// Save local relays to browser LocalStorage
 #[cfg(feature = "web")]
 pub fn save_local_relays(relays: &[String]) {
-    if let Ok(json) = serde_json::to_string(relays) {
-        let _ = storage::set(LOCAL_RELAYS_KEY, &json);
+    match serde_json::to_string(relays) {
+        Ok(json) => {
+            if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &json) {
+                log::error!("Failed to save local relays: {}", e);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to serialize local relays: {}", e);
+        }
     }
 }
 #[cfg(feature = "native")]
 pub fn save_local_relays(relays: &[String]) {
     let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
+        log::error!("Could not determine config directory for local relays");
         return;
     };
-    let _ = fs::create_dir_all(&config_dir);
+    if let Err(e) = fs::create_dir_all(&config_dir) {
+        log::error!("Failed to create config directory {:?}: {}", config_dir, e);
+        return;
+    }
     let path = config_dir.join(format!("{}.json", LOCAL_RELAYS_KEY));
-    if let Ok(json) = serde_json::to_string(relays) {
-        let _ = fs::write(path, json);
+    match serde_json::to_string(relays) {
+        Ok(json) => {
+            if let Err(e) = fs::write(&path, json) {
+                log::error!("Failed to write local relays to {:?}: {}", path, e);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to serialize local relays: {}", e);
+        }
     }
 }
 /// Initialize local relays from cache
