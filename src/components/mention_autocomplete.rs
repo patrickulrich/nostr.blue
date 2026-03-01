@@ -242,6 +242,10 @@ fn detect_mention(
         let after_at = &before_cursor[at_pos + 1..];
         if after_at.contains(char::is_whitespace) {
             state.show.set(false);
+            // Cancel any pending search task
+            if let Some(task) = state.relay_search_task.read().as_ref() {
+                task.cancel();
+            }
             return;
         }
         let query = after_at.to_string();
@@ -299,6 +303,10 @@ fn detect_mention(
             state.is_searching.set(false);
         }
     } else {
+        // Cancel any pending search task before hiding
+        if let Some(task) = state.relay_search_task.read().as_ref() {
+            task.cancel();
+        }
         state.show.set(false);
     }
 }

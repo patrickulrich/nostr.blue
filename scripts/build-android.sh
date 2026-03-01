@@ -126,6 +126,11 @@ generate_icons() {
         ["xxxhdpi"]=192
     )
 
+    # Create single temp directory for all temporary files
+    local tmp_dir
+    tmp_dir=$(mktemp -d "/tmp/ic_launcher_XXXXXX")
+    trap "rm -rf '$tmp_dir'" EXIT
+
     for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
         local size=${SIZES[$density]}
         local dir="$MIPMAP_BASE/mipmap-${density}"
@@ -142,11 +147,8 @@ generate_icons() {
                 "$dir/ic_launcher_foreground.webp"
         elif [ "$tool" = "cwebp" ]; then
             # cwebp: need intermediate PNG via ffmpeg or other
-            local tmp_png
-            tmp_png=$(mktemp "/tmp/ic_launcher_${density}.XXXXXX.png")
-            local tmp_fg_png
-            tmp_fg_png=$(mktemp "/tmp/ic_launcher_fg_${density}.XXXXXX.png")
-            trap "rm -f '$tmp_png' '$tmp_fg_png'" RETURN
+            local tmp_png="$tmp_dir/ic_launcher_${density}.png"
+            local tmp_fg_png="$tmp_dir/ic_launcher_fg_${density}.png"
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$tmp_png" 2>/dev/null
             cwebp -q 90 "$tmp_png" -o "$dir/ic_launcher.webp"
             cp "$dir/ic_launcher.webp" "$dir/ic_launcher_round.webp"

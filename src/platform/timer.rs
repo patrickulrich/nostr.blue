@@ -6,7 +6,7 @@ pub async fn sleep(duration: Duration) {
     {
         gloo_timers::future::sleep(duration).await;
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     {
         tokio::time::sleep(duration).await;
     }
@@ -18,7 +18,7 @@ pub async fn sleep_ms(ms: u32) {
     {
         gloo_timers::future::TimeoutFuture::new(ms).await;
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     {
         tokio::time::sleep(Duration::from_millis(ms as u64)).await;
     }

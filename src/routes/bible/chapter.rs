@@ -125,59 +125,33 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(format!("{} {}", v, text));
                     }
                 }
-                #[cfg(feature = "web")]
-                {
-                    let first = *verses.first().unwrap_or(&0);
-                    let last = *verses.last().unwrap_or(&0);
-                    let reference = if first == last {
-                        format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                    } else {
-                        format!(
-                            "{} {}:{}-{} ({})",
-                            book_name,
-                            chapter,
-                            first,
-                            last,
-                            translation,
-                        )
-                    };
-                    let full_text = format!(
-                        "{}\n\u{2014} {}",
-                        text_parts.join(" "),
-                        reference,
-                    );
-                    wasm_bindgen_futures::spawn_local(async move {
-                        let window = match web_sys::window() {
-                            Some(w) => w,
-                            None => {
-                                log::error!("Clipboard: No window object available");
-                                return;
-                            }
-                        };
-                        let navigator = window.navigator();
-                        let clipboard_exists = js_sys::Reflect::has(
-                                &navigator,
-                                &"clipboard".into(),
-                            )
-                            .unwrap_or(false);
-                        if !clipboard_exists {
-                            log::warn!(
-                                "Clipboard API unavailable (requires HTTPS or localhost)"
-                            );
-                            return;
-                        }
-                        let clipboard = navigator.clipboard();
-                        let promise = clipboard.write_text(&full_text);
-                        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise)
-                            .await
-                        {
-                            log::error!("Clipboard write failed: {:?}", e);
-                        }
-                        // Clear selection after clipboard operation
-                        selected_verses_for_clear.set(Vec::new());
-                        show_toolbar_for_clear.set(false);
-                    });
-                }
+                let first = *verses.first().unwrap_or(&0);
+                let last = *verses.last().unwrap_or(&0);
+                let reference = if first == last {
+                    format!("{} {}:{} ({})", book_name, chapter, first, translation)
+                } else {
+                    format!(
+                        "{} {}:{}-{} ({})",
+                        book_name,
+                        chapter,
+                        first,
+                        last,
+                        translation,
+                    )
+                };
+                let full_text = format!(
+                    "{}\n\u{2014} {}",
+                    text_parts.join(" "),
+                    reference,
+                );
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await {
+                        log::error!("Clipboard write failed: {:?}", e);
+                    }
+                    // Clear selection after clipboard operation
+                    selected_verses_for_clear.set(Vec::new());
+                    show_toolbar_for_clear.set(false);
+                });
             }
         }
     };

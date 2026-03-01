@@ -27,9 +27,16 @@ pub fn VideosLiveTag(tag: String) -> Element {
                 error.set(None);
                 oldest_timestamp.set(None);
                 has_more.set(true);
+                let gen = fetch_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
                 spawn(async move {
                     match load_streams_by_tag(&current_tag, None).await {
                         Ok((events, hit_limit)) => {
+                            // Verify generation before updating state
+                            if *fetch_gen.read() != gen {
+                                log::debug!("Stale fetch detected, discarding results");
+                                loading.set(false);
+                                return;
+                            }
                             if let Some(last_event) = events.last() {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
@@ -38,6 +45,12 @@ pub fn VideosLiveTag(tag: String) -> Element {
                             loading.set(false);
                         }
                         Err(e) => {
+                            // Verify generation before updating state
+                            if *fetch_gen.read() != gen {
+                                log::debug!("Stale fetch detected, discarding results");
+                                loading.set(false);
+                                return;
+                            }
                             error.set(Some(e));
                             loading.set(false);
                         }

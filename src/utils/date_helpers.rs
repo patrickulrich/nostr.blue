@@ -27,7 +27,8 @@ pub fn get_event_date(event: &UnifiedEvent) -> String {
     if ts == 0 {
         return String::new();
     }
-    let ts_i64 = i64::try_from(ts).unwrap_or(0);
+    const MAX_TIMESTAMP: i64 = 253_402_300_799; // Year 9999
+    let ts_i64 = i64::try_from(ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
     let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return String::new();
     };

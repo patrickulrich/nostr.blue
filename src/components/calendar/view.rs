@@ -427,8 +427,8 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let day: i32 = parts[2].parse().unwrap_or(1);
     let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
     let current_weekday = js_date.get_day();
-    const MS_PER_DAY: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
-    js_date.set_time(js_date.get_time() - (current_weekday as f64 * MS_PER_DAY));
+    // Use set_date() for DST-safe date arithmetic instead of millisecond calculations
+    js_date.set_date(js_date.get_date().wrapping_sub(current_weekday));
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
         dates
@@ -768,7 +768,15 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     #[cfg(not(feature = "web"))]
     {
         use chrono::{Local, TimeZone, Timelike};
-        let dt = Local.timestamp_opt(ts as i64, 0).single().unwrap_or_default();
+        // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
+        let ts_clamped = (ts as u64).min(253_402_300_799) as i64;
+        let dt = match Local.timestamp_opt(ts_clamped, 0).single() {
+            Some(dt) => dt,
+            None => {
+                log::warn!("Invalid timestamp {} fell back to epoch", ts);
+                Local.timestamp_opt(0, 0).single().unwrap_or_default()
+            }
+        };
         let hours = dt.hour();
         let minutes = dt.minute();
         let am_pm = if hours >= 12 { "PM" } else { "AM" };

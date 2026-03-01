@@ -10,7 +10,7 @@ struct CleanupGuard {
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
         #[cfg(feature = "web")]
-        destroyVideoJsPlayer(&self.video_id);
+        destroy_video_js_player(&self.video_id);
     }
 }
 /// Props for the LiveStreamPlayer component
@@ -160,13 +160,14 @@ export function destroyVideoJsPlayer(videoId) {
 "#
 )]
 extern "C" {
-    #[wasm_bindgen(catch)]
-    async fn initVideoJsPlayer(
+    #[wasm_bindgen(catch, js_name = "initVideoJsPlayer")]
+    async fn init_video_js_player(
         video_id: &str,
         url: &str,
         autoplay: bool,
     ) -> Result<JsValue, JsValue>;
-    fn destroyVideoJsPlayer(video_id: &str);
+    #[wasm_bindgen(js_name = "destroyVideoJsPlayer")]
+    fn destroy_video_js_player(video_id: &str);
 }
 /// LiveStreamPlayer component - Universal video player using Video.js
 ///
@@ -177,25 +178,23 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let poster = props.poster.clone();
     let autoplay = props.autoplay;
     let stream_url_for_validation = stream_url.clone();
-    let url_valid = use_memo(move || validate_stream_url(&stream_url_for_validation));
+    let url_valid = validate_stream_url(&stream_url_for_validation);
     let stream_url_for_id = stream_url.clone();
-    let video_id = use_memo(move || {
-        let hash = simple_hash(&stream_url_for_id);
-        format!("videojs-player-{}", hash)
-    });
+    let video_id = format!("videojs-player-{}", simple_hash(&stream_url_for_id));
     let mut error = use_signal(|| None::<String>);
     let mut loading = use_signal(|| true);
     let mut mounted = use_signal(|| false);
     #[allow(unused_mut, unused_variables)]
     let mut cleanup_guard = use_signal(|| None::<CleanupGuard>);
     let mut init_gen = use_signal(|| 0u32);
-    let video_id_str = video_id.read().clone();
+    let video_id_str = video_id.clone();
     let stream_url_for_effect = stream_url.clone();
+    let video_id_for_rsx = video_id.clone();
     use_effect(move || {
         let video_id = video_id_str.clone();
         let _stream_url = stream_url_for_effect.clone();
         let gen = init_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
-        if *url_valid.read() {
+        if url_valid {
             mounted.set(true);
             #[cfg(feature = "web")]
             {
@@ -205,7 +204,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     if !*mounted.peek() {
                         return;
                     }
-                    match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
+                    match init_video_js_player(&video_id, &stream_url, autoplay).await {
                         Ok(_) => {
                             if *init_gen.peek() == gen {
                                 loading.set(false);
@@ -347,9 +346,10 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
         });
     }
     let handle_retry = move |_| {
+        if *loading.peek() { return; } // Guard: already loading
         error.set(None);
         loading.set(true);
-        let _video_id = video_id.peek().clone();
+        let _video_id = video_id.clone();
         let _stream_url = stream_url.clone();
         #[cfg(feature = "web")]
         {
@@ -357,7 +357,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             let stream_url = _stream_url;
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
-                match initVideoJsPlayer(&video_id, &stream_url, autoplay).await {
+                match init_video_js_player(&video_id, &stream_url, autoplay).await {
                     Ok(_) => {
                         loading.set(false);
                         error.set(None);
@@ -463,7 +463,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             });
         }
     };
-    if !*url_valid.read() {
+    if !url_valid {
         return rsx! {
             div { class: "relative w-full aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center",
                 div { class: "text-center p-6",
@@ -475,7 +475,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     rsx! {
         div { class: "relative w-full aspect-video bg-black rounded-lg overflow-hidden",
             video {
-                id: "{video_id}",
+                id: "{video_id_for_rsx}",
                 class: "video-js vjs-big-play-centered vjs-fluid",
                 poster: poster.as_deref().unwrap_or(""),
                 playsinline: true,

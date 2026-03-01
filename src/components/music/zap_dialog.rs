@@ -206,7 +206,19 @@ pub fn MusicZapDialog() -> Element {
                     match js_sys::eval(&script) {
                         Ok(promise) => {
                             match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise)).await {
-                                Ok(result) => log::info!("WebLN payment completed: {:?}", result),
+                                Ok(result) => {
+                                    // Check success field in WebLN result
+                                    if let Some(_success) = js_sys::Reflect::get(&result, &"success".into()).ok().and_then(|v| v.as_bool()) {
+                                        log::info!("WebLN payment completed successfully");
+                                    } else {
+                                        // Extract error message if present
+                                        let error_msg = js_sys::Reflect::get(&result, &"error".into())
+                                            .ok()
+                                            .and_then(|v| v.as_string())
+                                            .unwrap_or_else(|| "Unknown error".to_string());
+                                        log::warn!("WebLN payment returned success=false: {}", error_msg);
+                                    }
+                                }
                                 Err(e) => log::error!("WebLN payment rejected: {:?}", e),
                             }
                         }
@@ -454,9 +466,13 @@ async fn generate_wavlake_lnurl_invoice(
         }
     }
     log::info!("Requesting invoice from callback: {}", callback_url);
-    let response = reqwest::get(&callback_url)
+    let response = crate::platform::http::http_client()
+        .get(&callback_url)
+        .send()
         .await
-        .map_err(|e| format!("Failed to request invoice: {}", e))?;
+        .map_err(|e| format!("Failed to request invoice: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("Invoice request failed: {}", e))?;
     let response_text = response
         .text()
         .await

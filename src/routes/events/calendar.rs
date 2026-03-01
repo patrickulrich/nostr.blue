@@ -445,9 +445,8 @@ fn add_days(date: &str, days: i32) -> String {
     #[cfg(feature = "web")]
     {
         let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
-        // Use set_date() for proper date arithmetic instead of millisecond calculations
-        let new_day = (js_date.get_date() as i32 + days).max(1) as u32;
-        js_date.set_date(new_day);
+        // Use set_date() for proper date arithmetic - it handles negative values and overflow correctly
+        js_date.set_date(js_date.get_date().wrapping_add(days as u32));
         format!(
             "{:04}-{:02}-{:02}",
             js_date.get_full_year(),

@@ -501,7 +501,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     };
     let copy_invoice = move |_| {
         if let Some(_inv) = invoice.read().as_ref() {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 use web_sys::window;
                 if let Some(window) = window() {
@@ -518,7 +518,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     };
     let open_in_wallet = move |_| {
         if let Some(_inv) = invoice.read().as_ref() {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 use web_sys::window;
                 if let Some(window) = window() {
@@ -536,7 +536,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 class: "bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();

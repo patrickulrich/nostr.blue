@@ -109,17 +109,18 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     // Generate filename from identifier
                                     let filename = format!("{}.md", identifier_md);
                                     #[cfg(feature = "web")]
-                                    download_markdown(&filename, &title_md, &content_md);
+                                    {
+                                        download_markdown(&filename, &title_md, &content_md);
+                                        toast_api.success(
+                                            "Downloaded!".to_string(),
+                                            ToastOptions::new()
+                                                .description(format!("Saved as {}", filename))
+                                                .duration(Duration::from_secs(2))
+                                                .permanent(false),
+                                        );
+                                    }
                                     #[cfg(not(feature = "web"))]
                                     { let _ = (&title_md, &content_md); }
-
-                                    toast_api.success(
-                                        "Downloaded!".to_string(),
-                                        ToastOptions::new()
-                                            .description(format!("Saved as {}", filename))
-                                            .duration(Duration::from_secs(2))
-                                            .permanent(false),
-                                    );
                                 },
                                 FileTextIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                                 div { class: "flex-1",

@@ -87,11 +87,12 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
     {
         use_effect(move || {
             register_beforeunload(is_dirty);
-            use_drop(|| {
-                unregister_beforeunload();
-            });
         });
     }
+    #[cfg(feature = "web")]
+    use_drop(|| {
+        unregister_beforeunload();
+    });
     UseUnsavedChanges {
         is_dirty,
         last_saved_hash,

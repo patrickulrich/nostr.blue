@@ -6,14 +6,14 @@ static STORAGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Get a value from persistent key-value storage.
 pub fn get<T: DeserializeOwned>(key: &str) -> Result<T, String> {
-    #[cfg(all(feature = "web", not(feature = "native")))]
+    #[cfg(feature = "web")]
     {
         use gloo_storage::Storage;
         gloo_storage::LocalStorage::get::<T>(key).map_err(|e| e.to_string())
     }
     #[cfg(feature = "native")]
     {
-        let store = load_store();
+        let store = load_store().unwrap_or_default();
         let value = store
             .get(key)
             .ok_or_else(|| format!("key not found: {key}"))?;
@@ -23,7 +23,7 @@ pub fn get<T: DeserializeOwned>(key: &str) -> Result<T, String> {
 
 /// Set a value in persistent key-value storage.
 pub fn set<T: Serialize + ?Sized>(key: &str, value: &T) -> Result<(), String> {
-    #[cfg(all(feature = "web", not(feature = "native")))]
+    #[cfg(feature = "web")]
     {
         use gloo_storage::Storage;
         gloo_storage::LocalStorage::set(key, value).map_err(|e| e.to_string())
@@ -31,7 +31,7 @@ pub fn set<T: Serialize + ?Sized>(key: &str, value: &T) -> Result<(), String> {
     #[cfg(feature = "native")]
     {
         let _guard = STORAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut store = load_store();
+        let mut store = load_store().unwrap_or_default();
         let json_value = serde_json::to_value(value).map_err(|e| e.to_string())?;
         store.insert(key.to_string(), json_value);
         save_store(&store)
@@ -40,7 +40,7 @@ pub fn set<T: Serialize + ?Sized>(key: &str, value: &T) -> Result<(), String> {
 
 /// Delete a key from persistent storage.
 pub fn delete(key: &str) {
-    #[cfg(all(feature = "web", not(feature = "native")))]
+    #[cfg(feature = "web")]
     {
         use gloo_storage::Storage;
         gloo_storage::LocalStorage::delete(key);
@@ -48,7 +48,7 @@ pub fn delete(key: &str) {
     #[cfg(feature = "native")]
     {
         let _guard = STORAGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut store = load_store();
+        let mut store = load_store().unwrap_or_default();
         store.remove(key);
         let _ = save_store(&store);
     }
@@ -121,11 +121,12 @@ fn storage_path() -> std::path::PathBuf {
 }
 
 #[cfg(feature = "native")]
-fn load_store() -> std::collections::HashMap<String, serde_json::Value> {
+fn load_store() -> Result<std::collections::HashMap<String, serde_json::Value>, std::io::Error> {
     let path = storage_path();
     match std::fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-        Err(_) => std::collections::HashMap::new(),
+        Ok(contents) => Ok(serde_json::from_str(&contents).unwrap_or_default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(std::collections::HashMap::new()),
+        Err(e) => Err(e),
     }
 }
 

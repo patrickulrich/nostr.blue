@@ -279,7 +279,8 @@ impl WavlakeAPI {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unable to read body".to_string());
-            log::debug!("LNURL error body (status {}): {}", status, &body[..body.len().min(200)]);
+            let body_truncated: String = body.chars().take(200).collect();
+            log::debug!("LNURL error body (status {}): {}", status, body_truncated);
             let error_msg = format!("LNURL fetch failed with status {}", status);
             log::error!("{}", error_msg);
             return Err(error_msg);

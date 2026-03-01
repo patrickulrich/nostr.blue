@@ -2,6 +2,7 @@
 //!
 //! Uses Photon API (based on OpenStreetMap) for geocoding.
 //! Includes localStorage caching to reduce API calls.
+use crate::platform::http::http_client;
 use crate::platform::storage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -148,7 +149,9 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
 async fn query_photon(query: &str) -> Result<Option<GeoLocation>, String> {
     let encoded = urlencoding::encode(query);
     let url = format!("{}?q={}&limit=1", PHOTON_API_URL, encoded);
-    let response = reqwest::get(&url)
+    let response = http_client()
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch geocode: {}", e))?;
     if !response.status().is_success() {
@@ -284,7 +287,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
         "{}?format=json&q={}&limit={}&addressdetails=1&email=contact@nostr.blue",
         NOMINATIM_API_URL, encoded, limit
     );
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(&url)
         .header("Accept-Language", "en-US,en;q=0.9")
         .header("User-Agent", "nostr.blue/0.8 (https://nostr.blue)")
