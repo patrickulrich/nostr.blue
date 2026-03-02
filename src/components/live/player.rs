@@ -1,6 +1,61 @@
 use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
+
+#[allow(dead_code)]
+fn build_native_setup_script(
+    video_id: &str,
+    stream_url: &str,
+    autoplay: bool,
+    detach_first: bool,
+) -> String {
+    let video_id_json = serde_json::to_string(video_id).unwrap_or_default();
+    let stream_url_json = serde_json::to_string(stream_url).unwrap_or_default();
+    let autoplay_str = if autoplay { "true" } else { "false" };
+    let detach_block = if detach_first {
+        r#"
+                        // Detach any existing HLS stream first
+                        if (window.hlsManager) {
+                            window.hlsManager.detach({video_id});
+                        }
+"#
+    } else {
+        ""
+    };
+    format!(
+        r#"
+                    try {{
+                        let video = document.getElementById({video_id});
+                        if (!video) return "error:Video element not found";
+
+                        {detach_block}
+                        let url = {stream_url};
+                        let isHls = url.toLowerCase().includes('.m3u8');
+
+                        if (isHls && window.hlsManager) {{
+                            let result = await window.hlsManager.attachToMedia({video_id}, url);
+                            console.log('[Live] HLS stream {log_msg}:', result);
+                        }} else {{
+                            video.src = url;
+                        }}
+
+                        if ({autoplay}) {{
+                            await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                        }}
+                        return "ok";
+                    }} catch (e) {{
+                        console.error('[Live] {error_label} error:', e);
+                        return "error:" + e.message;
+                    }}
+                    "#,
+        video_id = video_id_json,
+        stream_url = stream_url_json,
+        autoplay = autoplay_str,
+        detach_block = detach_block,
+        log_msg = if detach_first { "re-attached" } else { "attached" },
+        error_label = if detach_first { "Retry" } else { "Setup" }
+    )
+}
 /// Cleanup guard that destroys player on drop
 #[derive(Clone)]
 struct CleanupGuard {
@@ -259,41 +314,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
 
                     // Set up the video element via eval
-                    let video_id_json =
-                        serde_json::to_string(&video_id).unwrap_or_default();
-                    let stream_url_json =
-                        serde_json::to_string(&stream_url).unwrap_or_default();
-                    let autoplay_str = if autoplay { "true" } else { "false" };
-
-                    let setup_script = format!(
-                        r#"
-                        try {{
-                            let video = document.getElementById({video_id});
-                            if (!video) return "error:Video element not found";
-
-                            let url = {stream_url};
-                            let isHls = url.toLowerCase().includes('.m3u8');
-
-                            if (isHls && window.hlsManager) {{
-                                let result = await window.hlsManager.attachToMedia({video_id}, url);
-                                console.log('[Live] HLS stream attached:', result);
-                            }} else {{
-                                video.src = url;
-                            }}
-
-                            if ({autoplay}) {{
-                                await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
-                            }}
-                            return "ok";
-                        }} catch (e) {{
-                            console.error('[Live] Setup error:', e);
-                            return "error:" + e.message;
-                        }}
-                        "#,
-                        video_id = video_id_json,
-                        stream_url = stream_url_json,
-                        autoplay = autoplay_str,
-                    );
+                    let setup_script =
+                        build_native_setup_script(&video_id, &stream_url, autoplay, false);
 
                     if *init_gen.peek() != gen {
                         return;
@@ -379,12 +401,6 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
 
-                let video_id_json =
-                    serde_json::to_string(&video_id).unwrap_or_default();
-                let stream_url_json =
-                    serde_json::to_string(&stream_url).unwrap_or_default();
-                let autoplay_str = if autoplay { "true" } else { "false" };
-
                 // Ensure hlsManager is available
                 let check = document::eval(
                     "return typeof window.hlsManager !== 'undefined'",
@@ -405,40 +421,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
                 }
 
-                let setup_script = format!(
-                    r#"
-                    try {{
-                        let video = document.getElementById({video_id});
-                        if (!video) return "error:Video element not found";
-
-                        // Detach any existing HLS stream first
-                        if (window.hlsManager) {{
-                            window.hlsManager.detach({video_id});
-                        }}
-
-                        let url = {stream_url};
-                        let isHls = url.toLowerCase().includes('.m3u8');
-
-                        if (isHls && window.hlsManager) {{
-                            let result = await window.hlsManager.attachToMedia({video_id}, url);
-                            console.log('[Live] HLS stream re-attached:', result);
-                        }} else {{
-                            video.src = url;
-                        }}
-
-                        if ({autoplay}) {{
-                            await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
-                        }}
-                        return "ok";
-                    }} catch (e) {{
-                        console.error('[Live] Retry error:', e);
-                        return "error:" + e.message;
-                    }}
-                    "#,
-                    video_id = video_id_json,
-                    stream_url = stream_url_json,
-                    autoplay = autoplay_str,
-                );
+                let setup_script =
+                    build_native_setup_script(&video_id, &stream_url, autoplay, true);
 
                 match document::eval(&setup_script).await {
                     Ok(val) => {

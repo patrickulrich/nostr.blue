@@ -139,10 +139,17 @@ window.hlsManager = window.hlsManager || {
             // Store reject handler so detach() can reject the promise
             this.pendingRejects.set(elementId, reject);
 
+            // Capture the current attachId for timeout validation
+            const capturedAttachId = attachId;
             const timeout = setTimeout(() => {
+                // Verify this timeout belongs to the current attach
+                if (this.activeAttachMap.get(elementId) !== capturedAttachId) {
+                    return;
+                }
                 this.pendingRejects.delete(elementId);
                 this.pendingTimeouts.delete(elementId);
                 this.instances.delete(elementId);
+                this.activeAttachMap.delete(elementId);
                 hls.destroy();
                 reject(new Error('HLS stream timeout - stream may be offline'));
             }, 15000);
@@ -179,6 +186,10 @@ window.hlsManager = window.hlsManager || {
             });
 
             hls.on(Hls.Events.ERROR, (event, data) => {
+                // Validate this error belongs to the current attach
+                if (this.activeAttachMap.get(elementId) !== attachId) {
+                    return;
+                }
                 if (data.fatal) {
                     clearTimeout(timeout);
                     this.pendingTimeouts.delete(elementId);
@@ -186,6 +197,7 @@ window.hlsManager = window.hlsManager || {
                     console.error('[HLS Manager] Fatal error:', data.type, data.details);
                     hls.destroy();
                     this.instances.delete(elementId);
+                    this.activeAttachMap.delete(elementId);
 
                     // Dispatch error event for Rust to catch
                     window.dispatchEvent(new CustomEvent('hls-stream-error', {
@@ -205,6 +217,10 @@ window.hlsManager = window.hlsManager || {
 
             // Listen for ID3 timed metadata (now-playing info in some HLS streams)
             hls.on(Hls.Events.FRAG_PARSING_METADATA, (event, data) => {
+                // Guard against stale metadata from older Hls instances
+                if (this.activeAttachMap.get(elementId) !== attachId) {
+                    return;
+                }
                 const samples = data.samples || [];
                 samples.forEach(sample => {
                     try {

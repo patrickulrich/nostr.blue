@@ -114,6 +114,8 @@ pub fn get_pinned_communities_set() -> HashSet<String> {
 fn schedule_debounced_publish(pins: Vec<String>) {
     #[cfg(feature = "web")]
     {
+        use std::sync::atomic::Ordering;
+        let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst);
         PINNED_COMMUNITIES_TIMEOUT
             .with(|timeout| {
                 *timeout.borrow_mut() = None;
@@ -121,7 +123,7 @@ fn schedule_debounced_publish(pins: Vec<String>) {
                     1000,
                     move || {
                         spawn_local(async move {
-                            publish_with_retry(pins, 0).await;
+                            publish_with_retry(pins, captured_gen, 0).await;
                         });
                     },
                 );
@@ -137,7 +139,7 @@ fn schedule_debounced_publish(pins: Vec<String>) {
             crate::platform::timer::sleep_ms(delay_ms).await;
             // Only publish if generation hasn't changed (debounce protects against stale calls)
             if captured_gen == GENERATION_COUNTER.load(Ordering::SeqCst).wrapping_sub(1) {
-                publish_with_retry(pins, 0).await;
+                publish_with_retry(pins, captured_gen, 0).await;
             }
         });
     }
@@ -170,9 +172,16 @@ pub async fn unpin_community(a_tag: String) -> Result<(), String> {
 /// Publish pinned communities with retry and exponential backoff
 fn publish_with_retry(
     pins: Vec<String>,
+    captured_gen: u64,
     retry_count: u32,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
     Box::pin(async move {
+        use std::sync::atomic::Ordering;
+        // Short-circuit if this generation is stale
+        if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+            return;
+        }
+
         const MAX_RETRIES: u32 = 3;
         *PINNED_COMMUNITIES_SYNC_STATUS.write() = PinnedCommunitiesSyncStatus::Syncing;
         match publish_pinned_communities(pins.clone()).await {
@@ -197,7 +206,7 @@ fn publish_with_retry(
                         let timeout_handle = Timeout::new(
                             delay_ms,
                             move || {
-                                spawn_local(publish_with_retry(pins, retry_count + 1));
+                                spawn_local(publish_with_retry(pins, captured_gen, retry_count + 1));
                             },
                         );
                         // Intentionally forget timeout_handle to avoid dropping/cancelling the timer.
@@ -208,7 +217,7 @@ fn publish_with_retry(
                     #[cfg(not(feature = "web"))]
                     {
                         crate::platform::timer::sleep_ms(delay_ms).await;
-                        publish_with_retry(pins, retry_count + 1).await;
+                        publish_with_retry(pins, captured_gen, retry_count + 1).await;
                     }
                 } else {
                     log::error!(
@@ -298,9 +307,11 @@ pub fn rollback_pinned_communities() {
 /// Manually retry failed pinned communities publish
 #[allow(dead_code)]
 pub async fn retry_pinned_communities_publish() {
+    use std::sync::atomic::Ordering;
     let current_pins = PINNED_COMMUNITIES.read().data().read().clone();
     log::info!("Manually retrying pinned communities publish");
-    publish_with_retry(current_pins, 0).await;
+    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst);
+    publish_with_retry(current_pins, captured_gen, 0).await;
 }
 /// Dismiss failed status and keep local changes
 #[allow(dead_code)]

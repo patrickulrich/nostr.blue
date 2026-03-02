@@ -129,14 +129,16 @@ MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
 
 generate_icons() {
     local tool="$1"
-    # Android mipmap density -> pixel size mapping
-    declare -A SIZES=(
-        ["mdpi"]=48
-        ["hdpi"]=72
-        ["xhdpi"]=96
-        ["xxhdpi"]=144
-        ["xxxhdpi"]=192
-    )
+
+    get_density_size() {
+        case "$1" in
+            mdpi) echo 48 ;;
+            hdpi) echo 72 ;;
+            xhdpi) echo 96 ;;
+            xxhdpi) echo 144 ;;
+            xxxhdpi) echo 192 ;;
+        esac
+    }
 
     # Temp dir only needed for cwebp tool
     local tmp_dir=""
@@ -146,7 +148,7 @@ generate_icons() {
     fi
 
     for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-        local size=${SIZES[$density]}
+        local size=$(get_density_size "$density")
         local dir="$MIPMAP_BASE/mipmap-${density}"
         mkdir -p "$dir"
 

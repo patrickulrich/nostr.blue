@@ -472,8 +472,7 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let current_weekday = js_date.get_day() as i32;
     let current_day = js_date.get_date() as i32;
     let anchor = current_day - current_weekday;
-    let anchor_clamped = anchor.clamp(1, 62) as u32;
-    js_date.set_date(anchor_clamped);
+    js_date.set_date(anchor as u32);
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
         dates.push(format!(

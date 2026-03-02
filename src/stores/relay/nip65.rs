@@ -477,7 +477,9 @@ pub fn load_local_relays() -> Vec<String> {
                         Ok(relays) => {
                             log::debug!("Migrating local relays from old string format");
                             // Migrate to new format
-                            let _ = storage::set(LOCAL_RELAYS_KEY, &relays);
+                            if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
+                                log::error!("Failed to migrate local relays to new format: {:?}", e);
+                            }
                             relays
                         }
                         Err(e) => {
