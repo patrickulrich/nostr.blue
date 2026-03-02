@@ -593,6 +593,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                             );
                                             if let Err(e) = download_ics(&filename, &ics_content) {
                                                 log::error!("Failed to download event: {}", e);
+                                                error.set(Some(format!("Failed to export calendar event: {}", e)));
                                             }
                                         }
                                     },

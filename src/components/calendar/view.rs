@@ -1,10 +1,13 @@
 //! Calendar View Component
 //!
 //! Displays events in Day, Week, or Month views
+#![allow(unused_imports)]
+
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::utils::date_helpers::{
-    get_day_number, get_event_date, get_month_dates, get_month_from_date, get_today,
+    civil_from_days, days_from_civil, get_day_number, get_event_date, get_month_dates,
+    get_month_from_date, get_today,
 };
 use dioxus::prelude::*;
 use std::collections::BTreeMap;
@@ -469,7 +472,8 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let current_weekday = js_date.get_day() as i32;
     let current_day = js_date.get_date() as i32;
     let anchor = current_day - current_weekday;
-    js_date.set_date(anchor as u32);
+    let anchor_clamped = anchor.clamp(-31, 62) as u32;
+    js_date.set_date(anchor_clamped);
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
         dates.push(format!(
@@ -485,7 +489,7 @@ fn get_week_dates(date: &str) -> Vec<String> {
 
 #[cfg(not(feature = "web"))]
 fn get_week_dates(date: &str) -> Vec<String> {
-    // Simple fallback: parse date and compute week using chrono-free arithmetic
+    // Use shared date helpers from date_helpers module
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {
         return vec![];
@@ -494,29 +498,9 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let month: i32 = parts[1].parse().unwrap_or(1);
     let day: i32 = parts[2].parse().unwrap_or(1);
 
-    // Convert to days since epoch using a simplified calculation
-    fn days_from_civil(y: i32, m: i32, d: i32) -> i32 {
-        let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
-        365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + d - 1
-    }
-    fn civil_from_days(g: i32) -> (i32, i32, i32) {
-        let y = (10000 * (g as i64) + 14780) / 3652425;
-        let mut y = y as i32;
-        let mut doy = g - (365 * y + y / 4 - y / 100 + y / 400);
-        if doy < 0 {
-            y -= 1;
-            doy = g - (365 * y + y / 4 - y / 100 + y / 400);
-        }
-        let mi = (100 * doy + 52) / 3060;
-        let m = if mi < 10 { mi + 3 } else { mi - 9 };
-        let y = if m <= 2 { y + 1 } else { y };
-        let d = doy - (mi * 306 + 5) / 10 + 1;
-        (y, m, d)
-    }
-
     let total_days = days_from_civil(year, month, day);
-    let dow = ((total_days % 7) + 7) % 7; // 0=Wed in Hinnant's civil calendar
-    let sunday_offset = (dow + 3) % 7; // days since previous Sunday
+    let dow = ((total_days % 7) + 7) % 7;
+    let sunday_offset = (dow + 3) % 7;
     let sunday_days = total_days - sunday_offset;
 
     let mut dates = Vec::with_capacity(7);

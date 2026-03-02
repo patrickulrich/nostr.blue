@@ -541,7 +541,7 @@ pub async fn add_mint(mint_url: &str) -> Result<(), String> {
             log::warn!("Background restoration failed for {}: {}", mint_url_owned, e);
         }
     });
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     tokio::task::spawn(async move {
         if let Err(e) = restore_proofs_from_mint(&mint_url_owned).await {
             log::warn!("Background restoration failed for {}: {}", mint_url_owned, e);
@@ -1084,13 +1084,16 @@ pub async fn consolidate_proofs(
         .enumerate()
     {
         if attempt > 0 {
-            let effective_delay = if cfg!(feature = "web") {
+            #[cfg(feature = "web")]
+            {
                 let jitter = (js_sys::Math::random() * 200.0) as u32;
-                delay_ms.saturating_sub(100) + jitter
-            } else {
-                delay_ms
-            };
-            crate::platform::timer::sleep_ms(effective_delay).await;
+                let effective_delay = delay_ms.saturating_sub(100) + jitter;
+                crate::platform::timer::sleep_ms(effective_delay).await;
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                crate::platform::timer::sleep_ms(delay_ms).await;
+            }
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
         match client.send_event(&signed_event).await {

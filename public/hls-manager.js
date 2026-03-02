@@ -9,7 +9,7 @@ window.hlsManager = window.hlsManager || {
     hlsLoaded: false,
     hlsLoading: null,
     nowPlaying: null, // Current HLS metadata {title, artist}
-    nowPlayingAudioId: null, // Track which audio element owns nowPlaying
+    nowPlayingElementId: null, // Track which media element owns nowPlaying
 
     /**
      * Lazy load hls.js from CDN
@@ -66,8 +66,8 @@ window.hlsManager = window.hlsManager || {
      */
     async attachToMedia(elementId, streamUrl) {
         const element = document.getElementById(elementId);
-        if (!element) {
-            throw new Error('Media element not found: ' + elementId);
+        if (!element || !(element instanceof HTMLMediaElement)) {
+            throw new Error('Media element not found or not a HTMLMediaElement: ' + elementId);
         }
 
         // Cleanup existing instance
@@ -172,7 +172,7 @@ window.hlsManager = window.hlsManager || {
                         const frames = this.parseId3(sample.data);
                         if (frames && (frames.TIT2 || frames.TPE1)) {
                             // Store in hlsManager for polling from Rust
-                            this.nowPlayingAudioId = elementId;
+                            this.nowPlayingElementId = elementId;
                             this.nowPlaying = {
                                 title: frames.TIT2 || null,
                                 artist: frames.TPE1 || null
@@ -222,9 +222,9 @@ window.hlsManager = window.hlsManager || {
             this.instances.delete(elementId);
         }
         // Clear now playing metadata only if this audio owned it
-        if (this.nowPlayingAudioId === elementId) {
+        if (this.nowPlayingElementId === elementId) {
             this.nowPlaying = null;
-            this.nowPlayingAudioId = null;
+            this.nowPlayingElementId = null;
         }
     },
 

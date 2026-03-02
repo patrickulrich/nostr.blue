@@ -126,7 +126,7 @@ fn schedule_debounced_publish(pins: Vec<String>) {
     }
     #[cfg(not(feature = "web"))]
     {
-        spawn_local(async move {
+        crate::platform::spawn::spawn_detached(async move {
             publish_with_retry(pins, 0).await;
         });
     }

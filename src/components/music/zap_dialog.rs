@@ -230,7 +230,11 @@ pub fn MusicZapDialog() -> Element {
                                 }
                             }
                         }
-                        Err(e) => log::error!("WebLN eval failed: {:?}", e),
+                        Err(e) => {
+                            let err_str = format!("{:?}", e);
+                            log::error!("WebLN eval failed: {}", err_str);
+                            error_msg.set(Some(err_str));
+                        }
                     }
                 }
                 #[cfg(not(feature = "web"))]

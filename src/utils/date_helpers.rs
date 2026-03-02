@@ -52,8 +52,37 @@ pub fn get_today() -> String {
 pub fn get_month_from_date(date: &str) -> u32 {
     date.split('-')
         .nth(1)
-        .and_then(|m| m.parse().ok())
+        .and_then(|m| {
+            m.parse::<u32>()
+                .ok()
+                .and_then(|v| if (1..=12).contains(&v) { Some(v) } else { None })
+        })
         .unwrap_or(0)
+}
+
+/// Convert a date to days since civil epoch (Hinnant algorithm)
+/// Used for efficient date arithmetic without chrono
+#[allow(dead_code)]
+pub fn days_from_civil(y: i32, m: i32, d: i32) -> i32 {
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + d - 1
+}
+
+/// Convert days since civil epoch back to date (Hinnant algorithm)
+#[allow(dead_code)]
+pub fn civil_from_days(g: i32) -> (i32, i32, i32) {
+    let y = (10000 * (g as i64) + 14780) / 3652425;
+    let mut y = y as i32;
+    let mut doy = g - (365 * y + y / 4 - y / 100 + y / 400);
+    if doy < 0 {
+        y -= 1;
+        doy = g - (365 * y + y / 4 - y / 100 + y / 400);
+    }
+    let mi = (100 * doy + 52) / 3060;
+    let m = if mi < 10 { mi + 3 } else { mi - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    let d = doy - (mi * 306 + 5) / 10 + 1;
+    (y, m, d)
 }
 /// Get day number as display string (leading zeros stripped) from a date string
 pub fn get_day_number(date: &str) -> String {
@@ -88,10 +117,16 @@ pub fn get_month_dates(date: &str) -> Vec<String> {
     };
     // Find Sunday before (or on) the first day of the month
     let first_weekday = first.weekday().num_days_from_sunday() as i64;
-    let sunday = first - chrono::Duration::days(first_weekday);
+    let sunday = match first.checked_sub_signed(chrono::Duration::days(first_weekday)) {
+        Some(d) => d,
+        None => return vec![],
+    };
     let mut dates = Vec::with_capacity(42);
     for i in 0..42 {
-        let d = sunday + chrono::Duration::days(i);
+        let d = match sunday.checked_add_signed(chrono::Duration::days(i)) {
+            Some(date) => date,
+            None => break,
+        };
         dates.push(d.format("%Y-%m-%d").to_string());
     }
     dates

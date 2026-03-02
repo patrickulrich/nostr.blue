@@ -458,16 +458,8 @@ const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
 /// Load local relays from browser LocalStorage
 #[cfg(feature = "web")]
 pub fn load_local_relays() -> Vec<String> {
-    match storage::get::<String>(LOCAL_RELAYS_KEY) {
-        Ok(json) => {
-            match serde_json::from_str(&json) {
-                Ok(relays) => relays,
-                Err(e) => {
-                    log::error!("Failed to parse local relays JSON: {}. Raw: {}", e, json.chars().take(200).collect::<String>());
-                    Vec::new()
-                }
-            }
-        }
+    match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
+        Ok(relays) => relays,
         Err(e) => {
             log::debug!("Could not load local relays: {}", e);
             Vec::new()
@@ -502,15 +494,8 @@ pub fn load_local_relays() -> Vec<String> {
 /// Save local relays to browser LocalStorage
 #[cfg(feature = "web")]
 pub fn save_local_relays(relays: &[String]) {
-    match serde_json::to_string(relays) {
-        Ok(json) => {
-            if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &json) {
-                log::error!("Failed to save local relays: {}", e);
-            }
-        }
-        Err(e) => {
-            log::error!("Failed to serialize local relays: {}", e);
-        }
+    if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
+        log::error!("Failed to save local relays: {}", e);
     }
 }
 #[cfg(feature = "native")]

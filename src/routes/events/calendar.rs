@@ -451,7 +451,8 @@ fn add_days(date: &str, days: i32) -> String {
         let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
         let current_day = js_date.get_date() as i32;
         let new_day = current_day + days;
-        js_date.set_date(new_day as u32);
+        let new_day_clamped = new_day.clamp(-31, 62) as u32;
+        js_date.set_date(new_day_clamped);
         format!(
             "{:04}-{:02}-{:02}",
             js_date.get_full_year(),

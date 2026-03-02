@@ -1,5 +1,18 @@
 /// Save text content to a file. On web, triggers a browser download.
 /// On desktop, opens a save dialog. On mobile, uses WebView eval to trigger download.
+
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
+
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
+
+#[cfg(all(not(feature = "web"), not(feature = "desktop"), not(feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+
 pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), String> {
     #[cfg(feature = "web")]
     {
@@ -31,9 +44,5 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
             }
         });
         Ok(())
-    }
-    #[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
-    {
-        Err("File download not supported on this platform".to_string())
     }
 }

@@ -422,7 +422,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         let isHls = url.toLowerCase().includes('.m3u8');
 
                         if (isHls && window.hlsManager) {{
-                            let result = await window.hlsManager.attachToAudio({video_id}, url);
+                            let result = await window.hlsManager.attachToMedia({video_id}, url);
                             console.log('[Live] HLS stream re-attached:', result);
                         }} else {{
                             video.src = url;

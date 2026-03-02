@@ -29,6 +29,12 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DX_ANDROID="$PROJECT_ROOT/target/dx/nostrblue/release/android/app"
 ICON_SOURCE="$PROJECT_ROOT/public/icons/icon-512.png"
 
+if [ ! -f "$ICON_SOURCE" ]; then
+    echo "ERROR: Icon source not found: $ICON_SOURCE" >&2
+    echo "  Please ensure the icon file exists before building" >&2
+    exit 1
+fi
+
 echo "=== nostr.blue Android Build ==="
 echo "Project: $PROJECT_ROOT"
 echo "NDK: $ANDROID_NDK_HOME"
@@ -132,9 +138,12 @@ MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
         ["xxxhdpi"]=192
     )
 
-    # Create single temp directory for all temporary files
-    local tmp_dir
-    tmp_dir=$(mktemp -d "/tmp/ic_launcher_XXXXXX")
+    # Temp dir only needed for cwebp tool
+    local tmp_dir=""
+    if [ "$tool" = "cwebp" ]; then
+        tmp_dir=$(mktemp -d "/tmp/ic_launcher_XXXXXX")
+        trap "rm -rf \"$tmp_dir\"" EXIT
+    fi
 
     for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
         local size=${SIZES[$density]}
@@ -171,6 +180,9 @@ MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
         fi
         echo "  ${density}: ${size}x${size}px"
     done
+
+    # Cleanup temp dir if created
+    [ -n "$tmp_dir" ] && rm -rf "$tmp_dir"
 }
 
 if command -v convert &>/dev/null; then
