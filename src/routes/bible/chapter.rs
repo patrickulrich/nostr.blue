@@ -105,7 +105,6 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
         selected_verses.set(Vec::new());
         show_toolbar.set(false);
     };
-    #[allow(unused_variables)]
     let copy_verses = {
         let translation = translation_for_copy;
         let selected_verses_for_copy = selected_verses;

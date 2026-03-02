@@ -1,12 +1,12 @@
 /// Save text content to a file. On web, triggers a browser download.
 /// On desktop, opens a save dialog. On mobile, uses WebView eval to trigger download.
 pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), String> {
-    #[cfg(all(feature = "web", not(feature = "desktop")))]
+    #[cfg(feature = "web")]
     {
         crate::utils::download::download_blob(filename, content, _mime_type);
         Ok(())
     }
-    #[cfg(all(feature = "desktop", not(feature = "web")))]
+    #[cfg(feature = "desktop")]
     {
         let path = rfd::FileDialog::new()
             .set_file_name(filename)

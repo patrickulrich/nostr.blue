@@ -1084,16 +1084,13 @@ pub async fn consolidate_proofs(
         .enumerate()
     {
         if attempt > 0 {
-            #[cfg(feature = "web")]
-            {
+            let effective_delay = if cfg!(feature = "web") {
                 let jitter = (js_sys::Math::random() * 200.0) as u32;
-                let actual_delay = delay_ms.saturating_sub(100) + jitter;
-                crate::platform::timer::sleep_ms(actual_delay).await;
-            }
-            #[cfg(not(feature = "web"))]
-            {
-                crate::platform::timer::sleep_ms(delay_ms).await;
-            }
+                delay_ms.saturating_sub(100) + jitter
+            } else {
+                delay_ms
+            };
+            crate::platform::timer::sleep_ms(effective_delay).await;
             log::info!("Retrying token event publish (attempt {})", attempt + 1);
         }
         match client.send_event(&signed_event).await {

@@ -107,6 +107,30 @@ pub fn get_pinned_communities() -> Vec<String> {
 pub fn get_pinned_communities_set() -> HashSet<String> {
     PINNED_COMMUNITIES.read().data().read().iter().cloned().collect()
 }
+fn schedule_debounced_publish(pins: Vec<String>) {
+    #[cfg(feature = "web")]
+    {
+        PINNED_COMMUNITIES_TIMEOUT
+            .with(|timeout| {
+                *timeout.borrow_mut() = None;
+                let timeout_handle = Timeout::new(
+                    1000,
+                    move || {
+                        spawn_local(async move {
+                            publish_with_retry(pins, 0).await;
+                        });
+                    },
+                );
+                *timeout.borrow_mut() = Some(timeout_handle);
+            });
+    }
+    #[cfg(not(feature = "web"))]
+    {
+        spawn_local(async move {
+            publish_with_retry(pins, 0).await;
+        });
+    }
+}
 /// Pin a community
 pub async fn pin_community(a_tag: String) -> Result<(), String> {
     let mut pins = PINNED_COMMUNITIES.read().data().read().clone();
@@ -118,26 +142,7 @@ pub async fn pin_community(a_tag: String) -> Result<(), String> {
     }
     pins.push(a_tag);
     *PINNED_COMMUNITIES.read().data().write() = pins.clone();
-    #[cfg(feature = "web")]
-    {
-        PINNED_COMMUNITIES_TIMEOUT
-            .with(|timeout| {
-                *timeout.borrow_mut() = None;
-                let timeout_handle = Timeout::new(
-                    1000,
-                    move || {
-                        spawn_local(async move {
-                            publish_with_retry(pins, 0).await;
-                        });
-                    },
-                );
-                *timeout.borrow_mut() = Some(timeout_handle);
-            });
-    }
-    #[cfg(not(feature = "web"))]
-    {
-        publish_with_retry(pins, 0).await;
-    }
+    schedule_debounced_publish(pins);
     Ok(())
 }
 /// Unpin a community
@@ -148,26 +153,7 @@ pub async fn unpin_community(a_tag: String) -> Result<(), String> {
     }
     pins.retain(|tag| tag != &a_tag);
     *PINNED_COMMUNITIES.read().data().write() = pins.clone();
-    #[cfg(feature = "web")]
-    {
-        PINNED_COMMUNITIES_TIMEOUT
-            .with(|timeout| {
-                *timeout.borrow_mut() = None;
-                let timeout_handle = Timeout::new(
-                    1000,
-                    move || {
-                        spawn_local(async move {
-                            publish_with_retry(pins, 0).await;
-                        });
-                    },
-                );
-                *timeout.borrow_mut() = Some(timeout_handle);
-            });
-    }
-    #[cfg(not(feature = "web"))]
-    {
-        publish_with_retry(pins, 0).await;
-    }
+    schedule_debounced_publish(pins);
     Ok(())
 }
 /// Publish pinned communities with retry and exponential backoff

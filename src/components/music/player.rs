@@ -83,7 +83,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                     }}
 
                                     if (window.hlsManager) {{
-                                        const result = await window.hlsManager.attachToAudio({audio_id}, {media_url});
+                                        const result = await window.hlsManager.attachToMedia({audio_id}, {media_url});
                                         console.log('[Radio] Stream attached:', result);
                                         audio.dataset.currentUrl = {media_url};
                                     }}

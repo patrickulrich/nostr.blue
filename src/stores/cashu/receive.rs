@@ -371,7 +371,7 @@ pub async fn receive_tokens_with_options(
                 let actual_delay = delay_ms.saturating_sub(100) + jitter;
                 crate::platform::timer::sleep_ms(actual_delay).await;
             }
-            #[cfg(not(feature = "web"))]
+            #[cfg(feature = "native")]
             {
                 use rand::Rng;
                 let jitter = rand::thread_rng().gen_range(0..200);

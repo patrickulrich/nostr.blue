@@ -425,21 +425,24 @@ pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options.unchecked_into())
         .map_err(|e| format!("Failed to create blob: {:?}", e))?;
     let url = create_object_url(&blob);
-    let a = document
-        .create_element("a")
-        .map_err(|e| format!("Failed to create anchor: {:?}", e))?;
-    a.set_attribute("href", &url)
-        .map_err(|e| format!("Failed to set href: {:?}", e))?;
-    a.set_attribute("download", filename)
-        .map_err(|e| format!("Failed to set download: {:?}", e))?;
-    let click_fn = js_sys::Reflect::get(&a, &"click".into())
-        .map_err(|e| format!("No click method on anchor: {:?}", e))?;
-    let click_fn: js_sys::Function = click_fn.unchecked_into();
-    click_fn
-        .call0(&a)
-        .map_err(|e| format!("Failed to trigger download: {:?}", e))?;
+    let result = (|| {
+        let a = document
+            .create_element("a")
+            .map_err(|e| format!("Failed to create anchor: {:?}", e))?;
+        a.set_attribute("href", &url)
+            .map_err(|e| format!("Failed to set href: {:?}", e))?;
+        a.set_attribute("download", filename)
+            .map_err(|e| format!("Failed to set download: {:?}", e))?;
+        let click_fn = js_sys::Reflect::get(&a, &"click".into())
+            .map_err(|e| format!("No click method on anchor: {:?}", e))?;
+        let click_fn: js_sys::Function = click_fn.unchecked_into();
+        click_fn
+            .call0(&a)
+            .map_err(|e| format!("Failed to trigger download: {:?}", e))?;
+        Ok(())
+    })();
     revoke_object_url(&url);
-    Ok(())
+    result
 }
 
 /// Trigger download of ICS file (native)

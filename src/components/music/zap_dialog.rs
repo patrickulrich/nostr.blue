@@ -215,15 +215,19 @@ pub fn MusicZapDialog() -> Element {
                                     if success {
                                         log::info!("WebLN payment completed successfully");
                                     } else {
-                                        // Extract error message if present
                                         let js_error = js_sys::Reflect::get(&result, &"error".into())
                                             .ok()
                                             .and_then(|v| v.as_string())
                                             .unwrap_or_else(|| "Unknown error".to_string());
                                         log::warn!("WebLN payment returned success=false: {}", js_error);
+                                        error_msg.set(Some(js_error));
                                     }
                                 }
-                                Err(e) => log::error!("WebLN payment rejected: {:?}", e),
+                                Err(e) => {
+                                    let err_str = format!("{:?}", e);
+                                    log::error!("WebLN payment rejected: {}", err_str);
+                                    error_msg.set(Some(err_str));
+                                }
                             }
                         }
                         Err(e) => log::error!("WebLN eval failed: {:?}", e),
@@ -688,9 +692,15 @@ async fn generate_v4v_invoice(
         }
     }
     log::info!("Requesting invoice from: {}", callback_url);
-    let response = reqwest::get(&callback_url)
+    let client = crate::platform::http::http_client();
+    let response = client
+        .get(&callback_url)
+        .send()
         .await
         .map_err(|e| format!("Failed to request invoice: {}", e))?;
+    let response = response
+        .error_for_status()
+        .map_err(|e| format!("Invoice request failed: {}", e))?;
     let invoice_response: InvoiceResponse = response
         .json()
         .await

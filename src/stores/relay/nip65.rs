@@ -463,7 +463,7 @@ pub fn load_local_relays() -> Vec<String> {
             match serde_json::from_str(&json) {
                 Ok(relays) => relays,
                 Err(e) => {
-                    log::error!("Failed to parse local relays JSON: {}. Raw: {}", e, &json[..json.len().min(200)]);
+                    log::error!("Failed to parse local relays JSON: {}. Raw: {}", e, json.chars().take(200).collect::<String>());
                     Vec::new()
                 }
             }

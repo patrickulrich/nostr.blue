@@ -851,8 +851,8 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
     if ts == 0 {
         return "Date TBD".to_string();
     }
-    // Simple UTC formatting without js_sys
-    let secs = ts;
+    const MAX_TIMESTAMP: u64 = 253_402_300_799;
+    let secs = ts.min(MAX_TIMESTAMP);
     let days = secs / 86400;
     let remaining = secs % 86400;
     let hours = remaining / 3600;

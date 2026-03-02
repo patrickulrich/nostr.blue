@@ -151,13 +151,12 @@ MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
                 -gravity center -background none -extent "${fg_size}x${fg_size}" \
                 "$dir/ic_launcher_foreground.webp" 2>/dev/null
         elif [ "$tool" = "cwebp" ]; then
-            # cwebp: need intermediate PNG via ffmpeg or other
+            # cwebp: need intermediate PNG via ffmpeg
             local tmp_png="$tmp_dir/ic_launcher_${density}.png"
-            local tmp_fg_png="$tmp_dir/ic_launcher_fg_${density}.png"
+            local fg_size=$((size * 108 / 72))
+            ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size}" "$tmp_png" 2>/dev/null
             cwebp -q 90 "$tmp_png" -o "$dir/ic_launcher.webp"
             cp "$dir/ic_launcher.webp" "$dir/ic_launcher_round.webp"
-            # Foreground
-            local fg_size=$((size * 108 / 72))
             ffmpeg -y -i "$ICON_SOURCE" -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" \
                 "$dir/ic_launcher_foreground.webp" 2>/dev/null
         elif [ "$tool" = "ffmpeg" ]; then
@@ -170,25 +169,6 @@ MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
                 -vf "scale=${size}:${size},pad=${fg_size}:${fg_size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000" \
                 "$dir/ic_launcher_foreground.webp" 2>/dev/null
         fi
-        echo "  ${density}: ${size}x${size}px"
-    done
-}
-
-if command -v convert &>/dev/null; then
-    echo "Using ImageMagick"
-    generate_icons "convert"
-elif command -v cwebp &>/dev/null && command -v ffmpeg &>/dev/null; then
-    echo "Using cwebp + ffmpeg"
-    generate_icons "cwebp"
-elif command -v ffmpeg &>/dev/null; then
-    echo "Using ffmpeg"
-    generate_icons "ffmpeg"
-else
-    echo "WARNING: No image tools found (install imagemagick, ffmpeg, or cwebp)"
-    echo "  Skipping icon generation. Install with:"
-    echo "    sudo apt install imagemagick   # or"
-    echo "    sudo apt install ffmpeg"
-fi
         echo "  ${density}: ${size}x${size}px"
     done
 }

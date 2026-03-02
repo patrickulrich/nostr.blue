@@ -466,10 +466,10 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let month: i32 = parts[1].parse::<i32>().unwrap_or(1).clamp(1, 12) - 1;
     let day: i32 = parts[2].parse().unwrap_or(1);
     let js_date = js_sys::Date::new_with_year_month_day(year, month, day);
-    let current_weekday = js_date.get_day();
-    // JavaScript Date.setDate() handles month boundary crossing with wrapped values
-    // e.g., setDate(0) sets to last day of previous month, setDate(32) rolls to next month
-    js_date.set_date(js_date.get_date().wrapping_sub(current_weekday));
+    let current_weekday = js_date.get_day() as i32;
+    let current_day = js_date.get_date() as i32;
+    let anchor = current_day - current_weekday;
+    js_date.set_date(anchor as u32);
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
         dates.push(format!(
