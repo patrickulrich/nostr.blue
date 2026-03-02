@@ -8,10 +8,25 @@
 
 Run before committing:
 ```bash
+# Dioxus
+dx check
+
+# Cargo
 cargo check
-dx check                                                
-cargo clippy -- -D warnings                                # Native lints
-cargo clippy --target wasm32-unknown-unknown -- -D warnings  # WASM lints (CI enforced)
+
+# Web (WASM)
+cargo check --target wasm32-unknown-unknown
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
+
+# Desktop
+cargo check --no-default-features --features desktop
+cargo clippy --no-default-features --features desktop -- -D warnings
+
+# Mobile
+cargo check --no-default-features --features mobile
+cargo clippy --no-default-features --features mobile -- -D warnings
+
+# Tests
 cargo test
 ```
 

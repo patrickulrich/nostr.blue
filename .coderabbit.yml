@@ -43,7 +43,6 @@ reviews:
     - "!**/android/app/build/**"
     - "!**/android/.gradle/**"
     - "!**/android/.idea/**"
-    - "!**/android/res/**"
 
     # Configuration files that rarely need review
     - "!**/*.md"

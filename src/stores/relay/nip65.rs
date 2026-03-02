@@ -468,8 +468,8 @@ pub async fn fetch_blocked_relays(
     Ok(relays)
 }
 const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
-/// Load local relays from browser LocalStorage
-#[cfg(feature = "web")]
+/// Load local relays from browser LocalStorage (web-only, not when native is enabled)
+#[cfg(all(feature = "web", not(feature = "native")))]
 pub fn load_local_relays() -> Vec<String> {
     // First try the typed Vec<String> format
     match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
@@ -531,8 +531,8 @@ pub fn load_local_relays() -> Vec<String> {
         _ => Vec::new(),
     }
 }
-/// Save local relays to browser LocalStorage
-#[cfg(feature = "web")]
+/// Save local relays to browser LocalStorage (web-only, not when native is enabled)
+#[cfg(all(feature = "web", not(feature = "native")))]
 pub fn save_local_relays(relays: &[String]) {
     if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
         log::error!("Failed to save local relays: {}", e);

@@ -140,7 +140,7 @@ fn schedule_debounced_publish(pins: Vec<String>) {
         crate::platform::spawn::spawn_detached(async move {
             crate::platform::timer::sleep_ms(delay_ms).await;
             // Only publish if generation hasn't changed (debounce protects against stale calls)
-            if captured_gen == GENERATION_COUNTER.load(Ordering::SeqCst).wrapping_sub(1) {
+            if captured_gen == GENERATION_COUNTER.load(Ordering::SeqCst) {
                 publish_with_retry(pins, captured_gen, 0).await;
             }
         });
@@ -172,6 +172,7 @@ pub async fn unpin_community(a_tag: String) -> Result<(), String> {
     Ok(())
 }
 /// Publish pinned communities with retry and exponential backoff
+#[cfg(not(target_arch = "wasm32"))]
 fn publish_with_retry(
     pins: Vec<String>,
     captured_gen: u64,
@@ -203,24 +204,8 @@ fn publish_with_retry(
                         "Retrying pinned communities publish in {}ms (attempt {}/{})",
                         delay_ms, retry_count + 1, MAX_RETRIES
                     );
-                    #[cfg(feature = "web")]
-                    {
-                        let timeout_handle = Timeout::new(
-                            delay_ms,
-                            move || {
-                                spawn_local(publish_with_retry(pins, captured_gen, retry_count + 1));
-                            },
-                        );
-                        // Intentionally forget timeout_handle to avoid dropping/cancelling the timer.
-                        // This is a fire-and-forget pattern for WASM timers where the handle must
-                        // outlive this scope. Memory is reclaimed when the module unloads.
-                        std::mem::forget(timeout_handle);
-                    }
-                    #[cfg(not(feature = "web"))]
-                    {
-                        crate::platform::timer::sleep_ms(delay_ms).await;
-                        publish_with_retry(pins, captured_gen, retry_count + 1).await;
-                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
+                    publish_with_retry(pins, captured_gen, retry_count + 1).await;
                 } else {
                     log::error!(
                         "Pinned communities publish failed after {} retries: {}",
@@ -246,6 +231,78 @@ fn publish_with_retry(
             }
         }
     })
+}
+
+/// Publish pinned communities with retry and exponential backoff (WASM version - no Send bound)
+#[cfg(target_arch = "wasm32")]
+fn publish_with_retry(
+    pins: Vec<String>,
+    captured_gen: u64,
+    retry_count: u32,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+    Box::pin(async move {
+        use std::sync::atomic::Ordering;
+        // Short-circuit if this generation is stale
+        if captured_gen != GENERATION_COUNTER.load(Ordering::SeqCst) {
+            return;
+        }
+
+        const MAX_RETRIES: u32 = 3;
+        *PINNED_COMMUNITIES_SYNC_STATUS.write() = PinnedCommunitiesSyncStatus::Syncing;
+        match publish_pinned_communities(pins.clone()).await {
+            Ok(_) => {
+                *PINNED_COMMUNITIES_ROLLBACK.read().data().write() = None;
+                *PINNED_COMMUNITIES_SYNC_STATUS.write() = PinnedCommunitiesSyncStatus::Idle;
+                log::info!("Pinned communities published successfully");
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to publish pinned communities (attempt {}): {}", retry_count
+                    + 1, e
+                );
+                if retry_count < MAX_RETRIES {
+                    let delay_ms = 1000u32 * (1 << retry_count);
+                    log::info!(
+                        "Retrying pinned communities publish in {}ms (attempt {}/{})",
+                        delay_ms, retry_count + 1, MAX_RETRIES
+                    );
+                    let timeout_handle = Timeout::new(
+                        delay_ms,
+                        move || {
+                            spawn_local(publish_with_retry(pins, captured_gen, retry_count + 1));
+                        },
+                    );
+                    // Intentionally forget the timeout handle to prevent the scheduled retry
+                    // from being cancelled. When a Timeout is dropped, it cancels the callback.
+                    // We use fire-and-forget here so the retry runs even after this scope ends.
+                    // This is a deliberate WASM pattern - the small memory leak is acceptable
+                    // because the callback runs once and the module lifetime is the app lifetime.
+                    std::mem::forget(timeout_handle);
+                } else {
+                    log::error!(
+                        "Pinned communities publish failed after {} retries: {}",
+                        MAX_RETRIES, e
+                    );
+                    if let Some(previous_state) = PINNED_COMMUNITIES_ROLLBACK
+                        .read()
+                        .data()
+                        .read()
+                        .clone()
+                    {
+                        log::warn!(
+                            "Automatically rolling back pinned communities to previous state due to publish failure"
+                        );
+                        *PINNED_COMMUNITIES.read().data().write() = previous_state;
+                    }
+                    *PINNED_COMMUNITIES_ROLLBACK.read().data().write() = None;
+                    *PINNED_COMMUNITIES_SYNC_STATUS.write() = PinnedCommunitiesSyncStatus::Failed {
+                        error: e.clone(),
+                        retry_count,
+                    };
+                }
+            }
+        }
+})
 }
 /// Publish pinned communities list to relays (NIP-51 kind 10004)
 async fn publish_pinned_communities(pins: Vec<String>) -> Result<(), String> {
@@ -312,7 +369,8 @@ pub async fn retry_pinned_communities_publish() {
     use std::sync::atomic::Ordering;
     let current_pins = PINNED_COMMUNITIES.read().data().read().clone();
     log::info!("Manually retrying pinned communities publish");
-    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst);
+    // fetch_add returns previous value, so add 1 to get the new generation
+    let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     publish_with_retry(current_pins, captured_gen, 0).await;
 }
 /// Dismiss failed status and keep local changes

@@ -151,7 +151,7 @@ async fn pick_from_android(
     // Poll for result with timeout
     let max_attempts = 300; // 30 seconds at 100ms intervals
     for _ in 0..max_attempts {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        crate::platform::timer::sleep_ms(100).await;
 
         let poll_result = call_static_string_method(&mut env, &class, poll_method)?;
 

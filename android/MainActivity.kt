@@ -49,6 +49,70 @@ class MainActivity : WryActivity() {
         }
     }
 
+    // File picker launcher - must be instance property registered before STARTED
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        Log.d(TAG, "File picker result: uri=$uri")
+        synchronized(lock) {
+            if (uri != null) {
+                try {
+                    val contentResolver = contentResolver
+                    val mimeType = contentResolver.getType(uri)
+                    val inputStream = contentResolver.openInputStream(uri)
+                    if (inputStream != null) {
+                        val bytes = inputStream.readBytes()
+                        inputStream.close()
+                        pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        pendingFileMimeType = mimeType ?: "application/octet-stream"
+                        filePickError = null
+                        Log.d(TAG, "File picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                    } else {
+                        filePickError = "Could not open file"
+                    }
+                } catch (e: Exception) {
+                    filePickError = e.message
+                    Log.e(TAG, "File pick failed", e)
+                }
+            } else {
+                filePickError = "No file selected"
+            }
+            filePickInFlight = false
+        }
+    }
+
+    // Image picker launcher - must be instance property registered before STARTED
+    private val imagePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        Log.d(TAG, "Image picker result: uri=$uri")
+        synchronized(lock) {
+            if (uri != null) {
+                try {
+                    val contentResolver = contentResolver
+                    val mimeType = contentResolver.getType(uri)
+                    val inputStream = contentResolver.openInputStream(uri)
+                    if (inputStream != null) {
+                        val bytes = inputStream.readBytes()
+                        inputStream.close()
+                        pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        pendingFileMimeType = mimeType ?: "image/*"
+                        filePickError = null
+                        Log.d(TAG, "Image picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                    } else {
+                        filePickError = "Could not open image"
+                    }
+                } catch (e: Exception) {
+                    filePickError = e.message
+                    Log.e(TAG, "Image pick failed", e)
+                }
+            } else {
+                filePickError = "No image selected"
+            }
+            filePickInFlight = false
+        }
+    }
+
     // Note: `instance` can be briefly null during Activity recreation (e.g., config
     // changes). Callers like launchGetPublicKey() return "no_instance" so Rust callers
     // should retry or handle gracefully.
@@ -74,6 +138,9 @@ class MainActivity : WryActivity() {
         private const val TAG = "NIP55"
         private val lock = Any()
 
+        // Java package identifier regex: segments of [A-Za-z_][A-Za-z0-9_]* separated by dots
+        private val PACKAGE_NAME_REGEX = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
+
         @Volatile
         private var instance: MainActivity? = null
 
@@ -88,6 +155,35 @@ class MainActivity : WryActivity() {
 
         @Volatile
         private var intentInFlight: Boolean = false
+
+        // Storage for file picker results
+        @Volatile
+        private var pendingFileContent: String? = null
+        @Volatile
+        private var pendingFileMimeType: String? = null
+        @Volatile
+        private var filePickError: String? = null
+        @Volatile
+        private var filePickInFlight: Boolean = false
+
+        /**
+         * Validate a signer package name.
+         * 1. Must match Java package identifier pattern
+         * 2. Must be an installed package on the device
+         */
+        private fun validateSignerPackage(context: Context, signerPackage: String): Boolean {
+            if (!PACKAGE_NAME_REGEX.matches(signerPackage)) {
+                Log.w(TAG, "Invalid package name format: $signerPackage")
+                return false
+            }
+            return try {
+                context.packageManager.getPackageInfo(signerPackage, 0)
+                true
+            } catch (e: PackageManager.NameNotFoundException) {
+                Log.w(TAG, "Package not found: $signerPackage")
+                false
+            }
+        }
 
         /**
          * Get the app-private files directory for persistent storage.
@@ -151,6 +247,9 @@ class MainActivity : WryActivity() {
          */
         @JvmStatic
         fun getPublicKeyViaContentResolver(context: Context, signerPackage: String): String? {
+            if (!validateSignerPackage(context, signerPackage)) {
+                return null
+            }
             return try {
                 val uri = Uri.parse("content://$signerPackage.GET_PUBLIC_KEY")
                 val cursor = context.contentResolver.query(
@@ -198,6 +297,9 @@ class MainActivity : WryActivity() {
             eventJson: String,
             currentUser: String
         ): String? {
+            if (!validateSignerPackage(context, signerPackage)) {
+                return null
+            }
             return try {
                 val uri = Uri.parse("content://$signerPackage.SIGN_EVENT")
                 val cursor = context.contentResolver.query(
@@ -411,9 +513,26 @@ class MainActivity : WryActivity() {
                 // Decode base64 content
                 val contentBytes = android.util.Base64.decode(contentBase64, android.util.Base64.NO_WRAP)
 
+                // Sanitize filename to prevent path traversal:
+                // - Strip any path separators (both / and \)
+                // - Get only the basename (last segment after any separator)
+                // - Reject empty or whitespace-only names
+                val safeName = filename
+                    .replace("\\", "/")
+                    .substringAfterLast("/")
+                    .trim()
+                    .ifEmpty { "download" }
+
                 // Write to cache directory
                 val cacheDir = context.cacheDir
-                val file = java.io.File(cacheDir, filename)
+                val file = java.io.File(cacheDir, safeName)
+
+                // Verify the canonical path is within cacheDir (defense in depth)
+                if (!file.canonicalPath.startsWith(cacheDir.canonicalPath)) {
+                    Log.e(TAG, "downloadFile: path traversal attempt blocked: $filename")
+                    return "error:Invalid file path"
+                }
+
                 file.writeBytes(contentBytes)
 
                 // Create URI for the file
@@ -435,7 +554,7 @@ class MainActivity : WryActivity() {
                 chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(chooserIntent)
 
-                Log.d(TAG, "downloadFile: launched share for $filename")
+                Log.d(TAG, "downloadFile: launched share for $safeName")
                 "success"
             } catch (e: Exception) {
                 Log.e(TAG, "downloadFile failed for $filename", e)
@@ -456,6 +575,9 @@ class MainActivity : WryActivity() {
             pubkey: String,
             currentUser: String
         ): String? {
+            if (!validateSignerPackage(context, signerPackage)) {
+                return null
+            }
             return try {
                 val uri = Uri.parse("content://$signerPackage.$method")
                 val cursor = context.contentResolver.query(
@@ -484,87 +606,6 @@ class MainActivity : WryActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "$method failed for $signerPackage", e)
                 null
-            }
-        }
-
-        // Storage for file picker results
-        @Volatile
-        private var pendingFileContent: String? = null
-        @Volatile
-        private var pendingFileMimeType: String? = null
-        @Volatile
-        private var filePickError: String? = null
-        @Volatile
-        private var filePickInFlight: Boolean = false
-
-        private val filePickerLauncher = registerForActivityResult(
-            ActivityResultContracts.OpenDocument()
-        ) { uri ->
-            Log.d(TAG, "File picker result: uri=$uri")
-            synchronized(lock) {
-                if (uri != null) {
-                    try {
-                        val contentResolver = instance?.contentResolver
-                        if (contentResolver != null) {
-                            val mimeType = contentResolver.getType(uri)
-                            val inputStream = contentResolver.openInputStream(uri)
-                            if (inputStream != null) {
-                                val bytes = inputStream.readBytes()
-                                inputStream.close()
-                                // Encode as base64
-                                pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                pendingFileMimeType = mimeType ?: "application/octet-stream"
-                                filePickError = null
-                                Log.d(TAG, "File picked successfully: ${bytes.size} bytes, mime=$mimeType")
-                            } else {
-                                filePickError = "Could not open file"
-                            }
-                        } else {
-                            filePickError = "No content resolver"
-                        }
-                    } catch (e: Exception) {
-                        filePickError = e.message
-                        Log.e(TAG, "File pick failed", e)
-                    }
-                } else {
-                    filePickError = "No file selected"
-                }
-                filePickInFlight = false
-            }
-        }
-
-        private val imagePickerLauncher = registerForActivityResult(
-            ActivityResultContracts.GetContent()
-        ) { uri ->
-            Log.d(TAG, "Image picker result: uri=$uri")
-            synchronized(lock) {
-                if (uri != null) {
-                    try {
-                        val contentResolver = instance?.contentResolver
-                        if (contentResolver != null) {
-                            val mimeType = contentResolver.getType(uri)
-                            val inputStream = contentResolver.openInputStream(uri)
-                            if (inputStream != null) {
-                                val bytes = inputStream.readBytes()
-                                inputStream.close()
-                                pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                pendingFileMimeType = mimeType ?: "image/*"
-                                filePickError = null
-                                Log.d(TAG, "Image picked successfully: ${bytes.size} bytes, mime=$mimeType")
-                            } else {
-                                filePickError = "Could not open image"
-                            }
-                        } else {
-                            filePickError = "No content resolver"
-                        }
-                    } catch (e: Exception) {
-                        filePickError = e.message
-                        Log.e(TAG, "Image pick failed", e)
-                    }
-                } else {
-                    filePickError = "No image selected"
-                }
-                filePickInFlight = false
             }
         }
 

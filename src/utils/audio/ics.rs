@@ -3,21 +3,17 @@
 //! Provides functionality to import and export calendar events
 //! in the standard iCalendar format (RFC 5545).
 
-#[cfg(all(feature = "web", feature = "desktop"))]
-compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
+// Feature exclusivity guards
+// Note: 'native' is a shared feature enabled by both 'desktop' and 'mobile'
+// So we only need to prevent 'web' from being combined with 'native' (which covers desktop/mobile)
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
 
 #[cfg(all(feature = "web", feature = "mobile"))]
 compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
 
-#[cfg(all(feature = "desktop", feature = "mobile"))]
-compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
-
-#[cfg(all(
-    not(feature = "web"),
-    not(feature = "desktop"),
-    not(feature = "mobile")
-))]
-compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+#[cfg(not(any(feature = "web", feature = "native", feature = "mobile")))]
+compile_error!("Must enable one of 'web', 'native', or 'mobile' feature");
 
 use crate::utils::nip52::{CalendarEvent, CalendarEventType, EventTime};
 /// Generate ICS content for a single calendar event
