@@ -240,13 +240,22 @@ async fn read_file_as_bytes(
     Ok((bytes, mime_type))
 }
 
-/// Stub for non-web platforms
-#[cfg(feature = "native")]
+/// Stub for desktop platforms
+#[cfg(all(feature = "native", not(feature = "mobile")))]
 async fn read_file_as_bytes(
     _file_name: &str,
     _input_id: &str,
 ) -> Result<(Vec<u8>, String), String> {
     Err("File reading not supported on this platform".to_string())
+}
+
+/// Mobile implementation - uses Android file picker via JNI
+#[cfg(feature = "mobile")]
+async fn read_file_as_bytes(
+    _file_name: &str,
+    _input_id: &str,
+) -> Result<(Vec<u8>, String), String> {
+    crate::platform::mobile::pick_file().await
 }
 /// Helper function to format file size
 fn format_file_size(bytes: usize) -> String {
@@ -276,8 +285,14 @@ fn clear_file_input(input_id: &str) {
     }
 }
 
-/// Stub for non-web platforms
-#[cfg(feature = "native")]
+/// Stub for desktop platforms
+#[cfg(all(feature = "native", not(feature = "mobile")))]
 fn clear_file_input(_input_id: &str) {
-    // No-op on native
+    // No-op on desktop
+}
+
+/// Mobile: no-op (Android handles this differently)
+#[cfg(feature = "mobile")]
+fn clear_file_input(_input_id: &str) {
+    // No-op on mobile
 }

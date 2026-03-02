@@ -394,6 +394,56 @@ class MainActivity : WryActivity() {
         }
 
         /**
+         * Download file by writing to cache and triggering Share Intent.
+         *
+         * Writes content to a temporary file in cache directory, then opens
+         * the system share dialog so the user can save or share the file.
+         *
+         * @param context Android context
+         * @param filename Name of the file to download
+         * @param contentBase64 Base64-encoded file content
+         * @param mimeType MIME type of the content (e.g., "text/markdown", "image/png")
+         * @return "success" on launch, "error:..." on failure
+         */
+        @JvmStatic
+        fun downloadFile(context: Context, filename: String, contentBase64: String, mimeType: String): String {
+            return try {
+                // Decode base64 content
+                val contentBytes = android.util.Base64.decode(contentBase64, android.util.Base64.NO_WRAP)
+
+                // Write to cache directory
+                val cacheDir = context.cacheDir
+                val file = java.io.File(cacheDir, filename)
+                file.writeBytes(contentBytes)
+
+                // Create URI for the file
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+
+                // Create Share Intent
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = mimeType
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                // Launch chooser (share dialog)
+                val chooserIntent = Intent.createChooser(shareIntent, "Save or share file")
+                chooserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooserIntent)
+
+                Log.d(TAG, "downloadFile: launched share for $filename")
+                "success"
+            } catch (e: Exception) {
+                Log.e(TAG, "downloadFile failed for $filename", e)
+                "error:${e.message}"
+            }
+        }
+
+        /**
          * Generic ContentResolver query for encrypt/decrypt operations.
          * All NIP-04/NIP-44 operations use the same query pattern with
          * columns: [content, pubkey, current_user].
@@ -435,6 +485,186 @@ class MainActivity : WryActivity() {
                 Log.e(TAG, "$method failed for $signerPackage", e)
                 null
             }
+        }
+
+        // Storage for file picker results
+        @Volatile
+        private var pendingFileContent: String? = null
+        @Volatile
+        private var pendingFileMimeType: String? = null
+        @Volatile
+        private var filePickError: String? = null
+        @Volatile
+        private var filePickInFlight: Boolean = false
+
+        private val filePickerLauncher = registerForActivityResult(
+            ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            Log.d(TAG, "File picker result: uri=$uri")
+            synchronized(lock) {
+                if (uri != null) {
+                    try {
+                        val contentResolver = instance?.contentResolver
+                        if (contentResolver != null) {
+                            val mimeType = contentResolver.getType(uri)
+                            val inputStream = contentResolver.openInputStream(uri)
+                            if (inputStream != null) {
+                                val bytes = inputStream.readBytes()
+                                inputStream.close()
+                                // Encode as base64
+                                pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                pendingFileMimeType = mimeType ?: "application/octet-stream"
+                                filePickError = null
+                                Log.d(TAG, "File picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                            } else {
+                                filePickError = "Could not open file"
+                            }
+                        } else {
+                            filePickError = "No content resolver"
+                        }
+                    } catch (e: Exception) {
+                        filePickError = e.message
+                        Log.e(TAG, "File pick failed", e)
+                    }
+                } else {
+                    filePickError = "No file selected"
+                }
+                filePickInFlight = false
+            }
+        }
+
+        private val imagePickerLauncher = registerForActivityResult(
+            ActivityResultContracts.GetContent()
+        ) { uri ->
+            Log.d(TAG, "Image picker result: uri=$uri")
+            synchronized(lock) {
+                if (uri != null) {
+                    try {
+                        val contentResolver = instance?.contentResolver
+                        if (contentResolver != null) {
+                            val mimeType = contentResolver.getType(uri)
+                            val inputStream = contentResolver.openInputStream(uri)
+                            if (inputStream != null) {
+                                val bytes = inputStream.readBytes()
+                                inputStream.close()
+                                pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                pendingFileMimeType = mimeType ?: "image/*"
+                                filePickError = null
+                                Log.d(TAG, "Image picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                            } else {
+                                filePickError = "Could not open image"
+                            }
+                        } else {
+                            filePickError = "No content resolver"
+                        }
+                    } catch (e: Exception) {
+                        filePickError = e.message
+                        Log.e(TAG, "Image pick failed", e)
+                    }
+                } else {
+                    filePickError = "No image selected"
+                }
+                filePickInFlight = false
+            }
+        }
+
+        /**
+         * Open file picker and return selected file content as base64.
+         * Uses ACTION_OPEN_DOCUMENT for broad file selection.
+         *
+         * @return Base64-encoded file content with mime type, or "error:..." on failure
+         */
+        @JvmStatic
+        fun pickFile(@Suppress("UNUSED_PARAMETER") context: Context): String {
+            return try {
+                val activity = synchronized(lock) { instance }
+                if (activity == null) {
+                    Log.e(TAG, "pickFile: no Activity instance")
+                    return "error:no_instance"
+                }
+
+                synchronized(lock) {
+                    if (filePickInFlight) {
+                        return "error:already_in_flight"
+                    }
+                    filePickInFlight = true
+                    pendingFileContent = null
+                    pendingFileMimeType = null
+                    filePickError = null
+                }
+
+                // Launch file picker with common file types
+                activity.filePickerLauncher.launch(arrayOf("*/*"))
+                "picking"
+            } catch (e: Exception) {
+                Log.e(TAG, "pickFile failed", e)
+                synchronized(lock) {
+                    filePickInFlight = false
+                }
+                "error:${e.message}"
+            }
+        }
+
+        /**
+         * Open image picker from gallery.
+         *
+         * @return Base64-encoded image content with mime type, or "error:..." on failure
+         */
+        @JvmStatic
+        fun pickImage(@Suppress("UNUSED_PARAMETER") context: Context): String {
+            return try {
+                val activity = synchronized(lock) { instance }
+                if (activity == null) {
+                    Log.e(TAG, "pickImage: no Activity instance")
+                    return "error:no_instance"
+                }
+
+                synchronized(lock) {
+                    if (filePickInFlight) {
+                        return "error:already_in_flight"
+                    }
+                    filePickInFlight = true
+                    pendingFileContent = null
+                    pendingFileMimeType = null
+                    filePickError = null
+                }
+
+                activity.imagePickerLauncher.launch("image/*")
+                "picking"
+            } catch (e: Exception) {
+                Log.e(TAG, "pickImage failed", e)
+                synchronized(lock) {
+                    filePickInFlight = false
+                }
+                "error:${e.message}"
+            }
+        }
+
+        /**
+         * Poll for file picker result.
+         *
+         * @return Base64-encoded content prefixed with mime type "mime|base64", "picking", "error:...", or "none"
+         */
+        @JvmStatic
+        fun pollFileResult(@Suppress("UNUSED_PARAMETER") context: Context): String {
+            return synchronized(lock) {
+                when {
+                    filePickInFlight -> "picking"
+                    filePickError != null -> "error:$filePickError"
+                    pendingFileContent != null && pendingFileMimeType != null -> {
+                        "${pendingFileMimeType}|${pendingFileContent}"
+                    }
+                    else -> "none"
+                }
+            }
+        }
+
+        /**
+         * Check if file picker is currently in flight.
+         */
+        @JvmStatic
+        fun isFilePickInFlight(@Suppress("UNUSED_PARAMETER") context: Context): Boolean {
+            return synchronized(lock) { filePickInFlight }
         }
     }
 }

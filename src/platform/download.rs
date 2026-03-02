@@ -1,5 +1,5 @@
 /// Save text content to a file. On web, triggers a browser download.
-/// On desktop, opens a save dialog. On mobile, uses WebView eval to trigger download.
+/// On desktop, opens a save dialog. On mobile (Android), triggers Share Intent.
 
 #[cfg(all(feature = "web", feature = "desktop"))]
 compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
@@ -10,7 +10,11 @@ compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
 #[cfg(all(feature = "desktop", feature = "mobile"))]
 compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
 
-#[cfg(all(not(feature = "web"), not(feature = "desktop"), not(feature = "mobile")))]
+#[cfg(all(
+    not(feature = "web"),
+    not(feature = "desktop"),
+    not(feature = "mobile")
+))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), String> {
@@ -29,20 +33,8 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
     }
     #[cfg(feature = "mobile")]
     {
-        // On mobile WebView, trigger a download via JavaScript blob URL
-        // serde_json::to_string on &str produces a valid JS string literal (quoted + escaped)
-        let content_json = serde_json::to_string(content).unwrap_or_default();
-        let filename_json = serde_json::to_string(filename).unwrap_or_default();
-        let mime_json = serde_json::to_string(_mime_type).unwrap_or_default();
-        let js = format!(
-            r#"(function(){{var b=new Blob([{content_json}],{{type:{mime_json}}});var u=URL.createObjectURL(b);try{{var a=document.createElement('a');a.href=u;a.download={filename_json};document.body.appendChild(a);a.click();document.body.removeChild(a);}}finally{{URL.revokeObjectURL(u);}}}})();"#,
-        );
-        let js_owned = js;
-        crate::platform::spawn::spawn_detached(async move {
-            if let Err(e) = dioxus::prelude::document::eval(&js_owned).await {
-                log::warn!("Mobile download eval failed: {:?}", e);
-            }
-        });
-        Ok(())
+        // On mobile (Android), trigger a Share Intent to let user save/share the file
+        crate::platform::download_file(filename, content.as_bytes(), _mime_type)
+            .map_err(|e| format!("Download failed: {}", e))
     }
 }

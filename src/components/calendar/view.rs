@@ -1,15 +1,17 @@
 //! Calendar View Component
 //!
 //! Displays events in Day, Week, or Month views
-#![allow(unused_imports)]
 
 use crate::routes::Route;
 use crate::stores::calendar_store::UnifiedEvent;
+#[cfg(not(feature = "web"))]
+use crate::utils::date_helpers::{civil_from_days, days_from_civil};
 use crate::utils::date_helpers::{
-    civil_from_days, days_from_civil, get_day_number, get_event_date, get_month_dates,
-    get_month_from_date, get_today,
+    get_day_number, get_event_date, get_month_dates, get_month_from_date, get_today,
 };
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
+use js_sys;
 use std::collections::BTreeMap;
 const HOUR_HEIGHT_PX: f32 = 64.0;
 const MIN_EVENT_HEIGHT_PX: f32 = 30.0;
@@ -472,7 +474,7 @@ fn get_week_dates(date: &str) -> Vec<String> {
     let current_weekday = js_date.get_day() as i32;
     let current_day = js_date.get_date() as i32;
     let anchor = current_day - current_weekday;
-    js_date.set_date(anchor as u32);
+    let js_date = js_sys::Date::new_with_year_month_day(year, month, anchor);
     let mut dates = Vec::with_capacity(7);
     for _ in 0..7 {
         dates.push(format!(

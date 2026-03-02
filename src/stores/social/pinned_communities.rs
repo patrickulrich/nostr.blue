@@ -115,7 +115,8 @@ fn schedule_debounced_publish(pins: Vec<String>) {
     #[cfg(feature = "web")]
     {
         use std::sync::atomic::Ordering;
-        let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        // fetch_add returns previous value, so add 1 to get the new generation
+        let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
         PINNED_COMMUNITIES_TIMEOUT
             .with(|timeout| {
                 *timeout.borrow_mut() = None;
@@ -133,7 +134,8 @@ fn schedule_debounced_publish(pins: Vec<String>) {
     #[cfg(not(feature = "web"))]
     {
         use std::sync::atomic::Ordering;
-        let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        // fetch_add returns previous value, so add 1 to get the new generation
+        let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
         let delay_ms = 1000;
         crate::platform::spawn::spawn_detached(async move {
             crate::platform::timer::sleep_ms(delay_ms).await;
@@ -174,7 +176,7 @@ fn publish_with_retry(
     pins: Vec<String>,
     captured_gen: u64,
     retry_count: u32,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
     Box::pin(async move {
         use std::sync::atomic::Ordering;
         // Short-circuit if this generation is stale

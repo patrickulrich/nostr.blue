@@ -3,11 +3,21 @@
 //! Provides functionality to import and export calendar events
 //! in the standard iCalendar format (RFC 5545).
 
-#[cfg(all(feature = "web", feature = "native"))]
-compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
 
-#[cfg(all(not(feature = "web"), not(feature = "native")))]
-compile_error!("Must enable either 'web' or 'native' feature");
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
+
+#[cfg(all(
+    not(feature = "web"),
+    not(feature = "desktop"),
+    not(feature = "mobile")
+))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 use crate::utils::nip52::{CalendarEvent, CalendarEventType, EventTime};
 /// Generate ICS content for a single calendar event
@@ -452,8 +462,14 @@ pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     result
 }
 
-/// Trigger download of ICS file (native)
-#[cfg(feature = "native")]
+/// Trigger download of ICS file (mobile - uses Share Intent)
+#[cfg(feature = "mobile")]
+pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
+    crate::platform::download::save_file(filename, content, "text/calendar;charset=utf-8")
+}
+
+/// Trigger download of ICS file (desktop)
+#[cfg(all(feature = "native", not(feature = "mobile")))]
 pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     crate::platform::download::save_file(filename, content, "text/calendar;charset=utf-8")
 }

@@ -71,19 +71,13 @@ window.hlsManager = window.hlsManager || {
             throw new Error('Media element not found or not a HTMLMediaElement: ' + elementId);
         }
 
-        // Generate unique attach token to prevent race conditions
-        const attachId = Symbol();
-        this.activeAttachMap.set(elementId, attachId);
-
         const isHls = this.isHlsUrl(streamUrl);
 
         if (!isHls) {
             // Native playback for non-HLS streams (MP3, AAC, OGG)
             console.log('[HLS Manager] Using native playback for:', streamUrl);
-            // Check if this attach is still valid before mutating
-            if (this.activeAttachMap.get(elementId) !== attachId) {
-                return { type: 'cancelled', url: streamUrl };
-            }
+            // Cleanup any previous HLS instance before native playback
+            this.detach(elementId);
             element.src = streamUrl;
             return { type: 'native', url: streamUrl };
         }
@@ -91,13 +85,16 @@ window.hlsManager = window.hlsManager || {
         // Check native HLS support (Safari, iOS)
         if (element.canPlayType('application/vnd.apple.mpegurl')) {
             console.log('[HLS Manager] Using native HLS support');
-            // Check if this attach is still valid before mutating
-            if (this.activeAttachMap.get(elementId) !== attachId) {
-                return { type: 'cancelled', url: streamUrl };
-            }
+            // Cleanup any previous HLS instance before native-HLS playback
+            this.detach(elementId);
             element.src = streamUrl;
             return { type: 'native-hls', url: streamUrl };
         }
+
+        // Generate unique attach token to prevent race conditions
+        // Must be set AFTER cleanup to preserve attach lifecycle
+        const attachId = Symbol();
+        this.activeAttachMap.set(elementId, attachId);
 
         // Use hls.js for browsers without native HLS support
         await this.loadHls();
@@ -113,6 +110,9 @@ window.hlsManager = window.hlsManager || {
 
         // Cleanup any previous instance before creating new one
         this.detach(elementId);
+
+        // Re-register attach token after cleanup to maintain valid attach state
+        this.activeAttachMap.set(elementId, attachId);
 
         const hls = new Hls({
             enableWorker: true,

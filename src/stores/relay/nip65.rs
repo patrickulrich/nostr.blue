@@ -4,11 +4,17 @@
 //! This module provides centralized relay management using Nostr-native relay lists.
 //! It implements the Outbox model for intelligent relay routing.
 
-#[cfg(all(feature = "web", feature = "native"))]
-compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
 
-#[cfg(all(not(feature = "web"), not(feature = "native")))]
-compile_error!("Must enable either 'web' or 'native' feature");
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
+
+#[cfg(all(not(feature = "web"), not(feature = "desktop"), not(feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
@@ -20,9 +26,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::stores::nostr_client;
-#[cfg(feature = "web")]
+#[cfg(any(feature = "web", feature = "mobile"))]
 use crate::platform::storage;
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(feature = "mobile")))]
 use std::fs;
 /// Configuration for a single relay with read/write permissions
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -496,7 +502,11 @@ pub fn load_local_relays() -> Vec<String> {
         }
     }
 }
-#[cfg(feature = "native")]
+#[cfg(feature = "mobile")]
+pub fn load_local_relays() -> Vec<String> {
+    storage::get::<Vec<String>>(LOCAL_RELAYS_KEY).unwrap_or_default()
+}
+#[cfg(all(feature = "native", not(feature = "mobile")))]
 pub fn load_local_relays() -> Vec<String> {
     let path = dirs::config_dir()
         .map(|p| { p.join("nostr_blue").join(format!("{}.json", LOCAL_RELAYS_KEY)) });
@@ -528,7 +538,13 @@ pub fn save_local_relays(relays: &[String]) {
         log::error!("Failed to save local relays: {}", e);
     }
 }
-#[cfg(feature = "native")]
+#[cfg(feature = "mobile")]
+pub fn save_local_relays(relays: &[String]) {
+    if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
+        log::error!("Failed to save local relays: {}", e);
+    }
+}
+#[cfg(all(feature = "native", not(feature = "mobile")))]
 pub fn save_local_relays(relays: &[String]) {
     let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
         log::error!("Could not determine config directory for local relays");

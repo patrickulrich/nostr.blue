@@ -68,12 +68,23 @@ echo "--- Step 2c: Ensure OpenSSL libs ---"
 OPENSSL_SEARCH="$HOME/.local/share/.dx/prebuilt"
 OPENSSL_PREBUILT=""
 if [ -d "$OPENSSL_SEARCH" ]; then
+    matches=()
     for dir in "$OPENSSL_SEARCH"/openssl*/ssl/libs/android.arm64-v8a; do
         if [ -f "$dir/libssl.so" ] && [ -f "$dir/libcrypto.so" ]; then
-            OPENSSL_PREBUILT="$dir"
-            break
+            matches+=("$dir")
         fi
     done
+    if [ ${#matches[@]} -gt 0 ]; then
+        # Sort by modification time (newest first)
+        sorted=()
+        while IFS= read -r line; do
+            sorted+=("$line")
+        done < <(for m in "${matches[@]}"; do
+            mtime=$(stat -c %Y "$m" 2>/dev/null || echo 0)
+            echo "$mtime $m"
+        done | sort -rn | cut -d' ' -f2-)
+        OPENSSL_PREBUILT="${sorted[0]}"
+    fi
 fi
 if [ -z "$OPENSSL_PREBUILT" ]; then
     echo "ERROR: No OpenSSL prebuilt with libssl.so and libcrypto.so found in $OPENSSL_SEARCH"
@@ -137,6 +148,7 @@ generate_icons() {
             xhdpi) echo 96 ;;
             xxhdpi) echo 144 ;;
             xxxhdpi) echo 192 ;;
+            *) echo ""; return 1 ;;
         esac
     }
 
@@ -148,7 +160,8 @@ generate_icons() {
     fi
 
     for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-        local size=$(get_density_size "$density")
+        local size
+        size=$(get_density_size "$density") || { echo "ERROR: Unknown density: $density"; exit 1; }
         local dir="$MIPMAP_BASE/mipmap-${density}"
         mkdir -p "$dir"
 

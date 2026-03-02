@@ -10,3 +10,8 @@ pub mod timestamp;
 pub mod android_signer;
 #[cfg(feature = "mobile")]
 pub use android_signer::{IntentPollResult, Nip55Signer};
+
+#[cfg(feature = "mobile")]
+pub mod mobile;
+#[cfg(feature = "mobile")]
+pub use mobile::download_file;

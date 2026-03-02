@@ -194,7 +194,7 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
     Box::pin(async move {
         const MAX_RETRIES: u32 = 3;
         *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Syncing;

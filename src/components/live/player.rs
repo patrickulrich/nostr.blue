@@ -13,14 +13,17 @@ fn build_native_setup_script(
     let stream_url_json = serde_json::to_string(stream_url).unwrap_or_default();
     let autoplay_str = if autoplay { "true" } else { "false" };
     let detach_block = if detach_first {
-        r#"
+        format!(
+            r#"
                         // Detach any existing HLS stream first
-                        if (window.hlsManager) {
-                            window.hlsManager.detach({video_id});
-                        }
-"#
+                        if (window.hlsManager) {{
+                            window.hlsManager.detach({});
+                        }}
+"#,
+            video_id_json
+        )
     } else {
-        ""
+        String::new()
     };
     format!(
         r#"
