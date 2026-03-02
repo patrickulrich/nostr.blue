@@ -361,9 +361,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     Ok(_) => {
                         loading.set(false);
                         error.set(None);
-                        if cleanup_guard.peek().is_none() {
-                            cleanup_guard.set(Some(CleanupGuard { video_id: video_id.clone() }));
-                        }
+                        cleanup_guard.set(Some(CleanupGuard { video_id: video_id.clone() }));
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to load stream: {:?}", e);

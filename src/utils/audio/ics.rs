@@ -2,6 +2,13 @@
 //!
 //! Provides functionality to import and export calendar events
 //! in the standard iCalendar format (RFC 5545).
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(all(not(feature = "web"), not(feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 use crate::utils::nip52::{CalendarEvent, CalendarEventType, EventTime};
 /// Generate ICS content for a single calendar event
 pub fn export_event_to_ics(event: &CalendarEvent) -> String {
@@ -73,7 +80,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
     if !event.naddr.is_empty() {
         vevent.push_str(&format!(
             "URL:https://nostr.blue/events/{}\r\n",
-            &event.naddr
+            escape_ics_text(&event.naddr)
         ));
     }
     if !event.hashtags.is_empty() {

@@ -3,6 +3,13 @@
 //!
 //! This module provides centralized relay management using Nostr-native relay lists.
 //! It implements the Outbox model for intelligent relay routing.
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(all(not(feature = "web"), not(feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
 use nostr_sdk::{
@@ -458,11 +465,32 @@ const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
 /// Load local relays from browser LocalStorage
 #[cfg(feature = "web")]
 pub fn load_local_relays() -> Vec<String> {
+    // First try the typed Vec<String> format
     match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
         Ok(relays) => relays,
-        Err(e) => {
-            log::debug!("Could not load local relays: {}", e);
-            Vec::new()
+        Err(_) => {
+            // Fallback to old JSON string format and migrate
+            log::debug!("Could not load local relays as Vec<String>, trying old string format");
+            match storage::get::<String>(LOCAL_RELAYS_KEY) {
+                Ok(json) => {
+                    match serde_json::from_str::<Vec<String>>(&json) {
+                        Ok(relays) => {
+                            log::debug!("Migrating local relays from old string format");
+                            // Migrate to new format
+                            let _ = storage::set(LOCAL_RELAYS_KEY, &relays);
+                            relays
+                        }
+                        Err(e) => {
+                            log::debug!("Failed to parse old local relays format: {}", e);
+                            Vec::new()
+                        }
+                    }
+                }
+                Err(_) => {
+                    log::debug!("No local relays found in storage");
+                    Vec::new()
+                }
+            }
         }
     }
 }

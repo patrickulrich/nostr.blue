@@ -10,6 +10,7 @@ window.hlsManager = window.hlsManager || {
     hlsLoading: null,
     nowPlaying: null, // Current HLS metadata {title, artist}
     nowPlayingElementId: null, // Track which media element owns nowPlaying
+    activeAttachMap: new Map(), // Track active attach operations per elementId
 
     /**
      * Lazy load hls.js from CDN
@@ -70,14 +71,19 @@ window.hlsManager = window.hlsManager || {
             throw new Error('Media element not found or not a HTMLMediaElement: ' + elementId);
         }
 
-        // Cleanup existing instance
-        this.detach(elementId);
+        // Generate unique attach token to prevent race conditions
+        const attachId = Symbol();
+        this.activeAttachMap.set(elementId, attachId);
 
         const isHls = this.isHlsUrl(streamUrl);
 
         if (!isHls) {
             // Native playback for non-HLS streams (MP3, AAC, OGG)
             console.log('[HLS Manager] Using native playback for:', streamUrl);
+            // Check if this attach is still valid before mutating
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                return { type: 'cancelled', url: streamUrl };
+            }
             element.src = streamUrl;
             return { type: 'native', url: streamUrl };
         }
@@ -85,6 +91,10 @@ window.hlsManager = window.hlsManager || {
         // Check native HLS support (Safari, iOS)
         if (element.canPlayType('application/vnd.apple.mpegurl')) {
             console.log('[HLS Manager] Using native HLS support');
+            // Check if this attach is still valid before mutating
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                return { type: 'cancelled', url: streamUrl };
+            }
             element.src = streamUrl;
             return { type: 'native-hls', url: streamUrl };
         }
@@ -92,9 +102,17 @@ window.hlsManager = window.hlsManager || {
         // Use hls.js for browsers without native HLS support
         await this.loadHls();
 
+        // Check if this attach is still valid after await
+        if (this.activeAttachMap.get(elementId) !== attachId) {
+            return { type: 'cancelled', url: streamUrl };
+        }
+
         if (!Hls.isSupported()) {
             throw new Error('HLS not supported in this browser');
         }
+
+        // Cleanup any previous instance before creating new one
+        this.detach(elementId);
 
         const hls = new Hls({
             enableWorker: true,
@@ -111,6 +129,13 @@ window.hlsManager = window.hlsManager || {
         this.instances.set(elementId, hls);
 
         return new Promise((resolve, reject) => {
+            // Check if this attach is still valid before setting up
+            if (this.activeAttachMap.get(elementId) !== attachId) {
+                hls.destroy();
+                resolve({ type: 'cancelled', url: streamUrl });
+                return;
+            }
+
             // Store reject handler so detach() can reject the promise
             this.pendingRejects.set(elementId, reject);
 
@@ -126,11 +151,25 @@ window.hlsManager = window.hlsManager || {
             hls.attachMedia(element);
 
             hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+                // Check if this attach is still valid
+                if (this.activeAttachMap.get(elementId) !== attachId) {
+                    clearTimeout(timeout);
+                    hls.destroy();
+                    resolve({ type: 'cancelled', url: streamUrl });
+                    return;
+                }
                 console.log('[HLS Manager] Media attached, loading source:', streamUrl);
                 hls.loadSource(streamUrl);
             });
 
             hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+                // Check if this attach is still valid
+                if (this.activeAttachMap.get(elementId) !== attachId) {
+                    clearTimeout(timeout);
+                    hls.destroy();
+                    resolve({ type: 'cancelled', url: streamUrl });
+                    return;
+                }
                 clearTimeout(timeout);
                 this.pendingTimeouts.delete(elementId);
                 this.pendingRejects.delete(elementId);
@@ -207,6 +246,9 @@ window.hlsManager = window.hlsManager || {
             clearTimeout(pendingTimeout);
             this.pendingTimeouts.delete(elementId);
         }
+
+        // Clear active attach token to invalidate pending operations
+        this.activeAttachMap.delete(elementId);
 
         // Reject any pending attach Promise
         const pendingReject = this.pendingRejects.get(elementId);

@@ -122,10 +122,17 @@ pub fn get_month_dates(date: &str) -> Vec<String> {
         None => return vec![],
     };
     let mut dates = Vec::with_capacity(42);
+    let mut last_valid_date = sunday;
     for i in 0..42 {
         let d = match sunday.checked_add_signed(chrono::Duration::days(i)) {
-            Some(date) => date,
-            None => break,
+            Some(date) => {
+                last_valid_date = date;
+                date
+            }
+            None => {
+                // Use the last valid date as saturation point
+                last_valid_date
+            }
         };
         dates.push(d.format("%Y-%m-%d").to_string());
     }

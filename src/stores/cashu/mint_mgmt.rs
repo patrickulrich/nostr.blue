@@ -1090,7 +1090,7 @@ pub async fn consolidate_proofs(
                 let effective_delay = delay_ms.saturating_sub(100) + jitter;
                 crate::platform::timer::sleep_ms(effective_delay).await;
             }
-            #[cfg(not(feature = "web"))]
+            #[cfg(feature = "native")]
             {
                 crate::platform::timer::sleep_ms(delay_ms).await;
             }

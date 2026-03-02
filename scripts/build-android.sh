@@ -127,7 +127,7 @@ echo ""
 echo "--- Step 5: Generate app icons ---"
 MIPMAP_BASE="$DX_ANDROID/app/src/main/res"
 
- generate_icons() {
+generate_icons() {
     local tool="$1"
     # Android mipmap density -> pixel size mapping
     declare -A SIZES=(

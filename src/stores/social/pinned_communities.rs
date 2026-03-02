@@ -13,7 +13,11 @@ use dioxus_stores::Store;
 use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::{EventBuilder, Filter, Kind, PublicKey};
 use std::collections::HashSet;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
+
+#[allow(dead_code)]
+static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
 #[cfg(feature = "web")]
@@ -126,8 +130,15 @@ fn schedule_debounced_publish(pins: Vec<String>) {
     }
     #[cfg(not(feature = "web"))]
     {
+        use std::sync::atomic::Ordering;
+        let captured_gen = GENERATION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let delay_ms = 1000;
         crate::platform::spawn::spawn_detached(async move {
-            publish_with_retry(pins, 0).await;
+            crate::platform::timer::sleep_ms(delay_ms).await;
+            // Only publish if generation hasn't changed (debounce protects against stale calls)
+            if captured_gen == GENERATION_COUNTER.load(Ordering::SeqCst).wrapping_sub(1) {
+                publish_with_retry(pins, 0).await;
+            }
         });
     }
 }

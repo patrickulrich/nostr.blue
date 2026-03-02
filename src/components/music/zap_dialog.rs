@@ -456,7 +456,9 @@ async fn generate_wavlake_lnurl_invoice(
         "LNURL-pay params received. Callback: {}, min: {}, max: {}", params.callback,
         params.min_sendable, params.max_sendable
     );
-    let amount_millisats = amount_sats * 1000;
+    let amount_millisats = amount_sats
+        .checked_mul(1000)
+        .ok_or_else(|| "Amount overflow - too many sats".to_string())?;
     if amount_millisats < params.min_sendable || amount_millisats > params.max_sendable {
         return Err(
             format!(
