@@ -864,6 +864,7 @@ pub fn set_buffering(buffering: bool) {
 }
 /// Try next available stream when current one fails
 /// Returns true if there's a fallback stream to try, false if all failed
+#[allow(dead_code)]
 pub fn try_next_stream() -> bool {
     let mut state = MUSIC_PLAYER.write();
     if state.available_streams.is_empty() {

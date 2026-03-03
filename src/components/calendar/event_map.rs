@@ -10,7 +10,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
-use crate::services::geocoding::{geocode, geohash_to_coords, GeoLocation};
+use crate::services::geocoding::GeoLocation;
+#[cfg(feature = "web")]
+use crate::services::geocoding::{geocode, geohash_to_coords};
 use crate::stores::calendar_store::UnifiedEvent;
 use crate::utils::validation::validate_css_dimension;
 /// Global counter for unique EventMap container IDs
@@ -230,12 +232,17 @@ pub fn EventMap(props: EventMapProps) -> Element {
     let mut leaflet_error = use_signal(|| None::<String>);
     #[allow(unused_mut)]
     let mut map_initialized = use_signal(|| false);
+    #[allow(unused_mut)]
     let mut geocoded_events = use_signal(Vec::<GeocodedEvent>::new);
+    #[allow(unused_mut)]
     let mut loading_geo = use_signal(|| false);
     let mut processed_event_ids = use_signal(String::new);
     let mut geocode_cancelled = use_signal(|| false);
     let mut unmounted = use_signal(|| false);
+    #[cfg(feature = "web")]
     let mut geocode_gen = use_signal(|| 0u32);
+    #[cfg(not(feature = "web"))]
+    let _geocode_gen = use_signal(|| 0u32);
     use_drop(move || {
         geocode_cancelled.set(true);
         unmounted.set(true);
@@ -323,7 +330,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
         }
     });
     use_effect({
-        let events_for_geocode = events_for_geocode.clone();
+        let _events_for_geocode = events_for_geocode.clone();
         move || {
             #[cfg(not(feature = "web"))]
             {

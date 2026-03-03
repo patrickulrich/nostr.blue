@@ -9,7 +9,10 @@ use crate::stores::wiki_store::CachedWikiPage;
 #[cfg(feature = "web")]
 use crate::utils::download::{download_markdown, trigger_print};
 use dioxus::prelude::*;
-use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use dioxus_primitives::toast::consume_toast;
+#[allow(unused_imports)]
+use dioxus_primitives::toast::ToastOptions;
+#[allow(unused_imports)]
 use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
@@ -96,8 +99,10 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                     // Download as Markdown option
                     {
                         let title_md = title.clone();
+                        #[allow(unused_variables)]
                         let identifier_md = identifier.clone();
                         let content_md = content.clone();
+                        #[allow(unused_variables)]
                         let toast_api = toast;
                         rsx! {
                             button {
@@ -107,6 +112,7 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     is_open.set(false);
 
                                     // Generate filename from identifier
+                                    #[allow(unused_variables)]
                                     let filename = format!("{}.md", identifier_md);
                                     #[cfg(feature = "web")]
                                     {
