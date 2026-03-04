@@ -87,12 +87,10 @@ pub fn use_unsaved_changes(content_hash: Memo<u64>) -> UseUnsavedChanges {
         use_effect(move || {
             register_beforeunload(is_dirty);
         });
+        use_drop(move || {
+            unregister_beforeunload();
+        });
     }
-    // Note: We intentionally do NOT call unregister_beforeunload in use_drop.
-    // The browser automatically cleans up event listeners when the component
-    // is unmounted, and multiple components may share the same global listener
-    // slot. The register_beforeunload function handles replacing any existing
-    // listener, so there's no memory leak.
     UseUnsavedChanges {
         is_dirty,
         last_saved_hash,

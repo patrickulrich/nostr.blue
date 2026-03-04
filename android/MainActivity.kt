@@ -29,7 +29,8 @@ class MainActivity : WryActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             val pubkey = result.data?.getStringExtra("result")
             val pkg = result.data?.getStringExtra("package")
-            Log.d(TAG, "Signer approved: pubkey=$pubkey, package=$pkg")
+            val maskedPubkey = pubkey?.let { if (it.length > 8) "...${it.takeLast(4)}" else it }
+            Log.d(TAG, "Signer approved: pubkey=$maskedPubkey, package=$pkg")
             synchronized(lock) {
                 pendingPubkey = pubkey
                 pendingPackage = pkg
@@ -81,6 +82,7 @@ class MainActivity : WryActivity() {
                             val sizeToCheck = if (fileSize > 0) fileSize else stream.available().toLong()
                             if (sizeToCheck > MAX_UPLOAD_BYTES) {
                                 filePickError = "File too large (max 50MB)"
+                                filePickInFlight = false
                                 return@synchronized
                             }
                             val bytes = stream.readBytes()
@@ -120,6 +122,7 @@ class MainActivity : WryActivity() {
                             val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
                             if (available > MAX_UPLOAD_BYTES) {
                                 filePickError = "File too large (max 50MB)"
+                                filePickInFlight = false
                                 return@synchronized
                             }
                             val bytes = stream.readBytes()

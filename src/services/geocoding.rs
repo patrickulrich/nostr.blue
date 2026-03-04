@@ -198,11 +198,11 @@ async fn query_photon(query: &str) -> Result<Option<GeoLocation>, String> {
         .json()
         .await
         .map_err(|e| format!("Failed to parse geocode response: {}", e))?;
-    Ok(photon.features.first().map(feature_to_location))
+    Ok(photon.features.first().and_then(feature_to_location))
 }
 /// Convert Photon feature to GeoLocation
 #[cfg(feature = "web")]
-fn feature_to_location(feature: &PhotonFeature) -> GeoLocation {
+fn feature_to_location(feature: &PhotonFeature) -> Option<GeoLocation> {
     let props = &feature.properties;
     let coords = &feature.geometry.coordinates;
     let mut name_parts = Vec::new();
@@ -231,14 +231,14 @@ fn feature_to_location(feature: &PhotonFeature) -> GeoLocation {
             name_parts.push(country.clone());
         }
     }
-    let lat = coords.get(1).copied().unwrap_or(0.0);
-    let lon = coords.first().copied().unwrap_or(0.0);
+    let lat = *coords.get(1)?; // GeoJSON is [lon, lat]
+    let lon = *coords.first()?;
     let display_name = if name_parts.is_empty() {
         format!("{:.4}, {:.4}", lat, lon)
     } else {
         name_parts.join(", ")
     };
-    GeoLocation {
+    Some(GeoLocation {
         lat,
         lon,
         display_name,
@@ -247,7 +247,7 @@ fn feature_to_location(feature: &PhotonFeature) -> GeoLocation {
         country: props.country.clone(),
         country_code: props.countrycode.clone(),
         place_type: props.place_type.clone(),
-    }
+    })
 }
 /// Nominatim API endpoint (OpenStreetMap — better venue/business name search than Photon)
 #[cfg(feature = "web")]

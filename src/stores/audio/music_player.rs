@@ -385,7 +385,7 @@ pub fn init_player() {
         state.is_muted = is_muted;
     }
     if let Ok(speed) = storage::get::<f64>(STORAGE_KEY_PLAYBACK_SPEED) {
-        state.playback_speed = speed.clamp(0.5, 3.0);
+        state.playback_speed = speed.clamp(0.5, 2.0);
     }
     *MUSIC_PLAYER.write() = state;
     log::info!("Music player initialized");
@@ -838,7 +838,7 @@ pub async fn vote_for_music(track: &MusicTrack) -> Result<(), String> {
 }
 /// Set playback speed (for podcasts)
 pub fn set_playback_speed(speed: f64) {
-    let speed = speed.clamp(0.5, 3.0);
+    let speed = speed.clamp(0.5, 2.0);
     MUSIC_PLAYER.write().playback_speed = speed;
     let _ = storage::set(STORAGE_KEY_PLAYBACK_SPEED, &speed);
     log::debug!("Playback speed set to {}x", speed);

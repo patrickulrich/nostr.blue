@@ -213,6 +213,11 @@ fn publish_with_retry(
         *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Syncing;
         match publish_bookmarks(bookmarks.clone()).await {
             Ok(_) => {
+                let current_generation = BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish succeeded, skipping state update");
+                    return;
+                }
                 *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
                 *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
                 log::info!("Bookmarks published successfully");
@@ -221,6 +226,11 @@ fn publish_with_retry(
                 log::error!(
                     "Failed to publish bookmarks (attempt {}): {}", retry_count + 1, e
                 );
+                let current_generation = BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish failed, skipping retry");
+                    return;
+                }
                 if retry_count < MAX_RETRIES {
                     let delay_ms = 1000u32 * (1 << retry_count);
                     log::info!(
@@ -274,6 +284,11 @@ fn publish_with_retry(
         *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Syncing;
         match publish_bookmarks(bookmarks.clone()).await {
             Ok(_) => {
+                let current_generation = BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish succeeded, skipping state update");
+                    return;
+                }
                 *BOOKMARK_ROLLBACK_STATE.peek().data().write() = None;
                 *BOOKMARK_SYNC_STATUS.write() = BookmarkSyncStatus::Idle;
                 log::info!("Bookmarks published successfully");
@@ -282,6 +297,11 @@ fn publish_with_retry(
                 log::error!(
                     "Failed to publish bookmarks (attempt {}): {}", retry_count + 1, e
                 );
+                let current_generation = BOOKMARK_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+                if generation != current_generation {
+                    log::debug!("Stale bookmark publish failed, skipping retry");
+                    return;
+                }
                 if retry_count < MAX_RETRIES {
                     let delay_ms = 1000u32 * (1 << retry_count);
                     log::info!(
