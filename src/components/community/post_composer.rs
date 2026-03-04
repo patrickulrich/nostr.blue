@@ -66,11 +66,22 @@ pub fn CommunityPostComposer(
     let confirm_close = move |handler: EventHandler<()>| {
         let has_content = !content.read().trim().is_empty();
         if has_content {
-            let confirmed = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message("You have unsaved content. Discard it?").ok()
-                })
-                .unwrap_or(false);
+            let confirmed = {
+                #[cfg(feature = "web")]
+                {
+                    web_sys::window()
+                        .and_then(|w| {
+                            w.confirm_with_message("You have unsaved content. Discard it?").ok()
+                        })
+                        .unwrap_or(false)
+                }
+                #[cfg(not(feature = "web"))]
+                {
+                    // TODO: Implement crate::platform::dialog::confirm_discard for native
+                    // For now, require manual content deletion to prevent accidental data loss
+                    false
+                }
+            };
             if confirmed {
                 handler.call(());
             }
@@ -83,7 +94,7 @@ pub fn CommunityPostComposer(
     let on_close_for_cancel = on_close;
     rsx! {
         div {
-            class: "fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4",
+            class: "fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4",
             onclick: move |_| confirm_close(on_close_for_backdrop),
             div {
                 class: "bg-background rounded-lg p-6 max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",

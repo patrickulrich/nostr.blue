@@ -6,6 +6,7 @@ use crate::utils::truncate_pubkey;
 use dioxus::prelude::*;
 use dioxus_core::Task;
 use std::collections::HashMap;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 /// Guard struct that cancels polling task on drop
 #[derive(Clone)]
@@ -19,6 +20,7 @@ impl Drop for PollTaskGuard {
         }
     }
 }
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 export function scrollDMsToBottom(elementId) {
@@ -46,6 +48,11 @@ extern "C" {
     fn scrollDMsToBottom(element_id: &str);
     fn isDMsScrolledNearBottom(element_id: &str, threshold: f64) -> bool;
     fn isPageVisible() -> bool;
+}
+
+#[cfg(not(feature = "web"))]
+fn isPageVisible() -> bool {
+    true
 }
 /// Run the decrypt previews pass if not already running.
 async fn run_decrypt_if_idle(
@@ -150,7 +157,7 @@ pub fn DMs() -> Element {
                 }
                 let task = spawn(async move {
                     loop {
-                        gloo_timers::future::sleep(std::time::Duration::from_secs(30))
+                        crate::platform::timer::sleep(std::time::Duration::from_secs(30))
                             .await;
                         if auth_store::is_authenticated() && isPageVisible() {
                             log::debug!("Auto-refreshing DMs...");
@@ -408,7 +415,7 @@ fn ConversationView(pubkey: String) -> Element {
                 let pk_clone = pk.clone();
                 let new_task = spawn(async move {
                     loop {
-                        gloo_timers::future::TimeoutFuture::new(5000).await;
+                        crate::platform::timer::sleep_ms(5000).await;
                         if !isPageVisible() {
                             continue;
                         }
@@ -476,12 +483,20 @@ fn ConversationView(pubkey: String) -> Element {
             return;
         }
         spawn(async move {
-            gloo_timers::future::TimeoutFuture::new(50).await;
-            if *is_first_load.peek() {
-                scrollDMsToBottom(&container_id);
+            crate::platform::timer::sleep_ms(50).await;
+            #[cfg(feature = "web")]
+            {
+                if *is_first_load.peek() {
+                    scrollDMsToBottom(&container_id);
+                    is_first_load.set(false);
+                } else if isDMsScrolledNearBottom(&container_id, 100.0) {
+                    scrollDMsToBottom(&container_id);
+                }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = &container_id;
                 is_first_load.set(false);
-            } else if isDMsScrolledNearBottom(&container_id, 100.0) {
-                scrollDMsToBottom(&container_id);
             }
         });
     });
@@ -504,7 +519,7 @@ fn ConversationView(pubkey: String) -> Element {
                             .set(
                                 Some((false, "Failed to send to any relay".to_string())),
                             );
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {
                             send_feedback.set(None);
                         }
@@ -525,7 +540,7 @@ fn ConversationView(pubkey: String) -> Element {
                                     ),
                                 )),
                             );
-                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                        crate::platform::timer::sleep_ms(3000).await;
                         if feedback_version() == current_version {
                             send_feedback.set(None);
                         }
@@ -540,7 +555,7 @@ fn ConversationView(pubkey: String) -> Element {
                     feedback_version.set(feedback_version() + 1);
                     let current_version = feedback_version();
                     send_feedback.set(Some((false, format!("Error: {}", e))));
-                    gloo_timers::future::TimeoutFuture::new(5000).await;
+                    crate::platform::timer::sleep_ms(5000).await;
                     if feedback_version() == current_version {
                         send_feedback.set(None);
                     }

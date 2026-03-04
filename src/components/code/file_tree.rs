@@ -3,7 +3,7 @@
 //! Displays a repository file tree with expandable directories.
 //! Uses isomorphic-git Web Worker for git operations.
 use crate::routes::Route;
-use crate::services::git_worker::FileEntry;
+use crate::services::git_types::FileEntry;
 /// Split a slash-separated path string into route segments
 pub fn split_path(path: &str) -> Vec<String> {
     if path.is_empty() {

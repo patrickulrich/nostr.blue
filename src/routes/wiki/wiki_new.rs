@@ -13,7 +13,9 @@ use crate::stores::{auth_store, nostr_client, wiki_store};
 use crate::utils::nip54::normalize_wiki_dtag;
 use dioxus::events::{KeyboardData, MouseData};
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlTextAreaElement;
 /// Wiki page editor
 #[component]
@@ -30,6 +32,7 @@ pub fn WikiNew() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut show_citation_picker = use_signal(|| false);
     let mut show_book_picker = use_signal(|| false);
+    #[allow(unused_mut)]
     let mut cursor_position = use_signal(|| 0usize);
     let mut inline_trigger_prefix = use_signal(String::new);
     if auth.pubkey.is_none() {
@@ -83,6 +86,7 @@ pub fn WikiNew() -> Element {
         }
     };
     let sync_cursor_click = move |_: Event<MouseData>| {
+        #[cfg(feature = "web")]
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {
@@ -96,6 +100,7 @@ pub fn WikiNew() -> Element {
         }
     };
     let sync_cursor_keyup = move |_: Event<KeyboardData>| {
+        #[cfg(feature = "web")]
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
                 if let Some(elem) = document.get_element_by_id("wiki-content-editor") {

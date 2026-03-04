@@ -19,7 +19,7 @@ const MAX_RECURSION_DEPTH: usize = 20;
 /// Display a thread tree with recursive nested replies
 #[component]
 pub fn ThreadView(
-    thread: Vec<TopicThread>,
+    thread: Vec<Rc<TopicThread>>,
     #[props(default)]
     vote_counts: Rc<HashMap<String, VoteCounts>>,
 ) -> Element {
@@ -42,13 +42,13 @@ pub fn ThreadView(
 fn count_descendants(thread: &TopicThread) -> usize {
     const MAX_COUNT: usize = 1000;
     let mut count = 0usize;
-    let mut stack: Vec<&TopicThread> = thread.replies.iter().collect();
+    let mut stack: Vec<&TopicThread> = thread.replies.iter().map(|r| r.as_ref()).collect();
     while let Some(node) = stack.pop() {
         count += 1;
         if count >= MAX_COUNT {
             return count;
         }
-        stack.extend(node.replies.iter());
+        stack.extend(node.replies.iter().map(|r| r.as_ref()));
     }
     count
 }
@@ -56,7 +56,7 @@ fn count_descendants(thread: &TopicThread) -> usize {
 /// Single thread node with its replies
 #[component]
 fn ThreadNode(
-    thread: TopicThread,
+    thread: Rc<TopicThread>,
     vote_counts: Rc<HashMap<String, VoteCounts>>,
     #[props(default = 0)]
     depth: usize,
@@ -135,7 +135,7 @@ fn ThreadNode(
                         class: "text-sm text-foreground",
                         RichContent {
                             content: thread.post.content.clone(),
-                            tags: thread.post.event.tags.to_vec(),
+                            tags: thread.post.event.tags.clone().to_vec(),
                         }
                     }
                 }

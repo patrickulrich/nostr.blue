@@ -8,7 +8,7 @@ use crate::services::git_hosting::{
     fetch_repository, git_service,
     github_import::{fetch_commits, parse_github_url, GitHubCommit},
 };
-use crate::services::git_worker::CommitEntry;
+use crate::services::git_types::CommitEntry;
 use crate::stores::nostr_client;
 use crate::utils::{format_commit_date, format_time_ago};
 use crate::utils::nip34::Repository;

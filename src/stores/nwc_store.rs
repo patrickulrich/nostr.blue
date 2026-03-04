@@ -1,15 +1,9 @@
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
-use indexed_db_futures::prelude::*;
 use nwc::prelude::*;
-use std::future::IntoFuture;
 use std::str::FromStr;
 use std::sync::Arc;
-use wasm_bindgen::JsValue;
-const DB_NAME: &str = "nostr_blue_nwc";
-const DB_VERSION: u32 = 1;
-const STORE_NAME: &str = "nwc_settings";
-const KEY_NWC_URI: &str = "nwc_uri";
+const STORAGE_KEY_NWC_URI: &str = "nwc_uri";
 /// Connection status for NWC
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConnectionStatus {
@@ -26,79 +20,17 @@ pub static NWC_STATUS: GlobalSignal<ConnectionStatus> = Signal::global(|| {
 });
 /// Cached wallet balance in millisatoshis
 pub static NWC_BALANCE: GlobalSignal<Option<u64>> = Signal::global(|| None);
-/// Open or create IndexedDB for NWC settings
-async fn open_db() -> std::result::Result<IdbDatabase, String> {
-    let mut db_req = IdbDatabase::open_u32(DB_NAME, DB_VERSION)
-        .map_err(|e| format!("Failed to open IndexedDB: {:?}", e))?;
-    db_req
-        .set_on_upgrade_needed(
-            Some(|evt: &IdbVersionChangeEvent| {
-                let db = evt.db();
-                if !db.object_store_names().any(|n| n == STORE_NAME) {
-                    db.create_object_store(STORE_NAME)?;
-                }
-                Ok(())
-            }),
-        );
-    db_req.into_future().await.map_err(|e| format!("Failed to open IndexedDB: {:?}", e))
+/// Save NWC URI to persistent storage
+fn save_nwc_uri(uri: &str) -> std::result::Result<(), String> {
+    crate::platform::storage::set_string(STORAGE_KEY_NWC_URI, uri)
 }
-/// Save NWC URI to IndexedDB
-async fn save_nwc_uri(uri: &str) -> std::result::Result<(), String> {
-    let db = open_db().await?;
-    let tx = db
-        .transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)
-        .map_err(|e| format!("Failed to create transaction: {:?}", e))?;
-    let store = tx
-        .object_store(STORE_NAME)
-        .map_err(|e| format!("Failed to get object store: {:?}", e))?;
-    let js_key = JsValue::from_str(KEY_NWC_URI);
-    let js_value = JsValue::from_str(uri);
-    store
-        .put_key_val(&js_key, &js_value)
-        .map_err(|e| format!("Failed to save NWC URI: {:?}", e))?;
-    tx.await.into_result().map_err(|e| format!("Transaction failed: {:?}", e))?;
-    Ok(())
+/// Load NWC URI from persistent storage
+fn load_nwc_uri() -> Option<String> {
+    crate::platform::storage::get_string(STORAGE_KEY_NWC_URI)
 }
-/// Load NWC URI from IndexedDB
-async fn load_nwc_uri() -> std::result::Result<Option<String>, String> {
-    let db = open_db().await?;
-    let tx = db
-        .transaction_on_one(STORE_NAME)
-        .map_err(|e| format!("Failed to create transaction: {:?}", e))?;
-    let store = tx
-        .object_store(STORE_NAME)
-        .map_err(|e| format!("Failed to get object store: {:?}", e))?;
-    let js_key = JsValue::from_str(KEY_NWC_URI);
-    let js_value_opt = store
-        .get(&js_key)
-        .map_err(|e| format!("Failed to get NWC URI: {:?}", e))?
-        .await
-        .map_err(|e| format!("Failed to get NWC URI: {:?}", e))?;
-    let js_value = match js_value_opt {
-        Some(val) => val,
-        None => return Ok(None),
-    };
-    if js_value.is_undefined() || js_value.is_null() {
-        return Ok(None);
-    }
-    let uri = js_value
-        .as_string()
-        .ok_or_else(|| "Invalid URI value in IndexedDB".to_string())?;
-    Ok(Some(uri))
-}
-/// Delete NWC URI from IndexedDB
-async fn delete_nwc_uri() -> std::result::Result<(), String> {
-    let db = open_db().await?;
-    let tx = db
-        .transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)
-        .map_err(|e| format!("Failed to create transaction: {:?}", e))?;
-    let store = tx
-        .object_store(STORE_NAME)
-        .map_err(|e| format!("Failed to get object store: {:?}", e))?;
-    let js_key = JsValue::from_str(KEY_NWC_URI);
-    store.delete(&js_key).map_err(|e| format!("Failed to delete NWC URI: {:?}", e))?;
-    tx.await.into_result().map_err(|e| format!("Transaction failed: {:?}", e))?;
-    Ok(())
+/// Delete NWC URI from persistent storage
+fn delete_nwc_uri() {
+    crate::platform::storage::delete(STORAGE_KEY_NWC_URI);
 }
 /// Connect to NWC using a connection URI
 pub async fn connect_nwc(uri_string: &str) -> std::result::Result<(), String> {
@@ -115,8 +47,8 @@ pub async fn connect_nwc(uri_string: &str) -> std::result::Result<(), String> {
             log::info!(
                 "Connected to NWC wallet: {}", info.alias.as_deref().unwrap_or("Unknown")
             );
-            if let Err(e) = save_nwc_uri(uri_string.trim()).await {
-                log::warn!("Failed to save NWC URI to IndexedDB: {}", e);
+            if let Err(e) = save_nwc_uri(uri_string.trim()) {
+                log::warn!("Failed to save NWC URI: {}", e);
             }
             *NWC_CLIENT.write() = Some(Arc::new(nwc));
             *NWC_STATUS.write() = ConnectionStatus::Connected;
@@ -137,28 +69,21 @@ pub fn disconnect_nwc() {
     *NWC_CLIENT.write() = None;
     *NWC_STATUS.write() = ConnectionStatus::Disconnected;
     *NWC_BALANCE.write() = None;
-    spawn(async {
-        if let Err(e) = delete_nwc_uri().await {
-            log::warn!("Failed to delete NWC URI from IndexedDB: {}", e);
-        }
-    });
+    delete_nwc_uri();
     log::info!("Disconnected from NWC wallet");
 }
-/// Restore NWC connection from IndexedDB
+/// Restore NWC connection from persistent storage
 pub async fn restore_connection() {
-    match load_nwc_uri().await {
-        Ok(Some(uri)) => {
-            log::info!("Restoring NWC connection from IndexedDB");
+    match load_nwc_uri() {
+        Some(uri) => {
+            log::info!("Restoring NWC connection from storage");
             if let Err(e) = connect_nwc(&uri).await {
                 log::warn!("Failed to restore NWC connection: {}", e);
                 disconnect_nwc();
             }
         }
-        Ok(None) => {
+        None => {
             log::debug!("No NWC connection to restore");
-        }
-        Err(e) => {
-            log::error!("Failed to load NWC URI from IndexedDB: {}", e);
         }
     }
 }

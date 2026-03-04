@@ -7,10 +7,12 @@
 use crate::utils::markdown::render_markdown;
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(feature = "web")]
 #[wasm_bindgen(
     inline_js = r#"
 export function initMermaidDiagrams(rootId) {
@@ -161,9 +163,16 @@ pub fn ReadmeViewer(
                 let viewer_id = viewer_id.clone();
                 spawn(async move {
                     // Allow DOM to settle before mermaid scans for nodes (initMermaidDiagrams/injectCodeBlockCopyButtons)
-                    gloo_timers::future::TimeoutFuture::new(100).await;
-                    initMermaidDiagrams(&viewer_id);
-                    injectCodeBlockCopyButtons(&viewer_id);
+                    crate::platform::timer::sleep_ms(100).await;
+                    #[cfg(feature = "web")]
+                    {
+                        initMermaidDiagrams(&viewer_id);
+                        injectCodeBlockCopyButtons(&viewer_id);
+                    }
+                    #[cfg(not(feature = "web"))]
+                    {
+                        let _ = viewer_id;
+                    }
                 });
             }
         }

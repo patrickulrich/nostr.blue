@@ -41,15 +41,7 @@ pub fn SearchInput() -> Element {
             }
             let query_snapshot = new_value.clone();
             let new_task = spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    use std::time::Duration;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
+                crate::platform::timer::sleep_ms(300).await;
                 let query_relays = query_snapshot.len() >= 3;
                 match search_profiles(&query_snapshot, 10, query_relays).await {
                     Ok(results) => {

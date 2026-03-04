@@ -1,54 +1,40 @@
 //! PWA Update Banner
 //! Shows a notification when a new service worker version is available
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-/// Guard struct that removes the event listener on drop
-#[derive(Clone)]
-struct SwUpdateGuard {
-    callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,
-}
-impl Drop for SwUpdateGuard {
-    fn drop(&mut self) {
-        if let Some(callback) = self.callback.write().take() {
-            if let Some(window) = web_sys::window() {
-                let _ = window
-                    .remove_event_listener_with_callback(
-                        "sw-update-available",
-                        callback.as_ref().unchecked_ref(),
-                    );
-            }
-        }
-    }
-}
+
 /// PWA update banner that listens for service worker updates
 #[component]
 pub fn PwaUpdateBanner() -> Element {
     let mut update_available = use_signal(|| false);
-    let mut sw_callback = use_signal(|| {
-        None::<wasm_bindgen::closure::Closure<dyn FnMut()>>
-    });
-    use_effect(move || {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let callback = wasm_bindgen::closure::Closure::wrap(
-            Box::new(move || {
-                log::info!("[PWA] Update available - showing banner");
-                update_available.set(true);
-            }) as Box<dyn FnMut()>,
-        );
-        window
-            .add_event_listener_with_callback(
+
+    #[cfg(feature = "web")]
+    {
+        use_effect(move || {
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+            let callback = wasm_bindgen::closure::Closure::wrap(
+                Box::new(move || {
+                    log::info!("[PWA] Update available - showing banner");
+                    update_available.set(true);
+                }) as Box<dyn FnMut()>,
+            );
+            if let Err(e) = window.add_event_listener_with_callback(
                 "sw-update-available",
                 callback.as_ref().unchecked_ref(),
-            )
-            .ok();
-        sw_callback.set(Some(callback));
-    });
-    use_hook(move || SwUpdateGuard {
-        callback: sw_callback,
-    });
+            ) {
+                log::warn!("Failed to register SW update listener: {:?}", e);
+                return;
+            }
+            // Forget the closure - the listener lives for the app lifetime
+            callback.forget();
+        });
+    }
+
     let handle_refresh = move |_| {
+        #[cfg(feature = "web")]
         if let Some(window) = web_sys::window() {
             let _ = window.location().reload();
         }

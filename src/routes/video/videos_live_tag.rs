@@ -4,27 +4,8 @@ use crate::stores::nostr_client;
 use dioxus::prelude::*;
 use nostr_sdk::{Event, Filter, Kind, Timestamp};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-/// Guard struct that removes scroll listener on drop
-/// Note: Clone is required by use_hook but should not be manually called.
-/// The Signal ensures cleanup happens correctly even if cloned by the hook.
-#[derive(Clone)]
-struct ScrollListenerGuard {
-    callback: Signal<Option<wasm_bindgen::closure::Closure<dyn FnMut()>>>,
-}
-impl Drop for ScrollListenerGuard {
-    fn drop(&mut self) {
-        if let Some(callback) = self.callback.write().take() {
-            if let Some(window) = web_sys::window() {
-                let _ = window
-                    .remove_event_listener_with_callback(
-                        "scroll",
-                        callback.as_ref().unchecked_ref(),
-                    );
-            }
-        }
-    }
-}
 #[component]
 pub fn VideosLiveTag(tag: String) -> Element {
     let mut stream_events = use_signal(Vec::<Event>::new);
@@ -33,6 +14,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
     let mut has_more = use_signal(|| true);
     let mut oldest_timestamp = use_signal(|| None::<u64>);
     let mut error = use_signal(|| None::<String>);
+    let mut fetch_gen = use_signal(|| 0u32);
     use_effect(
         use_reactive(
             (&tag, &*refresh_trigger.read()),
@@ -45,9 +27,16 @@ pub fn VideosLiveTag(tag: String) -> Element {
                 error.set(None);
                 oldest_timestamp.set(None);
                 has_more.set(true);
+                let gen = fetch_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
                 spawn(async move {
                     match load_streams_by_tag(&current_tag, None).await {
                         Ok((events, hit_limit)) => {
+                            // Verify generation before updating state
+                            if *fetch_gen.read() != gen {
+                                log::debug!("Stale fetch detected, discarding results");
+                                loading.set(false);
+                                return;
+                            }
                             if let Some(last_event) = events.last() {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
@@ -56,6 +45,12 @@ pub fn VideosLiveTag(tag: String) -> Element {
                             loading.set(false);
                         }
                         Err(e) => {
+                            // Verify generation before updating state
+                            if *fetch_gen.read() != gen {
+                                log::debug!("Stale fetch detected, discarding results");
+                                loading.set(false);
+                                return;
+                            }
                             error.set(Some(e));
                             loading.set(false);
                         }
@@ -64,93 +59,110 @@ pub fn VideosLiveTag(tag: String) -> Element {
             },
         ),
     );
-    let tag_for_scroll = tag.clone();
-    let mut scroll_callback = use_signal(|| {
-        None::<wasm_bindgen::closure::Closure<dyn FnMut()>>
-    });
-    use_effect(
-        use_reactive(
-            &tag_for_scroll,
-            move |current_tag| {
-                if let Some(old_callback) = scroll_callback.write().take() {
-                    if let Some(window) = web_sys::window() {
-                        window
-                            .remove_event_listener_with_callback(
-                                "scroll",
-                                old_callback.as_ref().unchecked_ref(),
-                            )
-                            .ok();
-                    }
-                }
-                let window = web_sys::window().expect("no global window");
-                let _document = window.document().expect("no document");
-                let tag_for_callback = current_tag.clone();
-                let callback = wasm_bindgen::closure::Closure::wrap(
-                    Box::new(move || {
-                        let window = web_sys::window().expect("no global window");
-                        let scroll_y = window.scroll_y().unwrap_or(0.0);
-                        let inner_height = window
-                            .inner_height()
-                            .unwrap()
-                            .as_f64()
-                            .unwrap_or(0.0);
-                        let document = window.document().expect("no document");
-                        let body = document.body().expect("no body");
-                        let scroll_height = body.scroll_height() as f64;
-                        if scroll_y + inner_height >= scroll_height - 1000.0 {
-                            if *loading.read() || !*has_more.read() {
-                                return;
-                            }
-                            let until = *oldest_timestamp.read();
-                            let current_tag = tag_for_callback.clone();
-                            loading.set(true);
-                            spawn(async move {
-                                match load_streams_by_tag(&current_tag, until).await {
-                                    Ok((new_events, hit_limit)) => {
-                                        let existing_ids: std::collections::HashSet<_> = {
-                                            let current = stream_events.read();
-                                            current.iter().map(|e| e.id).collect()
-                                        };
-                                        let unique_events: Vec<_> = new_events
-                                            .into_iter()
-                                            .filter(|e| !existing_ids.contains(&e.id))
-                                            .collect();
-                                        if unique_events.is_empty() {
-                                            has_more.set(false);
-                                            loading.set(false);
-                                            return;
-                                        }
-                                        if let Some(last_event) = unique_events.last() {
-                                            oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                                        }
-                                        has_more.set(hit_limit);
-                                        let mut current = stream_events.read().clone();
-                                        current.extend(unique_events);
-                                        stream_events.set(current);
-                                        loading.set(false);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to load more streams: {}", e);
-                                        loading.set(false);
-                                    }
-                                }
-                            });
+    #[cfg(feature = "web")]
+    {
+        let tag_for_scroll = tag.clone();
+        let mut scroll_callback = use_signal(|| {
+            None::<wasm_bindgen::closure::Closure<dyn FnMut()>>
+        });
+        use_effect(
+            use_reactive(
+                &tag_for_scroll,
+                move |current_tag| {
+                    if let Some(old_callback) = scroll_callback.write().take() {
+                        if let Some(window) = web_sys::window() {
+                            window
+                                .remove_event_listener_with_callback(
+                                    "scroll",
+                                    old_callback.as_ref().unchecked_ref(),
+                                )
+                                .ok();
                         }
-                    }) as Box<dyn FnMut()>,
-                );
-                window
-                    .add_event_listener_with_callback(
+                    }
+                    let Some(window) = web_sys::window() else { return; };
+                    let tag_for_callback = current_tag.clone();
+                    let callback = wasm_bindgen::closure::Closure::wrap(
+                        Box::new(move || {
+                            let Some(window) = web_sys::window() else { return; };
+                            let scroll_y = window.scroll_y().unwrap_or(0.0);
+                            let inner_height = window
+                                .inner_height()
+                                .ok()
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0);
+                            let Some(document) = window.document() else { return; };
+                            let Some(body) = document.body() else { return; };
+                            let scroll_height = body.scroll_height() as f64;
+                            if scroll_y + inner_height >= scroll_height - 1000.0 {
+                                if *loading.read() || !*has_more.read() {
+                                    return;
+                                }
+                                let until = *oldest_timestamp.read();
+                                let current_tag = tag_for_callback.clone();
+                                loading.set(true);
+                                // Increment generation to invalidate any pending fetches
+                                fetch_gen.with_mut(|g| *g = g.wrapping_add(1));
+                                let this_gen = *fetch_gen.read();
+                                spawn(async move {
+                                    match load_streams_by_tag(&current_tag, until).await {
+                                        Ok((new_events, hit_limit)) => {
+                                            // Verify generation before updating state
+                                            if *fetch_gen.read() != this_gen {
+                                                log::debug!("Stale fetch detected, discarding results");
+                                                loading.set(false);
+                                                return;
+                                            }
+                                            let existing_ids: std::collections::HashSet<_> = {
+                                                let current = stream_events.read();
+                                                current.iter().map(|e| e.id).collect()
+                                            };
+                                            let unique_events: Vec<_> = new_events
+                                                .into_iter()
+                                                .filter(|e| !existing_ids.contains(&e.id))
+                                                .collect();
+                                            if unique_events.is_empty() {
+                                                has_more.set(false);
+                                                loading.set(false);
+                                                return;
+                                            }
+                                            if let Some(last_event) = unique_events.last() {
+                                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+                                            }
+                                            has_more.set(hit_limit);
+                                            // Use write() to extend in place instead of clone
+                                            stream_events.write().extend(unique_events);
+                                            loading.set(false);
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to load more streams: {}", e);
+                                            loading.set(false);
+                                        }
+                                    }
+                                });
+                            }
+                        }) as Box<dyn FnMut()>,
+                    );
+                    window
+                        .add_event_listener_with_callback(
+                            "scroll",
+                            callback.as_ref().unchecked_ref(),
+                        )
+                        .ok();
+                    scroll_callback.set(Some(callback));
+                },
+            ),
+        );
+        use_drop(move || {
+            if let Some(callback) = scroll_callback.write().take() {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.remove_event_listener_with_callback(
                         "scroll",
                         callback.as_ref().unchecked_ref(),
-                    )
-                    .ok();
-                scroll_callback.set(Some(callback));
-            },
-        ),
-    );
-    use_hook(move || ScrollListenerGuard {
-        callback: scroll_callback,
-    });
+                    );
+                }
+            }
+        });
+    }
     rsx! {
         div { class: "min-h-screen bg-background",
             div { class: "sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border",

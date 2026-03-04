@@ -99,13 +99,13 @@ pub fn WebBookmarkCard(
         let full_url_clone = full_url.clone();
         move |_| {
             if let Some(ref url) = full_url_clone {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     if let Some(window) = web_sys::window() {
                         let _ = window.open_with_url_and_target(url, "_blank");
                     }
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 {
                     log::info!("Open URL: {}", url);
                 }

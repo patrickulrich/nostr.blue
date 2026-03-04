@@ -250,8 +250,7 @@ pub fn orders_filter(limit: usize) -> Filter {
 /// Build filter for fetching ALL P2P orders without limit
 /// Uses a 30-day lookback for performance
 pub fn orders_filter_all() -> Filter {
-    let now_ms = js_sys::Date::now() as u64;
-    let now_secs = now_ms / 1000;
+    let now_secs = crate::platform::timestamp::now_secs();
     let thirty_days_ago = now_secs.saturating_sub(30 * 24 * 60 * 60);
     Filter::new().kind(Kind::PeerToPeerOrder).since(Timestamp::from(thirty_days_ago))
 }

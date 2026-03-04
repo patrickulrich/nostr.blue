@@ -89,7 +89,7 @@ fn SoundbiteCard(props: SoundbiteCardProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(safe_duration_millis(duration))
+                crate::platform::timer::sleep_ms(safe_duration_millis(duration))
                     .await;
                 is_playing.set(false);
             });
@@ -222,7 +222,7 @@ fn SoundbiteGridCard(props: SoundbiteGridCardProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(safe_duration_millis(duration))
+                crate::platform::timer::sleep_ms(safe_duration_millis(duration))
                     .await;
                 is_playing.set(false);
             });
@@ -279,7 +279,7 @@ fn share_soundbite(soundbite: &Soundbite, episode_title: Option<&str>) {
         title
     };
     log::info!("Sharing soundbite: {}", text);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use web_sys::window;
         if let Some(window) = window() {
@@ -322,7 +322,7 @@ pub fn FeaturedSoundbite(props: FeaturedSoundbiteProps) -> Element {
             is_playing.set(true);
             let duration = sb.duration;
             spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(safe_duration_millis(duration))
+                crate::platform::timer::sleep_ms(safe_duration_millis(duration))
                     .await;
                 is_playing.set(false);
             });

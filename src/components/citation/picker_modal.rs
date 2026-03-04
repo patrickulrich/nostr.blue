@@ -91,15 +91,7 @@ pub fn CitationPickerModal(mut props: CitationPickerModalProps) -> Element {
         let query_snapshot = new_query.clone();
         let query_lower = query_snapshot.to_lowercase();
         let new_task = spawn(async move {
-            #[cfg(target_family = "wasm")]
-            {
-                gloo_timers::future::TimeoutFuture::new(150).await;
-            }
-            #[cfg(not(target_family = "wasm"))]
-            {
-                use std::time::Duration;
-                tokio::time::sleep(Duration::from_millis(150)).await;
-            }
+            crate::platform::timer::sleep_ms(150).await;
             if search_query.read().as_str() == query_snapshot.as_str() {
                 let all_citations = USER_CITATIONS.read().all();
                 let filtered: Vec<CachedCitation> = all_citations

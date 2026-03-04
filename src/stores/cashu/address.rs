@@ -3,6 +3,7 @@
 //! Supports human-readable payment addresses like user@domain.com
 //! which can be resolved to Lightning invoices or LNURL endpoints.
 #![allow(dead_code)]
+use crate::platform::http::http_client;
 /// Type of payment address
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddressType {
@@ -132,12 +133,13 @@ pub async fn resolve_lightning_address(
 ) -> Result<LnurlPayResponse, String> {
     let url = address.lnurlp_url().ok_or("Not a Lightning Address")?;
     log::info!("Resolving Lightning Address: {}", address.original);
-    let response = gloo_net::http::Request::get(&url)
+    let response = http_client()
+        .get(&url)
         .header("Accept", "application/json")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let lnurl_response: LnurlPayResponse = response
@@ -186,12 +188,13 @@ pub async fn request_invoice(
         }
     }
     log::info!("Requesting invoice from: {}", url);
-    let response = gloo_net::http::Request::get(&url)
+    let response = http_client()
+        .get(&url)
         .header("Accept", "application/json")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
     let invoice_response: LnurlInvoiceResponse = response

@@ -10,8 +10,6 @@ use nostr_sdk::{
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use crate::stores::nostr_client;
-#[cfg(target_arch = "wasm32")]
-use js_sys;
 /// Kind 31234 - Draft Wraps (NIP-37)
 pub const KIND_DRAFT: u16 = 31234;
 /// Kind 10013 - Relay List for Private Content (NIP-37)
@@ -387,14 +385,7 @@ pub async fn delete_draft(identifier: &str) -> Result<(), String> {
 }
 /// Get current WASM-compatible timestamp
 fn current_timestamp() -> u64 {
-    #[cfg(target_arch = "wasm32")] { (js_sys::Date::now() / 1000.0) as u64 }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    }
+    crate::platform::timestamp::now_secs()
 }
 /// Calculate content hash for dirty state tracking
 /// Kept for future draft-level change detection

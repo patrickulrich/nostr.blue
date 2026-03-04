@@ -32,14 +32,23 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
     let balance = use_memo(move || WALLET_BALANCES.read().available);
     let handle_paste = move |_| {
         spawn(async move {
-            if let Some(window) = web_sys::window() {
-                let clipboard = window.navigator().clipboard();
-                let promise = clipboard.read_text();
-                if let Ok(text) = wasm_bindgen_futures::JsFuture::from(promise).await {
-                    if let Some(s) = text.as_string() {
-                        request_input.set(s);
+            #[cfg(feature = "web")]
+            {
+                if let Some(window) = web_sys::window() {
+                    let clipboard = window.navigator().clipboard();
+                    let promise = clipboard.read_text();
+                    if let Ok(text) = wasm_bindgen_futures::JsFuture::from(promise).await {
+                        if let Some(s) = text.as_string() {
+                            request_input.set(s);
+                        }
                     }
                 }
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                pay_state.set(PayState::Error {
+                    message: "Clipboard paste is only available on web".to_string(),
+                });
             }
         });
     };

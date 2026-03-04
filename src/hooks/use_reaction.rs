@@ -331,14 +331,7 @@ pub fn use_reaction(
                     }
                     state.set(ReactionState::Success);
                     invalidate_interaction_counts(&event_id_clone);
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        gloo_timers::future::TimeoutFuture::new(500).await;
-                    }
+                    crate::platform::timer::sleep_ms(500).await;
                     state.set(ReactionState::Idle);
                 }
                 Err(e) => {
@@ -418,14 +411,7 @@ pub fn use_reaction(
                     }
                     state.set(ReactionState::Success);
                     invalidate_interaction_counts(&event_id_clone);
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                    }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        gloo_timers::future::TimeoutFuture::new(500).await;
-                    }
+                    crate::platform::timer::sleep_ms(500).await;
                     state.set(ReactionState::Idle);
                 }
                 Err(e) => {

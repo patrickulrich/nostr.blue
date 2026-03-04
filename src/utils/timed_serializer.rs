@@ -17,13 +17,18 @@
 //! // Use debounced saving:
 //! bookmarks.request_save(); // Called 10x per second = 1 write after 1s delay
 //! ```
+#[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::Timeout;
 use std::cell::RefCell;
 use std::rc::Rc;
+
 /// A debouncer that delays execution until a quiet period
 #[allow(dead_code)]
 pub struct Debouncer {
+    #[cfg(target_arch = "wasm32")]
     timeout: Rc<RefCell<Option<Timeout>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    generation: Rc<std::cell::Cell<u32>>,
     delay_ms: u32,
 }
 #[allow(dead_code)]
@@ -31,12 +36,16 @@ impl Debouncer {
     /// Create a new debouncer with specified delay in milliseconds
     pub fn new(delay_ms: u32) -> Self {
         Self {
+            #[cfg(target_arch = "wasm32")]
             timeout: Rc::new(RefCell::new(None)),
+            #[cfg(not(target_arch = "wasm32"))]
+            generation: Rc::new(std::cell::Cell::new(0)),
             delay_ms,
         }
     }
     /// Schedule a callback to run after the delay period
     /// If called again before the delay expires, the previous call is cancelled
+    #[cfg(target_arch = "wasm32")]
     pub fn debounce<F>(&self, callback: F)
     where
         F: FnOnce() + 'static,
@@ -45,19 +54,54 @@ impl Debouncer {
         let timeout = Timeout::new(self.delay_ms, callback);
         *self.timeout.borrow_mut() = Some(timeout);
     }
+
+    /// Schedule a callback to run after the delay period (native: Dioxus spawn + sleep)
+    /// If called again before the delay expires, the previous call is cancelled
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn debounce<F>(&self, callback: F)
+    where
+        F: FnOnce() + 'static,
+    {
+        let gen = self.generation.get().wrapping_add(1);
+        self.generation.set(gen);
+        let generation = Rc::clone(&self.generation);
+        let delay_ms = self.delay_ms;
+        dioxus::prelude::spawn(async move {
+            crate::platform::timer::sleep_ms(delay_ms).await;
+            if generation.get() == gen {
+                callback();
+            }
+        });
+    }
+
     /// Cancel any pending debounced call
+    #[cfg(target_arch = "wasm32")]
     pub fn cancel(&self) {
         *self.timeout.borrow_mut() = None;
     }
+    /// Cancel any pending debounced call
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn cancel(&self) {
+        self.generation.set(self.generation.get().wrapping_add(1));
+    }
     /// Flush any pending debounced call immediately
+    #[cfg(target_arch = "wasm32")]
     pub fn flush(&self) {
         *self.timeout.borrow_mut() = None;
+    }
+    /// Flush any pending debounced call immediately
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn flush(&self) {
+        self.generation.set(self.generation.get().wrapping_add(1));
     }
 }
 impl Clone for Debouncer {
     fn clone(&self) -> Self {
         Self {
+            #[cfg(target_arch = "wasm32")]
             timeout: Rc::clone(&self.timeout),
+            #[cfg(not(target_arch = "wasm32"))]
+            generation: Rc::clone(&self.generation),
             delay_ms: self.delay_ms,
         }
     }

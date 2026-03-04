@@ -171,7 +171,7 @@ pub fn ZapDistribution(
                 // Race invoice fetch against a 30s timeout
                 let invoice_result = match select(
                     Box::pin(lnurl::get_invoice_from_lud16(lud16, recip.amount, None)),
-                    Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),
+                    Box::pin(crate::platform::timer::sleep_ms(30_000)),
                 ).await {
                     Either::Left((Ok(inv), _)) => Ok(inv),
                     Either::Left((Err(e), _)) => Err(PaymentStatus::Failed(format!("{}", e))),
@@ -182,7 +182,7 @@ pub fn ZapDistribution(
                         // Race payment against a 30s timeout
                         match select(
                             Box::pin(nwc_store::pay_invoice(invoice)),
-                            Box::pin(gloo_timers::future::TimeoutFuture::new(30_000)),
+                            Box::pin(crate::platform::timer::sleep_ms(30_000)),
                         ).await {
                             Either::Left((Ok(_), _)) => {
                                 success_count += 1;

@@ -496,12 +496,11 @@ pub async fn wait_for_nostr_payment(
             return Err("Timeout waiting for payment".to_string());
         }
         let notification = {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 use futures::future::{select, Either};
                 use futures::pin_mut;
-                use gloo_timers::future::TimeoutFuture;
-                let timeout_fut = TimeoutFuture::new(5000);
+                let timeout_fut = crate::platform::timer::sleep_ms(5000);
                 let recv_fut = notifications.recv();
                 pin_mut!(timeout_fut);
                 pin_mut!(recv_fut);
@@ -511,7 +510,7 @@ pub async fn wait_for_nostr_payment(
                     Either::Right((_, _)) => continue,
                 }
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(feature = "web"))]
             {
                 match tokio::time::timeout(
                         std::time::Duration::from_secs(5),

@@ -112,7 +112,7 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
     #[allow(unused_variables)]
     let code_for_copy = snippet.code.clone();
     let handle_copy = move |_| {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             let window = web_sys::window().unwrap();
             let navigator = window.navigator();
@@ -127,9 +127,9 @@ fn SnippetContent(snippet: DisplaySnippet, copied: Signal<bool>) -> Element {
         }
         copied.set(true);
         spawn(async move {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
-                gloo_timers::future::TimeoutFuture::new(2000).await;
+                crate::platform::timer::sleep_ms(2000).await;
             }
             copied.set(false);
         });

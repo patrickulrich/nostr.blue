@@ -2,7 +2,7 @@
 //!
 //! Fetches book metadata and covers from OpenLibrary.org.
 //! No API key required. Covers can be fetched via direct URL construction.
-use gloo_net::http::Request;
+use crate::platform::http::http_client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 /// Base URL for OpenLibrary covers
@@ -139,12 +139,11 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
         API_BASE_URL,
         bibkey,
     );
-    let response = Request::get(&url)
-        .send()
+    let response = http_client().get(&url).send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    if !response.ok() {
-        return Err(format!("HTTP {}: {}", response.status(), response.status_text()));
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
     let data: HashMap<String, BookApiData> = response
         .json()

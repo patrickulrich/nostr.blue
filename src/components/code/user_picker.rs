@@ -135,7 +135,7 @@ pub fn NostrUserPicker(
             let priority_snapshot = priority_pubkeys.clone();
             is_searching.set(true);
             let new_task = spawn(async move {
-                gloo_timers::future::TimeoutFuture::new(300).await;
+                crate::platform::timer::sleep_ms(300).await;
                 match search_profiles(&query_snapshot, 8, true).await {
                     Ok(relay_results) => {
                         if *query.peek() == query_snapshot {
@@ -239,7 +239,7 @@ pub fn NostrUserPicker(
                         onkeydown: handle_keydown,
                         onfocusout: move |_| {
                             spawn(async move {
-                                gloo_timers::future::TimeoutFuture::new(200).await;
+                                crate::platform::timer::sleep_ms(200).await;
                                 show_dropdown.set(false);
                             });
                         },

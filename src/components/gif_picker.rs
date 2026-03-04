@@ -23,20 +23,21 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
     let mut show_upload_modal = use_signal(|| false);
     let mut initialized = use_signal(|| false);
     let mut search_query = use_signal(String::new);
+    let mut search_gen = use_signal(|| 0u32);
     let gif_results = GIF_RESULTS.read();
     let gif_loading = GIF_LOADING.read();
     let recent_gifs = RECENT_GIFS.read();
     use_effect(move || {
         let query = search_query.read().clone();
         if *initialized.read() {
+            // Increment generation to invalidate any pending searches
+            search_gen.with_mut(|g| *g = g.wrapping_add(1));
+            let this_gen = *search_gen.read();
             spawn(async move {
-                #[cfg(target_family = "wasm")]
-                {
-                    gloo_timers::future::TimeoutFuture::new(300).await;
-                }
-                #[cfg(not(target_family = "wasm"))]
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                crate::platform::timer::sleep_ms(300).await;
+                // Verify generation before updating state
+                if *search_gen.read() != this_gen {
+                    return;
                 }
                 search_gifs(query).await;
             });

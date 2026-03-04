@@ -2,7 +2,9 @@
 //!
 //! Modal dialog for uploading GIFs to Nostr via NIP-96 or Blossom.
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
 use crate::stores::{blossom_store, gif_store, nip96_store};
 use crate::utils::format::display_server_url;
@@ -40,6 +42,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let input_id = use_signal(|| format!("gif-upload-{}", uuid::Uuid::new_v4()));
     let close_modal = move |_| {
         show.set(false);
+        #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
             let _ = web_sys::Url::revoke_object_url(url);
         }
@@ -79,6 +82,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             );
                         return;
                     }
+                    #[cfg(feature = "web")]
                     if let Some((_, _, _, Some(old_url))) = selected_file.read().as_ref()
                     {
                         let _ = web_sys::Url::revoke_object_url(old_url);
@@ -182,10 +186,11 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 let upload_id = uuid::Uuid::new_v4();
                                 current_upload_id.set(Some(upload_id));
                                 spawn(async move {
-                                    gloo_timers::future::TimeoutFuture::new(2000).await;
+                                    crate::platform::timer::sleep_ms(2000).await;
                                     if current_upload_id.peek().as_ref() != Some(&upload_id) {
                                         return;
                                     }
+                                    #[cfg(feature = "web")]
                                     if let Some((_, _, _, Some(url))) = selected_file
                                         .read()
                                         .as_ref()
@@ -221,6 +226,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
         }
     };
     let handle_clear = move |_| {
+        #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
             let _ = web_sys::Url::revoke_object_url(url);
         }
@@ -442,6 +448,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     }
 }
 /// Read file as bytes from file input
+#[cfg(feature = "web")]
 async fn read_file_as_bytes(
     input_id: &str,
 ) -> Result<(String, Vec<u8>, String), String> {
@@ -468,14 +475,25 @@ async fn read_file_as_bytes(
     let bytes = uint8_array.to_vec();
     Ok((filename, bytes, mime_type))
 }
+
+/// Read file as bytes - native stub
+#[cfg(not(feature = "web"))]
+async fn read_file_as_bytes(
+    _input_id: &str,
+) -> Result<(String, Vec<u8>, String), String> {
+    Err("File reading from HTML input not supported on native".to_string())
+}
 /// Clear file input element
-fn clear_file_input(input_id: &str) {
-    use web_sys::window;
-    if let Some(window) = window() {
-        if let Some(document) = window.document() {
-            if let Some(element) = document.get_element_by_id(input_id) {
-                if let Ok(input) = element.dyn_into::<HtmlInputElement>() {
-                    input.set_value("");
+fn clear_file_input(_input_id: &str) {
+    #[cfg(feature = "web")]
+    {
+        use web_sys::window;
+        if let Some(window) = window() {
+            if let Some(document) = window.document() {
+                if let Some(element) = document.get_element_by_id(_input_id) {
+                    if let Ok(input) = element.dyn_into::<HtmlInputElement>() {
+                        input.set_value("");
+                    }
                 }
             }
         }
@@ -494,6 +512,7 @@ fn format_file_size(bytes: usize) -> String {
     }
 }
 /// Create an Object URL from raw bytes (more memory efficient than base64 for large files)
+#[cfg(feature = "web")]
 fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
     use web_sys::BlobPropertyBag;
     let uint8_array = js_sys::Uint8Array::from(data);
@@ -507,4 +526,10 @@ fn create_object_url(data: &[u8], mime_type: &str) -> Option<String> {
         )
         .ok()?;
     web_sys::Url::create_object_url_with_blob(&blob).ok()
+}
+
+/// Create an Object URL - native stub
+#[cfg(not(feature = "web"))]
+fn create_object_url(_data: &[u8], _mime_type: &str) -> Option<String> {
+    None
 }

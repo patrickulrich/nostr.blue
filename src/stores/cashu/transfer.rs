@@ -196,15 +196,7 @@ pub async fn transfer_between_mints(
             });
             return Err(error);
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            use gloo_timers::future::TimeoutFuture;
-            TimeoutFuture::new(2000).await;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
+        crate::platform::timer::sleep_ms(2000).await;
     }
     if !mint_quote_paid {
         let error = "Timeout waiting for Lightning payment confirmation".to_string();

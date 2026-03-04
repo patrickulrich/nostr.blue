@@ -468,16 +468,25 @@ pub async fn cached_fetch(url: &str, default_ttl: u64) -> Result<String, String>
         }
     }
     log::debug!("Cache miss for {}, fetching...", url);
-    let response = gloo_net::http::Request::get(url)
+    let response = crate::platform::http::http_client()
+        .get(url)
         .header("Accept", "application/json")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
-    if !response.ok() {
+    if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()));
     }
-    let cache_control = response.headers().get("cache-control");
-    let etag = response.headers().get("etag");
+    let cache_control = response
+        .headers()
+        .get("cache-control")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let etag = response
+        .headers()
+        .get("etag")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
     let ttl = parse_cache_control(cache_control.as_deref()).unwrap_or(default_ttl);
     let body = response
         .text()

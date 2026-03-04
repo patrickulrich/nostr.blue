@@ -97,7 +97,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                 aria_labelledby: "highlight-modal-title",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();
@@ -163,7 +163,7 @@ pub fn HighlightModal(props: HighlightModalProps) -> Element {
                                 }
                             },
                         }
-                        p { class: "text-xs text-muted-foreground", "Press Ctrl+Enter to save" }
+                        p { class: "text-xs text-muted-foreground", "Press Ctrl/⌘+Enter to save" }
                     }
                 }
                 div { class: "flex justify-end gap-3 p-4 border-t border-border",

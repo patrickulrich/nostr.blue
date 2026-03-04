@@ -3,7 +3,6 @@ use crate::stores::nostr_client;
 use crate::utils::list_encryption::add_person_to_list;
 use crate::utils::list_kinds::{get_item_count, NAMED_CURATIONS, NAMED_PEOPLE};
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use nostr_sdk::{EventBuilder, EventId, Kind, Tag};
 use uuid::Uuid;
 /// Mode for the add to list modal
@@ -94,7 +93,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                         loading.set(false);
                         refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                         spawn(async move {
-                            gloo_timers::future::sleep(std::time::Duration::from_secs(2))
+                            crate::platform::timer::sleep(std::time::Duration::from_secs(2))
                                 .await;
                             on_close.call(());
                         });
@@ -162,7 +161,7 @@ pub fn AddToListModal(props: AddToListModalProps) -> Element {
                         loading.set(false);
                         refresh_trigger.with_mut(|val| *val = val.wrapping_add(1));
                         spawn(async move {
-                            gloo_timers::future::sleep(std::time::Duration::from_secs(2))
+                            crate::platform::timer::sleep(std::time::Duration::from_secs(2))
                                 .await;
                             on_close.call(());
                         });
@@ -515,7 +514,7 @@ async fn add_to_existing_list(
         tokio::select! {
             result = client.database().event_by_id(& list_id) => { result.map_err(| e |
             format!("Failed to fetch list: {}", e)) ? .ok_or("List not found") ? } _ =
-            TimeoutFuture::new(5_000) => { return Err("Database fetch timeout (5s)"
+            crate::platform::timer::sleep_ms(5_000) => { return Err("Database fetch timeout (5s)"
             .to_string()); }
         }
     };

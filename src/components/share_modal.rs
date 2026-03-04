@@ -10,7 +10,7 @@ use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
 use nostr_sdk::{Event as NostrEvent, EventBuilder, FromBech32, PublicKey};
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 /// Global counter for generating unique modal IDs
 static SHARE_MODAL_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -45,7 +45,7 @@ pub fn ShareModal(
     let has_signer = *HAS_SIGNER.read();
     #[allow(unused_variables)]
     fn get_cursor_position(textarea_id: &str, current_text: &str) -> usize {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "web")]
         {
             if let Some(window) = web_sys::window() {
                 if let Some(document) = window.document() {
@@ -215,15 +215,7 @@ pub fn ShareModal(
                         copied.set(true);
                         log::info!("Link copied to clipboard");
                         spawn(async move {
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                gloo_timers::future::TimeoutFuture::new(2000).await;
-                            }
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                tokio::time::sleep(std::time::Duration::from_millis(2000))
-                                    .await;
-                            }
+                            crate::platform::timer::sleep_ms(2000).await;
                             copied.set(false);
                         });
                     }
@@ -345,7 +337,7 @@ pub fn ShareModal(
                 aria_describedby: if *share_mode.read() == ShareMode::Main { Some(desc_id.clone()) } else { None },
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();

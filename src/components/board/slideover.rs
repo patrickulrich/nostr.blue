@@ -192,14 +192,14 @@ pub fn BoardSlideover(
             tabindex: "-1",
             onclick: move |e| e.stop_propagation(),
             onmounted: move |evt| {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "web")]
                 {
                     let element = evt.data();
                     if let Some(html_element) = element.downcast::<web_sys::HtmlElement>() {
                         let _ = html_element.focus();
                     }
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "web"))]
                 let _ = evt;
             },
             onkeydown: move |evt: KeyboardEvent| {

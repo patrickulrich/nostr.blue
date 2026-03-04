@@ -52,7 +52,7 @@ pub fn ReportModal(props: ReportModalProps) -> Element {
                     success.set(true);
                     loading.set(false);
                     spawn(async move {
-                        gloo_timers::future::sleep(std::time::Duration::from_secs(2))
+                        crate::platform::timer::sleep(std::time::Duration::from_secs(2))
                             .await;
                         on_close.call(());
                     });

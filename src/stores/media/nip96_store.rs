@@ -12,11 +12,16 @@
 //! - NIP-96: https://github.com/nostr-protocol/nips/blob/master/96.md
 //! - NIP-98: https://github.com/nostr-protocol/nips/blob/master/98.md
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use nostr_sdk::nips::nip98;
 use serde::Deserialize;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use wasm_bindgen_futures::JsFuture;
+#[cfg(feature = "web")]
 use web_sys::{FormData, Request, RequestInit, Response};
+#[cfg(feature = "web")]
 use crate::utils::nip98 as nip98_utils;
 type Result<T, E> = std::result::Result<T, E>;
 /// Default NIP-96 server (nostr.build)
@@ -27,6 +32,7 @@ pub const NOSTR_BUILD_API_URL: &str = "https://nostr.build/api/v2/nip96/upload";
 pub static NIP96_UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
 /// Current upload ID to prevent timer race conditions
 /// Each upload gets a unique ID; timer only clears progress if ID matches
+#[cfg(feature = "web")]
 pub static CURRENT_UPLOAD_ID: GlobalSignal<Option<uuid::Uuid>> = Signal::global(|| None);
 /// NIP-96 server configuration (from /.well-known/nostr/nip96.json)
 #[allow(dead_code)]
@@ -43,6 +49,7 @@ pub struct Nip96ServerConfig {
     pub content_types: Vec<String>,
 }
 /// NIP-96 upload response
+#[cfg(feature = "web")]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Nip96UploadResponse {
     pub status: String,
@@ -55,6 +62,7 @@ pub struct Nip96UploadResponse {
     pub nip94_event: Option<Nip94EventData>,
 }
 /// NIP-94 event data from upload response
+#[cfg(feature = "web")]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Nip94EventData {
     pub tags: Vec<Vec<String>>,
@@ -63,6 +71,7 @@ pub struct Nip94EventData {
     pub content: String,
 }
 /// Extracted file metadata from NIP-94 tags
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct UploadedFileMetadata {
     pub url: String,
@@ -74,6 +83,7 @@ pub struct UploadedFileMetadata {
     pub blurhash: Option<String>,
     pub thumbnail: Option<String>,
 }
+#[allow(dead_code)]
 impl UploadedFileMetadata {
     /// Parse metadata from NIP-94 event tags
     pub fn from_tags(tags: &[Vec<String>]) -> Option<Self> {
@@ -117,6 +127,7 @@ impl UploadedFileMetadata {
 /// # Returns
 /// * `Ok(UploadedFileMetadata)` - Metadata from successful upload
 /// * `Err(String)` - Error message if upload fails
+#[cfg(feature = "web")]
 pub async fn upload_to_nip96(
     file_data: Vec<u8>,
     mime_type: String,
@@ -169,7 +180,7 @@ pub async fn upload_to_nip96(
     let upload_id = uuid::Uuid::new_v4();
     *CURRENT_UPLOAD_ID.write() = Some(upload_id);
     dioxus_core::spawn_forever(async move {
-        gloo_timers::future::TimeoutFuture::new(1000).await;
+        crate::platform::timer::sleep_ms(1000).await;
         if *CURRENT_UPLOAD_ID.read() == Some(upload_id) {
             *NIP96_UPLOAD_PROGRESS.write() = None;
             *CURRENT_UPLOAD_ID.write() = None;
@@ -178,7 +189,20 @@ pub async fn upload_to_nip96(
     log::info!("NIP-96 upload successful: {}", metadata.url);
     Ok(metadata)
 }
+
+/// Upload a file to nostr.build (native stub)
+#[cfg(not(feature = "web"))]
+pub async fn upload_to_nip96(
+    _file_data: Vec<u8>,
+    _mime_type: String,
+    _caption: String,
+    _alt: String,
+) -> Result<UploadedFileMetadata, String> {
+    Err("NIP-96 upload not yet supported on native".to_string())
+}
+
 /// Upload file using web_sys Fetch API with FormData (for WASM compatibility)
+#[cfg(feature = "web")]
 async fn upload_with_fetch(
     file_data: Vec<u8>,
     mime_type: String,

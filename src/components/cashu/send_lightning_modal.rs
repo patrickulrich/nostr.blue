@@ -215,7 +215,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                 *MELT_PROGRESS.write() = None;
                                 if paid {
                                     spawn(async move {
-                                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                                        crate::platform::timer::sleep_ms(3000).await;
                                         on_close.call(());
                                     });
                                 }
@@ -248,7 +248,7 @@ pub fn CashuSendLightningModal(on_close: EventHandler<()>) -> Element {
                                 *MELT_PROGRESS.write() = None;
                                 if result.paid {
                                     spawn(async move {
-                                        gloo_timers::future::TimeoutFuture::new(3000).await;
+                                        crate::platform::timer::sleep_ms(3000).await;
                                         on_close.call(());
                                     });
                                 }

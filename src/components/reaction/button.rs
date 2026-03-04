@@ -86,7 +86,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     if props.has_signer {
                         let current = *show_picker.peek();
                         if !current {
-                            #[cfg(target_family = "wasm")]
+                            #[cfg(feature = "web")]
                             {
                                 let btn_id = button_id.read().clone();
                                 if let Some(window) = web_sys::window() {

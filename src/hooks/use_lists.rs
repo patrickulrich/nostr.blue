@@ -105,7 +105,12 @@ pub fn use_user_lists() -> (
             Some(auth_store::LoginMethod::BrowserExtension)
                 | Some(auth_store::LoginMethod::PrivateKey)
                 | Some(auth_store::LoginMethod::RemoteSigner)
-        );
+        ) || {
+            #[cfg(feature = "mobile")]
+            { matches!(auth.login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
+            #[cfg(not(feature = "mobile"))]
+            { false }
+        };
         if requires_signer && !has_signer {
             log::debug!("Waiting for signer before fetching lists...");
             return;

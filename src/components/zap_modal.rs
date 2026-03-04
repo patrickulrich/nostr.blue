@@ -9,7 +9,9 @@ use nostr_sdk::{EventId, PublicKey, RelayUrl};
 use qrcode::render::svg;
 use qrcode::QrCode;
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
+#[cfg(feature = "web")]
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "webln"], js_name = enable, catch)]
@@ -17,12 +19,14 @@ extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "webln"], js_name = sendPayment, catch)]
     async fn webln_send_payment_raw(invoice: &str) -> Result<JsValue, JsValue>;
 }
+#[cfg(feature = "web")]
 async fn webln_enable() -> Result<(), String> {
     webln_enable_raw()
         .await
         .map(|_| ())
         .map_err(|e| format!("WebLN enable failed: {:?}", e))
 }
+#[cfg(feature = "web")]
 async fn webln_send_payment(invoice: &str) -> Result<JsValue, String> {
     webln_send_payment_raw(invoice)
         .await
@@ -38,8 +42,9 @@ async fn webln_send_payment(invoice: &str) -> Result<JsValue, String> {
         })
 }
 fn is_webln_available() -> bool {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
+        use wasm_bindgen::prelude::*;
         use web_sys::window;
         if let Some(window) = window() {
             return js_sys::Reflect::has(&window, &JsValue::from_str("webln"))
@@ -207,6 +212,20 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                         }
                     }
                 }
+                #[cfg(feature = "mobile")]
+                signer::SignerType::AndroidSigner(ref android_signer) => {
+                    #[allow(unused_imports)]
+                    use nostr::signer::NostrSigner;
+                    match builder.sign(android_signer.as_ref()).await {
+                        Ok(event) => event,
+                        Err(e) => {
+                            error_msg
+                                .set(Some(format!("Failed to sign zap request: {}", e)));
+                            loading.set(false);
+                            return;
+                        }
+                    }
+                }
             };
             let lnurl_param = if lud16.is_some() { None } else { lud06.as_deref() };
             let inv = match lnurl::request_zap_invoice(
@@ -233,10 +252,12 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
             match payment_preference.as_str() {
                 "cashu_first" => {
                     use futures::future::{select, Either};
-                    let timeout = gloo_timers::future::TimeoutFuture::new(5000);
+                    let timeout = async {
+                        crate::platform::timer::sleep_ms(5000).await;
+                    };
                     let check_done = async {
                         while *checking_nutzap.peek() {
-                            gloo_timers::future::TimeoutFuture::new(100).await;
+                            crate::platform::timer::sleep_ms(100).await;
                         }
                     };
                     match select(Box::pin(timeout), Box::pin(check_done)).await {
@@ -410,6 +431,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                     }
                 }
             }
+            #[cfg(feature = "web")]
             if webln_available {
                 match webln_enable().await {
                     Ok(_) => {
@@ -479,7 +501,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     };
     let copy_invoice = move |_| {
         if let Some(_inv) = invoice.read().as_ref() {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 use web_sys::window;
                 if let Some(window) = window() {
@@ -496,7 +518,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
     };
     let open_in_wallet = move |_| {
         if let Some(_inv) = invoice.read().as_ref() {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "web")]
             {
                 use web_sys::window;
                 if let Some(window) = window() {
@@ -514,7 +536,7 @@ pub fn ZapModal(props: ZapModalProps) -> Element {
                 class: "bg-background border border-border rounded-lg shadow-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto",
                 tabindex: "-1",
                 onmounted: move |_evt| {
-                    #[cfg(target_arch = "wasm32")]
+                    #[cfg(feature = "web")]
                     {
                         if let Some(html_element) = _evt.data().downcast::<web_sys::HtmlElement>() {
                             let _ = html_element.focus();

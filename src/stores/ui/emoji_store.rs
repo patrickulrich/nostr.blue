@@ -34,7 +34,7 @@ pub static EMOJI_SETS: GlobalSignal<Store<EmojiSetsStore>> = Signal::global(|| S
     EmojiSetsStore::default(),
 ));
 pub static EMOJI_FETCH_TIME: GlobalSignal<Option<Timestamp>> = Signal::global(|| None);
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "web")]
 const RECENT_EMOJIS_KEY: &str = "nostr_blue_recent_emojis";
 const MAX_RECENT: usize = 14;
 const DEFAULT_RECENT: &[&str] = &[
@@ -52,14 +52,14 @@ pub static RECENT_EMOJIS: GlobalSignal<Vec<String>> = Signal::global(|| {
 });
 /// Load recent emojis from localStorage
 pub fn load_recent_emojis() -> Option<Vec<String>> {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use web_sys::window;
         let storage = window()?.local_storage().ok()??;
         let value = storage.get_item(RECENT_EMOJIS_KEY).ok()??;
         serde_json::from_str(&value).ok()
     }
-    #[cfg(not(target_arch = "wasm32"))] { None }
+    #[cfg(not(feature = "web"))] { None }
 }
 /// Save an emoji to recents (moves to front if already exists)
 pub fn save_recent_emoji(emoji: String) {
@@ -67,7 +67,7 @@ pub fn save_recent_emoji(emoji: String) {
     recent.retain(|e| e != &emoji);
     recent.insert(0, emoji);
     recent.truncate(MAX_RECENT);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "web")]
     {
         use web_sys::window;
         if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {

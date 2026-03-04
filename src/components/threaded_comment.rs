@@ -13,9 +13,11 @@ use crate::utils::time::format_relative_time_ex;
 use crate::utils::{event::is_voice_message, ThreadNode};
 use dioxus::events::MediaData;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
 use nostr_sdk::{Event as NostrEvent, Filter, Kind};
 use std::time::Duration;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 const MAX_DEPTH: usize = 8;
@@ -62,6 +64,7 @@ pub fn ThreadedComment(
         String::new()
     };
     let audio_id = format!("voice-comment-{}", event_id);
+    #[allow(unused_mut)]
     let mut duration = use_signal(|| 0.0f64);
     let mut current_time = use_signal(|| 0.0f64);
     let event_id_parsed = event.id;
@@ -193,61 +196,71 @@ pub fn ThreadedComment(
         "flex items-center text-muted-foreground hover:text-blue-500 transition"
     };
 
-    let audio_id_for_effect = audio_id.clone();
+    let _audio_id_for_effect = audio_id.clone();
     let audio_id_for_handlers = audio_id.clone();
 
+    #[allow(clippy::needless_return)]
     use_effect(move || {
         if !is_voice {
             return;
         }
-        let global_state = voice_messages_store::VOICE_PLAYBACK.read();
-        let is_playing = global_state.currently_playing == Some(event_id_parsed);
-        let audio_id_clone = audio_id_for_effect.clone();
-        let window = match web_sys::window() {
-            Some(w) => w,
-            None => return,
-        };
-        let document = match window.document() {
-            Some(d) => d,
-            None => return,
-        };
-        let audio_element = match document.get_element_by_id(&audio_id_clone) {
-            Some(el) => el,
-            None => return,
-        };
-        let audio = match audio_element.dyn_ref::<web_sys::HtmlAudioElement>() {
-            Some(a) => a,
-            None => return,
-        };
-        if is_playing {
-            let _ = audio.play().map_err(|e| {
-                log::debug!("Play failed: {:?}", e);
-            });
-        } else if let Err(e) = audio.pause() {
-            log::debug!("Pause failed: {:?}", e);
+        #[cfg(feature = "web")]
+        {
+            let global_state = voice_messages_store::VOICE_PLAYBACK.read();
+            let is_playing = global_state.currently_playing == Some(event_id_parsed);
+            let audio_id_clone = _audio_id_for_effect.clone();
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => return,
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => return,
+            };
+            let audio_element = match document.get_element_by_id(&audio_id_clone) {
+                Some(el) => el,
+                None => return,
+            };
+            let audio = match audio_element.dyn_ref::<web_sys::HtmlAudioElement>() {
+                Some(a) => a,
+                None => return,
+            };
+            if is_playing {
+                let _ = audio.play().map_err(|e| {
+                    log::debug!("Play failed: {:?}", e);
+                });
+            } else if let Err(e) = audio.pause() {
+                log::debug!("Pause failed: {:?}", e);
+            }
         }
     });
 
-    let handle_timeupdate = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
-            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
-                let time = audio.current_time();
-                current_time.set(time);
-                if voice_messages_store::is_playing(&event_id_parsed) {
-                    voice_messages_store::set_current_time(time);
+    let handle_timeupdate = move |_evt: Event<MediaData>| {
+        #[cfg(feature = "web")]
+        {
+            if let Some(target) = _evt.data.as_web_event().target() {
+                if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                    let time = audio.current_time();
+                    current_time.set(time);
+                    if voice_messages_store::is_playing(&event_id_parsed) {
+                        voice_messages_store::set_current_time(time);
+                    }
                 }
             }
         }
     };
 
-    let handle_loadedmetadata = move |evt: Event<MediaData>| {
-        if let Some(target) = evt.data.as_web_event().target() {
-            if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
-                let dur = audio.duration();
-                if !dur.is_nan() {
-                    duration.set(dur);
-                    if voice_messages_store::is_playing(&event_id_parsed) {
-                        voice_messages_store::set_duration(dur);
+    let handle_loadedmetadata = move |_evt: Event<MediaData>| {
+        #[cfg(feature = "web")]
+        {
+            if let Some(target) = _evt.data.as_web_event().target() {
+                if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
+                    let dur = audio.duration();
+                    if !dur.is_nan() {
+                        duration.set(dur);
+                        if voice_messages_store::is_playing(&event_id_parsed) {
+                            voice_messages_store::set_duration(dur);
+                        }
                     }
                 }
             }

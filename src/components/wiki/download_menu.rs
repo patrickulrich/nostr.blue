@@ -6,9 +6,13 @@
 
 use crate::components::icons::{ChevronDownIcon, DownloadIcon, FileTextIcon, PrinterIcon};
 use crate::stores::wiki_store::CachedWikiPage;
+#[cfg(feature = "web")]
 use crate::utils::download::{download_markdown, trigger_print};
 use dioxus::prelude::*;
-use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use dioxus_primitives::toast::consume_toast;
+#[allow(unused_imports)]
+use dioxus_primitives::toast::ToastOptions;
+#[allow(unused_imports)]
 use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
@@ -62,21 +66,23 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                 div { class: "absolute right-0 mt-2 w-56 bg-background border border-border rounded-lg shadow-lg z-50 py-1 overflow-hidden",
                     // Print to PDF option
                     {
-                        let toast_api = toast;
                         rsx! {
                             button {
                                 class: "w-full text-left px-4 py-2.5 hover:bg-accent transition-colors flex items-center gap-3",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
                                     is_open.set(false);
-                                    trigger_print();
-                                    toast_api.info(
-                                        "Print dialog opened".to_string(),
-                                        ToastOptions::new()
-                                            .description("Select 'Save as PDF' to download".to_string())
-                                            .duration(Duration::from_secs(3))
-                                            .permanent(false),
-                                    );
+                                    #[cfg(feature = "web")]
+                                    {
+                                        trigger_print();
+                                        toast.info(
+                                            "Print dialog opened".to_string(),
+                                            ToastOptions::new()
+                                                .description("Select 'Save as PDF' to download".to_string())
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                    }
                                 },
                                 PrinterIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                                 div { class: "flex-1",
@@ -93,8 +99,10 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                     // Download as Markdown option
                     {
                         let title_md = title.clone();
+                        #[allow(unused_variables)]
                         let identifier_md = identifier.clone();
                         let content_md = content.clone();
+                        #[allow(unused_variables)]
                         let toast_api = toast;
                         rsx! {
                             button {
@@ -104,16 +112,21 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     is_open.set(false);
 
                                     // Generate filename from identifier
+                                    #[allow(unused_variables)]
                                     let filename = format!("{}.md", identifier_md);
-                                    download_markdown(&filename, &title_md, &content_md);
-
-                                    toast_api.success(
-                                        "Downloaded!".to_string(),
-                                        ToastOptions::new()
-                                            .description(format!("Saved as {}", filename))
-                                            .duration(Duration::from_secs(2))
-                                            .permanent(false),
-                                    );
+                                    #[cfg(feature = "web")]
+                                    {
+                                        download_markdown(&filename, &title_md, &content_md);
+                                        toast_api.success(
+                                            "Downloaded!".to_string(),
+                                            ToastOptions::new()
+                                                .description(format!("Saved as {}", filename))
+                                                .duration(Duration::from_secs(2))
+                                                .permanent(false),
+                                        );
+                                    }
+                                    #[cfg(not(feature = "web"))]
+                                    { let _ = (&title_md, &content_md); }
                                 },
                                 FileTextIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                                 div { class: "flex-1",

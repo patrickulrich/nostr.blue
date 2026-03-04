@@ -2,7 +2,9 @@ use crate::stores::blossom_store;
 use crate::utils::format::display_server_url;
 use dioxus::events::FormData;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+#[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
 #[derive(Props, Clone, PartialEq)]
 pub struct MediaUploaderProps {
@@ -210,6 +212,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     }
 }
 /// Helper function to read file as bytes with specific input ID
+#[cfg(feature = "web")]
 async fn read_file_as_bytes(
     _file_name: &str,
     input_id: &str,
@@ -236,6 +239,24 @@ async fn read_file_as_bytes(
     let bytes = uint8_array.to_vec();
     Ok((bytes, mime_type))
 }
+
+/// Stub for desktop platforms
+#[cfg(all(feature = "native", not(feature = "mobile")))]
+async fn read_file_as_bytes(
+    _file_name: &str,
+    _input_id: &str,
+) -> Result<(Vec<u8>, String), String> {
+    Err("File reading not supported on this platform".to_string())
+}
+
+/// Mobile implementation - uses Android file picker via JNI
+#[cfg(feature = "mobile")]
+async fn read_file_as_bytes(
+    _file_name: &str,
+    _input_id: &str,
+) -> Result<(Vec<u8>, String), String> {
+    crate::platform::mobile::pick_file().await
+}
 /// Helper function to format file size
 fn format_file_size(bytes: usize) -> String {
     const KB: usize = 1024;
@@ -249,6 +270,7 @@ fn format_file_size(bytes: usize) -> String {
     }
 }
 /// Helper function to clear the file input element value
+#[cfg(feature = "web")]
 fn clear_file_input(input_id: &str) {
     use web_sys::window;
     if let Some(window) = window() {
@@ -261,4 +283,16 @@ fn clear_file_input(input_id: &str) {
             }
         }
     }
+}
+
+/// Stub for desktop platforms
+#[cfg(all(feature = "native", not(feature = "mobile")))]
+fn clear_file_input(_input_id: &str) {
+    // No-op on desktop
+}
+
+/// Mobile: no-op (Android handles this differently)
+#[cfg(feature = "mobile")]
+fn clear_file_input(_input_id: &str) {
+    // No-op on mobile
 }

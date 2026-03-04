@@ -193,7 +193,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                 "Comment posted but failed to refresh comments: {}", e
                             );
                             if let Some(my_pubkey) = auth_store::get_pubkey() {
-                                let now = (js_sys::Date::now() / 1000.0) as u64;
+                                let now = crate::platform::timestamp::now_secs();
                                 let temp_id = format!(
                                     "temp-{}-{}",
                                     now,
@@ -591,7 +591,10 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                                 "{}.ics",
                                                 cal_event.title.replace(" ", "_").replace("/", "-"),
                                             );
-                                            download_ics(&filename, &ics_content);
+                                            if let Err(e) = download_ics(&filename, &ics_content) {
+                                                log::error!("Failed to download event: {}", e);
+                                                error.set(Some(format!("Failed to export calendar event: {}", e)));
+                                            }
                                         }
                                     },
                                     svg {
@@ -686,7 +689,7 @@ fn CommentCard(pubkey: String, content: String, created_at: u64) -> Element {
         .unwrap_or_else(|| truncate_pubkey(&pubkey));
     let avatar = profile.as_ref().and_then(|p| p.picture.as_deref());
     let time_ago = {
-        let now = (js_sys::Date::now() / 1000.0) as u64;
+        let now = crate::platform::timestamp::now_secs();
         let diff = now.saturating_sub(created_at);
         if diff < 60 {
             "just now".to_string()
@@ -781,6 +784,7 @@ fn OrganizerCard(pubkey: String) -> Element {
     }
 }
 /// Format event datetime for display
+#[cfg(feature = "web")]
 fn format_event_datetime(event: &UnifiedEvent) -> String {
     let ts = event.start_timestamp();
     if ts == 0 {
@@ -841,6 +845,45 @@ fn format_event_datetime(event: &UnifiedEvent) -> String {
         )
     }
 }
+
+#[cfg(not(feature = "web"))]
+fn format_event_datetime(event: &UnifiedEvent) -> String {
+    let ts = event.start_timestamp();
+    if ts == 0 {
+        return "Date TBD".to_string();
+    }
+    const MAX_TIMESTAMP: u64 = 253_402_300_799;
+    let secs = ts.min(MAX_TIMESTAMP);
+    let days = secs / 86400;
+    let remaining = secs % 86400;
+    let hours = remaining / 3600;
+    let minutes = (remaining % 3600) / 60;
+    let mut y = 1970u64;
+    let mut d = days;
+    loop {
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if d < days_in_year { break; }
+        d -= days_in_year;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days_in_months: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_names = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    let mut m = 0usize;
+    for dim in &days_in_months {
+        if d < *dim { break; }
+        d -= dim;
+        m += 1;
+    }
+    if event.is_all_day() {
+        format!("{} {}, {}", month_names[m], d + 1, y)
+    } else {
+        let am_pm = if hours >= 12 { "PM" } else { "AM" };
+        let hour_12 = if hours == 0 { 12 } else if hours > 12 { hours - 12 } else { hours };
+        format!("{} {}, {} at {}:{:02} {} UTC", month_names[m], d + 1, y, hour_12, minutes, am_pm)
+    }
+}
+
 /// Presence avatar component for room presence display
 #[component]
 fn PresenceAvatar(pubkey: String, hand_raised: bool) -> Element {
@@ -895,7 +938,7 @@ fn get_detail_event_status(event: &UnifiedEvent) -> DetailEventStatus {
     if event.is_live() {
         return DetailEventStatus::Live;
     }
-    let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+    let now_secs = crate::platform::timestamp::now_secs();
     let start_ts = event.start_timestamp();
     if start_ts == 0 {
         return DetailEventStatus::None;

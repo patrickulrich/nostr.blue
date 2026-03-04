@@ -7,7 +7,9 @@ use crate::stores::profiles::get_cached_profile;
 use crate::stores::topic_store::{TopicPost, VoteCounts};
 use crate::utils::format::format_relative_time_or;
 use dioxus::prelude::*;
+#[cfg(feature = "web")]
 use dioxus::web::WebEventExt;
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
 /// Reddit-style topic post card
@@ -77,10 +79,13 @@ pub fn TopicPostCard(
                         let activate = matches!(evt.key(), Key::Enter);
                         if !activate { return; }
                         // Don't navigate if key event originated from/inside an anchor element
-                        if let Some(target) = evt.data.as_web_event().target() {
-                            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
-                                    return;
+                        #[cfg(feature = "web")]
+                        {
+                            if let Some(target) = evt.data.as_web_event().target() {
+                                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                                    if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
+                                        return;
+                                    }
                                 }
                             }
                         }
@@ -90,12 +95,15 @@ pub fn TopicPostCard(
                             post_id: post_id_for_key.clone(),
                         });
                     },
-                    onclick: move |evt| {
+                    onclick: move |_evt| {
                         // Don't navigate if click originated from/inside an interactive element
-                        if let Some(target) = evt.data.as_web_event().target() {
-                            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                if element.closest("a, button, input, textarea, select, summary, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
-                                    return;
+                        #[cfg(feature = "web")]
+                        {
+                            if let Some(target) = _evt.data.as_web_event().target() {
+                                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                                    if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
+                                        return;
+                                    }
                                 }
                             }
                         }
