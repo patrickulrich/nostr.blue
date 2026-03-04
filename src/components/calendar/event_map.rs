@@ -265,6 +265,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
             },
         ),
     );
+    #[cfg(feature = "web")]
     let events_for_geocode = props.events.clone();
     let events_count = props.events.len();
     use_effect(move || {
@@ -330,13 +331,11 @@ pub fn EventMap(props: EventMapProps) -> Element {
         }
     });
     use_effect({
-        let _events_for_geocode = events_for_geocode.clone();
         move || {
             #[cfg(not(feature = "web"))]
             {
                 let key = events_key.read().clone();
                 processed_event_ids.set(key);
-                return;
             }
             #[cfg(feature = "web")]
             {
@@ -349,13 +348,14 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     geocoded_events.set(Vec::new());
                     return;
                 }
+                // Increment generation counter to invalidate any pending tasks
+                // Must happen BEFORE checking loading_geo to ensure concurrent runs see new gen
+                geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
+                let this_gen = *geocode_gen.read();
                 if *loading_geo.read() {
                     return;
                 }
                 loading_geo.set(true);
-                // Increment generation counter to invalidate any pending tasks
-                geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
-                let this_gen = *geocode_gen.read();
                 let key_to_store = key.clone();
                 let events_to_process = events_for_geocode.clone();
                 spawn(async move {

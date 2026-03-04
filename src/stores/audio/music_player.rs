@@ -618,15 +618,20 @@ pub fn previous_track() {
 /// Set volume (0.0 - 1.0)
 pub fn set_volume(volume: f64) {
     let clamped = volume.clamp(0.0, 1.0);
-    let mut state = MUSIC_PLAYER.write();
-    state.volume = clamped;
+    {
+        let mut state = MUSIC_PLAYER.write();
+        state.volume = clamped;
+    }
     storage::set(STORAGE_KEY_VOLUME, &clamped).ok();
 }
 /// Toggle mute
 pub fn toggle_mute() {
-    let mut state = MUSIC_PLAYER.write();
-    state.is_muted = !state.is_muted;
-    storage::set(STORAGE_KEY_MUTED, &state.is_muted).ok();
+    let is_muted = {
+        let mut state = MUSIC_PLAYER.write();
+        state.is_muted = !state.is_muted;
+        state.is_muted
+    };
+    storage::set(STORAGE_KEY_MUTED, &is_muted).ok();
 }
 /// Set current time
 #[allow(dead_code)]

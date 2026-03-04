@@ -390,7 +390,6 @@ pub fn PersistentMusicPlayer() -> Element {
         // Suppress all DOM onerror on mobile — eval handles its own errors.
         #[cfg(not(feature = "web"))]
         {
-            return;
         }
         #[cfg(feature = "web")]
         {

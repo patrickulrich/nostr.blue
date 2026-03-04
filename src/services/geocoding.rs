@@ -64,15 +64,11 @@ struct PhotonResponse {
     features: Vec<PhotonFeature>,
 }
 #[cfg(feature = "web")]
-#[cfg(feature = "web")]
-#[cfg(feature = "web")]
-#[cfg(feature = "web")]
 #[derive(Debug, Deserialize)]
 struct PhotonFeature {
     geometry: PhotonGeometry,
     properties: PhotonProperties,
 }
-#[cfg(feature = "web")]
 #[cfg(feature = "web")]
 #[derive(Debug, Deserialize)]
 struct PhotonGeometry {
@@ -162,17 +158,19 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
         }
     }
     let result = query_photon(&normalized).await;
-    let location = result.as_ref().ok().cloned().flatten();
-    cache
-        .entries
-        .insert(
-            normalized,
-            CachedGeoResult {
-                location: location.clone(),
-                cached_at: now_secs(),
-            },
-        );
-    save_cache(&cache);
+    // Only cache successful responses (including Ok(None) real misses)
+    if let Ok(ref location) = result {
+        cache
+            .entries
+            .insert(
+                normalized,
+                CachedGeoResult {
+                    location: location.clone(),
+                    cached_at: now_secs(),
+                },
+            );
+        save_cache(&cache);
+    }
     result
 }
 
@@ -233,14 +231,16 @@ fn feature_to_location(feature: &PhotonFeature) -> GeoLocation {
             name_parts.push(country.clone());
         }
     }
+    let lat = coords.get(1).copied().unwrap_or(0.0);
+    let lon = coords.first().copied().unwrap_or(0.0);
     let display_name = if name_parts.is_empty() {
-        format!("{:.4}, {:.4}", coords[1], coords[0])
+        format!("{:.4}, {:.4}", lat, lon)
     } else {
         name_parts.join(", ")
     };
     GeoLocation {
-        lat: coords[1],
-        lon: coords[0],
+        lat,
+        lon,
         display_name,
         city: props.city.clone(),
         state: props.state.clone(),
@@ -396,7 +396,7 @@ pub async fn geocode_suggestions(_query: &str, _limit: u8) -> Result<Vec<GeoLoca
 }
 
 /// Decode a geohash to coordinates (center point)
-#[cfg(feature = "web")]
+#[allow(dead_code)]
 pub fn geohash_to_coords(geohash: &str) -> Option<(f64, f64)> {
     if geohash.is_empty() {
         return None;
@@ -432,13 +432,6 @@ pub fn geohash_to_coords(geohash: &str) -> Option<(f64, f64)> {
     let lat = (lat_range.0 + lat_range.1) / 2.0;
     let lon = (lon_range.0 + lon_range.1) / 2.0;
     Some((lat, lon))
-}
-
-/// Stub implementation for non-web platforms
-#[cfg(not(feature = "web"))]
-#[allow(dead_code)]
-pub fn geohash_to_coords(_geohash: &str) -> Option<(f64, f64)> {
-    None
 }
 
 #[cfg(test)]

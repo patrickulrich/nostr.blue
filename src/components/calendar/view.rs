@@ -532,7 +532,7 @@ fn position_day_events(events: &[UnifiedEvent], _date: &str) -> Vec<PositionedEv
             {
                 use chrono::{Local, TimeZone, Timelike};
                 // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
-                let ts_clamped = (ts as u64).min(253_402_300_799) as i64;
+                let ts_clamped = ts.min(253_402_300_799) as i64;
                 let dt = match Local.timestamp_opt(ts_clamped, 0).single() {
                     Some(dt) => dt,
                     None => {
@@ -789,7 +789,7 @@ fn format_event_time(event: &UnifiedEvent) -> String {
     {
         use chrono::{Local, TimeZone, Timelike};
         // Clamp timestamp to max safe value (9999-12-31) before i64 cast to prevent overflow
-        let ts_clamped = (ts as u64).min(253_402_300_799) as i64;
+        let ts_clamped = ts.min(253_402_300_799) as i64;
         let dt = match Local.timestamp_opt(ts_clamped, 0).single() {
             Some(dt) => dt,
             None => {

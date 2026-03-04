@@ -174,6 +174,7 @@ generate_icons() {
     local tmp_dir=""
     if [ "$tool" = "cwebp" ]; then
         tmp_dir=$(mktemp -d "/tmp/ic_launcher_XXXXXX")
+        # shellcheck disable=SC2064
         trap "rm -rf \"$tmp_dir\"" EXIT
     fi
 

@@ -55,6 +55,10 @@ pub fn download_file(filename: &str, content: &[u8], mime_type: &str) -> Result<
     let vm = get_jvm().ok_or("Failed to get JavaVM")?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
 
+    // SAFETY: The pointer returned by ndk_context::android_context().context() is valid
+    // for the entire lifetime of the Android application. This JObject is used immediately
+    // to call Java methods and is not stored beyond this function's scope, so there are
+    // no thread-safety or ownership issues.
     let ctx = ndk_context::android_context();
     let context = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
 
