@@ -2,9 +2,9 @@ use crate::stores::blossom_store;
 use crate::utils::format::display_server_url;
 use dioxus::events::FormData;
 use dioxus::prelude::*;
-#[cfg(all(feature = "web", not(feature = "native")))]
+#[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
-#[cfg(all(feature = "web", not(feature = "native")))]
+#[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
 #[derive(Props, Clone, PartialEq)]
 pub struct MediaUploaderProps {
@@ -212,7 +212,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     }
 }
 /// Helper function to read file as bytes with specific input ID
-#[cfg(all(feature = "web", not(feature = "native")))]
+#[cfg(feature = "web")]
 async fn read_file_as_bytes(
     _file_name: &str,
     input_id: &str,
@@ -270,7 +270,7 @@ fn format_file_size(bytes: usize) -> String {
     }
 }
 /// Helper function to clear the file input element value
-#[cfg(all(feature = "web", not(feature = "native")))]
+#[cfg(feature = "web")]
 fn clear_file_input(input_id: &str) {
     use web_sys::window;
     if let Some(window) = window() {

@@ -504,7 +504,13 @@ pub fn load_local_relays() -> Vec<String> {
 }
 #[cfg(feature = "mobile")]
 pub fn load_local_relays() -> Vec<String> {
-    storage::get::<Vec<String>>(LOCAL_RELAYS_KEY).unwrap_or_default()
+    match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
+        Ok(relays) => relays,
+        Err(e) => {
+            log::error!("Failed to load local relays from storage: {}, key: {}", e, LOCAL_RELAYS_KEY);
+            Vec::new()
+        }
+    }
 }
 #[cfg(all(feature = "native", not(feature = "mobile")))]
 pub fn load_local_relays() -> Vec<String> {

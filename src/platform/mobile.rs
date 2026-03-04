@@ -3,15 +3,16 @@
 use base64::Engine;
 use std::sync::OnceLock;
 
-static JNI_VM: OnceLock<jni::JavaVM> = OnceLock::new();
+static JNI_VM: OnceLock<Result<jni::JavaVM, jni::errors::Error>> = OnceLock::new();
 
 fn get_jvm() -> Option<&'static jni::JavaVM> {
     JNI_VM
         .get_or_init(|| unsafe {
             let ctx = ndk_context::android_context();
-            jni::JavaVM::from_raw(ctx.vm().cast() as *mut _).expect("Failed to get JavaVM")
+            jni::JavaVM::from_raw(ctx.vm().cast() as *mut _)
         })
-        .into()
+        .as_ref()
+        .ok()
 }
 
 fn find_app_class<'a>(

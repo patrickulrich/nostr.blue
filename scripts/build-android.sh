@@ -49,6 +49,12 @@ else
     echo "No stale jniLibs to clean"
 fi
 
+# 1a. Pre-copy Android resources (before dx build runs Gradle)
+echo ""
+echo "--- Step 1a: Pre-copy Android resources ---"
+mkdir -p "$PROJECT_ROOT/target/dx/nostrblue/release/android/app/app/src/main/res/xml"
+cp "$PROJECT_ROOT/android/res/xml/file_paths.xml" "$PROJECT_ROOT/target/dx/nostrblue/release/android/app/app/src/main/res/xml/" 2>/dev/null && echo "Pre-copied file_paths.xml" || echo "Directory not yet created (will be handled post-build)"
+
 # 2. Build (generates Android project + compiles Rust + runs Gradle)
 echo ""
 echo "--- Step 2: dx build (ARM64) ---"
@@ -131,6 +137,18 @@ if [ -f "$STRINGS_SRC" ]; then
     echo "Copied strings.xml (app_name = nostr.blue)"
 else
     echo "WARNING: $STRINGS_SRC not found, skipping app name fix"
+fi
+
+# 4b. Copy file_paths.xml for FileProvider
+echo ""
+echo "--- Step 4b: Copy file_paths.xml ---"
+FILE_PATHS_SRC="$PROJECT_ROOT/android/res/xml/file_paths.xml"
+FILE_PATHS_DST="$DX_ANDROID/app/src/main/res/xml/file_paths.xml"
+if [ -f "$FILE_PATHS_SRC" ]; then
+    cp "$FILE_PATHS_SRC" "$FILE_PATHS_DST"
+    echo "Copied file_paths.xml (FileProvider paths)"
+else
+    echo "WARNING: $FILE_PATHS_SRC not found, skipping file_paths.xml"
 fi
 
 # 5. Fix app icon

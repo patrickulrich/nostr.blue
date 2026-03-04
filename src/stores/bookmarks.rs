@@ -191,7 +191,7 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     Ok(())
 }
 /// Publish bookmarks with retry and exponential backoff (native - requires Send)
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown", feature = "web")))]
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,
@@ -244,7 +244,7 @@ fn publish_with_retry(
 }
 
 /// Publish bookmarks with retry and exponential backoff (WASM - no Send bound)
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web"))]
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,

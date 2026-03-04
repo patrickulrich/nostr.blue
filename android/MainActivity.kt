@@ -61,12 +61,19 @@ class MainActivity : WryActivity() {
                     val mimeType = contentResolver.getType(uri)
                     val inputStream = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
-                        val bytes = inputStream.readBytes()
-                        inputStream.close()
-                        pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        pendingFileMimeType = mimeType ?: "application/octet-stream"
-                        filePickError = null
-                        Log.d(TAG, "File picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                        inputStream.use { stream ->
+                            val available = stream.available()
+                            val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
+                            if (available > MAX_UPLOAD_BYTES) {
+                                filePickError = "File too large (max 50MB)"
+                                return@synchronized
+                            }
+                            val bytes = stream.readBytes()
+                            pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                            pendingFileMimeType = mimeType ?: "application/octet-stream"
+                            filePickError = null
+                            Log.d(TAG, "File picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                        }
                     } else {
                         filePickError = "Could not open file"
                     }
@@ -93,12 +100,19 @@ class MainActivity : WryActivity() {
                     val mimeType = contentResolver.getType(uri)
                     val inputStream = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
-                        val bytes = inputStream.readBytes()
-                        inputStream.close()
-                        pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        pendingFileMimeType = mimeType ?: "image/*"
-                        filePickError = null
-                        Log.d(TAG, "Image picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                        inputStream.use { stream ->
+                            val available = stream.available()
+                            val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
+                            if (available > MAX_UPLOAD_BYTES) {
+                                filePickError = "File too large (max 50MB)"
+                                return@synchronized
+                            }
+                            val bytes = stream.readBytes()
+                            pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                            pendingFileMimeType = mimeType ?: "image/*"
+                            filePickError = null
+                            Log.d(TAG, "Image picked successfully: ${bytes.size} bytes, mime=$mimeType")
+                        }
                     } else {
                         filePickError = "Could not open image"
                     }
