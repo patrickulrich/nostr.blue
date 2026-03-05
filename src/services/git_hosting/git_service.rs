@@ -6,6 +6,7 @@
 //! This service wraps GitWorkerManager and provides Repository-aware methods
 //! that handle clone URL selection.
 #![allow(dead_code)]
+use crate::platform::http::http_client;
 use crate::services::git_types::{CommitEntry, FileEntry};
 #[cfg(feature = "web")]
 use crate::services::git_worker::GitWorkerManager;
@@ -272,10 +273,9 @@ pub async fn compare_refs_github(
         "https://api.github.com/repos/{}/{}/compare/{}...{}",
         owner, repo_name, encoded_base, encoded_head
     );
-    let resp = reqwest::Client::new()
+    let resp = http_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3.diff")
-        .header("User-Agent", "nostr-blue")
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;

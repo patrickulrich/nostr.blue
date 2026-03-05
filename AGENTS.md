@@ -38,9 +38,11 @@ npm run build   # Production build
 
 ## Project Overview
 
-**nostr.blue** is a Nostr social client built with Rust + Dioxus, compiled to WebAssembly. Features include feeds, DMs, communities, zaps, Cashu ecash wallet, articles, wikis, podcasts, and more.
+**nostr.blue** is a Nostr social client built with Rust + Dioxus, compiled to WebAssembly for browsers, Android via WebView, and Linux Desktop. Features include feeds, DMs, communities, zaps, Cashu ecash wallet, articles, wikis, podcasts, and more.
 
 **Stack**: Dioxus 0.7 (reactive UI), rust-nostr SDK, CDK (Cashu), TailwindCSS 4
+
+**Platforms**: Web (WASM), Android (WebView), Linux Desktop
 
 ## Architecture
 

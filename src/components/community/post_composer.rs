@@ -63,7 +63,8 @@ pub fn CommunityPostComposer(
         });
     };
     let on_close_backdrop = on_close;
-    let confirm_close = move |handler: EventHandler<()>| {
+    #[allow(unused_mut)]
+    let mut confirm_close = move |handler: EventHandler<()>| {
         let has_content = !content.read().trim().is_empty();
         if has_content {
             let confirmed = {
@@ -79,6 +80,8 @@ pub fn CommunityPostComposer(
                 {
                     // TODO: Implement crate::platform::dialog::confirm_discard for native
                     // For now, require manual content deletion to prevent accidental data loss
+                    // Show user-visible feedback
+                    error.set(Some("Discard not supported on this platform — please delete content manually".to_string()));
                     false
                 }
             };

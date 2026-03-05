@@ -83,6 +83,15 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                                 .permanent(false),
                                         );
                                     }
+                                    #[cfg(not(feature = "web"))]
+                                    {
+                                        toast.error(
+                                            "Print not supported on this platform".to_string(),
+                                            ToastOptions::new()
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                    }
                                 },
                                 PrinterIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                                 div { class: "flex-1",
@@ -98,9 +107,11 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
 
                     // Download as Markdown option
                     {
+                        #[allow(unused_variables)]
                         let title_md = title.clone();
                         #[allow(unused_variables)]
                         let identifier_md = identifier.clone();
+                        #[allow(unused_variables)]
                         let content_md = content.clone();
                         #[allow(unused_variables)]
                         let toast_api = toast;
@@ -126,7 +137,14 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                         );
                                     }
                                     #[cfg(not(feature = "web"))]
-                                    { let _ = (&title_md, &content_md); }
+                                    {
+                                        toast_api.error(
+                                            "Download not supported on this platform".to_string(),
+                                            ToastOptions::new()
+                                                .duration(Duration::from_secs(3))
+                                                .permanent(false),
+                                        );
+                                    }
                                 },
                                 FileTextIcon { class: "w-5 h-5 text-muted-foreground".to_string() }
                                 div { class: "flex-1",

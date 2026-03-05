@@ -94,15 +94,24 @@ window.hlsManager = window.hlsManager || {
         // Generate unique attach token to prevent race conditions
         // Must be set AFTER cleanup to preserve attach lifecycle
         const attachId = Symbol();
-        this.activeAttachMap.set(elementId, attachId);
 
         // Use hls.js for browsers without native HLS support
-        await this.loadHls();
+        try {
+            await this.loadHls();
+        } catch (e) {
+            // Remove tentative token on load failure to avoid orphaning
+            this.activeAttachMap.delete(elementId);
+            console.error('[HLS Manager] Failed to load HLS:', e);
+            throw e;
+        }
 
         // Check if this attach is still valid after await
         if (this.activeAttachMap.get(elementId) !== attachId) {
             return { type: 'cancelled', url: streamUrl };
         }
+
+        // Token is valid, now commit it to the map
+        this.activeAttachMap.set(elementId, attachId);
 
         if (!Hls.isSupported()) {
             throw new Error('HLS not supported in this browser');

@@ -7,6 +7,7 @@
 //! - Explicit close() for resource cleanup
 //! - Subscribe sent in onopen callback (no timing races)
 #![allow(dead_code)]
+use crate::platform::http::http_client;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "web")]
@@ -679,7 +680,7 @@ pub async fn poll_proof_states(
     }
     let endpoint = format!("{}/v1/checkstate", mint_url.trim_end_matches('/'));
     let request_body = serde_json::json!({ "Ys" : y_values });
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(&endpoint)
         .header("Content-Type", "application/json")
         .body(request_body.to_string())

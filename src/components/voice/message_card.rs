@@ -245,7 +245,8 @@ pub fn VoiceMessageCard(
             },
         ),
     );
-    let toggle_play = move |_| {
+    let toggle_play = move |e: MouseEvent| {
+        e.stop_propagation();
         voice_messages_store::toggle_voice_message(event_id);
     };
     let audio_id_for_effect = audio_id.clone();
@@ -330,7 +331,8 @@ pub fn VoiceMessageCard(
         current_time.set(0.0);
     };
     let event_id_for_repost = event_id_str.clone();
-    let handle_repost = move |_| {
+    let handle_repost = move |e: MouseEvent| {
+        e.stop_propagation();
         let event_id_copy = event_id_for_repost.clone();
         is_reposting.set(true);
         spawn(async move {
@@ -502,7 +504,10 @@ pub fn VoiceMessageCard(
             div { class: "flex items-center justify-between text-muted-foreground",
                 button {
                     class: "flex items-center gap-1 hover:text-blue-500 transition group",
-                    onclick: move |_| show_reply_modal.set(true),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_reply_modal.set(true);
+                    },
                     MessageCircleIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
                     if *reply_count.read() > 0 {
                         span { class: "text-sm", "{reply_count.read()}" }
@@ -525,7 +530,10 @@ pub fn VoiceMessageCard(
                 }
                 button {
                     class: if *is_zapped.read() { "flex items-center gap-1 text-yellow-500 transition group" } else { "flex items-center gap-1 hover:text-yellow-500 transition group" },
-                    onclick: move |_| show_zap_modal.set(true),
+                    onclick: move |e: MouseEvent| {
+                        e.stop_propagation();
+                        show_zap_modal.set(true);
+                    },
                     ZapIcon { class: "w-4 h-4 group-hover:scale-110 transition" }
                     if *zap_amount_sats.read() > 0 {
                         span { class: "text-sm", "{zap_amount_sats.read()}" }

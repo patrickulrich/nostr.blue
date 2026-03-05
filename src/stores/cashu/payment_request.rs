@@ -6,6 +6,7 @@
 //! Uses CDK's native PaymentRequest types for NUT-18 compliance.
 #![allow(dead_code)]
 
+use crate::platform::http::http_client;
 /// Error message returned when a payment request is cancelled by the user.
 /// This is NOT an error condition - it indicates a clean shutdown.
 pub const PAYMENT_CANCELLED_MSG: &str = "Payment request cancelled";
@@ -290,8 +291,7 @@ pub async fn pay_payment_request(
             }
             TransportType::HttpPost => {
                 log::info!("Sending payment via HTTP transport to {}", transport.target);
-                let http_client = reqwest::Client::new();
-                let response = http_client
+                let response = http_client()
                     .post(&transport.target)
                     .json(&payload)
                     .send()

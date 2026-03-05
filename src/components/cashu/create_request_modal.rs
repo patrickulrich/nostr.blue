@@ -136,11 +136,19 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
                 }
                 #[cfg(not(feature = "web"))]
                 {
-                    let _ = req_clone;
-                    log::warn!("Clipboard not available on this platform");
-                    copy_error.set(Some("Copy not supported".to_string()));
-                    crate::platform::timer::sleep_ms(3000).await;
-                    copy_error.set(None);
+                    match crate::platform::clipboard::copy_to_clipboard(&req_clone).await {
+                        Ok(_) => {
+                            copied.set(true);
+                            crate::platform::timer::sleep_ms(2000).await;
+                            copied.set(false);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to copy to clipboard: {}", e);
+                            copy_error.set(Some("Copy failed".to_string()));
+                            crate::platform::timer::sleep_ms(3000).await;
+                            copy_error.set(None);
+                        }
+                    }
                 }
             });
         }

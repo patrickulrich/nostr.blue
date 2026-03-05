@@ -1,3 +1,4 @@
+use crate::platform::http::http_client;
 use regex::Regex;
 /// Base URL for locally-served NIPs documentation
 const NIPS_BASE: &str = "/docs/nips";
@@ -36,7 +37,8 @@ pub struct EventKindInfo {
 /// Fetch the README.md from the NIPs documentation
 pub async fn fetch_nips_readme() -> Result<String, String> {
     let url = format!("{}/README.md", NIPS_BASE);
-    let response = reqwest::get(&url)
+    let response = http_client().get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch NIPs README: {}", e))?;
     if !response.status().is_success() {
@@ -47,7 +49,8 @@ pub async fn fetch_nips_readme() -> Result<String, String> {
 /// Fetch the content of a specific NIP by its number
 pub async fn fetch_nip_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", NIPS_BASE, number);
-    let response = reqwest::get(&url)
+    let response = http_client().get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch NIP-{}: {}", number, e))?;
     if !response.status().is_success() {
@@ -162,7 +165,8 @@ pub struct DocSpec {
 /// Fetch the NUTs README
 pub async fn fetch_nuts_readme() -> Result<String, String> {
     let url = format!("{}/README.md", NUTS_BASE);
-    let response = reqwest::get(&url)
+    let response = http_client().get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch NUTs README: {}", e))?;
     if !response.status().is_success() {
@@ -172,7 +176,8 @@ pub async fn fetch_nuts_readme() -> Result<String, String> {
 }
 /// Fetch the Blossom README
 pub async fn fetch_buds_readme() -> Result<String, String> {
-    let response = reqwest::get(BUDS_README)
+    let response = http_client().get(BUDS_README)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch BUDs README: {}", e))?;
     if !response.status().is_success() {
@@ -183,7 +188,8 @@ pub async fn fetch_buds_readme() -> Result<String, String> {
 /// Fetch a specific NUT by number
 pub async fn fetch_nut_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", NUTS_BASE, number);
-    let response = reqwest::get(&url)
+    let response = http_client().get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch NUT-{}: {}", number, e))?;
     if !response.status().is_success() {
@@ -194,7 +200,8 @@ pub async fn fetch_nut_content(number: &str) -> Result<String, String> {
 /// Fetch a specific BUD by number
 pub async fn fetch_bud_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", BUDS_BASE, number);
-    let response = reqwest::get(&url)
+    let response = http_client().get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch BUD-{}: {}", number, e))?;
     if !response.status().is_success() {
@@ -205,7 +212,8 @@ pub async fn fetch_bud_content(number: &str) -> Result<String, String> {
 /// Fetch a specific NKBIP by number
 pub async fn fetch_nkbip_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", NKBIPS_BASE, number);
-    let response = reqwest::get(&url)
+    let response = http_client().get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch NKBIP-{}: {}", number, e))?;
     if !response.status().is_success() {
@@ -215,7 +223,8 @@ pub async fn fetch_nkbip_content(number: &str) -> Result<String, String> {
 }
 /// Fetch the market specification document
 pub async fn fetch_market_spec() -> Result<String, String> {
-    let response = reqwest::get(MARKET_SPEC_PATH)
+    let response = http_client().get(MARKET_SPEC_PATH)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch market spec: {}", e))?;
     if !response.status().is_success() {

@@ -59,10 +59,37 @@ fn is_binary_extension(filename: &str) -> bool {
     let ext = extract_extension(filename).to_lowercase();
     matches!(
         ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "pdf" | "doc" | "docx" | "xls"
-        | "xlsx" | "zip" | "tar" | "gz" | "rar" | "7z" | "exe" | "dll" | "so" | "dylib"
-        | "mp3" | "mp4" | "wav" | "avi" | "mov" | "woff" | "woff2" | "ttf" | "otf"
-        | "eot" | "wasm"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "ico"
+            | "pdf"
+            | "doc"
+            | "docx"
+            | "xls"
+            | "xlsx"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "rar"
+            | "7z"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "mp3"
+            | "mp4"
+            | "wav"
+            | "avi"
+            | "mov"
+            | "woff"
+            | "woff2"
+            | "ttf"
+            | "otf"
+            | "eot"
+            | "wasm"
     )
 }
 /// File viewer loading skeleton
@@ -93,8 +120,7 @@ pub fn CodeFileViewerSkeleton() -> Element {
 pub fn CodeFileViewer(
     content: String,
     filename: String,
-    #[props(default = "".to_string())]
-    git_ref: String,
+    #[props(default = "".to_string())] git_ref: String,
 ) -> Element {
     let mut copied = use_signal(|| false);
     let language = detect_language(&filename);
@@ -248,11 +274,7 @@ pub fn CodeFileViewer(
 }
 /// Compact code viewer for inline display (e.g., README preview)
 #[component]
-pub fn CodeFileViewerCompact(
-    content: String,
-    #[props(default = 10)]
-    max_lines: usize,
-) -> Element {
+pub fn CodeFileViewerCompact(content: String, #[props(default = 10)] max_lines: usize) -> Element {
     let all_lines: Vec<&str> = content.lines().collect();
     let total_lines = all_lines.len();
     let truncated = total_lines > max_lines;
@@ -279,7 +301,9 @@ pub fn CodeFileViewerCompact(
 pub fn RawFileButton(content: String, filename: String) -> Element {
     rsx! {
         button {
-            class: "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition",
+            class: if cfg!(feature = "web") { "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition" } else { "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted/50 text-muted-foreground rounded transition cursor-not-allowed opacity-50" },
+            disabled: !cfg!(feature = "web"),
+            title: if cfg!(feature = "web") { "" } else { "Raw download not supported on this platform" },
             onclick: {
                 let content = content.clone();
                 let filename = filename.clone();

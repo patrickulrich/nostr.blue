@@ -5,6 +5,7 @@
 //! - Split payments to multiple recipients
 //! - Support for both node pubkeys and Lightning Addresses
 use crate::components::icons;
+use crate::platform::http::http_client;
 use crate::services::lnurl;
 use crate::stores::nwc_store;
 use crate::utils::podcast::{ValueBlock, ValueRecipient};
@@ -361,7 +362,7 @@ async fn send_v4v_payment(
                             info.callback,
                             amount_msats,
                         );
-                        match reqwest::get(&callback_url).await {
+                        match http_client().get(&callback_url).send().await {
                             Ok(response) => {
                                 if let Ok(invoice_response) = response
                                     .json::<serde_json::Value>()

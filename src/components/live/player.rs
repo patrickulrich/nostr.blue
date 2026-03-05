@@ -238,7 +238,12 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let stream_url_for_validation = stream_url.clone();
     let url_valid = validate_stream_url(&stream_url_for_validation);
     let stream_url_for_id = stream_url.clone();
-    let video_id = format!("videojs-player-{}", simple_hash(&stream_url_for_id));
+    let instance_id = use_signal(|| {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(1);
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    });
+    let video_id = format!("videojs-player-{}-{}", simple_hash(&stream_url_for_id), instance_id());
     let mut error = use_signal(|| None::<String>);
     let mut loading = use_signal(|| true);
     let mut mounted = use_signal(|| false);
@@ -286,7 +291,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     }
                 });
             }
-            #[cfg(not(feature = "web"))]
+            #[cfg(feature = "native")]
             {
                 let stream_url = _stream_url;
                 spawn(async move {
@@ -355,7 +360,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     // Cleanup HLS on unmount for native platforms.
     // Can't use struct Drop (document::eval becomes NoOp there).
     // use_drop runs while the Dioxus runtime is still active.
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     {
         let video_id_for_cleanup = video_id.clone();
         use_drop(move || {
@@ -397,7 +402,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 }
             });
         }
-        #[cfg(not(feature = "web"))]
+        #[cfg(feature = "native")]
         {
             let video_id = _video_id;
             let stream_url = _stream_url;
