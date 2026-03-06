@@ -74,7 +74,17 @@ fn settings_storage_key() -> String {
 }
 
 fn load_code_settings() -> CodeSettingsData {
-    storage::get::<CodeSettingsData>(&settings_storage_key()).unwrap_or_default()
+    match storage::get::<CodeSettingsData>(&settings_storage_key()) {
+        Ok(data) => data,
+        Err(e) => {
+            log::warn!(
+                "Failed to load code settings from {}: {}",
+                settings_storage_key(),
+                e
+            );
+            CodeSettingsData::default()
+        }
+    }
 }
 
 fn save_code_settings(settings: &CodeSettingsData) -> Result<(), String> {

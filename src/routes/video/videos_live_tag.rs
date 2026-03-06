@@ -34,7 +34,6 @@ pub fn VideosLiveTag(tag: String) -> Element {
                             // Verify generation before updating state
                             if *fetch_gen.read() != gen {
                                 log::debug!("Stale fetch detected, discarding results");
-                                loading.set(false);
                                 return;
                             }
                             if let Some(last_event) = events.last() {
@@ -48,7 +47,6 @@ pub fn VideosLiveTag(tag: String) -> Element {
                             // Verify generation before updating state
                             if *fetch_gen.read() != gen {
                                 log::debug!("Stale fetch detected, discarding results");
-                                loading.set(false);
                                 return;
                             }
                             error.set(Some(e));
@@ -93,57 +91,26 @@ pub fn VideosLiveTag(tag: String) -> Element {
                             let Some(document) = window.document() else { return; };
                             let Some(body) = document.body() else { return; };
                             let scroll_height = body.scroll_height() as f64;
-                            if scroll_y + inner_height >= scroll_height - 1000.0 {
+                                if scroll_y + inner_height >= scroll_height - 1000.0 {
                                 if *loading.read() || !*has_more.read() {
                                     return;
                                 }
                                 let until = *oldest_timestamp.read();
                                 let current_tag = tag_for_callback.clone();
                                 loading.set(true);
-                                // Increment generation to invalidate any pending fetches
                                 fetch_gen.with_mut(|g| *g = g.wrapping_add(1));
                                 let this_gen = *fetch_gen.read();
                                 spawn(async move {
-                                    match load_streams_by_tag(&current_tag, until).await {
-                                        Ok((new_events, hit_limit)) => {
-                                            // Verify generation before updating state
-                                            if *fetch_gen.read() != this_gen {
-                                                log::debug!("Stale fetch detected, discarding results");
-                                                loading.set(false);
-                                                return;
-                                            }
-                                            let existing_ids: std::collections::HashSet<_> = {
-                                                let current = stream_events.read();
-                                                current.iter().map(|e| e.id).collect()
-                                            };
-                                            let unique_events: Vec<_> = new_events
-                                                .into_iter()
-                                                .filter(|e| !existing_ids.contains(&e.id))
-                                                .collect();
-                                            if unique_events.is_empty() {
-                                                has_more.set(false);
-                                                loading.set(false);
-                                                return;
-                                            }
-                                            if let Some(last_event) = unique_events.last() {
-                                                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
-                                            }
-                                            has_more.set(hit_limit);
-                                            // Use write() to extend in place instead of clone
-                                            stream_events.write().extend(unique_events);
-                                            loading.set(false);
-                                        }
-                                        Err(e) => {
-                                            // Verify generation before updating state
-                                            if *fetch_gen.read() != this_gen {
-                                                log::debug!("Stale fetch detected, discarding results");
-                                                loading.set(false);
-                                                return;
-                                            }
-                                            log::error!("Failed to load more streams: {}", e);
-                                            loading.set(false);
-                                        }
-                                    }
+                                    trigger_load_more_for_tag(
+                                        current_tag,
+                                        until,
+                                        this_gen,
+                                        &fetch_gen,
+                                        &mut loading,
+                                        &mut has_more,
+                                        &mut oldest_timestamp,
+                                        &mut stream_events,
+                                    ).await;
                                 });
                             }
                         }) as Box<dyn FnMut()>,
@@ -168,6 +135,10 @@ pub fn VideosLiveTag(tag: String) -> Element {
                 }
             }
         });
+    }
+    #[cfg(any(feature = "native", feature = "mobile"))]
+    {
+        log::debug!("VideosLiveTag: pagination available via scroll on web, native/mobile TBD");
     }
     rsx! {
         div { class: "min-h-screen bg-background",
@@ -235,6 +206,68 @@ pub fn VideosLiveTag(tag: String) -> Element {
         }
     }
 }
+
+#[allow(clippy::too_many_arguments)]
+async fn trigger_load_more_for_tag(
+    tag: String,
+    until: Option<u64>,
+    expected_gen: u32,
+    fetch_gen: &Signal<u32>,
+    loading: &mut Signal<bool>,
+    has_more: &mut Signal<bool>,
+    oldest_timestamp: &mut Signal<Option<u64>>,
+    stream_events: &mut Signal<Vec<Event>>,
+) {
+    match load_streams_by_tag(&tag, until).await {
+        Ok((new_events, hit_limit)) => {
+            if *fetch_gen.read() != expected_gen {
+                log::debug!("Stale fetch detected, discarding results");
+                return;
+            }
+            let existing_ids: std::collections::HashSet<_> = {
+                let current = stream_events.read();
+                current.iter().map(|e| e.id).collect()
+            };
+            let unique_events: Vec<_> = new_events
+                .into_iter()
+                .filter(|e| !existing_ids.contains(&e.id))
+                .collect();
+            if unique_events.is_empty() {
+                has_more.set(false);
+                loading.set(false);
+                return;
+            }
+            if let Some(last_event) = unique_events.last() {
+                oldest_timestamp.set(Some(last_event.created_at.as_secs()));
+            }
+            has_more.set(hit_limit);
+            stream_events.write().extend(unique_events);
+            loading.set(false);
+        }
+        Err(e) => {
+            if *fetch_gen.read() != expected_gen {
+                log::debug!("Stale fetch detected, discarding results");
+                return;
+            }
+            log::error!("Failed to load more streams: {}", e);
+            loading.set(false);
+        }
+    }
+}
+
+#[cfg(not(feature = "web"))]
+fn trigger_load_more_for_platform(
+    _tag: String,
+    _until: Option<u64>,
+    _fetch_gen: &Signal<u32>,
+    _loading: &Signal<bool>,
+    _has_more: &Signal<bool>,
+    _oldest_timestamp: &Signal<Option<u64>>,
+    _stream_events: &Signal<Vec<Event>>,
+) {
+    log::debug!("Pagination not yet implemented for this platform");
+}
+
 async fn load_streams_by_tag(
     tag: &str,
     until: Option<u64>,

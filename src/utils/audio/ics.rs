@@ -64,7 +64,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
         } => {
             vevent.push_str(&format!(
                 "DTSTART;TZID={}:{}\r\n",
-                timezone,
+                escape_ics_param(timezone),
                 format_local_timestamp(timezone, *ts)
             ));
         }
@@ -83,7 +83,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
             } => {
                 vevent.push_str(&format!(
                     "DTEND;TZID={}:{}\r\n",
-                    timezone,
+                    escape_ics_param(timezone),
                     format_local_timestamp(timezone, *ts)
                 ));
             }
@@ -156,6 +156,16 @@ fn escape_ics_text(text: &str) -> String {
         .replace('\r', "")
         .replace(',', "\\,")
         .replace(';', "\\;")
+}
+/// Escape ICS parameter value (removes/treats special chars that could break ICS structure)
+fn escape_ics_param(text: &str) -> String {
+    format!(
+        "\"{}\"",
+        text.replace('\\', "\\5c")
+            .replace(['\r', '\n'], "")
+            .replace(';', "\\;")
+            .replace(':', "\\:")
+    )
 }
 /// Decode geohash to approximate lat/lon (simple implementation)
 fn decode_geohash_approx(geohash: &str) -> Option<(f64, f64)> {
@@ -317,7 +327,9 @@ fn parse_ics_property(line: &str, event: &mut IcsEvent) {
             let parts: Vec<&str> = value.split(';').collect();
             if parts.len() == 2 {
                 if let (Ok(lat), Ok(lon)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
-                    event.geo = Some((lat, lon));
+                    if (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) {
+                        event.geo = Some((lat, lon));
+                    }
                 }
             }
         }

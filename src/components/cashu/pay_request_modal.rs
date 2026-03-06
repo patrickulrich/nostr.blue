@@ -34,15 +34,27 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
         spawn(async move {
             #[cfg(feature = "web")]
             {
-                if let Some(window) = web_sys::window() {
-                    let clipboard = window.navigator().clipboard();
-                    let promise = clipboard.read_text();
-                    if let Ok(text) = wasm_bindgen_futures::JsFuture::from(promise).await {
-                        if let Some(s) = text.as_string() {
-                            request_input.set(s);
-                        }
-                    }
-                }
+                let Some(window) = web_sys::window() else {
+                    pay_state.set(PayState::Error {
+                        message: "No window available".to_string(),
+                    });
+                    return;
+                };
+                let clipboard = window.navigator().clipboard();
+                let promise = clipboard.read_text();
+                let Ok(text) = wasm_bindgen_futures::JsFuture::from(promise).await else {
+                    pay_state.set(PayState::Error {
+                        message: "Failed to read clipboard".to_string(),
+                    });
+                    return;
+                };
+                let Some(s) = text.as_string() else {
+                    pay_state.set(PayState::Error {
+                        message: "No text in clipboard".to_string(),
+                    });
+                    return;
+                };
+                request_input.set(s);
             }
             #[cfg(not(feature = "web"))]
             {

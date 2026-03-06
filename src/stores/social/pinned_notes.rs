@@ -189,7 +189,8 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    if cfg!(not(feature = "web")) {
+    #[cfg(feature = "native")]
+    {
         publish_with_retry(pins, 0).await;
     }
     Ok(())

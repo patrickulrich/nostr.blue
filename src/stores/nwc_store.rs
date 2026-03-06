@@ -38,7 +38,9 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(0o600)) {
+            log::warn!(target: "nwc_store", "Failed to set permissions on {:?}: {}", path, e);
+        }
     }
     Ok(())
 }
@@ -56,14 +58,17 @@ fn delete_nwc_uri_secure() {
     let path = dir.join("nwc_uri.secure");
     let _ = fs::remove_file(path);
 }
+/// Save NWC URI to storage (web - "secure" is naming convention, maps to same localStorage key)
 #[cfg(feature = "web")]
 fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     crate::platform::storage::set_string(STORAGE_KEY_NWC_URI, uri)
 }
+/// Load NWC URI from storage (web - "secure" is naming convention, maps to same localStorage key)
 #[cfg(feature = "web")]
 fn load_nwc_uri_secure() -> Option<String> {
     crate::platform::storage::get_string(STORAGE_KEY_NWC_URI)
 }
+/// Delete NWC URI from storage (web - "secure" is naming convention, maps to same localStorage key)
 #[cfg(feature = "web")]
 fn delete_nwc_uri_secure() {
     let _ = crate::platform::storage::delete(STORAGE_KEY_NWC_URI);

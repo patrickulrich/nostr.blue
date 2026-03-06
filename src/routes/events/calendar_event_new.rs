@@ -1141,7 +1141,7 @@ fn format_ics_datetime(dt: &IcsDateTime) -> String {
         IcsDateTime::DateTime(ts)
         | IcsDateTime::DateTimeWithTz { timestamp: ts, .. } => {
             let (date_str, time_str) = timestamp_to_date_time(*ts);
-            format!("{} {}", date_str, time_str)
+            format!("{} {} UTC", date_str, time_str)
         }
     }
 }

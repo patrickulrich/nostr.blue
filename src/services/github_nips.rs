@@ -60,7 +60,7 @@ fn validate_hex_number(number: &str) -> Result<String, String> {
     if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(format!("Invalid NIP number: must be hex characters, got '{}'", trimmed));
     }
-    Ok(trimmed.to_string())
+    Ok(trimmed.to_ascii_uppercase())
 }
 
 #[cfg(feature = "web")]

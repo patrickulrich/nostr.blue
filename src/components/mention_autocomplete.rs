@@ -300,6 +300,10 @@ fn detect_mention(
             });
             task_signal.set(Some(new_task));
         } else {
+            if let Some(task) = state.relay_search_task.read().as_ref() {
+                task.cancel();
+            }
+            state.relay_search_task.write().take();
             state.is_searching.set(false);
         }
     } else {

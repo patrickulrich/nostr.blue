@@ -84,12 +84,12 @@ impl Debouncer {
     pub fn cancel(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
-    /// Flush any pending debounced call immediately
+    /// Cancel any pending debounced call (web: clears timeout, native: bumps generation)
     #[cfg(feature = "web")]
     pub fn flush(&self) {
         *self.timeout.borrow_mut() = None;
     }
-    /// Flush any pending debounced call immediately
+    /// Cancel any pending debounced call (web: clears timeout, native: bumps generation)
     #[cfg(not(feature = "web"))]
     pub fn flush(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
@@ -217,6 +217,7 @@ mod tests {
         assert_eq!(serializer.debouncer.delay_ms, 500);
     }
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    #[wasm_bindgen_test]
     #[test]
     fn test_pending_data_storage() {
         use std::sync::{Arc, Mutex};
@@ -233,6 +234,7 @@ mod tests {
         assert!(serializer.pending_data.borrow().is_some());
     }
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    #[wasm_bindgen_test]
     #[test]
     fn test_cancel() {
         let serializer = TimedSerializer::<String>::new();

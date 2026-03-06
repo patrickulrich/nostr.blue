@@ -153,7 +153,7 @@ pub async fn bookmark_event(event_id: String) -> Result<(), String> {
     }
     bookmarks.push(event_id);
     *BOOKMARKED_EVENTS.peek().data().write() = bookmarks.clone();
-    let generation = BOOKMARK_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let generation = BOOKMARK_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst).wrapping_add(1);
     #[cfg(feature = "web")]
     {
         BOOKMARK_PUBLISH_TIMEOUT
@@ -184,7 +184,7 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     }
     bookmarks.retain(|id| id != &event_id);
     *BOOKMARKED_EVENTS.peek().data().write() = bookmarks.clone();
-    let generation = BOOKMARK_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let generation = BOOKMARK_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst).wrapping_add(1);
     #[cfg(feature = "web")]
     {
         BOOKMARK_PUBLISH_TIMEOUT
@@ -376,7 +376,7 @@ pub fn rollback_bookmarks() {
 #[allow(dead_code)]
 pub async fn retry_bookmark_publish() {
     let current_bookmarks = BOOKMARKED_EVENTS.peek().data().peek().clone();
-    let generation = BOOKMARK_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let generation = BOOKMARK_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst).wrapping_add(1);
     log::info!("Manually retrying bookmark publish");
     publish_with_retry(current_bookmarks, 0, generation).await;
 }

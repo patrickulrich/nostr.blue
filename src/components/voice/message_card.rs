@@ -297,8 +297,8 @@ pub fn VoiceMessageCard(
             }
         }
     });
-    let handle_timeupdate = move |_evt: Event<MediaData>| {
-        #[cfg(feature = "web")]
+    #[cfg(feature = "web")]
+    let _handle_timeupdate = move |_evt: Event<MediaData>| {
         if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let time = audio.current_time();
@@ -311,8 +311,10 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_loadedmetadata = move |_evt: Event<MediaData>| {
-        #[cfg(feature = "web")]
+    #[cfg(not(feature = "web"))]
+    let handle_timeupdate = move |_: Event<MediaData>| {};
+    #[cfg(feature = "web")]
+    let _handle_loadedmetadata = move |_evt: Event<MediaData>| {
         if let Some(target) = _evt.data.as_web_event().target() {
             if let Some(audio) = target.dyn_ref::<web_sys::HtmlAudioElement>() {
                 let dur = audio.duration();
@@ -326,7 +328,9 @@ pub fn VoiceMessageCard(
             }
         }
     };
-    let handle_ended = move |_| {
+    #[cfg(not(feature = "web"))]
+    let handle_loadedmetadata = move |_: Event<MediaData>| {};
+    let _handle_ended = move |_: Event<MediaData>| {
         voice_messages_store::pause_voice_message();
         current_time.set(0.0);
     };
@@ -384,31 +388,28 @@ pub fn VoiceMessageCard(
             format!("{}d", (diff / 86400.0) as u32)
         }
     };
-    #[cfg(feature = "web")]
-    let navigator = use_navigator();
-    #[cfg(feature = "web")]
-    let voice_id_for_nav = event_id_str.clone();
+    let navigator: Option<Box<dyn Fn()>> = {
+        #[cfg(feature = "web")]
+        {
+            use crate::routes::Route;
+            let nav = use_navigator();
+            let voice_id = event_id_str.clone();
+            Some(Box::new(move || {
+                let _ = nav.push(Route::Note {
+                    note_id: voice_id.clone(),
+                    from_voice: Some("true".to_string()),
+                });
+            }))
+        }
+        #[cfg(not(feature = "web"))]
+        {
+            None
+        }
+    };
     #[cfg(feature = "web")]
     let is_clickable = true;
     #[cfg(not(feature = "web"))]
     let is_clickable = false;
-    let navigate_to_detail = {
-        #[cfg(feature = "web")]
-        move |_evt: Event<MouseData>| {
-            if let Some(target) = _evt.data.as_web_event().target() {
-                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                    if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
-                        return;
-                    }
-                }
-            }
-            navigator
-                .push(Route::Note {
-                    note_id: voice_id_for_nav.clone(),
-                    from_voice: Some("true".to_string()),
-                });
-        }
-    };
     let card_class = if is_clickable {
         "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border"
     } else {
@@ -417,7 +418,9 @@ pub fn VoiceMessageCard(
     let tooltip_text = if !is_clickable { "Not supported on this platform" } else { "" };
     let handle_click = move |_evt: Event<MouseData>| {
         if is_clickable {
-            navigate_to_detail(_evt);
+            if let Some(nav) = &navigator {
+                nav();
+            }
         }
     };
     rsx! {
@@ -469,58 +472,68 @@ pub fn VoiceMessageCard(
                     src: "{audio_url}",
                     preload: "metadata",
                     style: "display: none;",
-                    ontimeupdate: handle_timeupdate,
-                    onloadedmetadata: handle_loadedmetadata,
-                    onended: handle_ended,
+                    ontimeupdate: move |_| {},
+                    onloadedmetadata: move |_| {},
+                    onended: move |_| {},
                 }
-                div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
-                    button {
-                        class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
-                        onclick: toggle_play,
-                        if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
-                            svg {
-                                class: "w-5 h-5",
-                                view_box: "0 0 24 24",
-                                fill: "currentColor",
-                                rect {
-                                    x: "6",
-                                    y: "4",
-                                    width: "4",
-                                    height: "16",
+                if cfg!(feature = "web") {
+                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                        button {
+                            class: "shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition flex items-center justify-center",
+                            onclick: toggle_play,
+                            if voice_messages_store::VOICE_PLAYBACK.read().currently_playing == Some(event_id) {
+                                svg {
+                                    class: "w-5 h-5",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    rect {
+                                        x: "6",
+                                        y: "4",
+                                        width: "4",
+                                        height: "16",
+                                    }
+                                    rect {
+                                        x: "14",
+                                        y: "4",
+                                        width: "4",
+                                        height: "16",
+                                    }
                                 }
-                                rect {
-                                    x: "14",
-                                    y: "4",
-                                    width: "4",
-                                    height: "16",
+                            } else {
+                                svg {
+                                    class: "w-5 h-5 ml-0.5",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    polygon { points: "8,5 19,12 8,19" }
                                 }
                             }
-                        } else {
-                            svg {
-                                class: "w-5 h-5 ml-0.5",
-                                view_box: "0 0 24 24",
-                                fill: "currentColor",
-                                polygon { points: "8,5 19,12 8,19" }
+                        }
+                        div { class: "flex-1",
+                            div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
+                                div {
+                                    class: "h-full bg-primary transition-all",
+                                    style: "width: {progress_percent}%",
+                                }
+                            }
+                            div { class: "flex justify-between text-xs text-muted-foreground",
+                                span { "{current_time_str}" }
+                                span { "{duration_str}" }
                             }
                         }
                     }
-                    div { class: "flex-1",
-                        div { class: "w-full h-1 bg-muted rounded-full overflow-hidden mb-1",
-                            div {
-                                class: "h-full bg-primary transition-all",
-                                style: "width: {progress_percent}%",
-                            }
+                } else {
+                    div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",
+                        div { class: "shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center",
+                            span { class: "text-muted-foreground text-xs", "N/A" }
                         }
-                        div { class: "flex justify-between text-xs text-muted-foreground",
-                            span { "{current_time_str}" }
-                            span { "{duration_str}" }
+                        div { class: "flex-1 text-sm text-muted-foreground",
+                            "Playback not supported on this platform"
                         }
                     }
                 }
             }
             div { class: "flex items-center justify-between text-muted-foreground",
                 button {
-                    class: "flex items-center gap-1 hover:text-blue-500 transition group",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
                         show_reply_modal.set(true);

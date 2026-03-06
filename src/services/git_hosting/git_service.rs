@@ -19,9 +19,20 @@ fn redact_url_for_log(url: &str) -> String {
         Ok(mut parsed) => {
             parsed.set_username("").ok();
             parsed.set_password(Some("")).ok();
+            parsed.set_query(None);
+            parsed.set_fragment(None);
             parsed.to_string()
         }
         Err(_) => {
+            if url.contains('@') && url.contains(':') && !url.contains("://") {
+                if let Some(at_pos) = url.find('@') {
+                    let host_start = at_pos + 1;
+                    if let Some(colon_pos) = url[host_start..].find(':') {
+                        let host = &url[host_start..host_start + colon_pos];
+                        return format!("**REDACTED**@{}:{}", host, &url[host_start + colon_pos + 1..]);
+                    }
+                }
+            }
             if let Some(qmark_pos) = url.find('?') {
                 format!("{}?**REDACTED**", &url[..qmark_pos])
             } else {

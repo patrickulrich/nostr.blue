@@ -5,6 +5,8 @@ use dioxus::prelude::*;
 
 #[cfg(feature = "web")]
 use js_sys;
+#[cfg(not(feature = "web"))]
+use rand::{thread_rng, Rng};
 
 #[component]
 pub fn MusicRadio() -> Element {
@@ -59,10 +61,18 @@ pub fn MusicRadio() -> Element {
                         #[cfg(feature = "web")]
                         let seed = (js_sys::Date::now() as u64) as usize;
                         #[cfg(not(feature = "web"))]
-                        let seed = std::time::SystemTime::now()
+                        let seed = match std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as usize)
-                            .unwrap_or(0);
+                        {
+                            Ok(d) => d.as_millis() as usize,
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to get system time for shuffle seed: {}, using random fallback",
+                                    e
+                                );
+                                thread_rng().gen::<usize>()
+                            }
+                        };
                         for i in (1..music_tracks.len()).rev() {
                             let j = seed.wrapping_add(i) % (i + 1);
                             music_tracks.swap(i, j);

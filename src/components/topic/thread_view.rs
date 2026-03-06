@@ -20,8 +20,7 @@ const MAX_RECURSION_DEPTH: usize = 20;
 #[component]
 pub fn ThreadView(
     thread: Vec<Rc<TopicThread>>,
-    #[props(default)]
-    vote_counts: Rc<HashMap<String, VoteCounts>>,
+    #[props(default)] vote_counts: Rc<HashMap<String, VoteCounts>>,
 ) -> Element {
     rsx! {
         div {
@@ -58,8 +57,7 @@ fn count_descendants(thread: &TopicThread) -> usize {
 fn ThreadNode(
     thread: Rc<TopicThread>,
     vote_counts: Rc<HashMap<String, VoteCounts>>,
-    #[props(default = 0)]
-    depth: usize,
+    #[props(default = 0)] depth: usize,
 ) -> Element {
     // Prevent stack overflow on deeply nested threads
     if depth >= MAX_RECURSION_DEPTH {
@@ -85,7 +83,10 @@ fn ThreadNode(
         });
     let author_picture = profile.as_ref().and_then(|p| p.picture.clone());
     let time_ago = format_relative_time_or(thread.post.created_at, "just now");
-    let counts = vote_counts.get(&thread.post.id).cloned().unwrap_or_default();
+    let counts = vote_counts
+        .get(&thread.post.id)
+        .cloned()
+        .unwrap_or_default();
     let post_for_vote = thread.post.clone();
 
     let indent_class = match depth.min(MAX_VISUAL_DEPTH) {

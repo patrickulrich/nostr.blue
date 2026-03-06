@@ -32,11 +32,10 @@ pub fn GifPicker(props: GifPickerProps) -> Element {
         if *initialized.read() {
             // Increment generation to invalidate any pending searches
             search_gen.with_mut(|g| *g = g.wrapping_add(1));
-            let this_gen = *search_gen.read();
+            let this_gen = *search_gen.peek();
             spawn(async move {
                 crate::platform::timer::sleep_ms(300).await;
-                // Verify generation before updating state
-                if *search_gen.read() != this_gen {
+                if *search_gen.peek() != this_gen {
                     return;
                 }
                 search_gifs(query).await;
