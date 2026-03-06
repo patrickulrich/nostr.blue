@@ -246,6 +246,8 @@ fn detect_mention(
             if let Some(task) = state.relay_search_task.read().as_ref() {
                 task.cancel();
             }
+            state.relay_search_task.write().take();
+            state.is_searching.set(false);
             return;
         }
         let query = after_at.to_string();

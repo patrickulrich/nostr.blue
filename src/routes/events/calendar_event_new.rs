@@ -624,7 +624,7 @@ pub fn CalendarEventNew() -> Element {
                                         location.set(val.clone());
                                         if val.trim().len() >= 3 {
                                             show_location_dropdown.set(true);
-                                            let current_id = *location_debounce.peek() + 1;
+                                            let current_id = location_debounce.peek().wrapping_add(1);
                                             location_debounce.set(current_id);
                                             let query = val.trim().to_string();
                                             spawn(async move {
@@ -766,7 +766,7 @@ pub fn CalendarEventNew() -> Element {
                                             let cached = search_cached_profiles(&q, 8, &contacts, &[]);
                                             participant_results.set(cached.clone());
                                             if q.len() >= 3 && cached.len() < 5 {
-                                                let current_id = *participant_debounce.peek() + 1;
+                                                let current_id = participant_debounce.peek().wrapping_add(1);
                                                 participant_debounce.set(current_id);
                                                 let query_snapshot = q.clone();
                                                 spawn(async move {
@@ -952,12 +952,27 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
     if parts.len() != 3 {
         return 0;
     }
-    let year: i32 = parts[0].parse().unwrap_or(2024);
-    let month: i32 = parts[1].parse::<i32>().unwrap_or(1) - 1;
-    let day: i32 = parts[2].parse().unwrap_or(1);
+    let year: i32 = match parts[0].parse().ok() {
+        Some(y) => y,
+        None => return 0,
+    };
+    let month: i32 = match parts[1].parse().ok() {
+        Some(m) if (1..=12).contains(&m) => m - 1,
+        _ => return 0,
+    };
+    let day: i32 = match parts[2].parse().ok() {
+        Some(d) if (1..=31).contains(&d) => d,
+        _ => return 0,
+    };
     let time_parts: Vec<&str> = time.split(':').collect();
-    let hours: u32 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-    let minutes: u32 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let hours: u32 = match time_parts.first().and_then(|s| s.parse().ok()) {
+        Some(h) if (0..=23).contains(&h) => h,
+        _ => return 0,
+    };
+    let minutes: u32 = match time_parts.get(1).and_then(|s| s.parse().ok()) {
+        Some(m) if (0..=59).contains(&m) => m,
+        _ => return 0,
+    };
     let js_date = js_sys::Date::new_with_year_month_day(year as u32, month, day);
     js_date.set_hours(hours);
     js_date.set_minutes(minutes);

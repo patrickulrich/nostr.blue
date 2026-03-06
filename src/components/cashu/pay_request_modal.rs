@@ -56,12 +56,6 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
                 };
                 request_input.set(s);
             }
-            #[cfg(not(feature = "web"))]
-            {
-                pay_state.set(PayState::Error {
-                    message: "Clipboard paste is only available on web".to_string(),
-                });
-            }
         });
     };
     let handle_parse = move |_| {
@@ -153,10 +147,12 @@ pub fn CashuPayRequestModal(on_close: EventHandler<()>) -> Element {
                                     oninput: move |e| request_input.set(e.value()),
                                 }
                             }
-                            button {
-                                class: "w-full py-2 mb-4 bg-accent hover:bg-accent/80 rounded-lg transition flex items-center justify-center gap-2",
-                                onclick: handle_paste,
-                                span { "Paste from Clipboard" }
+                            if cfg!(feature = "web") {
+                                button {
+                                    class: "w-full py-2 mb-4 bg-accent hover:bg-accent/80 rounded-lg transition flex items-center justify-center gap-2",
+                                    onclick: handle_paste,
+                                    span { "Paste from Clipboard" }
+                                }
                             }
                             button {
                                 class: "w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-muted disabled:cursor-not-allowed text-white rounded-lg font-semibold transition",

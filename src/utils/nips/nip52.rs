@@ -139,11 +139,16 @@ pub enum EventTime {
     Date(String),
     /// Unix timestamp in seconds (for kind 31923)
     Timestamp(u64),
-    /// Local datetime with timezone (preserves TZID info)
+    /// Local datetime with timezone (preserves TZID info).
+    ///
+    /// The `timestamp` field is a Unix epoch in **UTC** seconds.
+    /// The `timezone` field is only used for presentation/display purposes
+    /// (e.g., converting to local time for UI display), not for storage.
+    /// When serializing to a tag, only the UTC timestamp is used.
     LocalDateTime {
-        /// Unix timestamp (naive, in local timezone)
+        /// Unix epoch seconds in UTC
         timestamp: u64,
-        /// Timezone identifier (e.g., "America/New_York")
+        /// Timezone identifier for display (e.g., "America/New_York")
         timezone: String,
     },
 }
@@ -747,6 +752,37 @@ mod tests {
         assert!(matches!(time, Some(EventTime::Timestamp(1735123200))));
         let time = EventTime::parse("invalid", CalendarEventType::TimeBased);
         assert!(time.is_none());
+    }
+    #[test]
+    fn test_event_time_local_datetime_tag_value() {
+        let time = EventTime::LocalDateTime {
+            timestamp: 1735123200,
+            timezone: "America/New_York".to_string(),
+        };
+        assert_eq!(time.as_tag_value(), "1735123200");
+        let time = EventTime::LocalDateTime {
+            timestamp: 0,
+            timezone: "UTC".to_string(),
+        };
+        assert_eq!(time.as_tag_value(), "0");
+        let time = EventTime::LocalDateTime {
+            timestamp: 9999999999,
+            timezone: "Europe/London".to_string(),
+        };
+        assert_eq!(time.as_tag_value(), "9999999999");
+    }
+    #[test]
+    fn test_event_time_local_datetime_to_timestamp() {
+        let time = EventTime::LocalDateTime {
+            timestamp: 1735123200,
+            timezone: "America/New_York".to_string(),
+        };
+        assert_eq!(time.to_timestamp(), Some(1735123200));
+        let time = EventTime::LocalDateTime {
+            timestamp: 0,
+            timezone: "UTC".to_string(),
+        };
+        assert_eq!(time.to_timestamp(), Some(0));
     }
     #[test]
     fn test_iso_duration_minutes() {

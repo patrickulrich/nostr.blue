@@ -77,12 +77,16 @@ fn load_code_settings() -> CodeSettingsData {
     match storage::get::<CodeSettingsData>(&settings_storage_key()) {
         Ok(data) => data,
         Err(e) => {
-            log::warn!(
-                "Failed to load code settings from {}: {}",
-                settings_storage_key(),
-                e
-            );
-            CodeSettingsData::default()
+            if e.contains("not found") {
+                CodeSettingsData::default()
+            } else {
+                log::warn!(
+                    "Failed to load code settings from {}: {}",
+                    settings_storage_key(),
+                    e
+                );
+                CodeSettingsData::default()
+            }
         }
     }
 }

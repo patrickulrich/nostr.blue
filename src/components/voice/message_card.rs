@@ -312,7 +312,7 @@ pub fn VoiceMessageCard(
         }
     };
     #[cfg(not(feature = "web"))]
-    let handle_timeupdate = move |_: Event<MediaData>| {};
+    let _handle_timeupdate = move |_: Event<MediaData>| {};
     #[cfg(feature = "web")]
     let _handle_loadedmetadata = move |_evt: Event<MediaData>| {
         if let Some(target) = _evt.data.as_web_event().target() {
@@ -329,7 +329,7 @@ pub fn VoiceMessageCard(
         }
     };
     #[cfg(not(feature = "web"))]
-    let handle_loadedmetadata = move |_: Event<MediaData>| {};
+    let _handle_loadedmetadata = move |_: Event<MediaData>| {};
     let _handle_ended = move |_: Event<MediaData>| {
         voice_messages_store::pause_voice_message();
         current_time.set(0.0);

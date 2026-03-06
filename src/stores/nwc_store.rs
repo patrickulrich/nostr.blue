@@ -38,9 +38,8 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(0o600)) {
-            log::warn!(target: "nwc_store", "Failed to set permissions on {:?}: {}", path, e);
-        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to set permissions on {:?}: {}", path, e))?;
     }
     Ok(())
 }

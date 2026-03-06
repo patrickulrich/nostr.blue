@@ -138,7 +138,15 @@ pub fn VideosLiveTag(tag: String) -> Element {
     }
     #[cfg(any(feature = "native", feature = "mobile"))]
     {
-        log::debug!("VideosLiveTag: pagination available via scroll on web, native/mobile TBD");
+        trigger_load_more_for_platform(
+            tag.clone(),
+            *oldest_timestamp.read(),
+            &fetch_gen,
+            &loading,
+            &has_more,
+            &oldest_timestamp,
+            &stream_events,
+        );
     }
     rsx! {
         div { class: "min-h-screen bg-background",
@@ -207,6 +215,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
     }
 }
 
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 async fn trigger_load_more_for_tag(
     tag: String,

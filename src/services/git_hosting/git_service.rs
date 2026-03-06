@@ -12,6 +12,8 @@ use crate::services::git_types::{CommitEntry, FileEntry};
 use crate::services::git_worker::GitWorkerManager;
 use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
+#[cfg(not(feature = "web"))]
+use std::path::PathBuf;
 use url;
 
 fn redact_url_for_log(url: &str) -> String {
@@ -77,8 +79,15 @@ impl GitService {
         #[cfg(not(feature = "web"))]
         {
             let data_dir = dirs::data_dir().unwrap_or_else(|| {
-                log::warn!("data_dir() returned None, falling back to home directory");
-                dirs::home_dir().expect("Could not determine home directory")
+                log::warn!("data_dir() returned None, falling back to home directory or temp");
+                std::env::var("HOME")
+                    .ok()
+                    .map(PathBuf::from)
+                    .or_else(|| Some(std::env::temp_dir()))
+                    .unwrap_or_else(|| {
+                        log::error!("Could not determine any directory, using current directory");
+                        PathBuf::from(".")
+                    })
             });
             let repos_dir = data_dir
                 .join("nostr-blue")
