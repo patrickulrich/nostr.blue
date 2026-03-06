@@ -12,6 +12,27 @@ use crate::services::git_types::{CommitEntry, FileEntry};
 use crate::services::git_worker::GitWorkerManager;
 use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
+
+fn redact_url_for_log(url: &str) -> String {
+    if let Some(at_pos) = url.find('@') {
+        if let Some(slash_pos) = url[at_pos..].find('/') {
+            let scheme_end = url[..at_pos].rfind("://").unwrap_or(0);
+            if scheme_end > 0 {
+                let host_with_cred = &url[scheme_end + 3..at_pos + slash_pos];
+                let path = &url[at_pos + slash_pos..];
+                if let Some(colon_pos) = host_with_cred.find(':') {
+                    let host = &host_with_cred[..colon_pos];
+                    return format!("{}**REDACTED**{}", host, path);
+                }
+                return format!("{}**REDACTED**{}", host_with_cred, path);
+            }
+        }
+    }
+    if let Some(qmark_pos) = url.find('?') {
+        return format!("{}?**REDACTED**", &url[..qmark_pos]);
+    }
+    url.to_string()
+}
 /// Git Service for repository operations
 ///
 /// Provides high-level methods for browsing files and reading content.
@@ -47,8 +68,11 @@ impl GitService {
         { format!("/repos/{}", id) }
         #[cfg(not(feature = "web"))]
         {
-            let repos_dir = dirs::data_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
+            let data_dir = dirs::data_dir().unwrap_or_else(|| {
+                log::warn!("data_dir() returned None, falling back to home directory");
+                dirs::home_dir().expect("Could not determine home directory")
+            });
+            let repos_dir = data_dir
                 .join("nostr-blue")
                 .join("repos")
                 .join(&id);
@@ -87,7 +111,7 @@ impl GitService {
             if GitWorkerManager::repo_exists(&dir).await {
                 return Ok(dir);
             }
-            log::info!("Cloning {} to {}", clone_url, dir);
+            log::info!("Cloning {} to {}", redact_url_for_log(&clone_url), dir);
             GitWorkerManager::clone_repo(&clone_url, &dir, 1).await?;
         }
         #[cfg(not(feature = "web"))]
@@ -97,7 +121,7 @@ impl GitService {
                 return Ok(dir);
             }
             std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
-            log::info!("Cloning {} to {}", clone_url, dir);
+            log::info!("Cloning {} to {}", redact_url_for_log(&clone_url), dir);
             let dir_clone = dir.clone();
             tokio::task::spawn_blocking(move || {
                 git2::build::RepoBuilder::new()

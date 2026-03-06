@@ -2,6 +2,19 @@ use crate::stores::blossom_store;
 use crate::utils::format::display_server_url;
 use dioxus::events::FormData;
 use dioxus::prelude::*;
+
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features");
+
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
+
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]

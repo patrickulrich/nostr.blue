@@ -3,17 +3,17 @@
 //! Provides functionality to import and export calendar events
 //! in the standard iCalendar format (RFC 5545).
 
-// Feature exclusivity guards
-// Note: 'native' is a shared feature enabled by both 'desktop' and 'mobile'
-// So we only need to prevent 'web' from being combined with 'native' (which covers desktop/mobile)
-#[cfg(all(feature = "web", feature = "native"))]
-compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features");
 
 #[cfg(all(feature = "web", feature = "mobile"))]
-compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
+compile_error!("Cannot enable both 'web' and 'mobile' features");
 
-#[cfg(not(any(feature = "web", feature = "native", feature = "mobile")))]
-compile_error!("Must enable one of 'web', 'native', or 'mobile' feature");
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
+
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 use crate::utils::nip52::{CalendarEvent, CalendarEventType, EventTime};
 /// Generate ICS content for a single calendar event
@@ -55,7 +55,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
         EventTime::Date(d) => {
             vevent.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", d.replace('-', "")));
         }
-        EventTime::Timestamp(ts) => {
+        EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
             vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
         }
     }
@@ -64,7 +64,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
             EventTime::Date(d) => {
                 vevent.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", d.replace('-', "")));
             }
-            EventTime::Timestamp(ts) => {
+            EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
                 vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
             }
         }
@@ -193,7 +193,13 @@ impl IcsDateTime {
                 }
             }
             IcsDateTime::DateTime(ts) => EventTime::Timestamp(*ts),
-            IcsDateTime::DateTimeWithTz { timestamp, .. } => EventTime::Timestamp(*timestamp),
+            IcsDateTime::DateTimeWithTz {
+                timestamp,
+                timezone,
+            } => EventTime::LocalDateTime {
+                timestamp: *timestamp,
+                timezone: timezone.clone(),
+            },
         }
     }
     /// Get timezone if present
@@ -309,8 +315,6 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
             return Some(IcsDateTime::DateTime(ts));
         }
     } else if let Some(tz) = tzid {
-        // TODO: TZID datetime is treated as UTC. Proper conversion requires chrono-tz.
-        // The timezone string is preserved in DateTimeWithTz for display purposes.
         if let Some(ts) = parse_ics_local_datetime(value) {
             return Some(IcsDateTime::DateTimeWithTz {
                 timestamp: ts,
@@ -383,7 +387,9 @@ impl From<IcsEvent> for Option<IcsImportData> {
         let start = event.start.as_ref()?.to_event_time();
         let event_type = match &start {
             EventTime::Date(_) => CalendarEventType::DateBased,
-            EventTime::Timestamp(_) => CalendarEventType::TimeBased,
+            EventTime::Timestamp(_) | EventTime::LocalDateTime { .. } => {
+                CalendarEventType::TimeBased
+            }
         };
         let end = event.end.as_ref().map(|e| e.to_event_time());
         let start_tzid = event
@@ -458,14 +464,14 @@ pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     result
 }
 
-/// Trigger download of ICS file (mobile - uses Share Intent)
-#[cfg(feature = "mobile")]
+/// Trigger download of ICS file (desktop - uses file dialog)
+#[cfg(feature = "desktop")]
 pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     crate::platform::download::save_file(filename, content, "text/calendar;charset=utf-8")
 }
 
-/// Trigger download of ICS file (desktop)
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+/// Trigger download of ICS file (mobile - uses Share Intent)
+#[cfg(feature = "mobile")]
 pub fn download_ics(filename: &str, content: &str) -> Result<(), String> {
     crate::platform::download::save_file(filename, content, "text/calendar;charset=utf-8")
 }

@@ -2,19 +2,15 @@
 /// On desktop, opens a save dialog. On mobile (Android), triggers Share Intent.
 
 #[cfg(all(feature = "web", feature = "desktop"))]
-compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
+compile_error!("Cannot enable both 'web' and 'desktop' features");
 
 #[cfg(all(feature = "web", feature = "mobile"))]
-compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
+compile_error!("Cannot enable both 'web' and 'mobile' features");
 
 #[cfg(all(feature = "desktop", feature = "mobile"))]
-compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
 
-#[cfg(all(
-    not(feature = "web"),
-    not(feature = "desktop"),
-    not(feature = "mobile")
-))]
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
 compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
 
 pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), String> {
@@ -33,7 +29,6 @@ pub fn save_file(filename: &str, content: &str, _mime_type: &str) -> Result<(), 
     }
     #[cfg(feature = "mobile")]
     {
-        // On mobile (Android), trigger a Share Intent to let user save/share the file
         crate::platform::download_file(filename, content.as_bytes(), _mime_type)
             .map_err(|e| format!("Download failed: {}", e))
     }

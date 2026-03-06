@@ -105,49 +105,17 @@ pub fn CashuCreateRequestModal(on_close: EventHandler<()>) -> Element {
             let req_clone = req.clone();
             copy_error.set(None);
             spawn(async move {
-                #[cfg(feature = "web")]
-                {
-                    if let Some(window) = web_sys::window() {
-                        let clipboard = window.navigator().clipboard();
-                        match wasm_bindgen_futures::JsFuture::from(
-                                clipboard.write_text(&req_clone),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                copied.set(true);
-                                crate::platform::timer::sleep_ms(2000).await;
-                                copied.set(false);
-                            }
-                            Err(e) => {
-                                let err_msg = format!("{:?}", e);
-                                log::error!("Failed to copy to clipboard: {}", err_msg);
-                                copy_error.set(Some("Copy failed".to_string()));
-                                crate::platform::timer::sleep_ms(3000).await;
-                                copy_error.set(None);
-                            }
-                        }
-                    } else {
-                        log::error!("Failed to copy: window not available");
+                match crate::platform::clipboard::copy_to_clipboard(&req_clone).await {
+                    Ok(_) => {
+                        copied.set(true);
+                        crate::platform::timer::sleep_ms(2000).await;
+                        copied.set(false);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to copy to clipboard: {}", e);
                         copy_error.set(Some("Copy failed".to_string()));
                         crate::platform::timer::sleep_ms(3000).await;
                         copy_error.set(None);
-                    }
-                }
-                #[cfg(not(feature = "web"))]
-                {
-                    match crate::platform::clipboard::copy_to_clipboard(&req_clone).await {
-                        Ok(_) => {
-                            copied.set(true);
-                            crate::platform::timer::sleep_ms(2000).await;
-                            copied.set(false);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to copy to clipboard: {}", e);
-                            copy_error.set(Some("Copy failed".to_string()));
-                            crate::platform::timer::sleep_ms(3000).await;
-                            copy_error.set(None);
-                        }
                     }
                 }
             });

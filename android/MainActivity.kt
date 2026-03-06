@@ -115,12 +115,27 @@ class MainActivity : WryActivity() {
                 try {
                     val contentResolver = contentResolver
                     val mimeType = contentResolver.getType(uri)
+                    val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
+
+                    // Try to get file size via AssetFileDescriptor for more reliable sizing
+                    var fileSize: Long = -1
+                    try {
+                        val afd = contentResolver.openAssetFileDescriptor(uri, "r")
+                        if (afd != null) {
+                            fileSize = afd.length
+                            afd.close()
+                        }
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Could not get AFD size: ${e.message}")
+                    }
+
+                    // Use AFD size if available, otherwise fall back to stream.available()
                     val inputStream = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
                         inputStream.use { stream ->
-                            val available = stream.available()
-                            val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
-                            if (available > MAX_UPLOAD_BYTES) {
+                            // Use AFD length if valid, otherwise fall back to available()
+                            val sizeToCheck = if (fileSize > 0) fileSize else stream.available().toLong()
+                            if (sizeToCheck > MAX_UPLOAD_BYTES) {
                                 filePickError = "File too large (max 50MB)"
                                 filePickInFlight = false
                                 return@synchronized
@@ -723,9 +738,17 @@ class MainActivity : WryActivity() {
             return synchronized(lock) {
                 when {
                     filePickInFlight -> "picking"
-                    filePickError != null -> "error:$filePickError"
+                    filePickError != null -> {
+                        val error = filePickError
+                        filePickError = null
+                        "error:$error"
+                    }
                     pendingFileContent != null && pendingFileMimeType != null -> {
-                        "${pendingFileMimeType}|${pendingFileContent}"
+                        val mimeType = pendingFileMimeType
+                        val content = pendingFileContent
+                        pendingFileMimeType = null
+                        pendingFileContent = null
+                        "$mimeType|$content"
                     }
                     else -> "none"
                 }

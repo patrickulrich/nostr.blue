@@ -134,6 +134,12 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                             loading.set(false);
                                         }
                                         Err(e) => {
+                                            // Verify generation before updating state
+                                            if *fetch_gen.read() != this_gen {
+                                                log::debug!("Stale fetch detected, discarding results");
+                                                loading.set(false);
+                                                return;
+                                            }
                                             log::error!("Failed to load more streams: {}", e);
                                             loading.set(false);
                                         }

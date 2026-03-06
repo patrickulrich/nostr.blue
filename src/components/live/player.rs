@@ -27,29 +27,31 @@ fn build_native_setup_script(
     };
     format!(
         r#"
-                    try {{
-                        let video = document.getElementById({video_id});
-                        if (!video) return "error:Video element not found";
+                    (async () => {{
+                        try {{
+                            let video = document.getElementById({video_id});
+                            if (!video) return "error:Video element not found";
 
-                        {detach_block}
-                        let url = {stream_url};
-                        let isHls = url.toLowerCase().includes('.m3u8');
+                            {detach_block}
+                            let url = {stream_url};
+                            let isHls = url.toLowerCase().includes('.m3u8');
 
-                        if (isHls && window.hlsManager) {{
-                            let result = await window.hlsManager.attachToMedia({video_id}, url);
-                            console.log('[Live] HLS stream {log_msg}:', result);
-                        }} else {{
-                            video.src = url;
+                            if (isHls && window.hlsManager) {{
+                                let result = await window.hlsManager.attachToMedia({video_id}, url);
+                                console.log('[Live] HLS stream {log_msg}:', result);
+                            }} else {{
+                                video.src = url;
+                            }}
+
+                            if ({autoplay}) {{
+                                await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
+                            }}
+                            return "ok";
+                        }} catch (e) {{
+                            console.error('[Live] {error_label} error:', e);
+                            return "error:" + e.message;
                         }}
-
-                        if ({autoplay}) {{
-                            await video.play().catch(e => console.log('[Live] Autoplay failed:', e));
-                        }}
-                        return "ok";
-                    }} catch (e) {{
-                        console.error('[Live] {error_label} error:', e);
-                        return "error:" + e.message;
-                    }}
+                    }})().catch(e => {{ console.error('[Live] {error_label} IIFE error:', e); return "error:" + e.message; }})
                     "#,
         video_id = video_id_json,
         stream_url = stream_url_json,

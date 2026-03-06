@@ -118,7 +118,9 @@ impl std::fmt::Display for FreeBusy {
 pub enum EventSource {
     #[default]
     Public,
-    Calendar { calendar_id: String },
+    Calendar {
+        calendar_id: String,
+    },
 }
 /// Participant in a calendar event
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,23 +139,26 @@ pub enum EventTime {
     Date(String),
     /// Unix timestamp in seconds (for kind 31923)
     Timestamp(u64),
+    /// Local datetime with timezone (preserves TZID info)
+    LocalDateTime {
+        /// Unix timestamp (naive, in local timezone)
+        timestamp: u64,
+        /// Timezone identifier (e.g., "America/New_York")
+        timezone: String,
+    },
 }
 impl EventTime {
     /// Parse from string based on event type
     pub fn parse(s: &str, event_type: CalendarEventType) -> Option<Self> {
         match event_type {
             CalendarEventType::DateBased => {
-                if s.len() == 10 && s.chars().nth(4) == Some('-')
-                    && s.chars().nth(7) == Some('-')
-                {
+                if s.len() == 10 && s.chars().nth(4) == Some('-') && s.chars().nth(7) == Some('-') {
                     Some(EventTime::Date(s.to_string()))
                 } else {
                     None
                 }
             }
-            CalendarEventType::TimeBased => {
-                s.parse::<u64>().ok().map(EventTime::Timestamp)
-            }
+            CalendarEventType::TimeBased => s.parse::<u64>().ok().map(EventTime::Timestamp),
         }
     }
     /// Get as string for tag value
@@ -161,12 +166,14 @@ impl EventTime {
         match self {
             EventTime::Date(d) => d.clone(),
             EventTime::Timestamp(t) => t.to_string(),
+            EventTime::LocalDateTime { timestamp, .. } => timestamp.to_string(),
         }
     }
     /// Get timestamp (for sorting/comparison)
     pub fn to_timestamp(&self) -> Option<u64> {
         match self {
             EventTime::Timestamp(t) => Some(*t),
+            EventTime::LocalDateTime { timestamp, .. } => Some(*timestamp),
             EventTime::Date(d) => {
                 let parts: Vec<&str> = d.split('-').collect();
                 if parts.len() == 3 {
@@ -365,8 +372,8 @@ pub fn parse_calendar_event(event: &Event) -> Result<CalendarEvent, String> {
     let start = EventTime::parse(&start_str, event_type)
         .ok_or_else(|| format!("Invalid start time format: {}", start_str))?;
     let end = get_tag_value(event, "end").and_then(|s| EventTime::parse(&s, event_type));
-    let start_tzid = get_tag_value(event, "start_tzid")
-        .or_else(|| get_tag_value(event, "timezone"));
+    let start_tzid =
+        get_tag_value(event, "start_tzid").or_else(|| get_tag_value(event, "timezone"));
     let end_tzid = get_tag_value(event, "end_tzid");
     let summary = get_tag_value(event, "summary");
     let content = event.content.clone();
@@ -410,9 +417,11 @@ pub fn parse_calendar_event(event: &Event) -> Result<CalendarEvent, String> {
 /// Parse a Kind 31925 event into a CalendarRsvp
 pub fn parse_calendar_rsvp(event: &Event) -> Result<CalendarRsvp, String> {
     if event.kind.as_u16() != KIND_CALENDAR_RSVP {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_CALENDAR_RSVP, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_CALENDAR_RSVP,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -444,9 +453,11 @@ pub fn parse_calendar_rsvp(event: &Event) -> Result<CalendarRsvp, String> {
 /// Parse a Kind 31924 event into a Calendar
 pub fn parse_calendar(event: &Event) -> Result<Calendar, String> {
     if event.kind.as_u16() != KIND_CALENDAR {
-        return Err(
-            format!("Expected kind {}, got {}", KIND_CALENDAR, event.kind.as_u16()),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_CALENDAR,
+            event.kind.as_u16()
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -472,38 +483,33 @@ pub fn parse_calendar(event: &Event) -> Result<Calendar, String> {
     })
 }
 /// Parse a Kind 31926 event into an AvailabilityTemplate
-pub fn parse_availability_template(
-    event: &Event,
-) -> Result<AvailabilityTemplate, String> {
+pub fn parse_availability_template(event: &Event) -> Result<AvailabilityTemplate, String> {
     if event.kind.as_u16() != KIND_AVAILABILITY_TEMPLATE {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_AVAILABILITY_TEMPLATE,
-                event.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_AVAILABILITY_TEMPLATE,
+            event.kind.as_u16(),
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
     let coordinate = format!("{}:{}:{}", KIND_AVAILABILITY_TEMPLATE, pubkey, d_tag);
-    let naddr = build_naddr(KIND_AVAILABILITY_TEMPLATE, &pubkey, &d_tag)
-        .unwrap_or_default();
+    let naddr = build_naddr(KIND_AVAILABILITY_TEMPLATE, &pubkey, &d_tag).unwrap_or_default();
     let title = get_tag_value(event, "title").unwrap_or_default();
     let duration_minutes = get_tag_value(event, "duration")
         .and_then(|s| parse_iso_duration_minutes(&s))
         .ok_or("Missing or invalid 'duration' tag")?;
-    let interval_minutes = get_tag_value(event, "interval")
-        .and_then(|s| parse_iso_duration_minutes(&s));
-    let buffer_before = get_tag_value(event, "buffer_before")
-        .and_then(|s| parse_iso_duration_minutes(&s));
-    let buffer_after = get_tag_value(event, "buffer_after")
-        .and_then(|s| parse_iso_duration_minutes(&s));
+    let interval_minutes =
+        get_tag_value(event, "interval").and_then(|s| parse_iso_duration_minutes(&s));
+    let buffer_before =
+        get_tag_value(event, "buffer_before").and_then(|s| parse_iso_duration_minutes(&s));
+    let buffer_after =
+        get_tag_value(event, "buffer_after").and_then(|s| parse_iso_duration_minutes(&s));
     let timezone = get_tag_value(event, "tzid");
-    let min_notice_days = get_tag_value(event, "min_notice")
-        .and_then(|s| parse_iso_duration_days(&s));
-    let max_advance_days = get_tag_value(event, "max_advance")
-        .and_then(|s| parse_iso_duration_days(&s));
+    let min_notice_days =
+        get_tag_value(event, "min_notice").and_then(|s| parse_iso_duration_days(&s));
+    let max_advance_days =
+        get_tag_value(event, "max_advance").and_then(|s| parse_iso_duration_days(&s));
     let amount_sats = get_tag_value(event, "amount").and_then(|s| s.parse::<u64>().ok());
     let schedule = parse_schedule_entries(event);
     Ok(AvailabilityTemplate {
@@ -528,13 +534,11 @@ pub fn parse_availability_template(
 /// Parse a Kind 31927 event into an AvailabilityBlock
 pub fn parse_availability_block(event: &Event) -> Result<AvailabilityBlock, String> {
     if event.kind.as_u16() != KIND_AVAILABILITY_BLOCK {
-        return Err(
-            format!(
-                "Expected kind {}, got {}",
-                KIND_AVAILABILITY_BLOCK,
-                event.kind.as_u16(),
-            ),
-        );
+        return Err(format!(
+            "Expected kind {}, got {}",
+            KIND_AVAILABILITY_BLOCK,
+            event.kind.as_u16(),
+        ));
     }
     let pubkey = event.pubkey.to_hex();
     let d_tag = get_tag_value(event, "d").ok_or("Missing required 'd' tag")?;
@@ -599,7 +603,10 @@ fn parse_participants(event: &Event) -> Vec<EventParticipant> {
                 .get(2)
                 .map(|s| s.to_string())
                 .filter(|s| !s.is_empty());
-            let role = slice.get(3).map(|s| s.to_string()).filter(|s| !s.is_empty());
+            let role = slice
+                .get(3)
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
             Some(EventParticipant {
                 pubkey,
                 relay_hint,
@@ -706,14 +713,26 @@ mod tests {
     fn test_rsvp_status_from_str() {
         assert_eq!(RsvpStatus::from_str("accepted"), Some(RsvpStatus::Accepted));
         assert_eq!(RsvpStatus::from_str("DECLINED"), Some(RsvpStatus::Declined));
-        assert_eq!(RsvpStatus::from_str("tentative"), Some(RsvpStatus::Tentative));
+        assert_eq!(
+            RsvpStatus::from_str("tentative"),
+            Some(RsvpStatus::Tentative)
+        );
         assert_eq!(RsvpStatus::from_str("invalid"), None);
     }
     #[test]
     fn test_free_busy_from_rsvp_status() {
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Accepted), FreeBusy::Busy);
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Declined), FreeBusy::Free);
-        assert_eq!(FreeBusy::from_rsvp_status(RsvpStatus::Tentative), FreeBusy::Free);
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Accepted),
+            FreeBusy::Busy
+        );
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Declined),
+            FreeBusy::Free
+        );
+        assert_eq!(
+            FreeBusy::from_rsvp_status(RsvpStatus::Tentative),
+            FreeBusy::Free
+        );
     }
     #[test]
     fn test_event_time_date() {

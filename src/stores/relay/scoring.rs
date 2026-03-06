@@ -187,7 +187,7 @@ pub fn get_score_stats() -> Option<(usize, f64)> {
 #[cfg(feature = "web")]
 #[allow(dead_code)]
 pub fn clear_relay_scores() {
-    storage::delete(RELAY_SCORES_KEY);
+    let _ = storage::delete(RELAY_SCORES_KEY);
     log::info!("Cleared stored relay scores");
 }
 /// Clear all stored relay scores - no-op on non-WASM platforms

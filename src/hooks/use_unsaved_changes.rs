@@ -138,7 +138,12 @@ fn register_beforeunload(is_dirty: Signal<bool>) -> u32 {
     }) as Box<dyn FnMut(BeforeUnloadEvent)>);
     let closure_id = NEXT_CLOSURE_ID.with(|cell| {
         let id = *cell.borrow();
-        *cell.borrow_mut() += 1;
+        let mut cell_mut = cell.borrow_mut();
+        let mut next = id.wrapping_add(1);
+        if next == 0 {
+            next = 1;
+        }
+        *cell_mut = next;
         id
     });
     if let Err(e) =

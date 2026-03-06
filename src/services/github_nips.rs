@@ -1,16 +1,32 @@
+//! GitHub-based NIP documentation service
+//!
+//! Provides fetching of NIPs, NUTs, and other protocol documentation
+//! from locally-served paths (web) or bundled assets (native).
+//!
+//! This module is primarily designed for web builds where documentation
+//! is served from the app's static assets.
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
+#[cfg(feature = "web")]
 use crate::platform::http::http_client;
 use regex::Regex;
-/// Base URL for locally-served NIPs documentation
+
+#[cfg(feature = "web")]
 const NIPS_BASE: &str = "/docs/nips";
-/// Base URL for Cashu NUTs documentation
+#[cfg(feature = "web")]
 const NUTS_BASE: &str = "/docs/nuts";
-/// Base URL for Blossom BUDs documentation
+#[cfg(feature = "web")]
 const BUDS_BASE: &str = "/docs/blossom/buds";
-/// Blossom README path
+#[cfg(feature = "web")]
 const BUDS_README: &str = "/docs/blossom/README.md";
-/// Base URL for NKBIPs documentation
+#[cfg(feature = "web")]
 const NKBIPS_BASE: &str = "/docs/NKBIPs";
-/// Market specification path
+#[cfg(feature = "web")]
 const MARKET_SPEC_PATH: &str = "/docs/market-spec/spec.md";
 /// Represents an official NIP from the nostr-protocol repository
 #[derive(Debug, Clone, PartialEq)]
@@ -34,29 +50,34 @@ pub struct EventKindInfo {
     /// Which NIP defines this kind
     pub nip: String,
 }
+
+#[cfg(feature = "web")]
+async fn fetch_text(url: &str, context: &str) -> Result<String, String> {
+    let response = http_client()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch {}: {}", context, e))?;
+    if !response.status().is_success() {
+        return Err(format!("Failed to fetch {}: HTTP {}", context, response.status()));
+    }
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read {} response: {}", context, e))
+}
+
 /// Fetch the README.md from the NIPs documentation
+#[cfg(feature = "web")]
 pub async fn fetch_nips_readme() -> Result<String, String> {
     let url = format!("{}/README.md", NIPS_BASE);
-    let response = http_client().get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NIPs README: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!("Failed to fetch NIPs README: HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    fetch_text(&url, "NIPs README").await
 }
 /// Fetch the content of a specific NIP by its number
+#[cfg(feature = "web")]
 pub async fn fetch_nip_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", NIPS_BASE, number);
-    let response = http_client().get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NIP-{}: {}", number, e))?;
-    if !response.status().is_success() {
-        return Err(format!("NIP-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read NIP-{}: {}", number, e))
+    fetch_text(&url, &format!("NIP-{}", number)).await
 }
 /// Parse the NIP list from the README content
 pub fn parse_nips_from_readme(content: &str) -> Vec<OfficialNip> {
@@ -163,75 +184,80 @@ pub struct DocSpec {
     pub category: Option<String>,
 }
 /// Fetch the NUTs README
+#[cfg(feature = "web")]
 pub async fn fetch_nuts_readme() -> Result<String, String> {
     let url = format!("{}/README.md", NUTS_BASE);
-    let response = http_client().get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NUTs README: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!("Failed to fetch NUTs README: HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    fetch_text(&url, "NUTs README").await
 }
 /// Fetch the Blossom README
+#[cfg(feature = "web")]
 pub async fn fetch_buds_readme() -> Result<String, String> {
-    let response = http_client().get(BUDS_README)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch BUDs README: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!("Failed to fetch BUDs README: HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read response: {}", e))
+    fetch_text(BUDS_README, "BUDs README").await
 }
 /// Fetch a specific NUT by number
+#[cfg(feature = "web")]
 pub async fn fetch_nut_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", NUTS_BASE, number);
-    let response = http_client().get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NUT-{}: {}", number, e))?;
-    if !response.status().is_success() {
-        return Err(format!("NUT-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read NUT-{}: {}", number, e))
+    fetch_text(&url, &format!("NUT-{}", number)).await
 }
 /// Fetch a specific BUD by number
+#[cfg(feature = "web")]
 pub async fn fetch_bud_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", BUDS_BASE, number);
-    let response = http_client().get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch BUD-{}: {}", number, e))?;
-    if !response.status().is_success() {
-        return Err(format!("BUD-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read BUD-{}: {}", number, e))
+    fetch_text(&url, &format!("BUD-{}", number)).await
 }
 /// Fetch a specific NKBIP by number
+#[cfg(feature = "web")]
 pub async fn fetch_nkbip_content(number: &str) -> Result<String, String> {
     let url = format!("{}/{}.md", NKBIPS_BASE, number);
-    let response = http_client().get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch NKBIP-{}: {}", number, e))?;
-    if !response.status().is_success() {
-        return Err(format!("NKBIP-{} not found (HTTP {})", number, response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read NKBIP-{}: {}", number, e))
+    fetch_text(&url, &format!("NKBIP-{}", number)).await
 }
-/// Fetch the market specification document
+/// Fetch the market specification
+#[cfg(feature = "web")]
 pub async fn fetch_market_spec() -> Result<String, String> {
-    let response = http_client().get(MARKET_SPEC_PATH)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch market spec: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!("Market spec not found (HTTP {})", response.status()));
-    }
-    response.text().await.map_err(|e| format!("Failed to read market spec: {}", e))
+    fetch_text(MARKET_SPEC_PATH, "Market spec").await
 }
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nips_readme() -> Result<String, String> {
+    Err("NIP documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nuts_readme() -> Result<String, String> {
+    Err("NUT documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_buds_readme() -> Result<String, String> {
+    Err("BUD documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nut_content(_number: &str) -> Result<String, String> {
+    Err("NUT documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_bud_content(_number: &str) -> Result<String, String> {
+    Err("BUD documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nkbip_content(_number: &str) -> Result<String, String> {
+    Err("NKBIP documentation not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_market_spec() -> Result<String, String> {
+    Err("Market specification not available on native builds".to_string())
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn fetch_nip_content(_number: &str) -> Result<String, String> {
+    Err("NIP documentation not available on native builds".to_string())
+}
+
 /// Parse NUT entries from the README content.
 /// The format has two tables (Mandatory / Optional) with rows like `| [00][00] | Description |`
 pub fn parse_nuts_from_readme(content: &str) -> Vec<DocSpec> {

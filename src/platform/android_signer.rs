@@ -142,8 +142,12 @@ impl Nip55Signer {
 
         // Check for pubkey result
         if let Some(pubkey_hex) = call_static_string("pollPublicKeyResult") {
-            let package = call_static_string("pollPackageResult")
-                .unwrap_or_else(|| Self::default_package().to_string());
+            let package = match call_static_string("pollPackageResult") {
+                Some(p) => p,
+                None => {
+                    return IntentPollResult::Error("No package name returned from signer".to_string());
+                }
+            };
             match PublicKey::parse(&pubkey_hex) {
                 Ok(pubkey) => IntentPollResult::Ready { pubkey, package },
                 Err(e) => {
@@ -195,6 +199,10 @@ impl NostrSigner for Nip55Signer {
 
             let event: Event = serde_json::from_str(&signed_json)
                 .map_err(SignerError::backend)?;
+
+            if event.pubkey.to_hex() != current_user {
+                return Err(SignerError::from("signer pubkey mismatch"));
+            }
 
             Ok(event)
         })

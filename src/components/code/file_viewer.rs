@@ -391,6 +391,8 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                         }
                         if let Some(html_a) = a.dyn_ref::<web_sys::HtmlElement>() {
                             html_a.click();
+                        } else {
+                            web_sys::console::warn_1(&format!("Download: Could not get HtmlElement for '{}'", filename).into());
                         }
                         if let Err(e) = body.remove_child(&a) {
                             log::error!(
@@ -408,10 +410,6 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                                 );
                             }
                         });
-                    }
-                    #[cfg(not(feature = "web"))]
-                    {
-                        log::warn!("Raw file download not yet supported on native desktop");
                     }
                 }
             },

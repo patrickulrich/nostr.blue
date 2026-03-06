@@ -4,17 +4,11 @@
 //! This module provides centralized relay management using Nostr-native relay lists.
 //! It implements the Outbox model for intelligent relay routing.
 
-#[cfg(all(feature = "web", feature = "desktop"))]
-compile_error!("Cannot enable both 'web' and 'desktop' features simultaneously");
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
 
-#[cfg(all(feature = "web", feature = "mobile"))]
-compile_error!("Cannot enable both 'web' and 'mobile' features simultaneously");
-
-#[cfg(all(feature = "desktop", feature = "mobile"))]
-compile_error!("Cannot enable both 'desktop' and 'mobile' features simultaneously");
-
-#[cfg(all(not(feature = "web"), not(feature = "desktop"), not(feature = "mobile")))]
-compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
 
 use dioxus::prelude::*;
 use dioxus::signals::ReadableExt;
@@ -26,9 +20,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::stores::nostr_client;
-#[cfg(any(feature = "web", feature = "mobile"))]
+#[cfg(feature = "web")]
 use crate::platform::storage;
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+#[cfg(all(feature = "native", not(feature = "web")))]
 use std::fs;
 /// Configuration for a single relay with read/write permissions
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -468,41 +462,8 @@ pub async fn fetch_blocked_relays(
     Ok(relays)
 }
 const LOCAL_RELAYS_KEY: &str = "nostr_blue_local_relays";
-/// Load local relays from browser LocalStorage (web-only, not when native is enabled)
-#[cfg(all(feature = "web", not(feature = "native")))]
-pub fn load_local_relays() -> Vec<String> {
-    // First try the typed Vec<String> format
-    match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
-        Ok(relays) => relays,
-        Err(_) => {
-            // Fallback to old JSON string format and migrate
-            log::debug!("Could not load local relays as Vec<String>, trying old string format");
-            match storage::get::<String>(LOCAL_RELAYS_KEY) {
-                Ok(json) => {
-                    match serde_json::from_str::<Vec<String>>(&json) {
-                        Ok(relays) => {
-                            log::debug!("Migrating local relays from old string format");
-                            // Migrate to new format
-                            if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
-                                log::error!("Failed to migrate local relays to new format: {:?}", e);
-                            }
-                            relays
-                        }
-                        Err(e) => {
-                            log::debug!("Failed to parse old local relays format: {}", e);
-                            Vec::new()
-                        }
-                    }
-                }
-                Err(_) => {
-                    log::debug!("No local relays found in storage");
-                    Vec::new()
-                }
-            }
-        }
-    }
-}
-#[cfg(feature = "mobile")]
+/// Load local relays from storage (web uses LocalStorage, native uses filesystem)
+#[cfg(feature = "web")]
 pub fn load_local_relays() -> Vec<String> {
     match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
         Ok(relays) => relays,
@@ -512,7 +473,7 @@ pub fn load_local_relays() -> Vec<String> {
         }
     }
 }
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+#[cfg(feature = "native")]
 pub fn load_local_relays() -> Vec<String> {
     let path = dirs::config_dir()
         .map(|p| { p.join("nostr_blue").join(format!("{}.json", LOCAL_RELAYS_KEY)) });
@@ -537,20 +498,14 @@ pub fn load_local_relays() -> Vec<String> {
         _ => Vec::new(),
     }
 }
-/// Save local relays to browser LocalStorage (web-only, not when native is enabled)
-#[cfg(all(feature = "web", not(feature = "native")))]
+/// Save local relays to browser LocalStorage (web-only)
+#[cfg(feature = "web")]
 pub fn save_local_relays(relays: &[String]) {
     if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
         log::error!("Failed to save local relays: {}", e);
     }
 }
-#[cfg(feature = "mobile")]
-pub fn save_local_relays(relays: &[String]) {
-    if let Err(e) = storage::set(LOCAL_RELAYS_KEY, &relays) {
-        log::error!("Failed to save local relays: {}", e);
-    }
-}
-#[cfg(all(feature = "native", not(feature = "mobile")))]
+#[cfg(feature = "native")]
 pub fn save_local_relays(relays: &[String]) {
     let Some(config_dir) = dirs::config_dir().map(|p| p.join("nostr_blue")) else {
         log::error!("Could not determine config directory for local relays");

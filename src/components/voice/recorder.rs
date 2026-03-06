@@ -19,13 +19,18 @@ pub fn VoiceRecorder(
     let mut is_mounted = use_signal(|| true);
     let mut is_playing_preview = use_signal(|| false);
     let mut blob_url_cache = use_signal(|| None::<String>);
+    let recorder_id = use_signal(|| Uuid::new_v4().to_string());
     use_drop(move || {
         is_mounted.set(false);
         if let Some(ref url) = *blob_url_cache.peek() {
             let _ = js_sys::eval(&format!("URL.revokeObjectURL('{}')", url));
         }
+        let cleanup_script = format!(
+            "if (window.voiceRecorderManager) {{ window.voiceRecorderManager.cleanup('{}'); }}",
+            recorder_id.read()
+        );
+        let _ = js_sys::eval(&cleanup_script);
     });
-    let recorder_id = use_signal(|| Uuid::new_v4().to_string());
     let start_recording_handler = {
         let recorder_id = recorder_id.read().clone();
         move |_| {

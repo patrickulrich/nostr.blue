@@ -5,6 +5,19 @@ use dioxus_stores::Store;
 use nostr_sdk::nips::nip51::Bookmarks;
 use nostr_sdk::{Event, EventBuilder, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
+
+#[cfg(all(feature = "web", feature = "desktop"))]
+compile_error!("Cannot enable both 'web' and 'desktop' features");
+
+#[cfg(all(feature = "web", feature = "mobile"))]
+compile_error!("Cannot enable both 'web' and 'mobile' features");
+
+#[cfg(all(feature = "desktop", feature = "mobile"))]
+compile_error!("Cannot enable both 'desktop' and 'mobile' features");
+
+#[cfg(not(any(feature = "web", feature = "desktop", feature = "mobile")))]
+compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature");
+
 #[cfg(feature = "web")]
 use gloo_timers::callback::Timeout;
 #[cfg(feature = "web")]
@@ -195,7 +208,7 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
     Ok(())
 }
 /// Publish bookmarks with retry and exponential backoff (native - requires Send)
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown", feature = "web")))]
+#[cfg(not(feature = "web"))]
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,
@@ -237,7 +250,7 @@ fn publish_with_retry(
                         "Retrying bookmark publish in {}ms (attempt {}/{})", delay_ms,
                         retry_count + 1, MAX_RETRIES
                     );
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
+                    crate::platform::timer::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
                     publish_with_retry(bookmarks, retry_count + 1, generation).await;
                 } else {
                     log::error!(
@@ -265,8 +278,8 @@ fn publish_with_retry(
     })
 }
 
-/// Publish bookmarks with retry and exponential backoff (WASM - no Send bound)
-#[cfg(all(target_arch = "wasm32", target_os = "unknown", feature = "web"))]
+/// Publish bookmarks with retry and exponential backoff (web - no Send bound)
+#[cfg(feature = "web")]
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,

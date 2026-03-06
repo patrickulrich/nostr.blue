@@ -195,7 +195,7 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
     Ok(())
 }
 /// Publish pinned notes with retry and exponential backoff (native - requires Send)
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(feature = "native")]
 fn publish_with_retry(
     pins: Vec<String>,
     retry_count: u32,
@@ -219,7 +219,7 @@ fn publish_with_retry(
                         "Retrying pinned notes publish in {}ms (attempt {}/{})",
                         delay_ms, retry_count + 1, MAX_RETRIES
                     );
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms as u64)).await;
+                    crate::platform::timer::sleep_ms(delay_ms).await;
                     publish_with_retry(pins, retry_count + 1).await;
                 } else {
                     log::error!(
@@ -249,7 +249,7 @@ fn publish_with_retry(
 }
 
 /// Publish pinned notes with retry and exponential backoff (WASM - no Send bound)
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[cfg(feature = "web")]
 fn publish_with_retry(
     pins: Vec<String>,
     retry_count: u32,

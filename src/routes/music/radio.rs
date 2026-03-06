@@ -2,6 +2,10 @@ use crate::routes::Route;
 use crate::services::wavlake::WavlakeAPI;
 use crate::stores::music_player::{self, MusicTrack};
 use dioxus::prelude::*;
+
+#[cfg(feature = "web")]
+use js_sys;
+
 #[component]
 pub fn MusicRadio() -> Element {
     let mut selected_genre = use_signal(|| String::from("all"));

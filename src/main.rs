@@ -4,6 +4,13 @@ use stores::{
     auth_store, cashu, feed_cache, music_player, nostr_client, nwc_store,
     reactions_store, relay, settings_store, shop_store, sidebar_store, theme_store,
 };
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 mod components;
 mod context;
 mod error;

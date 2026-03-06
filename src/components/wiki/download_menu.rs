@@ -10,10 +10,6 @@ use crate::stores::wiki_store::CachedWikiPage;
 use crate::utils::download::{download_markdown, trigger_print};
 use dioxus::prelude::*;
 use dioxus_primitives::toast::consume_toast;
-#[allow(unused_imports)]
-use dioxus_primitives::toast::ToastOptions;
-#[allow(unused_imports)]
-use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct WikiDownloadMenuProps {
@@ -74,6 +70,8 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     is_open.set(false);
                                     #[cfg(feature = "web")]
                                     {
+                                        use dioxus_primitives::toast::ToastOptions;
+                                        use std::time::Duration;
                                         trigger_print();
                                         toast.info(
                                             "Print dialog opened".to_string(),
@@ -85,6 +83,8 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     }
                                     #[cfg(not(feature = "web"))]
                                     {
+                                        use dioxus_primitives::toast::ToastOptions;
+                                        use std::time::Duration;
                                         toast.error(
                                             "Print not supported on this platform".to_string(),
                                             ToastOptions::new()
@@ -127,6 +127,8 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     let filename = format!("{}.md", identifier_md);
                                     #[cfg(feature = "web")]
                                     {
+                                        use dioxus_primitives::toast::ToastOptions;
+                                        use std::time::Duration;
                                         download_markdown(&filename, &title_md, &content_md);
                                         toast_api.success(
                                             "Downloaded!".to_string(),
@@ -138,6 +140,8 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     }
                                     #[cfg(not(feature = "web"))]
                                     {
+                                        use dioxus_primitives::toast::ToastOptions;
+                                        use std::time::Duration;
                                         toast_api.error(
                                             "Download not supported on this platform".to_string(),
                                             ToastOptions::new()

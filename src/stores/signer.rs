@@ -153,7 +153,7 @@ pub async fn set_signer(signer: SignerType) -> Result<(), String> {
 /// Clear the current signer and remove persisted session
 #[allow(dead_code)]
 pub fn clear_signer() {
-    crate::platform::storage::delete("signer_info");
+    let _ = crate::platform::storage::delete("signer_info");
     *SIGNER_INFO.write() = None;
     *CURRENT_SIGNER.write() = None;
 }

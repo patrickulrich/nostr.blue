@@ -384,12 +384,15 @@ pub fn VoiceMessageCard(
             format!("{}d", (diff / 86400.0) as u32)
         }
     };
+    #[cfg(feature = "web")]
     let navigator = use_navigator();
+    #[cfg(feature = "web")]
     let voice_id_for_nav = event_id_str.clone();
     // TODO: Native click guard — on native platforms, clicks on interactive elements
     // (links, buttons, audio controls) should not trigger navigation. Requires a
     // non-web-sys approach to detect interactive targets.
     let navigate_to_detail = move |_evt: Event<MouseData>| {
+        // Guard against propagation from nested interactive elements
         #[cfg(feature = "web")]
         {
             if let Some(target) = _evt.data.as_web_event().target() {
@@ -400,6 +403,14 @@ pub fn VoiceMessageCard(
                 }
             }
         }
+        #[cfg(not(feature = "web"))]
+        {
+            // On native/desktop, skip card-level navigation entirely.
+            // Users can click on Links or use other navigation methods.
+            #[allow(clippy::needless_return)]
+            return;
+        }
+        #[cfg(feature = "web")]
         navigator
             .push(Route::Note {
                 note_id: voice_id_for_nav.clone(),
@@ -416,6 +427,7 @@ pub fn VoiceMessageCard(
                         pubkey: author_pubkey.clone(),
                     },
                     class: "shrink-0",
+                    onclick: |e: MouseEvent| e.stop_propagation(),
                     if !author_avatar.is_empty() {
                         img {
                             src: "{author_avatar}",
@@ -434,6 +446,7 @@ pub fn VoiceMessageCard(
                             pubkey: author_pubkey.clone(),
                         },
                         class: "hover:underline",
+                        onclick: |e: MouseEvent| e.stop_propagation(),
                         div { class: "flex items-center gap-2",
                             span { class: "font-semibold text-foreground truncate", "{author_name}" }
                             if !author_username.is_empty() && author_username != author_name {

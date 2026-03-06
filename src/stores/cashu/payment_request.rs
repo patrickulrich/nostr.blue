@@ -6,6 +6,12 @@
 //! Uses CDK's native PaymentRequest types for NUT-18 compliance.
 #![allow(dead_code)]
 
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 use crate::platform::http::http_client;
 /// Error message returned when a payment request is cancelled by the user.
 /// This is NOT an error condition - it indicates a clean shutdown.
@@ -510,17 +516,19 @@ pub async fn wait_for_nostr_payment(
                     Either::Right((_, _)) => continue,
                 }
             }
-            #[cfg(not(feature = "web"))]
+            #[cfg(feature = "native")]
             {
-                match tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        notifications.recv(),
-                    )
-                    .await
-                {
-                    Ok(Ok(n)) => Some(n),
-                    Ok(Err(_)) => break,
-                    Err(_) => continue,
+                use futures::future::{select, Either};
+                use futures::pin_mut;
+                use std::time::Duration;
+                let timeout_fut = crate::platform::timer::sleep(Duration::from_secs(5));
+                let recv_fut = notifications.recv();
+                pin_mut!(timeout_fut);
+                pin_mut!(recv_fut);
+                match select(recv_fut, timeout_fut).await {
+                    Either::Left((Ok(n), _)) => Some(n),
+                    Either::Left((Err(_), _)) => break,
+                    Either::Right((_, _)) => continue,
                 }
             }
         };

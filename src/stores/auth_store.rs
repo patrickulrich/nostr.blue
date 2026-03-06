@@ -94,8 +94,8 @@ pub fn init_auth() {
                         }
                         Err(_) => {
                             log::warn!("Corrupted read-only pubkey in storage, clearing");
-                            crate::platform::storage::delete(STORAGE_KEY_NPUB);
-                            crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
                         }
                     }
                 }
@@ -113,10 +113,10 @@ pub fn init_auth() {
                         }
                         Err(_) => {
                             log::warn!("Corrupted remote signer pubkey in storage, clearing");
-                            crate::platform::storage::delete(STORAGE_KEY_NPUB);
-                            crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
-                            crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
-                            crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
+                            let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
                         }
                     }
                 }
@@ -160,8 +160,12 @@ pub async fn restore_session_async() {
                     } else {
                         log::error!("Invalid ncryptsec format in storage");
                         clear_auth();
-                        crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC);
-                        crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                        if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
+                            log::error!("Failed to delete ncryptsec: {}", e);
+                        }
+                        if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
+                            log::error!("Failed to delete method: {}", e);
+                        }
                     }
                 } else if let Ok(_nsec) = crate::platform::storage::get::<String>(STORAGE_KEY_NSEC) {
                     *PASSWORD_PROMPT.write() = PasswordPromptState {
@@ -236,10 +240,10 @@ pub async fn restore_session_async() {
                         "Cannot restore remote signer session: incomplete saved credentials (missing bunker URI or app keys)"
                     );
                     clear_auth();
-                    crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
-                    crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
-                    crate::platform::storage::delete(STORAGE_KEY_METHOD);
-                    crate::platform::storage::delete(STORAGE_KEY_NPUB);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_METHOD);
+                    let _ = crate::platform::storage::delete(STORAGE_KEY_NPUB);
                 }
             }
             _ => {}
@@ -268,10 +272,10 @@ pub async fn login_with_nsec(nsec: &str, password: &str) -> Result<(), String> {
         is_authenticated: true,
         login_method: Some(LoginMethod::PrivateKey),
     };
-    crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec).ok();
-    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey).ok();
-    crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key").ok();
-    crate::platform::storage::delete(STORAGE_KEY_NSEC);
+    crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey)?;
+    crate::platform::storage::set(STORAGE_KEY_METHOD, "private_key")?;
+    crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
     log::info!("Successfully logged in with encrypted key, pubkey: {}", pubkey);
     run_post_login_init().await;
     Ok(())
@@ -304,8 +308,8 @@ pub async fn login_with_npub(npub: &str) -> Result<(), String> {
         is_authenticated: false,
         login_method: Some(LoginMethod::ReadOnly),
     };
-    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
-    crate::platform::storage::set(STORAGE_KEY_METHOD, "read_only").ok();
+    crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
+    crate::platform::storage::set(STORAGE_KEY_METHOD, "read_only")?;
     log::info!("Loaded read-only mode with pubkey: {}", pubkey_str);
     Ok(())
 }
@@ -330,8 +334,8 @@ pub async fn login_with_browser_extension() -> Result<(), String> {
             is_authenticated: true,
             login_method: Some(LoginMethod::BrowserExtension),
         };
-        crate::platform::storage::set(STORAGE_KEY_METHOD, "extension").ok();
-        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str).ok();
+        crate::platform::storage::set(STORAGE_KEY_METHOD, "extension")?;
+        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_str)?;
         log::info!(
             "Successfully logged in via browser extension with pubkey: {}", pubkey_str
         );
@@ -517,13 +521,27 @@ pub async fn logout() {
     });
     let _ = nostr_client::set_read_only().await;
     clear_auth();
-    crate::platform::storage::delete(STORAGE_KEY_NSEC);
-    crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC);
-    crate::platform::storage::delete(STORAGE_KEY_NPUB);
-    crate::platform::storage::delete(STORAGE_KEY_METHOD);
-    crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI);
-    crate::platform::storage::delete(STORAGE_KEY_APP_KEYS);
-    crate::platform::storage::delete(STORAGE_KEY_SIGNER_PACKAGE);
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
+        log::error!("Failed to delete nsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
+        log::error!("Failed to delete ncryptsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NPUB) {
+        log::error!("Failed to delete npub: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
+        log::error!("Failed to delete method: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_BUNKER_URI) {
+        log::error!("Failed to delete bunker URI: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_APP_KEYS) {
+        log::error!("Failed to delete app keys: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_SIGNER_PACKAGE) {
+        log::error!("Failed to delete signer package: {}", e);
+    }
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
 }
 /// Clear authentication state
@@ -585,8 +603,8 @@ pub async fn restore_with_password(password: &str) -> Result<(), String> {
                 return Err(err);
             }
         };
-        crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec).ok();
-        crate::platform::storage::delete(STORAGE_KEY_NSEC);
+        crate::platform::storage::set(STORAGE_KEY_NCRYPTSEC, &ncryptsec)?;
+        crate::platform::storage::delete(STORAGE_KEY_NSEC)?;
         if let Err(e) = login_with_keys_internal(keys).await {
             PASSWORD_PROMPT.write().loading = false;
             PASSWORD_PROMPT.write().error = Some(e.clone());
@@ -606,10 +624,18 @@ pub async fn restore_with_password(password: &str) -> Result<(), String> {
 pub fn cancel_password_prompt() {
     *PASSWORD_PROMPT.write() = PasswordPromptState::default();
     clear_auth();
-    crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC);
-    crate::platform::storage::delete(STORAGE_KEY_NSEC);
-    crate::platform::storage::delete(STORAGE_KEY_NPUB);
-    crate::platform::storage::delete(STORAGE_KEY_METHOD);
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NCRYPTSEC) {
+        log::error!("Failed to delete ncryptsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NSEC) {
+        log::error!("Failed to delete nsec: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_NPUB) {
+        log::error!("Failed to delete npub: {}", e);
+    }
+    if let Err(e) = crate::platform::storage::delete(STORAGE_KEY_METHOD) {
+        log::error!("Failed to delete method: {}", e);
+    }
 }
 /// Sign a message with current keys
 #[allow(dead_code)]
@@ -681,9 +707,9 @@ pub async fn login_with_android_signer(npub: &str, signer_package: Option<&str>)
             login_method: Some(LoginMethod::AndroidSigner),
         };
 
-        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_hex).ok();
-        crate::platform::storage::set(STORAGE_KEY_METHOD, "android_signer").ok();
-        crate::platform::storage::set(STORAGE_KEY_SIGNER_PACKAGE, &package).ok();
+        crate::platform::storage::set(STORAGE_KEY_NPUB, &pubkey_hex)?;
+        crate::platform::storage::set(STORAGE_KEY_METHOD, "android_signer")?;
+        crate::platform::storage::set(STORAGE_KEY_SIGNER_PACKAGE, &package)?;
 
         log::info!("Successfully logged in via Android signer with pubkey: {}", pubkey_hex);
         run_post_login_init().await;

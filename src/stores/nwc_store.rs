@@ -20,20 +20,57 @@ pub static NWC_STATUS: GlobalSignal<ConnectionStatus> = Signal::global(|| {
 });
 /// Cached wallet balance in millisatoshis
 pub static NWC_BALANCE: GlobalSignal<Option<u64>> = Signal::global(|| None);
-/// Save NWC URI to persistent storage
-fn save_nwc_uri(uri: &str) -> std::result::Result<(), String> {
+/// Save NWC URI to secure storage (file with restricted permissions on native, web storage on web)
+#[cfg(feature = "native")]
+fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
+    use std::fs;
+    let dir = crate::platform::storage::data_dir();
+    let path = dir.join("nwc_uri.secure");
+    fs::write(&path, uri).map_err(|e| format!("Failed to write secure file: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+#[cfg(feature = "native")]
+fn load_nwc_uri_secure() -> Option<String> {
+    use std::fs;
+    let dir = crate::platform::storage::data_dir();
+    let path = dir.join("nwc_uri.secure");
+    fs::read_to_string(&path).ok()
+}
+#[cfg(feature = "native")]
+fn delete_nwc_uri_secure() {
+    use std::fs;
+    let dir = crate::platform::storage::data_dir();
+    let path = dir.join("nwc_uri.secure");
+    let _ = fs::remove_file(path);
+}
+#[cfg(not(feature = "native"))]
+fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     crate::platform::storage::set_string(STORAGE_KEY_NWC_URI, uri)
 }
-/// Load NWC URI from persistent storage
+#[cfg(not(feature = "native"))]
+fn load_nwc_uri_secure() -> Option<String> {
+    crate::platform::storage::get_string(STORAGE_KEY_NWC_URI)
+}
+#[cfg(not(feature = "native"))]
+fn delete_nwc_uri_secure() {
+    let _ = crate::platform::storage::delete(STORAGE_KEY_NWC_URI);
+}
+/// Load NWC URI from persistent storage (legacy - for backward compatibility)
 fn load_nwc_uri() -> Option<String> {
     crate::platform::storage::get_string(STORAGE_KEY_NWC_URI)
 }
 /// Delete NWC URI from persistent storage
 fn delete_nwc_uri() {
-    crate::platform::storage::delete(STORAGE_KEY_NWC_URI);
+    let _ = crate::platform::storage::delete(STORAGE_KEY_NWC_URI);
 }
 /// Connect to NWC using a connection URI
-pub async fn connect_nwc(uri_string: &str) -> std::result::Result<(), String> {
+/// If remember_wallet is true, the URI will be stored securely
+pub async fn connect_nwc(uri_string: &str, remember_wallet: bool) -> std::result::Result<(), String> {
     NWC_STATUS.write().clone_from(&ConnectionStatus::Connecting);
     let uri = NostrWalletConnectURI::from_str(uri_string.trim())
         .map_err(|e| {
@@ -47,8 +84,10 @@ pub async fn connect_nwc(uri_string: &str) -> std::result::Result<(), String> {
             log::info!(
                 "Connected to NWC wallet: {}", info.alias.as_deref().unwrap_or("Unknown")
             );
-            if let Err(e) = save_nwc_uri(uri_string.trim()) {
-                log::warn!("Failed to save NWC URI: {}", e);
+            if remember_wallet {
+                if let Err(e) = save_nwc_uri_secure(uri_string.trim()) {
+                    log::warn!("Failed to save NWC URI securely: {}", e);
+                }
             }
             *NWC_CLIENT.write() = Some(Arc::new(nwc));
             *NWC_STATUS.write() = ConnectionStatus::Connected;
@@ -69,15 +108,16 @@ pub fn disconnect_nwc() {
     *NWC_CLIENT.write() = None;
     *NWC_STATUS.write() = ConnectionStatus::Disconnected;
     *NWC_BALANCE.write() = None;
+    delete_nwc_uri_secure();
     delete_nwc_uri();
     log::info!("Disconnected from NWC wallet");
 }
 /// Restore NWC connection from persistent storage
 pub async fn restore_connection() {
-    match load_nwc_uri() {
+    match load_nwc_uri_secure().or_else(load_nwc_uri) {
         Some(uri) => {
-            log::info!("Restoring NWC connection from storage");
-            if let Err(e) = connect_nwc(&uri).await {
+            log::info!("Restoring NWC connection from secure storage");
+            if let Err(e) = connect_nwc(&uri, true).await {
                 log::warn!("Failed to restore NWC connection: {}", e);
                 disconnect_nwc();
             }

@@ -105,13 +105,13 @@ window.hlsManager = window.hlsManager || {
             throw e;
         }
 
+        // Commit token to map before validation check
+        this.activeAttachMap.set(elementId, attachId);
+
         // Check if this attach is still valid after await
         if (this.activeAttachMap.get(elementId) !== attachId) {
             return { type: 'cancelled', url: streamUrl };
         }
-
-        // Token is valid, now commit it to the map
-        this.activeAttachMap.set(elementId, attachId);
 
         if (!Hls.isSupported()) {
             throw new Error('HLS not supported in this browser');

@@ -121,7 +121,7 @@ pub fn cache_event(event: CalendarEvent) {
 fn get_date_key(time: &EventTime) -> String {
     match time {
         EventTime::Date(d) => d.clone(),
-        EventTime::Timestamp(ts) => {
+        EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
             use chrono::{TimeZone, Utc};
             const MAX_TIMESTAMP: i64 = 253_402_300_799; // Year 9999
             let ts_i64 = i64::try_from(*ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);

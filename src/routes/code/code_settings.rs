@@ -407,7 +407,7 @@ fn WalletSection() -> Element {
         connect_error.set(None);
         is_connecting.set(true);
         spawn(async move {
-            match nwc_store::connect_nwc(&uri).await {
+            match nwc_store::connect_nwc(&uri, false).await {
                 Ok(()) => {
                     nwc_uri.set(String::new());
                     connect_error.set(None);

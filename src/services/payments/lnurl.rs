@@ -65,10 +65,6 @@ impl std::fmt::Display for LnUrlError {
         }
     }
 }
-/// Get HTTP client reference
-fn get_http_client() -> &'static reqwest::Client {
-    http_client()
-}
 /// Validate that a URL is safe for LNURL requests
 /// Validates scheme and blocks private/local IP addresses to prevent SSRF attacks
 fn validate_url(url: &str) -> Result<(), LnUrlError> {
@@ -155,7 +151,7 @@ pub fn decode_lud06(lud06: &str) -> Result<String, LnUrlError> {
 /// Fetch LNURL pay information
 pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlError> {
     validate_url(url)?;
-    let client = get_http_client();
+    let client = http_client();
     let response = client
         .get(url)
         .send()
@@ -228,7 +224,7 @@ pub async fn request_zap_invoice(
     if let Some(lnurl_value) = lnurl {
         url.push_str(&format!("&lnurl={}", urlencoding::encode(lnurl_value)));
     }
-    let client = get_http_client();
+    let client = http_client();
     let response = client
         .get(&url)
         .send()
@@ -262,7 +258,7 @@ pub async fn fetch_lnurl_pay_info_simple(
     url: &str,
 ) -> Result<LnUrlPayResponse, LnUrlError> {
     validate_url(url)?;
-    let client = get_http_client();
+    let client = http_client();
     let response = client
         .get(url)
         .send()
@@ -286,7 +282,7 @@ pub async fn request_simple_invoice(
     if let Some(c) = comment {
         url.push_str(&format!("&comment={}", urlencoding::encode(c)));
     }
-    let client = get_http_client();
+    let client = http_client();
     let response = client
         .get(&url)
         .send()

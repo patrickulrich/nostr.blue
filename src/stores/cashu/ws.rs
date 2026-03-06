@@ -7,6 +7,13 @@
 //! - Explicit close() for resource cleanup
 //! - Subscribe sent in onopen callback (no timing races)
 #![allow(dead_code)]
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 use crate::platform::http::http_client;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -435,28 +442,6 @@ pub fn unsubscribe(mint_url: &str, sub_id: &str) {
         close_connection(mint_url);
     }
 }
-/// Check if WebSocket subscriptions are supported for a mint
-#[allow(dead_code)]
-#[cfg(feature = "web")]
-pub async fn check_ws_support(mint_url: &str) -> bool {
-    let ws_url = match mint_url_to_ws(mint_url) {
-        Ok(url) => url,
-        Err(_) => return false,
-    };
-    match WebSocket::new(&ws_url) {
-        Ok(ws) => {
-            let _ = ws.close();
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-#[allow(dead_code)]
-#[cfg(not(feature = "web"))]
-pub async fn check_ws_support(_mint_url: &str) -> bool {
-    false
-}
 /// Convert HTTP mint URL to WebSocket URL
 #[cfg(feature = "web")]
 fn mint_url_to_ws(mint_url: &str) -> Result<String, String> {
@@ -682,8 +667,7 @@ pub async fn poll_proof_states(
     let request_body = serde_json::json!({ "Ys" : y_values });
     let response = http_client()
         .post(&endpoint)
-        .header("Content-Type", "application/json")
-        .body(request_body.to_string())
+        .json(&request_body)
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;

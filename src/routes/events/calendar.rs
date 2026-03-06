@@ -19,6 +19,7 @@ pub fn Calendar() -> Element {
     let mut events = use_signal(Vec::<UnifiedEvent>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut export_error = use_signal(|| None::<String>);
     let mut selected_date = use_signal(get_today);
     let mut view_mode = use_signal(|| CalendarViewMode::Week);
     let mut show_all_day = use_signal(|| true);
@@ -201,6 +202,11 @@ pub fn Calendar() -> Element {
                                 }
                                 h1 { class: "text-xl font-semibold ml-4", "{month_header}" }
                             }
+                            if let Some(err) = export_error.read().as_ref() {
+                                div { class: "px-4 py-2 m-4 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-sm",
+                                    "{err}"
+                                }
+                            }
                             div { class: "flex items-center gap-3",
                                 if is_logged_in && !filtered_events.read().is_empty() {
                                     button {
@@ -223,6 +229,9 @@ pub fn Calendar() -> Element {
                                                 let filename = format!("nostr_calendar_{}.ics", today);
                                                 if let Err(e) = download_ics(&filename, &ics_content) {
                                                     log::error!("Failed to download calendar: {}", e);
+                                                    export_error.set(Some(format!("Failed to export: {}", e)));
+                                                } else {
+                                                    export_error.set(None);
                                                 }
                                             }
                                         },
@@ -261,6 +270,9 @@ pub fn Calendar() -> Element {
                                                 let filename = format!("nostr_calendar_{}.ics", today);
                                                 if let Err(e) = download_ics(&filename, &ics_content) {
                                                     log::error!("Failed to download calendar: {}", e);
+                                                    export_error.set(Some(format!("Failed to export: {}", e)));
+                                                } else {
+                                                    export_error.set(None);
                                                 }
                                             }
                                         },

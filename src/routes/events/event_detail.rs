@@ -15,6 +15,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
     let mut event = use_signal(|| None::<UnifiedEvent>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut export_error = use_signal(|| None::<String>);
     let mut rsvp_status = use_signal(|| None::<RsvpStatus>);
     let mut rsvp_loading = use_signal(|| false);
     let mut rsvp_count = use_signal(|| 0usize);
@@ -593,7 +594,7 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                             );
                                             if let Err(e) = download_ics(&filename, &ics_content) {
                                                 log::error!("Failed to download event: {}", e);
-                                                error.set(Some(format!("Failed to export calendar event: {}", e)));
+                                                export_error.set(Some(format!("Failed to export calendar event: {}", e)));
                                             }
                                         }
                                     },
@@ -611,6 +612,11 @@ pub fn CalendarEventDetail(naddr: String, from: Option<String>) -> Element {
                                         }
                                     }
                                     "Export to Calendar"
+                                }
+                                if let Some(err) = export_error.read().as_ref() {
+                                    div { class: "mt-2 px-3 py-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-sm",
+                                        "{err}"
+                                    }
                                 }
                             }
                         }
