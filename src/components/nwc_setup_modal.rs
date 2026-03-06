@@ -17,7 +17,7 @@ pub fn NwcSetupModal(
             connection_error.set(None);
             connection_success.set(false);
             let uri = nwc_uri.read().clone();
-            match nwc_store::connect_nwc(&uri, false).await {
+            match nwc_store::connect_nwc(&uri, true).await {
                 Ok(()) => {
                     log::info!("NWC connected successfully");
                     connection_success.set(true);

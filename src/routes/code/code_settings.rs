@@ -407,7 +407,7 @@ fn WalletSection() -> Element {
         connect_error.set(None);
         is_connecting.set(true);
         spawn(async move {
-            match nwc_store::connect_nwc(&uri, false).await {
+            match nwc_store::connect_nwc(&uri, true).await {
                 Ok(()) => {
                     nwc_uri.set(String::new());
                     connect_error.set(None);
@@ -421,7 +421,7 @@ fn WalletSection() -> Element {
     };
 
     let handle_disconnect = move |_| {
-        nwc_store::disconnect_nwc();
+        nwc_store::disconnect_nwc(false);
     };
 
     let handle_refresh = move |_| {

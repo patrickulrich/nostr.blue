@@ -388,13 +388,13 @@ pub fn VoiceMessageCard(
     let navigator = use_navigator();
     #[cfg(feature = "web")]
     let voice_id_for_nav = event_id_str.clone();
-    // TODO: Native click guard — on native platforms, clicks on interactive elements
-    // (links, buttons, audio controls) should not trigger navigation. Requires a
-    // non-web-sys approach to detect interactive targets.
-    let navigate_to_detail = move |_evt: Event<MouseData>| {
-        // Guard against propagation from nested interactive elements
+    #[cfg(feature = "web")]
+    let is_clickable = true;
+    #[cfg(not(feature = "web"))]
+    let is_clickable = false;
+    let navigate_to_detail = {
         #[cfg(feature = "web")]
-        {
+        move |_evt: Event<MouseData>| {
             if let Some(target) = _evt.data.as_web_event().target() {
                 if let Some(element) = target.dyn_ref::<web_sys::Element>() {
                     if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [role=\"link\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
@@ -402,25 +402,29 @@ pub fn VoiceMessageCard(
                     }
                 }
             }
+            navigator
+                .push(Route::Note {
+                    note_id: voice_id_for_nav.clone(),
+                    from_voice: Some("true".to_string()),
+                });
         }
-        #[cfg(not(feature = "web"))]
-        {
-            // On native/desktop, skip card-level navigation entirely.
-            // Users can click on Links or use other navigation methods.
-            #[allow(clippy::needless_return)]
-            return;
+    };
+    let card_class = if is_clickable {
+        "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border"
+    } else {
+        "p-4 border-b border-border opacity-60"
+    };
+    let tooltip_text = if !is_clickable { "Not supported on this platform" } else { "" };
+    let handle_click = move |_evt: Event<MouseData>| {
+        if is_clickable {
+            navigate_to_detail(_evt);
         }
-        #[cfg(feature = "web")]
-        navigator
-            .push(Route::Note {
-                note_id: voice_id_for_nav.clone(),
-                from_voice: Some("true".to_string()),
-            });
     };
     rsx! {
         div {
-            class: "p-4 hover:bg-accent/50 transition cursor-pointer border-b border-border",
-            onclick: navigate_to_detail,
+            class: "{card_class}",
+            title: "{tooltip_text}",
+            onclick: handle_click,
             div { class: "flex items-start gap-3 mb-3",
                 Link {
                     to: Route::Profile {

@@ -55,8 +55,18 @@ fn format_vevent(event: &CalendarEvent) -> String {
         EventTime::Date(d) => {
             vevent.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", d.replace('-', "")));
         }
-        EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
+        EventTime::Timestamp(ts) => {
             vevent.push_str(&format!("DTSTART:{}\r\n", format_timestamp(*ts)));
+        }
+        EventTime::LocalDateTime {
+            timestamp: ts,
+            timezone,
+        } => {
+            vevent.push_str(&format!(
+                "DTSTART;TZID={}:{}\r\n",
+                timezone,
+                format_local_timestamp(timezone, *ts)
+            ));
         }
     }
     if let Some(end) = &event.end {
@@ -64,8 +74,18 @@ fn format_vevent(event: &CalendarEvent) -> String {
             EventTime::Date(d) => {
                 vevent.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", d.replace('-', "")));
             }
-            EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
+            EventTime::Timestamp(ts) => {
                 vevent.push_str(&format!("DTEND:{}\r\n", format_timestamp(*ts)));
+            }
+            EventTime::LocalDateTime {
+                timestamp: ts,
+                timezone,
+            } => {
+                vevent.push_str(&format!(
+                    "DTEND;TZID={}:{}\r\n",
+                    timezone,
+                    format_local_timestamp(timezone, *ts)
+                ));
             }
         }
     }
@@ -116,6 +136,18 @@ fn format_timestamp(ts: u64) -> String {
         return "19700101T000000Z".to_string();
     };
     dt.format("%Y%m%dT%H%M%SZ").to_string()
+}
+/// Format Unix timestamp as ICS local datetime with TZID (YYYYMMDDTHHmmss)
+fn format_local_timestamp(_tzid: &str, ts: u64) -> String {
+    use chrono::{TimeZone, Utc};
+    const MAX_TIMESTAMP: i64 = 253_402_300_799;
+    let ts_i64 = i64::try_from(ts)
+        .unwrap_or(MAX_TIMESTAMP)
+        .min(MAX_TIMESTAMP);
+    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+        return "19700101T000000".to_string();
+    };
+    dt.format("%Y%m%dT%H%M%S").to_string()
 }
 /// Escape special characters in ICS text
 fn escape_ics_text(text: &str) -> String {

@@ -73,8 +73,8 @@ impl Nip55Signer {
         call_static_string("getSignerPackages")
             .unwrap_or_default()
             .split(',')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_string())
             .collect()
     }
 
@@ -202,6 +202,19 @@ impl NostrSigner for Nip55Signer {
 
             if event.pubkey.to_hex() != current_user {
                 return Err(SignerError::from("signer pubkey mismatch"));
+            }
+
+            if event.kind != unsigned.kind {
+                return Err(SignerError::from("signed event payload mismatch: kind"));
+            }
+            if event.tags != unsigned.tags {
+                return Err(SignerError::from("signed event payload mismatch: tags"));
+            }
+            if event.content != unsigned.content {
+                return Err(SignerError::from("signed event payload mismatch: content"));
+            }
+            if event.created_at != unsigned.created_at {
+                return Err(SignerError::from("signed event payload mismatch: created_at"));
             }
 
             Ok(event)

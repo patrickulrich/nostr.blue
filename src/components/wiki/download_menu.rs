@@ -9,7 +9,8 @@ use crate::stores::wiki_store::CachedWikiPage;
 #[cfg(feature = "web")]
 use crate::utils::download::{download_markdown, trigger_print};
 use dioxus::prelude::*;
-use dioxus_primitives::toast::consume_toast;
+use dioxus_primitives::toast::{consume_toast, ToastOptions};
+use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct WikiDownloadMenuProps {
@@ -70,8 +71,6 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     is_open.set(false);
                                     #[cfg(feature = "web")]
                                     {
-                                        use dioxus_primitives::toast::ToastOptions;
-                                        use std::time::Duration;
                                         trigger_print();
                                         toast.info(
                                             "Print dialog opened".to_string(),
@@ -83,8 +82,6 @@ pub fn WikiDownloadMenu(props: WikiDownloadMenuProps) -> Element {
                                     }
                                     #[cfg(not(feature = "web"))]
                                     {
-                                        use dioxus_primitives::toast::ToastOptions;
-                                        use std::time::Duration;
                                         toast.error(
                                             "Print not supported on this platform".to_string(),
                                             ToastOptions::new()

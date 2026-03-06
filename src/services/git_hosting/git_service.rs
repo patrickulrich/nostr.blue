@@ -12,26 +12,23 @@ use crate::services::git_types::{CommitEntry, FileEntry};
 use crate::services::git_worker::GitWorkerManager;
 use crate::stores::grasp_servers;
 use crate::utils::nip34::Repository;
+use url;
 
 fn redact_url_for_log(url: &str) -> String {
-    if let Some(at_pos) = url.find('@') {
-        if let Some(slash_pos) = url[at_pos..].find('/') {
-            let scheme_end = url[..at_pos].rfind("://").unwrap_or(0);
-            if scheme_end > 0 {
-                let host_with_cred = &url[scheme_end + 3..at_pos + slash_pos];
-                let path = &url[at_pos + slash_pos..];
-                if let Some(colon_pos) = host_with_cred.find(':') {
-                    let host = &host_with_cred[..colon_pos];
-                    return format!("{}**REDACTED**{}", host, path);
-                }
-                return format!("{}**REDACTED**{}", host_with_cred, path);
+    match url::Url::parse(url) {
+        Ok(mut parsed) => {
+            parsed.set_username("").ok();
+            parsed.set_password(Some("")).ok();
+            parsed.to_string()
+        }
+        Err(_) => {
+            if let Some(qmark_pos) = url.find('?') {
+                format!("{}?**REDACTED**", &url[..qmark_pos])
+            } else {
+                url.to_string()
             }
         }
     }
-    if let Some(qmark_pos) = url.find('?') {
-        return format!("{}?**REDACTED**", &url[..qmark_pos]);
-    }
-    url.to_string()
 }
 /// Git Service for repository operations
 ///

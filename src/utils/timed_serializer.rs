@@ -201,8 +201,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "web")]
-    use std::sync::{Arc, Mutex};
     #[test]
     fn test_debouncer_creation() {
         let debouncer = Debouncer::new(1000);
@@ -221,6 +219,7 @@ mod tests {
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     #[test]
     fn test_pending_data_storage() {
+        use std::sync::{Arc, Mutex};
         let serializer = TimedSerializer::<String>::new();
         let called = Arc::new(Mutex::new(false));
         let called_clone = Arc::clone(&called);

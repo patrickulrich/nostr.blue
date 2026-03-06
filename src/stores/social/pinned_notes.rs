@@ -158,7 +158,7 @@ pub async fn pin_event(event_id: String) -> Result<(), String> {
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(feature = "web"))]
+    #[cfg(feature = "native")]
     {
         publish_with_retry(pins, 0).await;
     }
@@ -174,6 +174,7 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
     *PINNED_EVENTS.read().data().write() = pins.clone();
     #[cfg(feature = "web")]
     {
+        let pins_for_timeout = pins.clone();
         PINNED_PUBLISH_TIMEOUT
             .with(|timeout| {
                 *timeout.borrow_mut() = None;
@@ -181,15 +182,14 @@ pub async fn unpin_event(event_id: String) -> Result<(), String> {
                     1000,
                     move || {
                         spawn_local(async move {
-                            publish_with_retry(pins, 0).await;
+                            publish_with_retry(pins_for_timeout, 0).await;
                         });
                     },
                 );
                 *timeout.borrow_mut() = Some(timeout_handle);
             });
     }
-    #[cfg(not(feature = "web"))]
-    {
+    if cfg!(not(feature = "web")) {
         publish_with_retry(pins, 0).await;
     }
     Ok(())

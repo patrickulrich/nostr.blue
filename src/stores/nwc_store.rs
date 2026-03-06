@@ -3,6 +3,13 @@ use dioxus::signals::ReadableExt;
 use nwc::prelude::*;
 use std::str::FromStr;
 use std::sync::Arc;
+
+#[cfg(all(feature = "web", feature = "native"))]
+compile_error!("Cannot enable both 'web' and 'native' features simultaneously");
+
+#[cfg(not(any(feature = "web", feature = "native")))]
+compile_error!("Must enable either 'web' or 'native' feature");
+
 const STORAGE_KEY_NWC_URI: &str = "nwc_uri";
 /// Connection status for NWC
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +32,7 @@ pub static NWC_BALANCE: GlobalSignal<Option<u64>> = Signal::global(|| None);
 fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     use std::fs;
     let dir = crate::platform::storage::data_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create storage directory: {}", e))?;
     let path = dir.join("nwc_uri.secure");
     fs::write(&path, uri).map_err(|e| format!("Failed to write secure file: {}", e))?;
     #[cfg(unix)]
@@ -48,15 +56,15 @@ fn delete_nwc_uri_secure() {
     let path = dir.join("nwc_uri.secure");
     let _ = fs::remove_file(path);
 }
-#[cfg(not(feature = "native"))]
+#[cfg(feature = "web")]
 fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
     crate::platform::storage::set_string(STORAGE_KEY_NWC_URI, uri)
 }
-#[cfg(not(feature = "native"))]
+#[cfg(feature = "web")]
 fn load_nwc_uri_secure() -> Option<String> {
     crate::platform::storage::get_string(STORAGE_KEY_NWC_URI)
 }
-#[cfg(not(feature = "native"))]
+#[cfg(feature = "web")]
 fn delete_nwc_uri_secure() {
     let _ = crate::platform::storage::delete(STORAGE_KEY_NWC_URI);
 }
@@ -104,12 +112,15 @@ pub async fn connect_nwc(uri_string: &str, remember_wallet: bool) -> std::result
     }
 }
 /// Disconnect from NWC
-pub fn disconnect_nwc() {
+/// If preserve_storage is true, the stored URI is kept for reconnection
+pub fn disconnect_nwc(preserve_storage: bool) {
     *NWC_CLIENT.write() = None;
     *NWC_STATUS.write() = ConnectionStatus::Disconnected;
     *NWC_BALANCE.write() = None;
-    delete_nwc_uri_secure();
-    delete_nwc_uri();
+    if !preserve_storage {
+        delete_nwc_uri_secure();
+        delete_nwc_uri();
+    }
     log::info!("Disconnected from NWC wallet");
 }
 /// Restore NWC connection from persistent storage
@@ -119,7 +130,7 @@ pub async fn restore_connection() {
             log::info!("Restoring NWC connection from secure storage");
             if let Err(e) = connect_nwc(&uri, true).await {
                 log::warn!("Failed to restore NWC connection: {}", e);
-                disconnect_nwc();
+                disconnect_nwc(true);
             }
         }
         None => {

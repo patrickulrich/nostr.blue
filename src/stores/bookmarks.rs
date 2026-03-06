@@ -55,7 +55,7 @@ pub static BOOKMARK_SYNC_STATUS: GlobalSignal<BookmarkSyncStatus> = Signal::glob
 pub static BOOKMARK_ROLLBACK_STATE: GlobalSignal<Store<BookmarkRollbackStore>> = Signal::global(||
 Store::new(BookmarkRollbackStore::default()));
 /// Generation counter to track bookmark changes and prevent stale publishes
-static BOOKMARK_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static BOOKMARK_GENERATION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 #[cfg(feature = "web")]
 thread_local! {
     /// Pending bookmark publish timeout (for debouncing)
@@ -212,7 +212,7 @@ pub async fn unbookmark_event(event_id: String) -> Result<(), String> {
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,
-    generation: u64,
+    generation: u32,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
     Box::pin(async move {
         // Check if this publish is still current (not stale)
@@ -283,7 +283,7 @@ fn publish_with_retry(
 fn publish_with_retry(
     bookmarks: Vec<String>,
     retry_count: u32,
-    generation: u64,
+    generation: u32,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> {
     Box::pin(async move {
         // Check if this publish is still current (not stale)

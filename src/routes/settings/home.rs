@@ -287,7 +287,7 @@ pub fn Settings() -> Element {
                                                                                                                                                                                                                                                                                                                                                                                                                                                         text-red-700 dark:text-red-300 rounded-lg
                                                                                                                                                                                                                                                                                                                                                                                                                                                         hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors",
                                         onclick: move |_| {
-                                            nwc_store::disconnect_nwc();
+                                            nwc_store::disconnect_nwc(false);
                                         },
                                         "Disconnect"
                                     }

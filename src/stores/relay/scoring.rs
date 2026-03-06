@@ -12,6 +12,7 @@
 //! **IMPORTANT**: All functions take `client: &Client` as a parameter
 //! rather than calling `nostr_client::get_client()` internally. This avoids
 //! circular dependencies and follows the relay module design principle.
+#[cfg(feature = "web")]
 use crate::platform::storage;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};

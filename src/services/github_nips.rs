@@ -52,6 +52,18 @@ pub struct EventKindInfo {
 }
 
 #[cfg(feature = "web")]
+fn validate_hex_number(number: &str) -> Result<String, String> {
+    let trimmed = number.trim();
+    if trimmed.len() < 2 || trimmed.len() > 3 {
+        return Err(format!("Invalid NIP number length: expected 2-3 characters, got {}", trimmed.len()));
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("Invalid NIP number: must be hex characters, got '{}'", trimmed));
+    }
+    Ok(trimmed.to_string())
+}
+
+#[cfg(feature = "web")]
 async fn fetch_text(url: &str, context: &str) -> Result<String, String> {
     let response = http_client()
         .get(url)
@@ -76,8 +88,9 @@ pub async fn fetch_nips_readme() -> Result<String, String> {
 /// Fetch the content of a specific NIP by its number
 #[cfg(feature = "web")]
 pub async fn fetch_nip_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", NIPS_BASE, number);
-    fetch_text(&url, &format!("NIP-{}", number)).await
+    let validated = validate_hex_number(number)?;
+    let url = format!("{}/{}.md", NIPS_BASE, validated);
+    fetch_text(&url, &format!("NIP-{}", validated)).await
 }
 /// Parse the NIP list from the README content
 pub fn parse_nips_from_readme(content: &str) -> Vec<OfficialNip> {
@@ -197,20 +210,23 @@ pub async fn fetch_buds_readme() -> Result<String, String> {
 /// Fetch a specific NUT by number
 #[cfg(feature = "web")]
 pub async fn fetch_nut_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", NUTS_BASE, number);
-    fetch_text(&url, &format!("NUT-{}", number)).await
+    let validated = validate_hex_number(number)?;
+    let url = format!("{}/{}.md", NUTS_BASE, validated);
+    fetch_text(&url, &format!("NUT-{}", validated)).await
 }
 /// Fetch a specific BUD by number
 #[cfg(feature = "web")]
 pub async fn fetch_bud_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", BUDS_BASE, number);
-    fetch_text(&url, &format!("BUD-{}", number)).await
+    let validated = validate_hex_number(number)?;
+    let url = format!("{}/{}.md", BUDS_BASE, validated);
+    fetch_text(&url, &format!("BUD-{}", validated)).await
 }
 /// Fetch a specific NKBIP by number
 #[cfg(feature = "web")]
 pub async fn fetch_nkbip_content(number: &str) -> Result<String, String> {
-    let url = format!("{}/{}.md", NKBIPS_BASE, number);
-    fetch_text(&url, &format!("NKBIP-{}", number)).await
+    let validated = validate_hex_number(number)?;
+    let url = format!("{}/{}.md", NKBIPS_BASE, validated);
+    fetch_text(&url, &format!("NKBIP-{}", validated)).await
 }
 /// Fetch the market specification
 #[cfg(feature = "web")]

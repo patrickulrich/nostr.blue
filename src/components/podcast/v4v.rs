@@ -264,6 +264,7 @@ fn CustomBoostInput(props: CustomBoostInputProps) -> Element {
                 if amt > 0 {
                     let vb = vb.clone();
                     let on_send = on_send;
+                    error.set(None);
                     is_sending.set(true);
                     spawn(async move {
                         match send_v4v_payment(&vb, amt).await {
