@@ -357,6 +357,8 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
                 updated_at: 0,
             };
             *USER_RELAY_METADATA.write() = Some(default);
+            crate::services::search_relays::invalidate_search_relay_cache().await;
+            log::debug!("Invalidated search relay cache after NIP-65 fallback");
             log::info!(
                 "Using default relays for Settings display. User can configure and publish their relay lists."
             );
@@ -520,10 +522,22 @@ pub fn save_local_relays(relays: &[String]) {
         return;
     }
     let path = config_dir.join(format!("{}.json", LOCAL_RELAYS_KEY));
+    let temp_path = config_dir.join(format!("{}.json.tmp", LOCAL_RELAYS_KEY));
     match serde_json::to_string(relays) {
         Ok(json) => {
-            if let Err(e) = fs::write(&path, json) {
-                log::error!("Failed to write local relays to {:?}: {}", path, e);
+            if let Err(e) = fs::write(&temp_path, &json) {
+                log::error!("Failed to write local relays temp file {:?}: {}", temp_path, e);
+                let _ = fs::remove_file(&temp_path);
+                return;
+            }
+            if let Err(e) = fs::rename(&temp_path, &path) {
+                log::error!(
+                    "Failed to atomically replace local relays {:?} with {:?}: {}",
+                    path,
+                    temp_path,
+                    e
+                );
+                let _ = fs::remove_file(&temp_path);
             }
         }
         Err(e) => {

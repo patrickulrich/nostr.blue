@@ -469,6 +469,7 @@ pub async fn cached_fetch(url: &str, default_ttl: u64) -> Result<String, String>
     }
     log::debug!("Cache miss for {}, fetching...", url);
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .header("Accept", "application/json")
         .send()

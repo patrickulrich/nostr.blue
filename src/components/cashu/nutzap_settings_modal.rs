@@ -108,6 +108,8 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                         );
                         log::error!("{msg}");
                         error_message.set(Some(msg));
+                        is_publishing.set(false);
+                        return;
                     }
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
                     success_message
@@ -132,7 +134,7 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
     };
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4",
+            class: "fixed inset-0 bg-black/50 backdrop-blur-sm z-40 flex items-center justify-center p-4",
             onclick: move |_| on_close.call(()),
             div {
                 class: "bg-card border border-border rounded-lg max-w-lg w-full shadow-xl max-h-[90vh] overflow-y-auto",

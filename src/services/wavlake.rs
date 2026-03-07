@@ -143,6 +143,7 @@ impl WavlakeAPI {
             urlencoding::encode(term),
         );
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -188,6 +189,7 @@ impl WavlakeAPI {
             .join("&");
         let url = format!("{}/content/rankings?{}", self.base_url, query_string);
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -201,6 +203,7 @@ impl WavlakeAPI {
     pub async fn get_track(&self, track_id: &str) -> Result<WavlakeTrack, String> {
         let url = format!("{}/content/track/{}", self.base_url, track_id);
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -218,6 +221,7 @@ impl WavlakeAPI {
     pub async fn get_artist(&self, artist_id: &str) -> Result<WavlakeArtist, String> {
         let url = format!("{}/content/artist/{}", self.base_url, artist_id);
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -231,6 +235,7 @@ impl WavlakeAPI {
     pub async fn get_album(&self, album_id: &str) -> Result<WavlakeAlbum, String> {
         let url = format!("{}/content/album/{}", self.base_url, album_id);
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -247,6 +252,7 @@ impl WavlakeAPI {
     ) -> Result<WavlakePlaylist, String> {
         let url = format!("{}/content/playlist/{}", self.base_url, playlist_id);
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await
@@ -271,6 +277,7 @@ impl WavlakeAPI {
         };
         log::debug!("Requesting LNURL from: {}", url);
         let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
             .get(&url)
             .send()
             .await

@@ -7,10 +7,9 @@
 ///
 /// On native platforms, a 15-second timeout is configured. On WASM, the timeout
 /// API is not available so the client relies on the browser's fetch timeout.
-pub(crate) fn http_client() -> &'static reqwest::Client {
+pub(crate) fn http_client() -> Result<&'static reqwest::Client, &'static reqwest::Error> {
     static CLIENT: std::sync::OnceLock<Result<reqwest::Client, reqwest::Error>> =
         std::sync::OnceLock::new();
-    static FALLBACK_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     match CLIENT.get_or_init(|| {
         let builder =
             reqwest::Client::builder().user_agent("Mozilla/5.0 (compatible; NostrBlueBot/1.0)");
@@ -18,10 +17,7 @@ pub(crate) fn http_client() -> &'static reqwest::Client {
         let builder = builder.timeout(std::time::Duration::from_secs(15));
         builder.build()
     }) {
-        Ok(client) => client,
-        Err(e) => {
-            log::warn!("Failed to build configured HTTP client: {e}. Using fallback client.");
-            FALLBACK_CLIENT.get_or_init(reqwest::Client::new)
-        }
+        Ok(client) => Ok(client),
+        Err(e) => Err(e),
     }
 }

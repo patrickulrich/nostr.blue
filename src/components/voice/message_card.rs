@@ -17,6 +17,10 @@ use nostr_sdk::{Event as NostrEvent, EventId, Filter, Kind, PublicKey};
 use std::time::Duration;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
+
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, audio, [role=\"button\"], [tabindex], [contenteditable=\"true\"]";
 #[component]
 pub fn VoiceMessageCard(
     event: NostrEvent,
@@ -391,7 +395,6 @@ pub fn VoiceMessageCard(
     let navigator: Option<std::rc::Rc<dyn Fn()>> = {
         #[cfg(feature = "web")]
         {
-            use crate::routes::Route;
             let nav = use_navigator();
             let voice_id = event_id_str.clone();
             Some(std::rc::Rc::new(move || {
@@ -419,6 +422,21 @@ pub fn VoiceMessageCard(
     let navigator_for_click = navigator.clone();
     let navigator_for_keydown = navigator.clone();
     let handle_click = move |_evt: Event<MouseData>| {
+        #[cfg(feature = "web")]
+        {
+            if let Some(target) = _evt.data.as_web_event().target() {
+                if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                    if element
+                        .closest(INTERACTIVE_ELEMENT_SELECTOR)
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
         if is_clickable {
             if let Some(nav) = navigator_for_click.as_ref() {
                 nav();
@@ -443,6 +461,21 @@ pub fn VoiceMessageCard(
                 };
                 if !activate {
                     return;
+                }
+                #[cfg(feature = "web")]
+                {
+                    if let Some(target) = evt.data.as_web_event().target() {
+                        if let Some(element) = target.dyn_ref::<web_sys::Element>() {
+                            if element
+                                .closest(INTERACTIVE_ELEMENT_SELECTOR)
+                                .ok()
+                                .flatten()
+                                .is_some()
+                            {
+                                return;
+                            }
+                        }
+                    }
                 }
                 evt.prevent_default();
                 if let Some(nav) = navigator_for_keydown.as_ref() {
@@ -555,6 +588,11 @@ pub fn VoiceMessageCard(
             }
             div { class: "flex items-center justify-between text-muted-foreground",
                 button {
+                    class: if *show_reply_modal.read() {
+                        "flex items-center gap-1 text-blue-500 transition group"
+                    } else {
+                        "flex items-center gap-1 hover:text-blue-500 transition group"
+                    },
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
                         show_reply_modal.set(true);

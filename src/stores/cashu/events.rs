@@ -1117,7 +1117,7 @@ pub fn start_pending_events_processor() {
         log::debug!("Pending events processor already running on native");
         return;
     }
-    dioxus::prelude::spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let mut recovery_counter: u8 = 0;
         loop {
             if let Err(e) = process_pending_events().await {
@@ -1141,7 +1141,7 @@ pub fn start_pending_events_processor() {
                     }
                     _ => {}
                 }
-                spawn(async {
+                dioxus_core::spawn_forever(async {
                     use futures::FutureExt;
                     let recovery_future = super::proof_recovery::run_full_recovery()
                         .fuse();

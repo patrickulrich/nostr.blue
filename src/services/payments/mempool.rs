@@ -105,6 +105,7 @@ pub async fn get_transaction(
 ) -> Result<BitcoinTransaction, String> {
     let url = format!("{}/tx/{}", endpoint.trim_end_matches('/'), txid);
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await
@@ -124,6 +125,7 @@ pub async fn get_address(
 ) -> Result<BitcoinAddress, String> {
     let url = format!("{}/address/{}", endpoint.trim_end_matches('/'), address);
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await

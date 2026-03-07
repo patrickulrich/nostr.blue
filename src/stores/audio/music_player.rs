@@ -643,7 +643,6 @@ pub fn toggle_mute() {
     storage::set(STORAGE_KEY_MUTED, &is_muted).ok();
 }
 /// Set current time
-#[allow(dead_code)]
 pub fn set_current_time(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
@@ -670,7 +669,6 @@ pub fn seek_to(time: f64) {
     });
 }
 /// Set duration
-#[allow(dead_code)]
 pub fn set_duration(duration: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.duration = duration;
@@ -683,54 +681,6 @@ pub fn close_player() {
     spawn(async move {
         clear_music_status().await;
     });
-}
-/// Show the player
-#[allow(dead_code)]
-pub fn show_player() {
-    let mut state = MUSIC_PLAYER.write();
-    if state.current_track.is_some() {
-        state.is_visible = true;
-    }
-}
-/// Clear the player and stop playback
-#[allow(dead_code)]
-pub fn clear_player() {
-    let mut state = MUSIC_PLAYER.write();
-    state.current_track = None;
-    state.playlist.clear();
-    state.current_index = 0;
-    state.is_playing = false;
-    state.is_visible = false;
-    state.current_time = 0.0;
-    state.duration = 0.0;
-    spawn(async move {
-        clear_music_status().await;
-    });
-}
-/// Get current track
-#[allow(dead_code)]
-pub fn get_current_track() -> Option<MusicTrack> {
-    MUSIC_PLAYER.read().current_track.clone()
-}
-/// Get playing status
-#[allow(dead_code)]
-pub fn is_playing() -> bool {
-    MUSIC_PLAYER.read().is_playing
-}
-/// Get player visibility
-#[allow(dead_code)]
-pub fn is_visible() -> bool {
-    MUSIC_PLAYER.read().is_visible
-}
-/// Get volume
-#[allow(dead_code)]
-pub fn get_volume() -> f64 {
-    MUSIC_PLAYER.read().volume
-}
-/// Check if muted
-#[allow(dead_code)]
-pub fn is_muted() -> bool {
-    MUSIC_PLAYER.read().is_muted
 }
 /// Show zap dialog for a specific track (or current track if None)
 pub fn show_zap_dialog_for_track(track: Option<MusicTrack>) {
@@ -881,7 +831,6 @@ pub fn set_buffering(buffering: bool) {
 }
 /// Try next available stream when current one fails
 /// Returns true if there's a fallback stream to try, false if all failed
-#[allow(dead_code)]
 pub fn try_next_stream() -> bool {
     let mut state = MUSIC_PLAYER.write();
     if state.available_streams.is_empty() {
@@ -910,7 +859,6 @@ pub fn set_available_streams(streams: Vec<String>) {
     state.current_stream_index = 0;
 }
 /// Set now playing metadata from HLS ID3 tags
-#[allow(dead_code)]
 pub fn set_now_playing(now_playing: Option<NowPlaying>) {
     MUSIC_PLAYER.write().now_playing = now_playing;
 }

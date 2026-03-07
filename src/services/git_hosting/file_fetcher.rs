@@ -177,6 +177,7 @@ async fn fetch_github_file(
         git_ref,
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -217,6 +218,7 @@ async fn fetch_github_tree(
         git_ref,
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -279,6 +281,7 @@ async fn fetch_gitlab_file(
         git_ref,
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await
@@ -302,6 +305,7 @@ async fn fetch_gitlab_tree(
         urlencoding::encode(path),
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await
@@ -349,6 +353,7 @@ async fn fetch_codeberg_file(
         git_ref,
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await
@@ -372,6 +377,7 @@ async fn fetch_codeberg_tree(
         git_ref,
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await
@@ -445,6 +451,7 @@ async fn fetch_github_all_paths(
         owner, repo, git_ref,
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")

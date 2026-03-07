@@ -139,7 +139,8 @@ pub async fn get_book_by_isbn(isbn: &str) -> Result<Book, String> {
         API_BASE_URL,
         bibkey,
     );
-    let response = http_client().get(&url).send()
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?.get(&url).send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     if !response.status().is_success() {

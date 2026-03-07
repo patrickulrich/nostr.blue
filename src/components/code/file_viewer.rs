@@ -334,22 +334,35 @@ pub fn CodeFileViewerCompact(content: String, #[props(default = 10)] max_lines: 
 /// Raw file download button
 #[component]
 pub fn RawFileButton(content: String, filename: String) -> Element {
+    let mut save_error = use_signal(|| false);
     rsx! {
         button {
-            class: "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition",
+            class: if save_error() {
+                "flex items-center gap-1 px-3 py-1.5 text-sm bg-red-500/20 text-red-500 rounded transition"
+            } else {
+                "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition"
+            },
             title: "",
             onclick: {
                 let content = content.clone();
                 let filename = filename.clone();
                 move |_| {
+                    save_error.set(false);
                     let _content = content.clone();
                     let _filename = filename.clone();
-                    if let Err(e) = crate::platform::download::save_file(
+                    match crate::platform::download::save_file(
                         &_filename,
                         &_content,
                         "text/plain;charset=utf-8",
                     ) {
-                        log::error!("Download failed for '{}': {}", _filename, e);
+                        Ok(()) => save_error.set(false),
+                        Err(e) if e.contains("Save cancelled") => {
+                            save_error.set(false);
+                        }
+                        Err(e) => {
+                            log::error!("Download failed for '{}': {}", _filename, e);
+                            save_error.set(true);
+                        }
                     }
                 }
             },
@@ -373,7 +386,7 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                     y2: "3",
                 }
             }
-            span { "Raw" }
+            span { if save_error() { "Save failed" } else { "Raw" } }
         }
     }
 }

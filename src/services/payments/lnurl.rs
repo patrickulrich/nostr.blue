@@ -151,7 +151,8 @@ pub fn decode_lud06(lud06: &str) -> Result<String, LnUrlError> {
 /// Fetch LNURL pay information
 pub async fn fetch_lnurl_pay_info(url: &str) -> Result<LnUrlPayResponse, LnUrlError> {
     validate_url(url)?;
-    let client = http_client();
+    let client = http_client()
+        .map_err(|e| LnUrlError::FetchError(format!("HTTP client init failed: {}", e)))?;
     let response = client
         .get(url)
         .send()
@@ -224,7 +225,8 @@ pub async fn request_zap_invoice(
     if let Some(lnurl_value) = lnurl {
         url.push_str(&format!("&lnurl={}", urlencoding::encode(lnurl_value)));
     }
-    let client = http_client();
+    let client = http_client()
+        .map_err(|e| LnUrlError::FetchError(format!("HTTP client init failed: {}", e)))?;
     let response = client
         .get(&url)
         .send()
@@ -258,7 +260,8 @@ pub async fn fetch_lnurl_pay_info_simple(
     url: &str,
 ) -> Result<LnUrlPayResponse, LnUrlError> {
     validate_url(url)?;
-    let client = http_client();
+    let client = http_client()
+        .map_err(|e| LnUrlError::FetchError(format!("HTTP client init failed: {}", e)))?;
     let response = client
         .get(url)
         .send()
@@ -282,7 +285,8 @@ pub async fn request_simple_invoice(
     if let Some(c) = comment {
         url.push_str(&format!("&comment={}", urlencoding::encode(c)));
     }
-    let client = http_client();
+    let client = http_client()
+        .map_err(|e| LnUrlError::FetchError(format!("HTTP client init failed: {}", e)))?;
     let response = client
         .get(&url)
         .send()

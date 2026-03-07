@@ -74,6 +74,7 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 pub async fn fetch_github_repo(owner: &str, repo: &str) -> Result<GitHubRepo, String> {
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -107,6 +108,7 @@ pub async fn fetch_user_repos(
         limit,
     );
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -126,6 +128,7 @@ pub async fn search_repos(query: &str, limit: usize) -> Result<Vec<GitHubRepo>, 
         limit,
     );
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -177,6 +180,7 @@ pub async fn fetch_commits(
         limit,
     );
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -205,6 +209,7 @@ pub async fn fetch_file_commits(
         limit,
     );
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")
@@ -220,6 +225,7 @@ pub async fn fetch_file_commits(
 pub async fn fetch_branches(owner: &str, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("https://api.github.com/repos/{}/{}/branches", owner, repo);
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")

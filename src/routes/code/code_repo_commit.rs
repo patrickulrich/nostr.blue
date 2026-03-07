@@ -337,6 +337,7 @@ async fn fetch_commit_detail(
 
     // Fetch JSON metadata (includes files[].patch for diff)
     let meta_resp = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&api_url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "nostr-blue")

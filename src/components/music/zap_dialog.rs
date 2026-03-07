@@ -442,6 +442,7 @@ async fn generate_wavlake_lnurl_invoice(
     log::info!("Decoded LNURL to: {}", lnurl_pay_url);
     log::info!("Fetching LNURL-pay parameters from: {}", lnurl_pay_url);
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&lnurl_pay_url)
         .send()
         .await
@@ -481,6 +482,7 @@ async fn generate_wavlake_lnurl_invoice(
     }
     log::info!("Requesting invoice from callback: {}", callback_url);
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&callback_url)
         .send()
         .await
@@ -698,7 +700,8 @@ async fn generate_v4v_invoice(
         }
     }
     log::info!("Requesting invoice from: {}", callback_url);
-    let client = crate::platform::http::http_client();
+    let client = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?;
     let response = client
         .get(&callback_url)
         .send()

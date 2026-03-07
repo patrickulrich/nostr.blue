@@ -25,6 +25,7 @@ pub fn PersistentMusicPlayer() -> Element {
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
     let mut native_source_bound = use_signal(|| false);
+    let mut native_bind_token = use_signal(|| 0u32);
     let audio_id = "global-music-player-audio";
     // Inject HLS manager JS on non-web platforms.
     // On web, it loads via <script> tag in index.html.
@@ -48,18 +49,19 @@ pub fn PersistentMusicPlayer() -> Element {
             });
         });
     }
-    // No Rust-side generation counter needed — the JS IIFEs guard against stale
-    // execution via audio.dataset.currentUrl checks, making them idempotent
-    // even when multiple async tasks overlap from rapid effect re-runs.
     use_effect(move || {
         let state = MUSIC_PLAYER.read();
         if let Some(ref track) = state.current_track {
             let media_url = track.media_url.clone();
             let is_playing = state.is_playing;
             let _is_live_stream = track.is_live_stream;
+            native_source_bound.set(false);
+            let bind_token = native_bind_token.with_mut(|token| {
+                *token = token.wrapping_add(1);
+                *token
+            });
             {
                 spawn(async move {
-                    native_source_bound.set(false);
                     let audio_id_json = serde_json::to_string(&audio_id)
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                     let media_url_json = serde_json::to_string(&media_url)
@@ -72,7 +74,8 @@ pub fn PersistentMusicPlayer() -> Element {
                             (async function() {{
                                 try {{
                                     let audio = document.getElementById({audio_id});
-                                    if (!audio) return;
+                                    if (!audio) return "missing";
+                                    audio.dataset.isPlaying = {is_playing};
 
                                     // Skip if already playing this URL
                                     if (audio.dataset.currentUrl === {media_url}) {{
@@ -81,7 +84,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                         }} else if (!{is_playing} && !audio.paused) {{
                                             audio.pause();
                                         }}
-                                        return;
+                                        return "bound:" + audio.dataset.currentUrl;
                                     }}
 
                                     if (window.hlsManager) {{
@@ -89,17 +92,20 @@ pub fn PersistentMusicPlayer() -> Element {
                                         console.log('[Radio] Stream attached:', result);
                                         if (result && result.type === 'error') {{
                                             console.error('[Radio] Stream attach returned error:', result.error || 'unknown');
-                                            return;
+                                            return "error";
                                         }}
-                                        if (result && result.type !== 'cancelled') {{
-                                            audio.dataset.currentUrl = {media_url};
+                                        if (result && result.type === 'cancelled') {{
+                                            return "cancelled";
                                         }}
+                                        audio.dataset.currentUrl = {media_url};
                                     }}
                                     if ({is_playing}) {{
                                         audio.play().catch(e => console.log('Play failed:', e));
                                     }}
+                                    return "bound:" + audio.dataset.currentUrl;
                                 }} catch (e) {{
                                     console.error('[Radio] Stream attach failed:', e);
+                                    return "error";
                                 }}
                             }})();
                             "#,
@@ -112,7 +118,8 @@ pub fn PersistentMusicPlayer() -> Element {
                             r#"
                             (function() {{
                                 let audio = document.getElementById({audio_id});
-                                if (!audio) return;
+                                if (!audio) return "missing";
+                                audio.dataset.isPlaying = {is_playing};
 
                                 // Cleanup any existing HLS instance
                                 if (window.hlsManager) {{
@@ -134,12 +141,14 @@ pub fn PersistentMusicPlayer() -> Element {
                                     if ({is_playing}) {{
                                         const onCanPlay = function() {{
                                             if (audio.dataset.currentUrl !== {media_url}) return;
-                                            if (!{is_playing}) return;
+                                            if (audio.dataset.currentUrl !== audio.dataset.pendingUrl) return;
+                                            if (audio.dataset.isPlaying !== 'true') return;
                                             audio.removeEventListener('canplay', onCanPlay);
                                             audio._nostrBlueOnCanPlay = null;
                                             audio.play().catch(e => console.log('Play failed:', e.name, e.message));
                                         }};
                                         audio._nostrBlueOnCanPlay = onCanPlay;
+                                        audio.dataset.pendingUrl = {media_url};
                                         audio.addEventListener('canplay', onCanPlay);
                                         audio.load();
                                     }}
@@ -151,6 +160,7 @@ pub fn PersistentMusicPlayer() -> Element {
                                         audio.pause();
                                     }}
                                 }}
+                                return "bound:" + audio.dataset.currentUrl;
                             }})();
                             "#,
                             audio_id = audio_id_json,
@@ -159,7 +169,14 @@ pub fn PersistentMusicPlayer() -> Element {
                         )
                     };
                     match document::eval(&script).await {
-                        Ok(_) => native_source_bound.set(true),
+                        Ok(val) => {
+                            let result = val.as_str().unwrap_or_default();
+                            if *native_bind_token.read() == bind_token
+                                && result == format!("bound:{}", media_url)
+                            {
+                                native_source_bound.set(true);
+                            }
+                        }
                         Err(e) => {
                             native_source_bound.set(false);
                             log::warn!("Failed to apply audio source script: {:?}", e);
@@ -418,10 +435,12 @@ pub fn PersistentMusicPlayer() -> Element {
             if !*native_source_bound.read() {
                 return;
             }
-            music_player::set_buffering(false);
-            music_player::set_playback_error(Some(
-                "Playback error on this platform. Please retry.".to_string(),
-            ));
+            if !music_player::try_next_stream() {
+                music_player::set_buffering(false);
+                music_player::set_playback_error(Some(
+                    "Playback error on this platform. Please retry.".to_string(),
+                ));
+            }
         }
         #[cfg(feature = "web")]
         {

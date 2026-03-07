@@ -48,6 +48,7 @@ pub async fn fetch_url_metadata(url: String) -> Result<UrlMetadata, String> {
 #[cfg(feature = "web")]
 async fn fetch_html_wasm(url: &str) -> Result<String, String> {
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .send()
         .await
@@ -61,6 +62,7 @@ async fn fetch_html_wasm(url: &str) -> Result<String, String> {
 #[cfg(not(feature = "web"))]
 async fn fetch_html_native(url: &str) -> Result<String, String> {
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .send()
         .await

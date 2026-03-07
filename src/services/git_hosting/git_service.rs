@@ -305,6 +305,7 @@ pub async fn compare_refs_github(
         owner, repo_name, encoded_base, encoded_head
     );
     let resp = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/vnd.github.v3.diff")
         .send()

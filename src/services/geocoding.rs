@@ -212,6 +212,7 @@ async fn query_photon(query: &str) -> Result<Option<GeoLocation>, String> {
     let encoded = urlencoding::encode(query);
     let url = format!("{}?q={}&limit=1", PHOTON_API_URL, encoded);
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .send()
         .await
@@ -380,6 +381,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
         NOMINATIM_API_URL, encoded, limit
     );
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept-Language", "en-US,en;q=0.9")
         .header("User-Agent", "nostr.blue/0.8 (https://nostr.blue)")

@@ -375,7 +375,14 @@ async fn send_v4v_payment(
                             info.callback,
                             amount_msats,
                         );
-                        match http_client().get(&callback_url).send().await {
+                        let client = match http_client() {
+                            Ok(client) => client,
+                            Err(e) => {
+                                log::error!("Failed to initialize HTTP client for {}: {}", recipient.address, e);
+                                continue;
+                            }
+                        };
+                        match client.get(&callback_url).send().await {
                             Ok(response) => {
                                 if let Ok(invoice_response) = response
                                     .json::<serde_json::Value>()

@@ -222,25 +222,36 @@ pub fn ChannelChat(channel_id: String) -> Element {
     // Auto-scroll
     let chat_container_id_for_scroll = chat_container_id.clone();
     let mut is_first_load = use_signal(|| true);
+    let mut channel_scroll_gen = use_signal(|| 0u32);
     use_effect(use_reactive(&channel_id, move |_| {
         is_first_load.set(true);
+        channel_scroll_gen.with_mut(|gen| *gen = gen.wrapping_add(1));
     }));
     use_effect(move || {
         let msg_count = messages.read().len();
         let container_id = chat_container_id_for_scroll.clone();
+        let scroll_gen = channel_scroll_gen.with_mut(|gen| {
+            *gen = gen.wrapping_add(1);
+            *gen
+        });
         spawn(async move {
             crate::platform::timer::sleep_ms(50).await;
             #[cfg(feature = "web")]
             {
-                if *is_first_load.peek() && msg_count > 0 {
+                let mut did_scroll = false;
+                let should_scroll = (*is_first_load.peek() && msg_count > 0)
+                    || isChannelChatScrolledNearBottom(&container_id, 100.0);
+                if should_scroll {
                     scrollChannelChatToBottom(&container_id);
+                    did_scroll = true;
+                }
+                if did_scroll && *channel_scroll_gen.read() == scroll_gen {
                     is_first_load.set(false);
-                } else if isChannelChatScrolledNearBottom(&container_id, 100.0) {
-                    scrollChannelChatToBottom(&container_id);
                 }
             }
             #[cfg(not(feature = "web"))]
             {
+                let mut did_scroll = false;
                 if msg_count > 0 {
                     let element_id =
                         serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string());
@@ -258,10 +269,16 @@ pub fn ChannelChat(channel_id: String) -> Element {
                             "(() => {{ const el = document.getElementById({}); if (el) {{ el.scrollTop = el.scrollHeight; return true; }} return false; }})()",
                             element_id
                         );
-                        let _ = document::eval(&scroll_script).await;
+                        did_scroll = document::eval(&scroll_script)
+                            .await
+                            .ok()
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                     }
                 }
-                is_first_load.set(false);
+                if did_scroll && *channel_scroll_gen.read() == scroll_gen {
+                    is_first_load.set(false);
+                }
             }
         });
     });

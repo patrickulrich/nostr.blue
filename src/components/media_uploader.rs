@@ -48,18 +48,15 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let input_id_for_handler = input_id.clone();
     #[cfg(feature = "mobile")]
     let input_id_for_mobile_handler = input_id.clone();
+    #[cfg(feature = "desktop")]
+    let input_id_for_desktop_handler = input_id.clone();
     let input_id_for_upload = input_id.clone();
     let input_id_for_clear_handler = input_id.clone();
     let handle_file_select = move |evt: Event<FormData>| {
         let input_id = input_id_for_handler.clone();
         spawn(async move {
             error.set(None);
-            #[cfg(feature = "mobile")]
-            {
-                let _ = (evt, input_id);
-                // Mobile uses its dedicated picker button path.
-            }
-            #[cfg(not(feature = "mobile"))]
+            #[cfg(feature = "web")]
             {
                 let files = evt.files();
                 if files.is_empty() {
@@ -77,6 +74,16 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                         error.set(Some(format!("Failed to read file: {}", e)));
                     }
                 }
+            }
+            #[cfg(feature = "mobile")]
+            {
+                let _ = (evt, input_id);
+                // Mobile uses its dedicated picker button path.
+            }
+            #[cfg(feature = "desktop")]
+            {
+                let _ = (evt, input_id);
+                // Desktop uses its dedicated picker button path.
             }
         });
     };
@@ -99,6 +106,25 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     };
     #[cfg(not(feature = "mobile"))]
     let handle_mobile_pick = move |_| {};
+    #[cfg(feature = "desktop")]
+    let handle_desktop_pick = move |_| {
+        let input_id = input_id_for_desktop_handler.clone();
+        spawn(async move {
+            error.set(None);
+            match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+                Ok((file_name, data, mime_type)) => {
+                    log::info!("File selected: {} ({} bytes)", file_name, data.len());
+                    selected_file.set(Some((file_name, data, mime_type)));
+                }
+                Err(e) => {
+                    log::error!("Failed to read file: {}", e);
+                    error.set(Some(format!("Failed to read file: {}", e)));
+                }
+            }
+        });
+    };
+    #[cfg(not(feature = "desktop"))]
+    let handle_desktop_pick = move |_| {};
     let handle_upload = move |_| {
         if let Some((_filename, data, mime_type)) = selected_file.read().clone() {
             let quality_val = *quality.read();
@@ -149,27 +175,42 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 div { class: "flex items-center justify-center w-full",
                     if cfg!(feature = "mobile") {
                         button {
-                            class: "flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:border-gray-600",
+                            class: "flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg bg-background hover:bg-muted transition",
                             onclick: handle_mobile_pick,
                             div { class: "flex flex-col items-center justify-center pt-5 pb-6",
                                 span { class: "text-4xl mb-2", "📎" }
-                                p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
+                                p { class: "mb-2 text-sm text-muted-foreground",
                                     span { class: "font-semibold", "Tap to upload" }
                                 }
-                                p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                p { class: "text-xs text-muted-foreground",
+                                    "Images (PNG, JPG) or Videos (MP4, MOV)"
+                                }
+                            }
+                        }
+                    } else if cfg!(feature = "desktop") {
+                        button {
+                            class: "flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg bg-background hover:bg-muted transition",
+                            onclick: handle_desktop_pick,
+                            div { class: "flex flex-col items-center justify-center pt-5 pb-6",
+                                span { class: "text-4xl mb-2", "📎" }
+                                p { class: "mb-2 text-sm text-muted-foreground",
+                                    span { class: "font-semibold text-foreground", "Click to upload" }
+                                    " from your device"
+                                }
+                                p { class: "text-xs text-muted-foreground",
                                     "Images (PNG, JPG) or Videos (MP4, MOV)"
                                 }
                             }
                         }
                     } else {
-                        label { class: "flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:border-gray-600",
+                        label { class: "flex flex-col items-center justify-center w-full h-32 border-2 border-border border-dashed rounded-lg cursor-pointer bg-background hover:bg-muted transition",
                             div { class: "flex flex-col items-center justify-center pt-5 pb-6",
                                 span { class: "text-4xl mb-2", "📎" }
-                                p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
-                                    span { class: "font-semibold", "Click to upload" }
+                                p { class: "mb-2 text-sm text-muted-foreground",
+                                    span { class: "font-semibold text-foreground", "Click to upload" }
                                     " or drag and drop"
                                 }
-                                p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                p { class: "text-xs text-muted-foreground",
                                     "Images (PNG, JPG) or Videos (MP4, MOV)"
                                 }
                             }
@@ -185,28 +226,28 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 }
             } else {
                 if let Some((filename, data, _)) = selected_file.read().as_ref() {
-                    div { class: "p-4 bg-gray-50 dark:bg-gray-700 rounded-lg space-y-3",
+                    div { class: "p-4 bg-card border border-border rounded-lg space-y-3",
                         div { class: "flex items-center justify-between",
                             div {
-                                p { class: "text-sm font-medium text-gray-900 dark:text-white",
+                                p { class: "text-sm font-medium text-foreground",
                                     "{filename}"
                                 }
-                                p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                p { class: "text-xs text-muted-foreground",
                                     "{format_file_size(data.len())}"
                                 }
                             }
                             button {
-                                class: "px-3 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300",
+                                class: "px-3 py-1 text-sm text-muted-foreground hover:text-foreground transition",
                                 onclick: handle_clear,
                                 "✕ Remove"
                             }
                         }
                         div { class: "space-y-2",
-                            label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300",
+                            label { class: "block text-sm font-medium text-foreground",
                                 "Quality: {quality}% ({quality_label})"
                             }
                             input {
-                                class: "w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600",
+                                class: "w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer",
                                 r#type: "range",
                                 min: "10",
                                 max: "100",
@@ -218,18 +259,18 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                                     }
                                 },
                             }
-                            div { class: "flex justify-between text-xs text-gray-500 dark:text-gray-400",
+                            div { class: "flex justify-between text-xs text-muted-foreground",
                                 span { "Small" }
                                 span { "Original" }
                             }
                         }
                         if show_server_selector {
                             div { class: "space-y-2",
-                                label { class: "block text-sm font-medium text-gray-700 dark:text-gray-300",
+                                label { class: "block text-sm font-medium text-foreground",
                                     "Upload to"
                                 }
                                 select {
-                                    class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 text-sm",
+                                    class: "w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary text-sm",
                                     disabled: *uploading.read(),
                                     onchange: move |evt| {
                                         selected_server.set(evt.value());
@@ -247,7 +288,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                             }
                         }
                         button {
-                            class: "w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition",
+                            class: "w-full px-4 py-2 bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 rounded-lg font-medium transition",
                             disabled: *uploading.read(),
                             onclick: handle_upload,
                             if *uploading.read() {
@@ -264,7 +305,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 }
             }
             if let Some(err) = error.read().as_ref() {
-                div { class: "p-3 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-sm",
+                div { class: "p-3 bg-destructive/10 text-destructive rounded-lg text-sm",
                     "❌ {err}"
                 }
             }

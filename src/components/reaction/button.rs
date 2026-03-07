@@ -11,6 +11,8 @@ const PICKER_WIDTH_PX: f64 = 280.0;
 const PICKER_HEIGHT_PX: f64 = 50.0;
 const PICKER_GAP_PX: f64 = 8.0;
 const PICKER_EDGE_PADDING_PX: f64 = 8.0;
+#[cfg(not(feature = "web"))]
+const ESTIMATED_BUTTON_HEIGHT_PX: f64 = 36.0;
 
 fn compute_picker_position(
     anchor_x: f64,
@@ -74,6 +76,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
     let mut picker_left = use_signal(|| 0.0);
     #[allow(unused_mut, unused_variables)]
     let mut position_below = use_signal(|| false);
+    let mut picker_session_id = use_signal(|| 0u32);
     let is_liked = *props.reaction.is_liked.read();
     let like_count = *props.reaction.like_count.read();
     let is_pending = matches!(*props.reaction.state.read(), ReactionState::Pending);
@@ -117,10 +120,15 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     if props.has_signer {
                         let current = *show_picker.peek();
                         if current {
+                            picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                             show_picker.set(false);
                             return;
                         }
                         if !current {
+                            let session_id = picker_session_id.with_mut(|id| {
+                                *id = id.wrapping_add(1);
+                                *id
+                            });
                             #[cfg(feature = "web")]
                             {
                                 let btn_id = button_id.read().clone();
@@ -148,6 +156,11 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                                                 viewport_width,
                                                 viewport_height,
                                             );
+                                            if *picker_session_id.read() != session_id
+                                                || *show_picker.read()
+                                            {
+                                                return;
+                                            }
                                             picker_top.set(top);
                                             picker_left.set(left);
                                             position_below.set(is_below);
@@ -182,13 +195,27 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                                         }
                                         Err(_) => (1024.0, 800.0),
                                     };
+                                    if *picker_session_id.read() != session_id
+                                        || *show_picker.read()
+                                    {
+                                        return;
+                                    }
+                                    let anchor_top =
+                                        coords.y - (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
+                                    let anchor_bottom =
+                                        coords.y + (ESTIMATED_BUTTON_HEIGHT_PX / 2.0);
                                     let (top, left, is_below) = compute_picker_position(
                                         coords.x,
-                                        coords.y,
-                                        coords.y,
+                                        anchor_top,
+                                        anchor_bottom,
                                         window_width,
                                         window_height,
                                     );
+                                    if *picker_session_id.read() != session_id
+                                        || *show_picker.read()
+                                    {
+                                        return;
+                                    }
                                     picker_top.set(top);
                                     picker_left.set(left);
                                     position_below.set(is_below);
@@ -239,6 +266,7 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     class: "fixed inset-0 z-40",
                     onclick: move |e: MouseEvent| {
                         e.stop_propagation();
+                        picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                         show_picker.set(false);
                     },
                 }
@@ -248,9 +276,11 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     InlineReactionPicker {
                         on_reaction: move |emoji: ReactionEmoji| {
                             props.reaction.react_with.call(emoji);
+                            picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                             show_picker.set(false);
                         },
                         on_settings: move |_| {
+                            picker_session_id.with_mut(|id| *id = id.wrapping_add(1));
                             show_picker.set(false);
                             show_defaults_modal.set(true);
                         },

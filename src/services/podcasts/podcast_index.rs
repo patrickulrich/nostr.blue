@@ -17,6 +17,7 @@ async fn authenticated_get<T: for<'de> Deserialize<'de>>(
     let auth_result = nip98_utils::create_auth_header(url, nip98::HttpMethod::GET)
         .await?;
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
@@ -428,6 +429,7 @@ async fn fetch_via_proxy<T: for<'de> Deserialize<'de>>(
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()
@@ -452,6 +454,7 @@ async fn fetch_text_via_proxy(url: &str, resource_type: &str) -> Result<String, 
     let auth_result = nip98_utils::create_auth_header(&proxy_url, nip98::HttpMethod::GET)
         .await?;
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&auth_result.signed_url)
         .header("Authorization", &auth_result.header)
         .send()

@@ -9,6 +9,9 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
+import java.io.IOException
+import java.util.UUID
 
 /**
  * NIP-55 Android Signer Bridge
@@ -32,9 +35,21 @@ class MainActivity : WryActivity() {
             val maskedPubkey = pubkey?.let { if (it.length > 8) "...${it.takeLast(4)}" else it }
             Log.d(TAG, "Signer approved: pubkey=$maskedPubkey, package=$pkg")
             synchronized(lock) {
-                pendingPubkey = pubkey
-                pendingPackage = pkg
-                intentError = null
+                when {
+                    pubkey.isNullOrBlank() -> {
+                        intentError = "Signer approval returned without a pubkey"
+                        Log.e(TAG, "Signer approval missing pubkey for package=$pkg")
+                    }
+                    pkg.isNullOrBlank() -> {
+                        intentError = "Signer approval returned without a package name"
+                        Log.e(TAG, "Signer approval missing package for pubkey=$maskedPubkey")
+                    }
+                    else -> {
+                        pendingPubkey = pubkey
+                        pendingPackage = pkg
+                        intentError = null
+                    }
+                }
             }
         } else {
             val errorMsg = "User rejected or cancelled (resultCode=${result.resultCode})"
@@ -56,80 +71,19 @@ class MainActivity : WryActivity() {
     ) { uri ->
         Log.d(TAG, "File picker result: uri=$uri")
         synchronized(lock) {
-            if (uri != null) {
-                try {
-                    val contentResolver = contentResolver
-                    val mimeType = contentResolver.getType(uri)
-                    val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
-
-                    // Try to get file size via AssetFileDescriptor for more reliable sizing
-                    var fileSize: Long = -1
-                    try {
-                        val afd = contentResolver.openAssetFileDescriptor(uri, "r")
-                        if (afd != null) {
-                            fileSize = afd.length
-                            afd.close()
-                        }
-                    } catch (e: Exception) {
-                        Log.d(TAG, "Could not get AFD size: ${e.message}")
-                    }
-
-                    // If AFD did not provide size, try OpenableColumns.SIZE metadata.
-                    if (fileSize <= 0) {
-                        try {
-                            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
-                                ?.use { cursor ->
-                                    if (cursor.moveToFirst()) {
-                                        val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
-                                            fileSize = cursor.getLong(sizeIndex)
-                                        }
-                                    }
-                                }
-                        } catch (e: Exception) {
-                            Log.d(TAG, "Could not get query size: ${e.message}")
-                        }
-                    }
-                    val inputStream = contentResolver.openInputStream(uri)
-                    if (inputStream != null) {
-                        inputStream.use { stream ->
-                            if (fileSize > 0 && fileSize > MAX_UPLOAD_BYTES) {
-                                filePickError = "File too large (max 50MB)"
-                                filePickInFlight = false
-                                return@synchronized
-                            }
-                            val output = java.io.ByteArrayOutputStream()
-                            val buffer = ByteArray(8 * 1024)
-                            var totalBytes = 0
-                            while (true) {
-                                val read = stream.read(buffer)
-                                if (read <= 0) break
-                                totalBytes += read
-                                if (totalBytes > MAX_UPLOAD_BYTES) {
-                                    filePickError = "File too large (max 50MB)"
-                                    filePickInFlight = false
-                                    return@synchronized
-                                }
-                                output.write(buffer, 0, read)
-                            }
-                            val bytes = output.toByteArray()
-                            pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                            pendingFileMimeType = mimeType ?: "application/octet-stream"
-                            filePickError = null
-                            Log.d(TAG, "File picked successfully: ${bytes.size} bytes, mime=$mimeType")
-                        }
-                    } else {
-                        filePickError = "Could not open file"
-                    }
-                } catch (e: Exception) {
-                    filePickError = e.message
-                    Log.e(TAG, "File pick failed", e)
-                }
-            } else {
-                filePickError = "No file selected"
-            }
-            filePickInFlight = false
+            filePickInFlight = true
         }
+        if (uri == null) {
+            synchronized(lock) {
+                filePickError = "No file selected"
+                filePickInFlight = false
+            }
+            return@registerForActivityResult
+        }
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        Thread {
+            processPickedContent(uri, mimeType, "file")
+        }.start()
     }
 
     // Image picker launcher - must be instance property registered before STARTED
@@ -138,80 +92,19 @@ class MainActivity : WryActivity() {
     ) { uri ->
         Log.d(TAG, "Image picker result: uri=$uri")
         synchronized(lock) {
-            if (uri != null) {
-                try {
-                    val contentResolver = contentResolver
-                    val mimeType = contentResolver.getType(uri)
-                    val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
-
-                    // Try to get file size via AssetFileDescriptor for more reliable sizing
-                    var fileSize: Long = -1
-                    try {
-                        val afd = contentResolver.openAssetFileDescriptor(uri, "r")
-                        if (afd != null) {
-                            fileSize = afd.length
-                            afd.close()
-                        }
-                    } catch (e: Exception) {
-                        Log.d(TAG, "Could not get AFD size: ${e.message}")
-                    }
-
-                    // If AFD did not provide size, try OpenableColumns.SIZE metadata.
-                    if (fileSize <= 0) {
-                        try {
-                            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
-                                ?.use { cursor ->
-                                    if (cursor.moveToFirst()) {
-                                        val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
-                                            fileSize = cursor.getLong(sizeIndex)
-                                        }
-                                    }
-                                }
-                        } catch (e: Exception) {
-                            Log.d(TAG, "Could not get query size: ${e.message}")
-                        }
-                    }
-                    val inputStream = contentResolver.openInputStream(uri)
-                    if (inputStream != null) {
-                        inputStream.use { stream ->
-                            if (fileSize > 0 && fileSize > MAX_UPLOAD_BYTES) {
-                                filePickError = "File too large (max 50MB)"
-                                filePickInFlight = false
-                                return@synchronized
-                            }
-                            val output = java.io.ByteArrayOutputStream()
-                            val buffer = ByteArray(8 * 1024)
-                            var totalBytes = 0
-                            while (true) {
-                                val read = stream.read(buffer)
-                                if (read <= 0) break
-                                totalBytes += read
-                                if (totalBytes > MAX_UPLOAD_BYTES) {
-                                    filePickError = "File too large (max 50MB)"
-                                    filePickInFlight = false
-                                    return@synchronized
-                                }
-                                output.write(buffer, 0, read)
-                            }
-                            val bytes = output.toByteArray()
-                            pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                            pendingFileMimeType = mimeType ?: "image/*"
-                            filePickError = null
-                            Log.d(TAG, "Image picked successfully: ${bytes.size} bytes, mime=$mimeType")
-                        }
-                    } else {
-                        filePickError = "Could not open image"
-                    }
-                } catch (e: Exception) {
-                    filePickError = e.message
-                    Log.e(TAG, "Image pick failed", e)
-                }
-            } else {
-                filePickError = "No image selected"
-            }
-            filePickInFlight = false
+            filePickInFlight = true
         }
+        if (uri == null) {
+            synchronized(lock) {
+                filePickError = "No image selected"
+                filePickInFlight = false
+            }
+            return@registerForActivityResult
+        }
+        val mimeType = contentResolver.getType(uri) ?: "image/*"
+        Thread {
+            processPickedContent(uri, mimeType, "image")
+        }.start()
     }
 
     // Note: `instance` can be briefly null during Activity recreation (e.g., config
@@ -219,6 +112,7 @@ class MainActivity : WryActivity() {
     // should retry or handle gracefully.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cleanupTempShareFiles(cacheDir)
         synchronized(lock) {
             instance = this
         }
@@ -266,6 +160,100 @@ class MainActivity : WryActivity() {
         private var filePickError: String? = null
         @Volatile
         private var filePickInFlight: Boolean = false
+        private const val MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50MB
+        private const val SHARE_TEMP_PREFIX = "share_"
+
+        private fun processPickedContent(uri: Uri, fallbackMimeType: String, label: String) {
+            try {
+                val result = readPickedContent(uri, fallbackMimeType)
+                synchronized(lock) {
+                    pendingFileContent = result.first
+                    pendingFileMimeType = result.second
+                    filePickError = null
+                    filePickInFlight = false
+                }
+                Log.d(TAG, "${label.replaceFirstChar { it.uppercase() }} picked successfully: mime=${result.second}")
+            } catch (e: Exception) {
+                synchronized(lock) {
+                    filePickError = e.message ?: "Could not open $label"
+                    filePickInFlight = false
+                }
+                Log.e(TAG, "${label.replaceFirstChar { it.uppercase() }} pick failed", e)
+            }
+        }
+
+        @Throws(IOException::class)
+        private fun readPickedContent(uri: Uri, fallbackMimeType: String): Pair<String, String> {
+            val activity = synchronized(lock) { instance }
+                ?: throw IOException("Activity unavailable")
+            val contentResolver = activity.contentResolver
+            val mimeType = contentResolver.getType(uri) ?: fallbackMimeType
+
+            var fileSize: Long = -1
+            try {
+                contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                    fileSize = afd.length
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Could not get AFD size: ${e.message}")
+            }
+
+            if (fileSize <= 0) {
+                try {
+                    contentResolver.query(
+                        uri,
+                        arrayOf(android.provider.OpenableColumns.SIZE),
+                        null,
+                        null,
+                        null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                                fileSize = cursor.getLong(sizeIndex)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Could not get query size: ${e.message}")
+                }
+            }
+
+            if (fileSize > 0 && fileSize > MAX_UPLOAD_BYTES) {
+                throw IOException("File too large (max 50MB)")
+            }
+
+            val bytes = contentResolver.openInputStream(uri)?.use { stream ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8 * 1024)
+                var totalBytes = 0
+                while (true) {
+                    val read = stream.read(buffer)
+                    if (read <= 0) break
+                    totalBytes += read
+                    if (totalBytes > MAX_UPLOAD_BYTES) {
+                        throw IOException("File too large (max 50MB)")
+                    }
+                    output.write(buffer, 0, read)
+                }
+                output.toByteArray()
+            } ?: throw IOException("Could not open file")
+
+            return Pair(
+                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+                mimeType
+            )
+        }
+
+        private fun cleanupTempShareFiles(cacheDir: File) {
+            cacheDir.listFiles()?.forEach { file ->
+                if (file.name.startsWith(SHARE_TEMP_PREFIX)) {
+                    if (!file.delete()) {
+                        Log.d(TAG, "Could not delete stale shared temp file: ${file.name}")
+                    }
+                }
+            }
+        }
 
         /**
          * Validate a signer package name.
@@ -626,7 +614,7 @@ class MainActivity : WryActivity() {
 
                 // Write to cache directory
                 val cacheDir = context.cacheDir
-                val file = java.io.File(cacheDir, safeName)
+                val file = File(cacheDir, "${SHARE_TEMP_PREFIX}${UUID.randomUUID()}_$safeName")
 
                 // Verify the canonical path is within cacheDir (defense in depth)
                 if (!file.canonicalPath.startsWith(cacheDir.canonicalPath)) {
@@ -647,6 +635,7 @@ class MainActivity : WryActivity() {
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = mimeType
                     putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_TITLE, safeName)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
 

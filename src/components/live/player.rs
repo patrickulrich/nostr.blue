@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 #[cfg(feature = "web")]
 use wasm_bindgen::prelude::*;
 
-#[allow(dead_code)]
+#[cfg(feature = "native")]
 fn build_native_setup_script(
     video_id: &str,
     stream_url: &str,
@@ -41,6 +41,9 @@ fn build_native_setup_script(
                                 console.log('[Live] HLS stream {log_msg}:', result);
                                 if (result && result.type === 'error') {{
                                     return "error:" + (result.error || "Failed to attach HLS stream");
+                                }}
+                                if (result && result.type === 'cancelled') {{
+                                    return "cancelled";
                                 }}
                             }} else {{
                                 video.src = url;
@@ -258,13 +261,12 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let poster = props.poster.clone();
     let autoplay = props.autoplay;
     let url_valid = validate_stream_url(&stream_url);
-    let stream_url_for_id = stream_url.clone();
     let instance_id = use_signal(|| {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(1);
         COUNTER.fetch_add(1, Ordering::SeqCst)
     });
-    let video_id = format!("videojs-player-{}-{}", simple_hash(&stream_url_for_id), instance_id());
+    let video_id = format!("videojs-player-{}", instance_id());
     let mut error = use_signal(|| None::<String>);
     let mut loading = use_signal(|| true);
     let mut mounted = use_signal(|| false);
@@ -279,7 +281,10 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
         let _stream_url = stream_url_prop.clone();
         let url_valid = validate_stream_url(&_stream_url);
         let gen = init_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
+        error.set(None);
+        loading.set(url_valid);
         if url_valid {
+            cleanup_guard.set(None);
             mounted.set(true);
             #[cfg(feature = "web")]
             {
@@ -346,6 +351,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                                     .unwrap_or("error:Unexpected eval result type");
                                 if let Some(err_msg) = result.strip_prefix("error:") {
                                     error.set(Some(err_msg.to_string()));
+                                } else if result == "cancelled" {
+                                    error.set(Some("Stream setup was cancelled".to_string()));
                                 } else {
                                     error.set(None);
                                 }
@@ -438,6 +445,8 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                             .unwrap_or("error:Unexpected eval result type");
                         if let Some(err_msg) = result.strip_prefix("error:") {
                             error.set(Some(err_msg.to_string()));
+                        } else if result == "cancelled" {
+                            error.set(Some("Stream setup was cancelled".to_string()));
                         } else {
                             error.set(None);
                         }
@@ -529,9 +538,4 @@ fn validate_stream_url(url_str: &str) -> bool {
         }
         Err(_) => false,
     }
-}
-/// Generates a simple hash for a string (for creating stable IDs)
-fn simple_hash(s: &str) -> u32 {
-    s.bytes()
-        .fold(0u32, |hash, byte| { hash.wrapping_mul(31).wrapping_add(byte as u32) })
 }

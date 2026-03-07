@@ -79,6 +79,7 @@ fn validate_hex_number(number: &str, label: &str) -> Result<String, String> {
 #[cfg(feature = "web")]
 async fn fetch_text(url: &str, context: &str) -> Result<String, String> {
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .send()
         .await

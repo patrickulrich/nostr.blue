@@ -298,6 +298,7 @@ pub async fn pay_payment_request(
             TransportType::HttpPost => {
                 log::info!("Sending payment via HTTP transport to {}", transport.target);
                 let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
                     .post(&transport.target)
                     .json(&payload)
                     .send()

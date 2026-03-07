@@ -38,7 +38,7 @@ pub fn ArticleNew() -> Element {
     let mut draft_status = use_signal(|| DraftStatus::Clean);
     let mut loaded_draft_id = use_signal(|| Option::<String>::None);
     let mut last_auto_save = use_signal(|| 0u64);
-    let mut auto_save_gen = use_signal(|| 0u64);
+    let mut auto_save_gen = use_signal(|| 0u32);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut show_publish_dialog = use_signal(|| false);

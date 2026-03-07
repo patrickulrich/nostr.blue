@@ -151,6 +151,7 @@ pub async fn fetch_podcast_feed(url: &str) -> Result<RssPodcast, String> {
         url.to_string()
     };
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&fetch_url)
         .send()
         .await
@@ -423,6 +424,7 @@ pub fn parse_podcast_feed(xml: &str, feed_url: &str) -> Result<RssPodcast, Strin
 #[allow(dead_code)]
 pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .send()
         .await
@@ -440,6 +442,7 @@ pub async fn fetch_chapters(url: &str) -> Result<ChaptersFile, String> {
 #[allow(dead_code)]
 pub async fn fetch_transcript(transcript: &TranscriptRef) -> Result<String, String> {
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&transcript.url)
         .send()
         .await

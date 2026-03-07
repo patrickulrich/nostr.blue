@@ -30,7 +30,7 @@ pub fn VideosLiveTag(tag: String) -> Element {
                 let gen = fetch_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
                 spawn(async move {
                     match load_streams_by_tag(&current_tag, None).await {
-                        Ok((events, hit_limit)) => {
+                        Ok((events, _hit_limit)) => {
                             // Verify generation before updating state
                             if *fetch_gen.read() != gen {
                                 log::debug!("Stale fetch detected, discarding results");
@@ -39,7 +39,8 @@ pub fn VideosLiveTag(tag: String) -> Element {
                             if let Some(last_event) = events.last() {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
-                            has_more.set(hit_limit);
+                            #[cfg(feature = "web")]
+                            has_more.set(_hit_limit);
                             #[cfg(not(feature = "web"))]
                             has_more.set(false);
                             stream_events.set(events);
@@ -100,8 +101,10 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 let until = *oldest_timestamp.read();
                                 let current_tag = tag_for_callback.clone();
                                 loading.set(true);
-                                fetch_gen.with_mut(|g| *g = g.wrapping_add(1));
-                                let this_gen = *fetch_gen.read();
+                                let this_gen = fetch_gen.with_mut(|g| {
+                                    *g = g.wrapping_add(1);
+                                    *g
+                                });
                                 spawn(async move {
                                     trigger_load_more_for_tag(
                                         current_tag,
@@ -218,7 +221,7 @@ async fn trigger_load_more_for_tag(
     stream_events: &mut Signal<Vec<Event>>,
 ) {
     match load_streams_by_tag(&tag, until).await {
-        Ok((new_events, hit_limit)) => {
+        Ok((new_events, _hit_limit)) => {
             if *fetch_gen.read() != expected_gen {
                 log::debug!("Stale fetch detected, discarding results");
                 return;
@@ -239,7 +242,10 @@ async fn trigger_load_more_for_tag(
             if let Some(last_event) = unique_events.last() {
                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
             }
-            has_more.set(hit_limit);
+            #[cfg(feature = "web")]
+            has_more.set(_hit_limit);
+            #[cfg(not(feature = "web"))]
+            has_more.set(false);
             stream_events.write().extend(unique_events);
             loading.set(false);
         }
@@ -274,8 +280,10 @@ fn trigger_load_more_for_platform(
     let mut stream_events_sig = *stream_events;
     let mut fetch_gen_sig = *fetch_gen;
     loading_sig.set(true);
-    fetch_gen_sig.with_mut(|g| *g = g.wrapping_add(1));
-    let this_gen = *fetch_gen_sig.read();
+    let this_gen = fetch_gen_sig.with_mut(|g| {
+        *g = g.wrapping_add(1);
+        *g
+    });
     spawn(async move {
         trigger_load_more_for_tag(
             tag,

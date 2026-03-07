@@ -41,6 +41,24 @@ fn save_nwc_uri_secure(uri: &str) -> std::result::Result<(), String> {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
             .map_err(|e| format!("Failed to set permissions on {:?}: {}", path, e))?;
     }
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+
+        let username = std::env::var("USERNAME")
+            .map_err(|e| format!("Failed to determine current Windows user for {:?}: {}", path, e))?;
+        let grant_arg = format!("{username}:F");
+        let status = Command::new("icacls")
+            .arg(&path)
+            .arg("/inheritance:r")
+            .arg("/grant:r")
+            .arg(&grant_arg)
+            .status()
+            .map_err(|e| format!("Failed to set permissions on {:?}: {}", path, e))?;
+        if !status.success() {
+            return Err(format!("Failed to set permissions on {:?}: icacls exited with {}", path, status));
+        }
+    }
     Ok(())
 }
 #[cfg(feature = "native")]

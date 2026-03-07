@@ -468,6 +468,7 @@ pub async fn poll_quote_status(
         format!("{}/v1/melt/quote/bolt11/{}", mint_url.trim_end_matches('/'), quote_id)
     };
     let response = crate::platform::http::http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&endpoint)
         .send()
         .await
@@ -666,6 +667,7 @@ pub async fn poll_proof_states(
     let endpoint = format!("{}/v1/checkstate", mint_url.trim_end_matches('/'));
     let request_body = serde_json::json!({ "Ys" : y_values });
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .post(&endpoint)
         .json(&request_body)
         .send()

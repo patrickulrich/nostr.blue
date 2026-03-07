@@ -24,7 +24,8 @@ pub async fn fetch_btc_prices() -> Result<(), String> {
         "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={}",
         SUPPORTED_CURRENCIES,
     );
-    let response = http_client().get(&url).send()
+    let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?.get(&url).send()
         .await
         .map_err(|e| format!("Failed to fetch prices: {}", e))?;
     if !response.status().is_success() {

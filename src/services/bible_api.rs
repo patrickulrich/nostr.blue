@@ -182,7 +182,11 @@ async fn fetch_with_timeout(
     #[cfg(feature = "web")]
     let response = {
         use futures::FutureExt;
-        let request = http_client().get(url).send().fuse();
+        let request = http_client()
+            .map_err(|e| format!("HTTP client init failed: {}", e))?
+            .get(url)
+            .send()
+            .fuse();
         let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
         futures::pin_mut!(request, timeout);
         futures::select! {
@@ -192,6 +196,7 @@ async fn fetch_with_timeout(
     };
     #[cfg(not(feature = "web"))]
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(url)
         .send()
         .await;

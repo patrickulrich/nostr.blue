@@ -84,6 +84,32 @@ fn clear_progress_if_gen_matches(gen: u32) {
         *UPLOAD_PROGRESS.write() = None;
     }
 }
+
+struct UploadProgressGuard {
+    gen: u32,
+    clear_on_drop: bool,
+}
+
+impl UploadProgressGuard {
+    fn new(gen: u32) -> Self {
+        Self {
+            gen,
+            clear_on_drop: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.clear_on_drop = false;
+    }
+}
+
+impl Drop for UploadProgressGuard {
+    fn drop(&mut self) {
+        if self.clear_on_drop {
+            clear_progress_if_gen_matches(self.gen);
+        }
+    }
+}
 /// Represents a media item stored on Blossom servers (BUD-01/BUD-02 compatible)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaItem {
@@ -266,6 +292,7 @@ pub async fn upload_image(
     server_url: Option<String>,
 ) -> Result<String, String> {
     let gen = next_upload_gen();
+    let mut progress_guard = UploadProgressGuard::new(gen);
     let is_video = content_type.starts_with("video/");
     let media_type = if is_video { "video" } else { "image" };
     let quality_str = if is_video {
@@ -291,7 +318,7 @@ pub async fn upload_image(
     };
     log::info!("Final {} size: {} bytes", media_type, final_data.len());
     UPLOAD_PROGRESS.write().replace(50.0);
-    upload_blob_with_auth(
+    let result = upload_blob_with_auth(
             final_data,
             content_type,
             format!("Upload {} via nostr.blue", media_type),
@@ -299,7 +326,11 @@ pub async fn upload_image(
             server_url,
             gen,
         )
-        .await
+        .await;
+    if result.is_ok() {
+        progress_guard.disarm();
+    }
+    result
 }
 /// Compress an image to the specified quality level
 ///
@@ -362,6 +393,7 @@ async fn upload_blob_with_auth(
     server_url: Option<String>,
     gen: u32,
 ) -> Result<String, String> {
+    let mut progress_guard = UploadProgressGuard::new(gen);
     let signer = nostr_client::get_signer()
         .ok_or("Not authenticated. Please sign in to upload.")?;
     UPLOAD_PROGRESS.write().replace(start_progress);
@@ -433,6 +465,7 @@ async fn upload_blob_with_auth(
     };
     UPLOAD_PROGRESS.write().replace(100.0);
     log::info!("Upload successful: {}", descriptor.url);
+    progress_guard.disarm();
     spawn(async move {
         crate::platform::timer::sleep_ms(1000).await;
         // Only clear if generation hasn't changed (no new upload started)
@@ -455,9 +488,10 @@ pub async fn upload_audio(
     server_url: Option<String>,
 ) -> Result<String, String> {
     let gen = next_upload_gen();
+    let mut progress_guard = UploadProgressGuard::new(gen);
     log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
     UPLOAD_PROGRESS.write().replace(0.0);
-    upload_blob_with_auth(
+    let result = upload_blob_with_auth(
             data,
             content_type,
             "Upload voice message via nostr.blue".to_string(),
@@ -465,7 +499,11 @@ pub async fn upload_audio(
             server_url,
             gen,
         )
-        .await
+        .await;
+    if result.is_ok() {
+        progress_guard.disarm();
+    }
+    result
 }
 /// Calculate SHA-256 hash of data
 #[allow(dead_code)]

@@ -134,6 +134,7 @@ pub async fn resolve_lightning_address(
     let url = address.lnurlp_url().ok_or("Not a Lightning Address")?;
     log::info!("Resolving Lightning Address: {}", address.original);
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/json")
         .send()
@@ -189,6 +190,7 @@ pub async fn request_invoice(
     }
     log::info!("Requesting invoice from: {}", url);
     let response = http_client()
+        .map_err(|e| format!("HTTP client init failed: {}", e))?
         .get(&url)
         .header("Accept", "application/json")
         .send()

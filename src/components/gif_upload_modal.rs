@@ -54,7 +54,6 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
         success.set(false);
         clear_file_input(&input_id.read());
     };
-    #[allow(unused_variables)]
     let handle_file_select = move |_evt: Event<FormData>| {
         let input_id = input_id.read().clone();
         let session_token = *upload_session_token.read();
