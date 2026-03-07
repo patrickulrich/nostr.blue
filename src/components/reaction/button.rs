@@ -6,6 +6,36 @@ use super::picker::InlineReactionPicker;
 use crate::hooks::{format_count, ReactionEmoji, ReactionState, UseReaction};
 use crate::stores::reactions_store::get_default_reaction;
 use dioxus::prelude::*;
+
+const PICKER_WIDTH_PX: f64 = 280.0;
+const PICKER_HEIGHT_PX: f64 = 50.0;
+const PICKER_GAP_PX: f64 = 8.0;
+const PICKER_EDGE_PADDING_PX: f64 = 8.0;
+
+fn compute_picker_position(
+    anchor_x: f64,
+    anchor_y: f64,
+    viewport_width: f64,
+    viewport_height: f64,
+) -> (f64, f64, bool) {
+    let max_left = (viewport_width - PICKER_WIDTH_PX - PICKER_EDGE_PADDING_PX)
+        .max(PICKER_EDGE_PADDING_PX);
+    let left = (anchor_x - (PICKER_WIDTH_PX / 2.0))
+        .clamp(PICKER_EDGE_PADDING_PX, max_left);
+    let top_candidate = anchor_y - PICKER_HEIGHT_PX - PICKER_GAP_PX;
+    let (top, position_below) = if top_candidate >= PICKER_EDGE_PADDING_PX {
+        (top_candidate, false)
+    } else {
+        let max_top = (viewport_height - PICKER_HEIGHT_PX - PICKER_EDGE_PADDING_PX)
+            .max(PICKER_EDGE_PADDING_PX);
+        (
+            (anchor_y + PICKER_GAP_PX).clamp(PICKER_EDGE_PADDING_PX, max_top),
+            true,
+        )
+    };
+    (top, left, position_below)
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct ReactionButtonProps {
     /// The reaction hook instance from use_reaction()
@@ -93,24 +123,43 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                                     if let Some(document) = window.document() {
                                         if let Some(element) = document.get_element_by_id(&btn_id) {
                                             let rect = element.get_bounding_client_rect();
+                                            let viewport_width = window
+                                                .inner_width()
+                                                .ok()
+                                                .and_then(|w| w.as_f64())
+                                                .unwrap_or(1024.0);
                                             let viewport_height = window
                                                 .inner_height()
                                                 .ok()
                                                 .and_then(|h| h.as_f64())
                                                 .unwrap_or(800.0);
-                                            let picker_height = 50.0;
-                                            let button_center_y = rect.top() + (rect.height() / 2.0);
-                                            if button_center_y < (viewport_height / 2.0) {
-                                                picker_top.set(rect.bottom() + 8.0);
-                                                position_below.set(true);
-                                            } else {
-                                                picker_top.set(rect.top() - picker_height - 8.0);
-                                                position_below.set(false);
-                                            }
-                                            picker_left.set(rect.left());
+                                            let anchor_x = rect.left() + (rect.width() / 2.0);
+                                            let anchor_y = rect.top();
+                                            let (top, left, is_below) = compute_picker_position(
+                                                anchor_x,
+                                                anchor_y,
+                                                viewport_width,
+                                                viewport_height,
+                                            );
+                                            picker_top.set(top);
+                                            picker_left.set(left);
+                                            position_below.set(is_below);
                                         }
                                     }
                                 }
+                            }
+                            #[cfg(not(feature = "web"))]
+                            {
+                                let coords = e.client_coordinates();
+                                let (top, left, is_below) = compute_picker_position(
+                                    coords.x,
+                                    coords.y,
+                                    1024.0,
+                                    800.0,
+                                );
+                                picker_top.set(top);
+                                picker_left.set(left);
+                                position_below.set(is_below);
                             }
                         }
                         show_picker.set(!current);
