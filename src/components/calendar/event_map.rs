@@ -336,13 +336,11 @@ pub fn EventMap(props: EventMapProps) -> Element {
                     geocoded_events.set(Vec::new());
                     return;
                 }
-                // Increment generation counter to invalidate any pending tasks
-                // Must happen BEFORE checking loading_geo to ensure concurrent runs see new gen
-                geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
-                let this_gen = *geocode_gen.read();
-                if *loading_geo.read() {
+                if *loading_geo.peek() {
                     return;
                 }
+                geocode_gen.with_mut(|g| *g = g.wrapping_add(1));
+                let this_gen = *geocode_gen.peek();
                 loading_geo.set(true);
                 let key_to_store = key.clone();
                 let events_to_process = events_for_geocode.clone();

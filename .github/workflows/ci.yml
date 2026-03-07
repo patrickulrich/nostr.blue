@@ -94,19 +94,19 @@ jobs:
         run: cargo install dioxus-cli --version 0.7.2 --locked --force
 
       - name: Dioxus check
-        run: dx check
+        run: dx check --no-default-features --features desktop
 
       - name: Cargo check
-        run: cargo check
+        run: cargo check --no-default-features --features desktop
 
       - name: Clippy host
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --no-default-features --features desktop -- -D warnings
 
       - name: Clippy wasm
         run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
 
       - name: Cargo test
-        run: cargo test
+        run: cargo test --no-default-features --features desktop
 
   android-build:
     name: Android APK Build

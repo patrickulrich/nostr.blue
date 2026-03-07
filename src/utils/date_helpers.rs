@@ -111,6 +111,9 @@ pub fn get_month_dates(date: &str) -> Vec<String> {
     let (Ok(year), Ok(month)) = (parts[0].parse::<i32>(), parts[1].parse::<u32>()) else {
         return vec![];
     };
+    if !(0..=9999).contains(&year) {
+        return vec![];
+    }
     let first = match NaiveDate::from_ymd_opt(year, month, 1) {
         Some(d) => d,
         None => return vec![],
@@ -137,4 +140,32 @@ pub fn get_month_dates(date: &str) -> Vec<String> {
         dates.push(d.format("%Y-%m-%d").to_string());
     }
     dates
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_month_dates;
+
+    #[test]
+    fn get_month_dates_returns_full_grid_for_valid_month() {
+        let dates = get_month_dates("2026-03-07");
+        assert_eq!(dates.len(), 42);
+        assert_eq!(dates.first().map(String::as_str), Some("2026-03-01"));
+    }
+
+    #[test]
+    fn get_month_dates_rejects_invalid_month() {
+        assert!(get_month_dates("2026-13-01").is_empty());
+    }
+
+    #[test]
+    fn get_month_dates_rejects_five_digit_years() {
+        assert!(get_month_dates("10000-01-01").is_empty());
+    }
+
+    #[test]
+    fn get_month_dates_accepts_year_9999() {
+        let dates = get_month_dates("9999-12-15");
+        assert_eq!(dates.len(), 42);
+    }
 }

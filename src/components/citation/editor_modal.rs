@@ -64,6 +64,7 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut session_token = use_signal(|| 0u64);
+    let mut save_request_id = use_signal(|| 0u64);
     let is_editing = props.citation_to_edit.is_some();
     use_effect(use_reactive(
         (&*props.show.read(), &props.citation_to_edit),
@@ -129,7 +130,6 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         if is_shown {
             let new_token = *session_token.peek() + 1;
             session_token.set(new_token);
-            saving.set(false);
         }
     }));
     let close_modal = move |_| {
@@ -173,6 +173,10 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
         let prompt_url_val = prompt_url.read().clone();
         let on_save = props.on_save;
         let mut show = props.show;
+        let save_request = save_request_id.with_mut(|request_id| {
+            *request_id = request_id.wrapping_add(1);
+            *request_id
+        });
         // Compute fresh from current props
         let existing_d_tag = props
             .citation_to_edit
@@ -271,6 +275,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                 }
             };
             if *session_token.read() != my_token {
+                if *save_request_id.peek() == save_request {
+                    saving.set(false);
+                }
                 return;
             }
             match result {
@@ -295,7 +302,9 @@ pub fn CitationEditorModal(mut props: CitationEditorModalProps) -> Element {
                     error.set(Some(e));
                 }
             }
-            saving.set(false);
+            if *save_request_id.peek() == save_request {
+                saving.set(false);
+            }
         });
     };
     if !*props.show.read() {

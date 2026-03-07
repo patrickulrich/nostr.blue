@@ -57,7 +57,7 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
             pins.set(Vec::new());
             pins_loading.set(true);
             pins_error.set(None);
-            let next = request_id.read().wrapping_add(1);
+            let next = request_id.peek().wrapping_add(1);
             request_id.set(if next == 0 { 1 } else { next });
         }
     });
@@ -107,15 +107,11 @@ pub fn BoardSlideover(board: Pinboard, show: Signal<bool>, on_close: EventHandle
         }
         let a_tag = board_a_tag.clone();
         let owner_pk = owner_pubkey_for_pins.clone();
-        let current_request = {
-            let next = request_id_mut.read().wrapping_add(1);
-            if next == 0 {
-                1
-            } else {
-                next
-            }
-        };
-        request_id_mut.set(current_request);
+        let current_request = request_id_mut.with_mut(|request_id| {
+            let next = request_id.wrapping_add(1);
+            *request_id = if next == 0 { 1 } else { next };
+            *request_id
+        });
         pins_loading.set(true);
         pins_error.set(None);
         spawn(async move {

@@ -27,7 +27,7 @@ fn build_native_setup_script(
     };
     format!(
         r#"
-                    (async () => {{
+                    return (async () => {{
                         try {{
                             let video = document.getElementById({video_id});
                             if (!video) return "error:Video element not found";
@@ -70,6 +70,21 @@ fn build_native_setup_script(
         },
         error_label = if detach_first { "Retry" } else { "Setup" }
     )
+}
+
+#[cfg(feature = "native")]
+fn parse_native_setup_result(val: serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(result) => result,
+        serde_json::Value::Null => {
+            log::warn!("[Live] Native stream setup returned null");
+            "error:Stream setup returned no result".to_string()
+        }
+        other => {
+            log::warn!("[Live] Native stream setup returned unexpected result: {other}");
+            "error:Stream setup returned unexpected result".to_string()
+        }
+    }
 }
 
 #[cfg(feature = "native")]
@@ -350,8 +365,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         match document::eval(&setup_script).await {
                             Ok(val) => {
                                 if *init_gen.peek() == gen {
-                                    let result =
-                                        val.as_str().unwrap_or("error:Unexpected eval result type");
+                                    let result = parse_native_setup_result(val);
                                     if let Some(err_msg) = result.strip_prefix("error:") {
                                         error.set(Some(err_msg.to_string()));
                                     } else if result == "cancelled" {
@@ -455,8 +469,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                 match document::eval(&setup_script).await {
                     Ok(val) => {
                         if *init_gen.peek() == gen {
-                            let result =
-                                val.as_str().unwrap_or("error:Unexpected eval result type");
+                            let result = parse_native_setup_result(val);
                             if let Some(err_msg) = result.strip_prefix("error:") {
                                 error.set(Some(err_msg.to_string()));
                             } else if result == "cancelled" {

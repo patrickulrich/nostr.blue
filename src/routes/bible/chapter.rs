@@ -2,6 +2,7 @@
 //! Displays a chapter with verse selection and highlighting
 use crate::components::content_share_modal::{ContentShareModal, ContentType};
 use crate::components::HighlightModal;
+use crate::services::bible_api::format_selected_verses_reference;
 use crate::services::bible_api::verse_to_plain_text;
 use crate::stores::auth_store;
 use crate::stores::bible_store::{self, ChapterContent, VerseContent};
@@ -128,16 +129,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(format!("{} {}", v, text));
                     }
                 }
-                let first = *verses.first().unwrap_or(&0);
-                let last = *verses.last().unwrap_or(&0);
-                let reference = if first == last {
-                    format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                } else {
-                    format!(
-                        "{} {}:{}-{} ({})",
-                        book_name, chapter, first, last, translation,
-                    )
-                };
+                let reference =
+                    format_selected_verses_reference(book_name, chapter, &verses, &translation);
                 let full_text = format!("{}\n\u{2014} {}", text_parts.join(" "), reference,);
                 spawn(async move {
                     if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await
@@ -167,16 +160,8 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                         text_parts.push(text.clone());
                     }
                 }
-                let first = *verses.first().unwrap_or(&0);
-                let last = *verses.last().unwrap_or(&0);
-                let reference = if first == last {
-                    format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                } else {
-                    format!(
-                        "{} {}:{}-{} ({})",
-                        book_name, chapter, first, last, translation,
-                    )
-                };
+                let reference =
+                    format_selected_verses_reference(&book_name, chapter, &verses, &translation);
                 let verse_text = text_parts.join(" ");
                 pending_highlight_text.set(verse_text);
                 pending_highlight_reference.set(reference);
@@ -444,8 +429,6 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             return;
                                         }
                                         let book_name = &data.book.common_name;
-                                        let first = *verses.first().unwrap_or(&0);
-                                        let last = *verses.last().unwrap_or(&0);
                                         let verse_text_map = build_verse_text_map(&data.chapter.content);
                                         let mut text_parts = Vec::new();
                                         for v in verses.iter() {
@@ -454,11 +437,12 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                                             }
                                         }
                                         let verse_text = text_parts.join(" ");
-                                        let reference = if first == last {
-                                            format!("{} {}:{} ({})", book_name, chapter, first, translation)
-                                        } else {
-                                            format!("{} {}:{}-{} ({})", book_name, chapter, first, last, translation)
-                                        };
+                                        let reference = format_selected_verses_reference(
+                                            book_name,
+                                            chapter,
+                                            &verses,
+                                            &translation,
+                                        );
                                         let url = format!(
                                             "https://nostr.blue/bible/{}/{}/{}",
                                             urlencoding::encode(&translation),

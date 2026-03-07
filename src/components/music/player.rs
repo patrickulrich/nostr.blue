@@ -22,6 +22,21 @@ fn format_time(seconds: f64) -> String {
 }
 
 #[cfg(all(not(feature = "web"), not(feature = "mobile")))]
+fn parse_native_audio_bind_result(val: serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(result) => result,
+        serde_json::Value::Null => {
+            log::warn!("[Audio] Native audio bind returned null");
+            "error:Native audio binding returned no result".to_string()
+        }
+        other => {
+            log::warn!("[Audio] Native audio bind returned unexpected result: {other}");
+            "error:Native audio binding returned unexpected result".to_string()
+        }
+    }
+}
+
+#[cfg(all(not(feature = "web"), not(feature = "mobile")))]
 async fn ensure_native_audio_hls_manager() -> Result<(), String> {
     let check = document::eval("return typeof window.hlsManager !== 'undefined'")
         .await
@@ -113,7 +128,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         let script = if is_hls {
                             format!(
                                 r#"
-                            (async function() {{
+                            return (async function() {{
                                 try {{
                                     let audio = document.getElementById({audio_id});
                                     if (!audio) return "missing";
@@ -214,7 +229,7 @@ pub fn PersistentMusicPlayer() -> Element {
                         };
                         match document::eval(&script).await {
                             Ok(val) => {
-                                let result = val.as_str().unwrap_or_default();
+                                let result = parse_native_audio_bind_result(val);
                                 if *native_bind_token.read() == bind_token {
                                     if result == format!("bound:{}", media_url) {
                                         native_source_bound.set(true);

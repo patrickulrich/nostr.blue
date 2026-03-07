@@ -72,6 +72,7 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let mut is_following = use_signal(|| false);
     let mut is_loading_follow_state = use_signal(|| true);
     let mut is_updating_follow = use_signal(|| false);
+    let mut follow_check_gen = use_signal(|| 0u32);
     let mut show_report_modal = use_signal(|| false);
     let mut show_add_to_list_modal = use_signal(|| false);
     let mut show_pin_to_board_modal = use_signal(|| false);
@@ -98,14 +99,26 @@ pub fn ContentMenu(props: ContentMenuProps) -> Element {
     let has_copyable_link = !clean_naddr.is_empty() || !event_id_hex.is_empty();
     let event_id_hex_copy = event_id_hex.clone();
     use_effect(use_reactive(&author_pubkey_follow_check, move |pubkey| {
+        is_loading_follow_state.set(true);
+        let gen = follow_check_gen.with_mut(|current| {
+            *current = current.wrapping_add(1);
+            *current
+        });
         spawn(async move {
             match nostr_client::is_following(pubkey).await {
                 Ok(following) => {
+                    if *follow_check_gen.peek() != gen {
+                        return;
+                    }
                     is_following.set(following);
                     is_loading_follow_state.set(false);
                 }
                 Err(e) => {
+                    if *follow_check_gen.peek() != gen {
+                        return;
+                    }
                     log::warn!("Failed to check follow status: {}", e);
+                    is_following.set(false);
                     is_loading_follow_state.set(false);
                 }
             }
