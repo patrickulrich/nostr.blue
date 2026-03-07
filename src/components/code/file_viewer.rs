@@ -301,9 +301,8 @@ pub fn CodeFileViewerCompact(content: String, #[props(default = 10)] max_lines: 
 pub fn RawFileButton(content: String, filename: String) -> Element {
     rsx! {
         button {
-            class: if cfg!(feature = "web") { "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition" } else { "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted/50 text-muted-foreground rounded transition cursor-not-allowed opacity-50" },
-            disabled: !cfg!(feature = "web"),
-            title: if cfg!(feature = "web") { "" } else { "Raw download not supported on this platform" },
+            class: "flex items-center gap-1 px-3 py-1.5 text-sm bg-muted hover:bg-accent rounded transition",
+            title: "",
             onclick: {
                 let content = content.clone();
                 let filename = filename.clone();
@@ -410,6 +409,16 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                                 );
                             }
                         });
+                    }
+                    #[cfg(not(feature = "web"))]
+                    {
+                        if let Err(e) = crate::platform::download::save_file(
+                            &_filename,
+                            &_content,
+                            "text/plain;charset=utf-8",
+                        ) {
+                            log::error!("Download failed for '{}': {}", _filename, e);
+                        }
                     }
                 }
             },

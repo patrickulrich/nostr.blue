@@ -992,8 +992,17 @@ fn parse_datetime_to_timestamp(date: &str, time: &str) -> u64 {
         return 0;
     }
     let time_parts: Vec<&str> = time.split(':').collect();
-    let hours: i64 = time_parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-    let minutes: i64 = time_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    if time_parts.len() != 2 {
+        return 0;
+    }
+    let hours: i64 = match time_parts.first().and_then(|s| s.parse().ok()) {
+        Some(h) if (0..=23).contains(&h) => h,
+        _ => return 0,
+    };
+    let minutes: i64 = match time_parts.get(1).and_then(|s| s.parse().ok()) {
+        Some(m) if (0..=59).contains(&m) => m,
+        _ => return 0,
+    };
     // Accurate days since Unix epoch using Hinnant's civil calendar algorithm
     let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
     let era_days = 365 * y + y / 4 - y / 100 + y / 400 + (m * 153 + 2) / 5 + day - 1;

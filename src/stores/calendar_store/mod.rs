@@ -122,10 +122,10 @@ fn get_date_key(time: &EventTime) -> String {
     match time {
         EventTime::Date(d) => d.clone(),
         EventTime::Timestamp(ts) | EventTime::LocalDateTime { timestamp: ts, .. } => {
-            use chrono::{TimeZone, Utc};
+            use chrono::{Local, TimeZone};
             const MAX_TIMESTAMP: i64 = 253_402_300_799; // Year 9999
             let ts_i64 = i64::try_from(*ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
-            let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+            let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
                 return String::new();
             };
             dt.format("%Y-%m-%d").to_string()

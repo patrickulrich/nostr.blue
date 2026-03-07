@@ -388,13 +388,13 @@ pub fn VoiceMessageCard(
             format!("{}d", (diff / 86400.0) as u32)
         }
     };
-    let navigator: Option<Box<dyn Fn()>> = {
+    let navigator: Option<std::rc::Rc<dyn Fn()>> = {
         #[cfg(feature = "web")]
         {
             use crate::routes::Route;
             let nav = use_navigator();
             let voice_id = event_id_str.clone();
-            Some(Box::new(move || {
+            Some(std::rc::Rc::new(move || {
                 let _ = nav.push(Route::Note {
                     note_id: voice_id.clone(),
                     from_voice: Some("true".to_string()),
@@ -416,9 +416,11 @@ pub fn VoiceMessageCard(
         "p-4 border-b border-border opacity-60"
     };
     let tooltip_text = if !is_clickable { "Not supported on this platform" } else { "" };
+    let navigator_for_click = navigator.clone();
+    let navigator_for_keydown = navigator.clone();
     let handle_click = move |_evt: Event<MouseData>| {
         if is_clickable {
-            if let Some(nav) = &navigator {
+            if let Some(nav) = navigator_for_click.as_ref() {
                 nav();
             }
         }
@@ -427,7 +429,26 @@ pub fn VoiceMessageCard(
         div {
             class: "{card_class}",
             title: "{tooltip_text}",
+            role: if is_clickable { "button" } else { "article" },
+            tabindex: if is_clickable { "0" } else { "-1" },
             onclick: handle_click,
+            onkeydown: move |evt: KeyboardEvent| {
+                if !is_clickable {
+                    return;
+                }
+                let activate = match evt.key() {
+                    Key::Enter => true,
+                    Key::Character(c) => c == " ",
+                    _ => false,
+                };
+                if !activate {
+                    return;
+                }
+                evt.prevent_default();
+                if let Some(nav) = navigator_for_keydown.as_ref() {
+                    nav();
+                }
+            },
             div { class: "flex items-start gap-3 mb-3",
                 Link {
                     to: Route::Profile {

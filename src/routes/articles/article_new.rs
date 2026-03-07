@@ -38,6 +38,7 @@ pub fn ArticleNew() -> Element {
     let mut draft_status = use_signal(|| DraftStatus::Clean);
     let mut loaded_draft_id = use_signal(|| Option::<String>::None);
     let mut last_auto_save = use_signal(|| 0u64);
+    let mut auto_save_gen = use_signal(|| 0u64);
     let mut is_publishing = use_signal(|| false);
     let mut error_message = use_signal(|| Option::<String>::None);
     let mut show_publish_dialog = use_signal(|| false);
@@ -140,9 +141,16 @@ pub fn ArticleNew() -> Element {
         let saved_hash = *content_hash.read();
         last_auto_save.set(now);
         draft_status.set(DraftStatus::Saving);
+        let save_gen = auto_save_gen.with_mut(|g| {
+            *g = g.wrapping_add(1);
+            *g
+        });
         spawn(async move {
             match save_draft(&draft).await {
                 Ok(event_id) => {
+                    if *auto_save_gen.read() != save_gen {
+                        return;
+                    }
                     loaded_draft_id.set(Some(draft.identifier.clone()));
                     last_saved_hash.set(Some(saved_hash));
                     is_dirty.set(false);
@@ -154,6 +162,9 @@ pub fn ArticleNew() -> Element {
                     log::info!("Draft auto-saved");
                 }
                 Err(e) => {
+                    if *auto_save_gen.read() != save_gen {
+                        return;
+                    }
                     log::error!("Failed to auto-save draft: {}", e);
                     draft_status.set(DraftStatus::Error(e));
                 }

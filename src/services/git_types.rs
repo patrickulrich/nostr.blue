@@ -24,5 +24,5 @@ pub struct CommitEntry {
     pub author: String,
     pub email: String,
     pub timestamp: u64,
-    pub parent: Option<String>,
+    pub parents: Vec<String>,
 }

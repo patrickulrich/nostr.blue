@@ -100,7 +100,7 @@ pub fn apply_theme() {
         let class = match theme {
             Theme::Light => "",
             Theme::Dark => "dark",
-            Theme::System => "dark", // Default to dark on native
+            Theme::System => "",
         };
         let js = format!("document.documentElement.setAttribute('class', '{}')", class);
         dioxus::prelude::spawn(async move {
@@ -143,7 +143,7 @@ pub fn is_dark_mode() -> bool {
                     }
                 }
             }
-            true // Default to dark on native (matches apply_theme)
+            false
         }
     }
 }

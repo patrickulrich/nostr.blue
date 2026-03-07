@@ -11,6 +11,7 @@ use nostr_sdk::nips::nip01::Coordinate;
 use nostr_sdk::nips::nip38::{LiveStatus, StatusType};
 use nostr_sdk::{EventBuilder, Kind, Tag, TagKind, Timestamp};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 /// Kind number for Music Vote events (addressable, one per user)
 pub const KIND_MUSIC_VOTE: u16 = 33169;
 /// Music track for the player (unified for Wavlake, Nostr music, and Podcasts)
@@ -375,6 +376,7 @@ pub static MUSIC_PLAYER: GlobalSignal<MusicPlayerState> = Signal::global(
 const STORAGE_KEY_VOLUME: &str = "music_player_volume";
 const STORAGE_KEY_MUTED: &str = "music_player_muted";
 const STORAGE_KEY_PLAYBACK_SPEED: &str = "music_player_playback_speed";
+static VOLUME_PERSIST_GEN: AtomicU64 = AtomicU64::new(0);
 /// Initialize music player from localStorage
 pub fn init_player() {
     let mut state = MusicPlayerState::default();
@@ -622,7 +624,14 @@ pub fn set_volume(volume: f64) {
         let mut state = MUSIC_PLAYER.write();
         state.volume = clamped;
     }
-    storage::set(STORAGE_KEY_VOLUME, &clamped).ok();
+    let gen = VOLUME_PERSIST_GEN.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    crate::platform::spawn::spawn_detached(async move {
+        crate::platform::timer::sleep_ms(300).await;
+        if VOLUME_PERSIST_GEN.load(Ordering::SeqCst) != gen {
+            return;
+        }
+        storage::set(STORAGE_KEY_VOLUME, &clamped).ok();
+    });
 }
 /// Toggle mute
 pub fn toggle_mute() {

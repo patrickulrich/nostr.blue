@@ -1103,5 +1103,24 @@ pub fn start_pending_events_processor() {
 /// No-op on non-WASM targets (gloo_timers is WASM-only)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_pending_events_processor() {
-    log::debug!("Pending events processor only runs in WASM");
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static PROCESSOR_RUNNING_NATIVE: AtomicBool = AtomicBool::new(false);
+    if PROCESSOR_RUNNING_NATIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        log::debug!("Pending events processor already running on native");
+        return;
+    }
+    dioxus::prelude::spawn(async move {
+        loop {
+            if let Err(e) = process_pending_events().await {
+                log::error!("Error processing pending events: {}", e);
+            }
+            let pending_count = PENDING_NOSTR_EVENTS.read().len();
+            let interval_ms = if pending_count > 0 { 30_000 } else { 60_000 };
+            crate::platform::timer::sleep_ms(interval_ms).await;
+        }
+    });
+    log::info!("Started pending events processor on native");
 }

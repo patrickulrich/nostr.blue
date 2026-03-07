@@ -237,8 +237,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let stream_url = props.stream_url.clone();
     let poster = props.poster.clone();
     let autoplay = props.autoplay;
-    let stream_url_for_validation = stream_url.clone();
-    let url_valid = validate_stream_url(&stream_url_for_validation);
+    let url_valid = validate_stream_url(&stream_url);
     let stream_url_for_id = stream_url.clone();
     let instance_id = use_signal(|| {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -255,9 +254,10 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
     let video_id_str = video_id.clone();
     let stream_url_for_effect = stream_url.clone();
     let video_id_for_rsx = video_id.clone();
-    use_effect(move || {
+    use_effect(use_reactive((&stream_url_for_effect, &autoplay), move |(stream_url_prop, autoplay_prop)| {
         let video_id = video_id_str.clone();
-        let _stream_url = stream_url_for_effect.clone();
+        let _stream_url = stream_url_prop.clone();
+        let url_valid = validate_stream_url(&_stream_url);
         let gen = init_gen.with_mut(|g| { *g = g.wrapping_add(1); *g });
         if url_valid {
             mounted.set(true);
@@ -269,7 +269,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     if !*mounted.peek() {
                         return;
                     }
-                    match init_video_js_player(&video_id, &stream_url, autoplay).await {
+                    match init_video_js_player(&video_id, &stream_url, autoplay_prop).await {
                         Ok(_) => {
                             if *init_gen.peek() == gen {
                                 loading.set(false);
@@ -325,7 +325,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
 
                     // Set up the video element via eval
                     let setup_script =
-                        build_native_setup_script(&video_id, &stream_url, autoplay, false);
+                        build_native_setup_script(&video_id, &stream_url, autoplay_prop, false);
 
                     if *init_gen.peek() != gen {
                         return;
@@ -358,7 +358,7 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             error.set(Some("Invalid stream URL".to_string()));
             loading.set(false);
         }
-    });
+    }));
     // Cleanup HLS on unmount for native platforms.
     // Can't use struct Drop (document::eval becomes NoOp there).
     // use_drop runs while the Dioxus runtime is still active.

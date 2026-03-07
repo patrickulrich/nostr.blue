@@ -334,8 +334,18 @@ pub fn CodeRepoUpload(naddr: String) -> Element {
                             }
                         },
                         onclick: move |_| {
-                            // Programmatically click the hidden file input
-                            trigger_file_input(input_id);
+                            #[cfg(feature = "web")]
+                            {
+                                // Programmatically click the hidden file input
+                                trigger_file_input(input_id);
+                            }
+                            #[cfg(not(feature = "web"))]
+                            {
+                                error_message.set(Some(
+                                    "File browsing is currently available only on web builds."
+                                        .to_string(),
+                                ));
+                            }
                         },
                         div { class: "w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center",
                             svg {
@@ -701,6 +711,7 @@ fn trigger_file_input(input_id: &str) {
 }
 
 #[cfg(not(feature = "web"))]
+#[allow(dead_code)]
 fn trigger_file_input(_input_id: &str) {}
 
 /// Clear a file input element's value

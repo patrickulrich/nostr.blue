@@ -6,7 +6,11 @@ pub fn PollTimer(ends_at: Timestamp) -> Element {
     use_future(move || async move {
         loop {
             crate::platform::timer::sleep_ms(1000).await;
-            time_remaining.set(calculate_time_remaining(ends_at));
+            let remaining = calculate_time_remaining(ends_at);
+            time_remaining.set(remaining);
+            if remaining <= 0 {
+                break;
+            }
         }
     });
     let is_expired = time_remaining() <= 0;

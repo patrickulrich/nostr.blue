@@ -237,7 +237,7 @@ pub fn PersistentMusicPlayer() -> Element {
                             log::warn!("Unexpected time poll result: {:?}", val);
                             continue;
                         };
-                        if !time.is_nan() && time > 0.0 {
+                        if !time.is_nan() && time >= 0.0 {
                             last_synced_time.set(time);
                             music_player::set_current_time(time);
                         }
@@ -390,6 +390,10 @@ pub fn PersistentMusicPlayer() -> Element {
         // Suppress all DOM onerror on mobile — eval handles its own errors.
         #[cfg(not(feature = "web"))]
         {
+            music_player::set_buffering(false);
+            music_player::set_playback_error(Some(
+                "Playback error on this platform. Please retry.".to_string(),
+            ));
         }
         #[cfg(feature = "web")]
         {

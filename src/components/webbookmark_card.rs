@@ -115,13 +115,27 @@ pub fn WebBookmarkCard(
                 }
                 #[cfg(not(feature = "web"))]
                 {
-                    log::info!("Open URL: {}", url);
-                    toast_api.error(
-                        "Open URL not supported on this platform".to_string(),
-                        ToastOptions::new()
-                            .duration(Duration::from_secs(3))
-                            .permanent(false),
+                    let url_to_open = url.clone();
+                    let toast_for_open = toast_api;
+                    let open_script = format!(
+                        "(function() {{ const w = window.open({}, '_blank'); return !!w; }})()",
+                        serde_json::to_string(&url_to_open).unwrap_or_else(|_| "\"\"".to_string())
                     );
+                    spawn(async move {
+                        match document::eval(&open_script).await {
+                            Ok(val) if val.as_bool().unwrap_or(false) => {
+                                log::info!("Opened URL: {}", url_to_open);
+                            }
+                            _ => {
+                                toast_for_open.error(
+                                    "Unable to open URL on this platform".to_string(),
+                                    ToastOptions::new()
+                                        .duration(Duration::from_secs(3))
+                                        .permanent(false),
+                                );
+                            }
+                        }
+                    });
                 }
             }
         }

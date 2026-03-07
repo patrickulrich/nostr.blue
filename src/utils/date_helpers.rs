@@ -3,7 +3,7 @@
 //! Shared date manipulation functions for calendar components.
 //! All functions work with YYYY-MM-DD format strings.
 use crate::stores::calendar_store::UnifiedEvent;
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{Datelike, Local, NaiveDate, TimeZone};
 
 /// Check if a year is a leap year
 #[allow(dead_code)]
@@ -39,14 +39,14 @@ pub fn get_event_date(event: &UnifiedEvent) -> String {
     let ts_i64 = i64::try_from(ts)
         .unwrap_or(MAX_TIMESTAMP)
         .min(MAX_TIMESTAMP);
-    let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
+    let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
         return String::new();
     };
     dt.format("%Y-%m-%d").to_string()
 }
 /// Get today's date as YYYY-MM-DD string
 pub fn get_today() -> String {
-    Utc::now().format("%Y-%m-%d").to_string()
+    Local::now().format("%Y-%m-%d").to_string()
 }
 /// Get month number (1-12) from a date string in YYYY-MM-DD format
 pub fn get_month_from_date(date: &str) -> u32 {

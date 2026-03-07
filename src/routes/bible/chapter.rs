@@ -146,6 +146,7 @@ pub fn BibleChapter(translation: String, book: String, chapter: u32) -> Element 
                 spawn(async move {
                     if let Err(e) = crate::platform::clipboard::copy_to_clipboard(&full_text).await {
                         log::error!("Clipboard write failed: {:?}", e);
+                        return;
                     }
                     selected_verses_for_clear.set(Vec::new());
                     show_toolbar_for_clear.set(false);

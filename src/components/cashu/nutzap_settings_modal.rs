@@ -98,13 +98,20 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
         spawn(async move {
             match cashu::publish_nutzap_info(mints, relays).await {
                 Ok(event_id) => {
-                    *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
                     if let Err(e) = crate::platform::storage::set(
                         "nostr_nutzap_auto_redeem",
                         &auto_redeem_setting,
                     ) {
-                        log::error!("Failed to save nutzap auto-redeem setting: {e}");
+                        let msg = format!(
+                            "Published nutzap info, but failed to save auto-redeem preference locally: {}",
+                            e
+                        );
+                        log::error!("{msg}");
+                        error_message.set(Some(msg));
+                        is_publishing.set(false);
+                        return;
                     }
+                    *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
                     success_message
                         .set(
                             Some(

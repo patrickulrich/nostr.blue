@@ -468,6 +468,11 @@ pub fn load_local_relays() -> Vec<String> {
     match storage::get::<Vec<String>>(LOCAL_RELAYS_KEY) {
         Ok(relays) => relays,
         Err(e) => {
+            let lower = e.to_lowercase();
+            if lower.contains("not found") || lower.contains("missing") || lower.contains("no key")
+            {
+                return Vec::new();
+            }
             log::error!("Failed to load local relays from storage: {}, key: {}", e, LOCAL_RELAYS_KEY);
             Vec::new()
         }

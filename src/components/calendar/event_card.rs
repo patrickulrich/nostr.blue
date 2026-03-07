@@ -373,11 +373,17 @@ fn format_event_time(event: &UnifiedEvent) -> String {
 
 #[cfg(not(feature = "web"))]
 fn format_event_time(event: &UnifiedEvent) -> String {
+    use chrono::{Local, TimeZone};
     let ts = event.start_timestamp();
     if ts == 0 {
         return "TBD".to_string();
     }
-    crate::utils::time::format_relative_time(Timestamp::from(ts))
+    const MAX_TIMESTAMP: i64 = 253_402_300_799;
+    let ts_i64 = i64::try_from(ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
+    let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
+        return "TBD".to_string();
+    };
+    dt.format("%b %-d at %-I:%M %p").to_string()
 }
 /// Format event time (short version for compact cards)
 fn format_event_time_short(event: &UnifiedEvent) -> String {
@@ -400,7 +406,13 @@ fn format_event_time_short(event: &UnifiedEvent) -> String {
         }
         #[cfg(not(feature = "web"))]
         {
-            format_relative_time(Timestamp::from(ts))
+            use chrono::{Local, TimeZone};
+            const MAX_TIMESTAMP: i64 = 253_402_300_799;
+            let ts_i64 = i64::try_from(ts).unwrap_or(MAX_TIMESTAMP).min(MAX_TIMESTAMP);
+            let Some(dt) = Local.timestamp_opt(ts_i64, 0).single() else {
+                return "TBD".to_string();
+            };
+            dt.format("%b %-d").to_string()
         }
     }
 }

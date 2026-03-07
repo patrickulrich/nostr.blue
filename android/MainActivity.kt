@@ -74,18 +74,36 @@ class MainActivity : WryActivity() {
                         Log.d(TAG, "Could not get AFD size: ${e.message}")
                     }
 
-                    // Use AFD size if available, otherwise fall back to stream.available()
+                    // If AFD did not provide size, try OpenableColumns.SIZE metadata.
+                    if (fileSize <= 0) {
+                        try {
+                            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
+                                ?.use { cursor ->
+                                    if (cursor.moveToFirst()) {
+                                        val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                                            fileSize = cursor.getLong(sizeIndex)
+                                        }
+                                    }
+                                }
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Could not get query size: ${e.message}")
+                        }
+                    }
                     val inputStream = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
                         inputStream.use { stream ->
-                            // Use AFD length if valid, otherwise fall back to available()
-                            val sizeToCheck = if (fileSize > 0) fileSize else stream.available().toLong()
-                            if (sizeToCheck > MAX_UPLOAD_BYTES) {
+                            if (fileSize > 0 && fileSize > MAX_UPLOAD_BYTES) {
                                 filePickError = "File too large (max 50MB)"
                                 filePickInFlight = false
                                 return@synchronized
                             }
                             val bytes = stream.readBytes()
+                            if (bytes.size > MAX_UPLOAD_BYTES) {
+                                filePickError = "File too large (max 50MB)"
+                                filePickInFlight = false
+                                return@synchronized
+                            }
                             pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                             pendingFileMimeType = mimeType ?: "application/octet-stream"
                             filePickError = null
@@ -129,18 +147,36 @@ class MainActivity : WryActivity() {
                         Log.d(TAG, "Could not get AFD size: ${e.message}")
                     }
 
-                    // Use AFD size if available, otherwise fall back to stream.available()
+                    // If AFD did not provide size, try OpenableColumns.SIZE metadata.
+                    if (fileSize <= 0) {
+                        try {
+                            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
+                                ?.use { cursor ->
+                                    if (cursor.moveToFirst()) {
+                                        val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                                        if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                                            fileSize = cursor.getLong(sizeIndex)
+                                        }
+                                    }
+                                }
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Could not get query size: ${e.message}")
+                        }
+                    }
                     val inputStream = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
                         inputStream.use { stream ->
-                            // Use AFD length if valid, otherwise fall back to available()
-                            val sizeToCheck = if (fileSize > 0) fileSize else stream.available().toLong()
-                            if (sizeToCheck > MAX_UPLOAD_BYTES) {
+                            if (fileSize > 0 && fileSize > MAX_UPLOAD_BYTES) {
                                 filePickError = "File too large (max 50MB)"
                                 filePickInFlight = false
                                 return@synchronized
                             }
                             val bytes = stream.readBytes()
+                            if (bytes.size > MAX_UPLOAD_BYTES) {
+                                filePickError = "File too large (max 50MB)"
+                                filePickInFlight = false
+                                return@synchronized
+                            }
                             pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                             pendingFileMimeType = mimeType ?: "image/*"
                             filePickError = null

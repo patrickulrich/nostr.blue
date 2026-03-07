@@ -241,7 +241,13 @@ pub fn ChannelChat(channel_id: String) -> Element {
             }
             #[cfg(not(feature = "web"))]
             {
-                let _ = (&container_id, msg_count);
+                if msg_count > 0 {
+                    let script = format!(
+                        "(() => {{ const el = document.getElementById({}); if (el) {{ el.scrollTop = el.scrollHeight; }} return true; }})()",
+                        serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string())
+                    );
+                    let _ = document::eval(&script).await;
+                }
                 is_first_load.set(false);
             }
         });

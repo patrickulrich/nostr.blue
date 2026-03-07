@@ -371,10 +371,6 @@ async fn upload_blob_with_auth(
                 .upload_blob(data, Some(content_type), auth_options, Some(&keys))
                 .await
                 .map_err(|e| {
-                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
-                        *g = g.wrapping_add(1);
-                        *g
-                    });
                     if *UPLOAD_PROGRESS_GEN.read() == gen {
                         *UPLOAD_PROGRESS.write() = None;
                     }
@@ -392,10 +388,6 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
-                        *g = g.wrapping_add(1);
-                        *g
-                    });
                     if *UPLOAD_PROGRESS_GEN.read() == gen {
                         *UPLOAD_PROGRESS.write() = None;
                     }
@@ -412,10 +404,6 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
-                        *g = g.wrapping_add(1);
-                        *g
-                    });
                     if *UPLOAD_PROGRESS_GEN.read() == gen {
                         *UPLOAD_PROGRESS.write() = None;
                     }
@@ -433,10 +421,6 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
-                        *g = g.wrapping_add(1);
-                        *g
-                    });
                     if *UPLOAD_PROGRESS_GEN.read() == gen {
                         *UPLOAD_PROGRESS.write() = None;
                     }

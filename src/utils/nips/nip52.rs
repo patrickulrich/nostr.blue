@@ -666,6 +666,23 @@ fn build_naddr(kind: u16, pubkey: &str, d_tag: &str) -> Option<String> {
 }
 /// Calculate days since Unix epoch (simple implementation)
 fn days_since_epoch(year: i32, month: u32, day: u32) -> Option<i64> {
+    if year < 1970 {
+        return None;
+    }
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap_year(year) { 29 } else { 28 }
+        }
+        _ => return None,
+    };
+    if day == 0 || day > max_day {
+        return None;
+    }
     let mut days: i64 = 0;
     for y in 1970..year {
         days += if is_leap_year(y) { 366 } else { 365 };

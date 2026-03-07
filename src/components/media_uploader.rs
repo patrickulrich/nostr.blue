@@ -50,11 +50,30 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         let input_id = input_id_for_handler.clone();
         spawn(async move {
             error.set(None);
-            let files = evt.files();
-            if let Some(file_data) = files.first() {
-                let file_name = file_data.name();
-                match read_file_as_bytes(&file_name, &input_id).await {
-                    Ok((data, mime_type)) => {
+            #[cfg(feature = "mobile")]
+            {
+                let _ = evt;
+                match read_file_as_bytes(&input_id).await {
+                    Ok((file_name, data, mime_type)) => {
+                        log::info!(
+                            "File selected: {} ({} bytes)", file_name, data.len()
+                        );
+                        selected_file.set(Some((file_name, data, mime_type)));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read file: {}", e);
+                        error.set(Some(format!("Failed to read file: {}", e)));
+                    }
+                }
+            }
+            #[cfg(not(feature = "mobile"))]
+            {
+                let files = evt.files();
+                if files.is_empty() {
+                    return;
+                }
+                match read_file_as_bytes(&input_id).await {
+                    Ok((file_name, data, mime_type)) => {
                         log::info!(
                             "File selected: {} ({} bytes)", file_name, data.len()
                         );
@@ -227,9 +246,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
 /// Helper function to read file as bytes with specific input ID
 #[cfg(feature = "web")]
 async fn read_file_as_bytes(
-    _file_name: &str,
     input_id: &str,
-) -> Result<(Vec<u8>, String), String> {
+) -> Result<(String, Vec<u8>, String), String> {
     use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
     use web_sys::window;
@@ -242,6 +260,7 @@ async fn read_file_as_bytes(
         .map_err(|_| "Not an input element")?;
     let file_list = input.files().ok_or("No files")?;
     let file = file_list.get(0).ok_or("No file selected")?;
+    let file_name = file.name();
     let mime_type = file.type_();
     let promise = file.array_buffer();
     let array_buffer = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
@@ -250,25 +269,30 @@ async fn read_file_as_bytes(
         .map_err(|_| "Not an ArrayBuffer")?;
     let uint8_array = Uint8Array::new(&array_buffer);
     let bytes = uint8_array.to_vec();
-    Ok((bytes, mime_type))
+    Ok((file_name, bytes, mime_type))
 }
 
 /// Stub for desktop platforms
 #[cfg(all(feature = "native", not(feature = "mobile")))]
 async fn read_file_as_bytes(
-    _file_name: &str,
     _input_id: &str,
-) -> Result<(Vec<u8>, String), String> {
+) -> Result<(String, Vec<u8>, String), String> {
     Err("File reading not supported on this platform".to_string())
 }
 
 /// Mobile implementation - uses Android file picker via JNI
 #[cfg(feature = "mobile")]
 async fn read_file_as_bytes(
-    _file_name: &str,
     _input_id: &str,
-) -> Result<(Vec<u8>, String), String> {
-    crate::platform::mobile::pick_file().await
+) -> Result<(String, Vec<u8>, String), String> {
+    let (bytes, mime_type) = crate::platform::mobile::pick_file().await?;
+    let extension = mime_type
+        .split('/')
+        .nth(1)
+        .map(|s| s.split(';').next().unwrap_or("bin"))
+        .unwrap_or("bin");
+    let filename = format!("upload.{}", extension);
+    Ok((filename, bytes, mime_type))
 }
 /// Helper function to format file size
 fn format_file_size(bytes: usize) -> String {

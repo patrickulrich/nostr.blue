@@ -360,6 +360,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                 let events_to_process = events_for_geocode.clone();
                 spawn(async move {
                     let mut results = Vec::new();
+                    let mut had_lookup_error = false;
                     const BATCH_SIZE: usize = 5;
                     const BATCH_DELAY_MS: u32 = 200;
                     for (idx, event) in events_to_process.iter().enumerate() {
@@ -411,6 +412,7 @@ pub fn EventMap(props: EventMapProps) -> Element {
                                     log::warn!(
                                         "Geocoding failed for '{}': {}", location_str, e
                                     );
+                                    had_lookup_error = true;
                                 }
                             }
                         }
@@ -427,7 +429,9 @@ pub fn EventMap(props: EventMapProps) -> Element {
                         return;
                     }
                     geocoded_events.set(results);
-                    processed_event_ids.set(key_to_store);
+                    if !had_lookup_error {
+                        processed_event_ids.set(key_to_store);
+                    }
                     loading_geo.set(false);
                 });
             }

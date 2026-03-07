@@ -19,12 +19,16 @@ const CACHE_KEY: &str = "nostr_blue_geocode_cache";
 /// Cache expiry time (7 days in seconds)
 #[cfg(feature = "web")]
 const CACHE_EXPIRY_SECS: u64 = 7 * 24 * 60 * 60;
+#[cfg(feature = "web")]
+const MAX_GEO_CACHE_ENTRIES: usize = 500;
 /// Suggestion cache key for localStorage
 #[cfg(feature = "web")]
 const SUGGEST_CACHE_KEY: &str = "nostr_blue_suggest_cache";
 /// Suggestion cache expiry time (1 hour in seconds)
 #[cfg(feature = "web")]
 const SUGGEST_CACHE_EXPIRY_SECS: u64 = 60 * 60;
+#[cfg(feature = "web")]
+const MAX_SUGGEST_CACHE_ENTRIES: usize = 500;
 /// Minimum interval between Nominatim requests (1 second in ms)
 #[cfg(feature = "web")]
 const NOMINATIM_THROTTLE_MS: f64 = 1000.0;
@@ -136,6 +140,26 @@ fn is_valid_cache(cached: &CachedGeoResult) -> bool {
     let age = now_secs().saturating_sub(cached.cached_at);
     age < CACHE_EXPIRY_SECS
 }
+#[cfg(feature = "web")]
+fn prune_geo_cache(cache: &mut GeoCache) {
+    let now = now_secs();
+    cache
+        .entries
+        .retain(|_, v| now.saturating_sub(v.cached_at) < CACHE_EXPIRY_SECS);
+    if cache.entries.len() <= MAX_GEO_CACHE_ENTRIES {
+        return;
+    }
+    let mut by_age: Vec<(String, u64)> = cache
+        .entries
+        .iter()
+        .map(|(k, v)| (k.clone(), v.cached_at))
+        .collect();
+    by_age.sort_by_key(|(_, ts)| *ts);
+    let remove_count = by_age.len().saturating_sub(MAX_GEO_CACHE_ENTRIES);
+    for (key, _) in by_age.into_iter().take(remove_count) {
+        cache.entries.remove(&key);
+    }
+}
 /// Normalize query for cache key
 #[allow(dead_code)]
 fn normalize_query(query: &str) -> String {
@@ -169,6 +193,7 @@ pub async fn geocode(query: &str) -> Result<Option<GeoLocation>, String> {
                     cached_at: now_secs(),
                 },
             );
+        prune_geo_cache(&mut cache);
         save_cache(&cache);
     }
     result
@@ -295,6 +320,26 @@ fn is_valid_suggest_cache(cached: &CachedSuggestions) -> bool {
     let age = now_secs().saturating_sub(cached.cached_at);
     age < SUGGEST_CACHE_EXPIRY_SECS
 }
+#[cfg(feature = "web")]
+fn prune_suggest_cache(cache: &mut SuggestCache) {
+    let now = now_secs();
+    cache
+        .entries
+        .retain(|_, v| now.saturating_sub(v.cached_at) < SUGGEST_CACHE_EXPIRY_SECS);
+    if cache.entries.len() <= MAX_SUGGEST_CACHE_ENTRIES {
+        return;
+    }
+    let mut by_age: Vec<(String, u64)> = cache
+        .entries
+        .iter()
+        .map(|(k, v)| (k.clone(), v.cached_at))
+        .collect();
+    by_age.sort_by_key(|(_, ts)| *ts);
+    let remove_count = by_age.len().saturating_sub(MAX_SUGGEST_CACHE_ENTRIES);
+    for (key, _) in by_age.into_iter().take(remove_count) {
+        cache.entries.remove(&key);
+    }
+}
 /// Search for location suggestions (for autocomplete)
 ///
 /// Uses Nominatim (OpenStreetMap) which handles venue/business name queries
@@ -385,6 +430,7 @@ pub async fn geocode_suggestions(query: &str, limit: u8) -> Result<Vec<GeoLocati
             cached_at: now_secs(),
         },
     );
+    prune_suggest_cache(&mut cache);
     save_suggest_cache(&cache);
     Ok(locations)
 }

@@ -15,8 +15,14 @@ pub(crate) fn http_client() -> &'static reqwest::Client {
         #[cfg(not(target_arch = "wasm32"))]
         let builder = builder.timeout(std::time::Duration::from_secs(15));
         builder.build().unwrap_or_else(|e| {
-            log::warn!("Failed to build HTTP client: {e}, using default");
-            reqwest::Client::new()
+            log::warn!("Failed to build HTTP client with configured options: {e}");
+            reqwest::Client::builder()
+                .build()
+                .unwrap_or_else(|fallback_err| {
+                    panic!(
+                        "Failed to build reqwest client (configured and fallback): {e}; {fallback_err}"
+                    )
+                })
         })
     })
 }

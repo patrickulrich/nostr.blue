@@ -24,6 +24,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
     let mut saving = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
+    let mut modal_session = use_signal(|| 0u64);
     let mut show_picture_uploader = use_signal(|| false);
     let mut show_banner_uploader = use_signal(|| false);
     use_effect(
@@ -31,6 +32,7 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
             &*props.show.read(),
             move |is_shown| {
                 if is_shown {
+                    modal_session.with_mut(|s| *s = s.wrapping_add(1));
                     spawn(async move {
                         if let Some(pubkey) = auth_store::get_pubkey() {
                             match profiles::fetch_profile(pubkey.clone()).await {
@@ -118,8 +120,12 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
                 Ok(_) => {
                     log::info!("Profile updated successfully");
                     success.set(true);
+                    let session = *modal_session.read();
                     spawn(async move {
                         crate::platform::timer::sleep_ms(1500).await;
+                        if *modal_session.read() != session || !*props.show.read() {
+                            return;
+                        }
                         props.show.set(false);
                         success.set(false);
                     });

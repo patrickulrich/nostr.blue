@@ -266,15 +266,38 @@ async fn trigger_load_more_for_tag(
 
 #[cfg(not(feature = "web"))]
 fn trigger_load_more_for_platform(
-    _tag: String,
-    _until: Option<u64>,
-    _fetch_gen: &Signal<u32>,
-    _loading: &Signal<bool>,
-    _has_more: &Signal<bool>,
-    _oldest_timestamp: &Signal<Option<u64>>,
-    _stream_events: &Signal<Vec<Event>>,
+    tag: String,
+    until: Option<u64>,
+    fetch_gen: &Signal<u32>,
+    loading: &Signal<bool>,
+    has_more: &Signal<bool>,
+    oldest_timestamp: &Signal<Option<u64>>,
+    stream_events: &Signal<Vec<Event>>,
 ) {
-    log::debug!("Pagination not yet implemented for this platform");
+    if *loading.read() || !*has_more.read() {
+        return;
+    }
+    let mut loading_sig = *loading;
+    let mut has_more_sig = *has_more;
+    let mut oldest_timestamp_sig = *oldest_timestamp;
+    let mut stream_events_sig = *stream_events;
+    let mut fetch_gen_sig = *fetch_gen;
+    loading_sig.set(true);
+    fetch_gen_sig.with_mut(|g| *g = g.wrapping_add(1));
+    let this_gen = *fetch_gen_sig.read();
+    spawn(async move {
+        trigger_load_more_for_tag(
+            tag,
+            until,
+            this_gen,
+            &fetch_gen_sig,
+            &mut loading_sig,
+            &mut has_more_sig,
+            &mut oldest_timestamp_sig,
+            &mut stream_events_sig,
+        )
+        .await;
+    });
 }
 
 async fn load_streams_by_tag(

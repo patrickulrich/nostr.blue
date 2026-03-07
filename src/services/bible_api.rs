@@ -179,17 +179,29 @@ async fn fetch_with_timeout(
     url: &str,
     error_context: &str,
 ) -> Result<reqwest::Response, String> {
+    #[cfg(feature = "web")]
+    let response = {
+        use futures::FutureExt;
+        let request = http_client().get(url).send().fuse();
+        let timeout = gloo_timers::future::TimeoutFuture::new(15_000).fuse();
+        futures::pin_mut!(request, timeout);
+        futures::select! {
+            resp = request => resp,
+            _ = timeout => return Err("Request timeout".to_string()),
+        }
+    };
+    #[cfg(not(feature = "web"))]
     let response = http_client()
         .get(url)
         .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                "Request timeout".to_string()
-            } else {
-                format!("Failed to {}: {}", error_context, e)
-            }
-        })?;
+        .await;
+    let response = response.map_err(|e| {
+        if e.is_timeout() {
+            "Request timeout".to_string()
+        } else {
+            format!("Failed to {}: {}", error_context, e)
+        }
+    })?;
     if !response.status().is_success() {
         return Err(format!("API error: {}", response.status()));
     }

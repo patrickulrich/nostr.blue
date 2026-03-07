@@ -93,8 +93,9 @@ pub fn get_log(
 ) -> Result<Vec<CommitEntry>, String> {
     let repo = Repository::open(repo_path).map_err(|e| e.to_string())?;
     let obj = repo.revparse_single(git_ref).map_err(|e| e.to_string())?;
+    let commit = obj.peel_to_commit().map_err(|e| e.to_string())?;
     let mut revwalk = repo.revwalk().map_err(|e| e.to_string())?;
-    revwalk.push(obj.id()).map_err(|e| e.to_string())?;
+    revwalk.push(commit.id()).map_err(|e| e.to_string())?;
     revwalk
         .set_sorting(git2::Sort::TIME)
         .map_err(|e| e.to_string())?;
@@ -113,7 +114,7 @@ pub fn get_log(
             author: author.name().unwrap_or("").to_string(),
             email: author.email().unwrap_or("").to_string(),
             timestamp: commit.time().seconds().max(0) as u64,
-            parent: commit.parent_id(0).ok().map(|id| id.to_string()),
+            parents: commit.parent_ids().map(|id| id.to_string()).collect(),
         });
     }
     Ok(commits)

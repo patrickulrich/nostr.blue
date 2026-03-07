@@ -1585,6 +1585,7 @@ fn LoginSection() -> Element {
     // NIP-55 UI state machine: Idle → Checking → WaitingForApproval/Error
     let mut nip55_state = use_signal(|| Nip55State::Idle);
     let nip55_connect = move |_| {
+        error.set(None);
         nip55_state.set(Nip55State::Checking);
         spawn(async move {
             match auth_store::login_with_android_signer_auto().await {
@@ -1597,10 +1598,12 @@ fn LoginSection() -> Element {
                         }
                         auth_store::AndroidSignerAutoResult::IntentLaunched => {
                             log::info!("NIP-55: Intent launched, waiting for user approval");
+                            error.set(None);
                             nip55_state.set(Nip55State::WaitingForApproval);
                         }
                         auth_store::AndroidSignerAutoResult::IntentInFlight => {
                             log::info!("NIP-55: Intent already in flight");
+                            error.set(None);
                             nip55_state.set(Nip55State::WaitingForApproval);
                         }
                         auth_store::AndroidSignerAutoResult::Error(e) => {
@@ -1617,6 +1620,7 @@ fn LoginSection() -> Element {
         });
     };
     let nip55_poll_and_connect = move |_| {
+        error.set(None);
         nip55_state.set(Nip55State::Checking);
         spawn(async move {
             match auth_store::login_with_android_signer_auto().await {
@@ -1629,9 +1633,11 @@ fn LoginSection() -> Element {
                         }
                         auth_store::AndroidSignerAutoResult::IntentInFlight => {
                             log::info!("NIP-55: still waiting for approval");
+                            error.set(None);
                             nip55_state.set(Nip55State::WaitingForApproval);
                         }
                         auth_store::AndroidSignerAutoResult::IntentLaunched => {
+                            error.set(None);
                             nip55_state.set(Nip55State::WaitingForApproval);
                         }
                         auth_store::AndroidSignerAutoResult::Error(e) => {
@@ -1646,6 +1652,7 @@ fn LoginSection() -> Element {
         });
     };
     let nip55_retry = move |_| {
+        error.set(None);
         nip55_state.set(Nip55State::Idle);
     };
     rsx! {

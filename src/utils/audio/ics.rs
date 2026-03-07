@@ -64,7 +64,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
         } => {
             vevent.push_str(&format!(
                 "DTSTART;TZID={}:{}\r\n",
-                escape_ics_param(timezone),
+                escape_ics_param_unquoted(timezone),
                 format_local_timestamp(timezone, *ts)
             ));
         }
@@ -83,7 +83,7 @@ fn format_vevent(event: &CalendarEvent) -> String {
             } => {
                 vevent.push_str(&format!(
                     "DTEND;TZID={}:{}\r\n",
-                    escape_ics_param(timezone),
+                    escape_ics_param_unquoted(timezone),
                     format_local_timestamp(timezone, *ts)
                 ));
             }
@@ -157,15 +157,11 @@ fn escape_ics_text(text: &str) -> String {
         .replace(',', "\\,")
         .replace(';', "\\;")
 }
-/// Escape ICS parameter value (removes/treats special chars that could break ICS structure)
-fn escape_ics_param(text: &str) -> String {
-    format!(
-        "\"{}\"",
-        text.replace('\\', "\\5c")
-            .replace(['\r', '\n'], "")
-            .replace(';', "\\;")
-            .replace(':', "\\:")
-    )
+fn escape_ics_param_unquoted(text: &str) -> String {
+    text.replace('\\', "\\5c")
+        .replace(['\r', '\n'], "")
+        .replace(';', "\\;")
+        .replace(':', "\\:")
 }
 /// Decode geohash to approximate lat/lon (simple implementation)
 fn decode_geohash_approx(geohash: &str) -> Option<(f64, f64)> {
@@ -349,7 +345,7 @@ fn parse_ics_datetime(value: &str, params: &str) -> Option<IcsDateTime> {
     let tzid = params
         .split(';')
         .find(|p| p.to_uppercase().starts_with("TZID="))
-        .map(|p| p[5..].to_string());
+        .map(|p| p[5..].trim_matches('"').to_string());
     if is_date_only {
         if value.len() >= 8 {
             return Some(IcsDateTime::Date(value[..8].to_string()));

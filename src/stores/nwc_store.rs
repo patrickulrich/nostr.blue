@@ -100,6 +100,9 @@ pub async fn connect_nwc(uri_string: &str, remember_wallet: bool) -> std::result
                 if let Err(e) = save_nwc_uri_secure(uri_string.trim()) {
                     log::warn!("Failed to save NWC URI securely: {}", e);
                 }
+            } else {
+                delete_nwc_uri_secure();
+                delete_nwc_uri();
             }
             *NWC_CLIENT.write() = Some(Arc::new(nwc));
             *NWC_STATUS.write() = ConnectionStatus::Connected;
@@ -129,12 +132,16 @@ pub fn disconnect_nwc(preserve_storage: bool) {
 }
 /// Restore NWC connection from persistent storage
 pub async fn restore_connection() {
-    match load_nwc_uri_secure().or_else(load_nwc_uri) {
+    let secure_uri = load_nwc_uri_secure();
+    let legacy_uri = if secure_uri.is_none() { load_nwc_uri() } else { None };
+    match secure_uri.or_else(|| legacy_uri.clone()) {
         Some(uri) => {
             log::info!("Restoring NWC connection from secure storage");
             if let Err(e) = connect_nwc(&uri, true).await {
                 log::warn!("Failed to restore NWC connection: {}", e);
                 disconnect_nwc(true);
+            } else if legacy_uri.is_some() {
+                delete_nwc_uri();
             }
         }
         None => {

@@ -52,6 +52,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
         success.set(false);
         clear_file_input(&input_id.read());
     };
+    #[allow(unused_variables)]
     let handle_file_select = move |_evt: Event<FormData>| {
         let input_id = input_id.read().clone();
         spawn(async move {
@@ -270,23 +271,35 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     if !*success.read() {
                         if selected_file.read().is_none() {
                             div { class: "flex items-center justify-center w-full",
-                                label { class: "flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl cursor-pointer bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition",
-                                    div { class: "flex flex-col items-center justify-center py-4",
-                                        span { class: "text-5xl mb-3", "🎬" }
-                                        p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
-                                            span { class: "font-semibold", "Click to upload" }
-                                            " or drag and drop"
+                                if cfg!(feature = "web") {
+                                    label { class: "flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl cursor-pointer bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition",
+                                        div { class: "flex flex-col items-center justify-center py-4",
+                                            span { class: "text-5xl mb-3", "🎬" }
+                                            p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
+                                                span { class: "font-semibold", "Click to upload" }
+                                                " or drag and drop"
+                                            }
+                                            p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                                "GIF files only (max 21MB)"
+                                            }
                                         }
-                                        p { class: "text-xs text-gray-500 dark:text-gray-400",
-                                            "GIF files only (max 21MB)"
+                                        input {
+                                            id: "{input_id}",
+                                            class: "hidden",
+                                            r#type: "file",
+                                            accept: "image/gif,.gif",
+                                            onchange: handle_file_select,
                                         }
                                     }
-                                    input {
-                                        id: "{input_id}",
-                                        class: "hidden",
-                                        r#type: "file",
-                                        accept: "image/gif,.gif",
-                                        onchange: handle_file_select,
+                                } else {
+                                    div { class: "flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 dark:border-gray-600 border-dashed rounded-xl bg-gray-50 dark:bg-gray-700/50 text-center px-4",
+                                        span { class: "text-4xl mb-2", "📱" }
+                                        p { class: "text-sm text-gray-600 dark:text-gray-300",
+                                            "GIF upload from this modal is currently web-only."
+                                        }
+                                        p { class: "text-xs text-gray-500 dark:text-gray-400 mt-1",
+                                            "Use a web build to upload GIF files."
+                                        }
                                     }
                                 }
                             }
