@@ -654,6 +654,7 @@ pub fn seek_to(time: f64) {
     let mut state = MUSIC_PLAYER.write();
     state.current_time = time;
     drop(state);
+    #[cfg(feature = "web")]
     spawn(async move {
         let script = format!(
             r#"
@@ -663,7 +664,9 @@ pub fn seek_to(time: f64) {
             }}
             "#,
         );
-        let _ = document::eval(&script);
+        if let Err(e) = document::eval(&script).await {
+            log::warn!("Failed to sync seek via eval: {:?}", e);
+        }
     });
 }
 /// Set duration

@@ -33,10 +33,14 @@ pub fn ProfileEditorModal(mut props: ProfileEditorModalProps) -> Element {
             move |is_shown| {
                 if is_shown {
                     modal_session.with_mut(|s| *s = s.wrapping_add(1));
+                    let session = *modal_session.read();
                     spawn(async move {
                         if let Some(pubkey) = auth_store::get_pubkey() {
                             match profiles::fetch_profile(pubkey.clone()).await {
                                 Ok(profile) => {
+                                    if *modal_session.read() != session {
+                                        return;
+                                    }
                                     name.set(profile.name.unwrap_or_default());
                                     display_name.set(profile.display_name.unwrap_or_default());
                                     about.set(profile.about.unwrap_or_default());

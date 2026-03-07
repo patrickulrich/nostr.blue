@@ -493,9 +493,9 @@ pub fn VoiceMessageCard(
                     src: "{audio_url}",
                     preload: "metadata",
                     style: "display: none;",
-                    ontimeupdate: move |_| {},
-                    onloadedmetadata: move |_| {},
-                    onended: move |_| {},
+                    ontimeupdate: _handle_timeupdate,
+                    onloadedmetadata: _handle_loadedmetadata,
+                    onended: _handle_ended,
                 }
                 if cfg!(feature = "web") {
                     div { class: "flex items-center gap-4 bg-muted/30 rounded-lg p-3",

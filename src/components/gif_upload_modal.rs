@@ -35,12 +35,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut success = use_signal(|| false);
     let mut current_upload_id = use_signal(|| None::<uuid::Uuid>);
+    let mut upload_session_token = use_signal(|| 0u64);
     let progress = use_memo(move || match *upload_server.read() {
         UploadServer::NostrBuild => *nip96_store::NIP96_UPLOAD_PROGRESS.read(),
         UploadServer::Blossom => *blossom_store::UPLOAD_PROGRESS.read(),
     });
     let input_id = use_signal(|| format!("gif-upload-{}", uuid::Uuid::new_v4()));
     let close_modal = move |_| {
+        upload_session_token.with_mut(|token| *token = token.wrapping_add(1));
         show.set(false);
         #[cfg(feature = "web")]
         if let Some((_, _, _, Some(url))) = selected_file.read().as_ref() {
@@ -55,10 +57,14 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
     #[allow(unused_variables)]
     let handle_file_select = move |_evt: Event<FormData>| {
         let input_id = input_id.read().clone();
+        let session_token = *upload_session_token.read();
         spawn(async move {
             error.set(None);
             match read_file_as_bytes(&input_id).await {
                 Ok((filename, data, mime_type)) => {
+                    if *upload_session_token.read() != session_token {
+                        return;
+                    }
                     if data.len() < 6
                         || (&data[0..6] != b"GIF87a" && &data[0..6] != b"GIF89a")
                     {
@@ -93,6 +99,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                     selected_file.set(Some((filename, data, mime_type, preview_url)));
                 }
                 Err(e) => {
+                    if *upload_session_token.read() != session_token {
+                        return;
+                    }
                     log::error!("Failed to read file: {}", e);
                     error.set(Some(format!("Failed to read file: {}", e)));
                 }
@@ -119,6 +128,7 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
             let file_size = data.len();
             uploading.set(true);
             error.set(None);
+            let session_token = *upload_session_token.read();
             spawn(async move {
                 use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
@@ -154,6 +164,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                 };
                 match upload_result {
                     Ok((url, hash, dimensions)) => {
+                        if *upload_session_token.read() != session_token {
+                            return;
+                        }
                         log::info!("File uploaded successfully: {}", url);
                         match gif_store::publish_gif_event(
                                 url.clone(),
@@ -166,6 +179,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                             .await
                         {
                             Ok(event_id) => {
+                                if *upload_session_token.read() != session_token {
+                                    return;
+                                }
                                 log::info!("GIF event published: {}", event_id);
                                 success.set(true);
                                 uploading.set(false);
@@ -188,6 +204,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 current_upload_id.set(Some(upload_id));
                                 spawn(async move {
                                     crate::platform::timer::sleep_ms(2000).await;
+                                    if *upload_session_token.read() != session_token {
+                                        return;
+                                    }
                                     if current_upload_id.peek().as_ref() != Some(&upload_id) {
                                         return;
                                     }
@@ -206,6 +225,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                                 });
                             }
                             Err(e) => {
+                                if *upload_session_token.read() != session_token {
+                                    return;
+                                }
                                 log::error!("Failed to publish GIF event: {}", e);
                                 error
                                     .set(
@@ -218,6 +240,9 @@ pub fn GifUploadModal(props: GifUploadModalProps) -> Element {
                         }
                     }
                     Err(e) => {
+                        if *upload_session_token.read() != session_token {
+                            return;
+                        }
                         log::error!("Upload failed: {}", e);
                         error.set(Some(e));
                         uploading.set(false);

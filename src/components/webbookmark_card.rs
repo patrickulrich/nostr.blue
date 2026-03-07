@@ -11,6 +11,20 @@ use dioxus_primitives::toast::ToastOptions;
 #[cfg(not(feature = "web"))]
 use std::time::Duration;
 use nostr_sdk::Event as NostrEvent;
+#[cfg(not(feature = "web"))]
+use url::Url;
+
+#[cfg(not(feature = "web"))]
+fn redact_url_for_log(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .map(|parsed| {
+            let scheme = parsed.scheme();
+            let host = parsed.host_str().unwrap_or("unknown-host");
+            format!("{}://{}", scheme, host)
+        })
+        .unwrap_or_else(|| "invalid-url".to_string())
+}
 #[component]
 pub fn WebBookmarkCard(
     event: NostrEvent,
@@ -110,21 +124,26 @@ pub fn WebBookmarkCard(
                 #[cfg(feature = "web")]
                 {
                     if let Some(window) = web_sys::window() {
-                        let _ = window.open_with_url_and_target(url, "_blank");
+                        let _ = window.open_with_url_and_target_and_features(
+                            url,
+                            "_blank",
+                            "noopener,noreferrer",
+                        );
                     }
                 }
                 #[cfg(not(feature = "web"))]
                 {
                     let url_to_open = url.clone();
+                    let redacted_url = redact_url_for_log(&url_to_open);
                     let toast_for_open = toast_api;
                     let open_script = format!(
-                        "(function() {{ const w = window.open({}, '_blank'); return !!w; }})()",
+                        "(function() {{ const w = window.open({}, '_blank', 'noopener,noreferrer'); if (w) {{ try {{ w.opener = null; }} catch (_) {{}} }} return !!w; }})()",
                         serde_json::to_string(&url_to_open).unwrap_or_else(|_| "\"\"".to_string())
                     );
                     spawn(async move {
                         match document::eval(&open_script).await {
                             Ok(val) if val.as_bool().unwrap_or(false) => {
-                                log::info!("Opened URL: {}", url_to_open);
+                                log::info!("Opened URL: {}", redacted_url);
                             }
                             _ => {
                                 toast_for_open.error(

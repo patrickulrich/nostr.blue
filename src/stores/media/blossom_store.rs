@@ -71,6 +71,19 @@ pub static SERVERS_LOADED: GlobalSignal<bool> = Signal::global(|| false);
 pub static UPLOAD_PROGRESS: GlobalSignal<Option<f32>> = Signal::global(|| None);
 /// Generation counter for upload progress to prevent stale clears
 pub static UPLOAD_PROGRESS_GEN: GlobalSignal<u32> = Signal::global(|| 0);
+
+fn next_upload_gen() -> u32 {
+    UPLOAD_PROGRESS_GEN.with_mut(|g| {
+        *g = g.wrapping_add(1);
+        *g
+    })
+}
+
+fn clear_progress_if_gen_matches(gen: u32) {
+    if *UPLOAD_PROGRESS_GEN.read() == gen {
+        *UPLOAD_PROGRESS.write() = None;
+    }
+}
 /// Represents a media item stored on Blossom servers (BUD-01/BUD-02 compatible)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaItem {
@@ -252,6 +265,7 @@ pub async fn upload_image(
     quality: u8,
     server_url: Option<String>,
 ) -> Result<String, String> {
+    let gen = next_upload_gen();
     let is_video = content_type.starts_with("video/");
     let media_type = if is_video { "video" } else { "image" };
     let quality_str = if is_video {
@@ -283,6 +297,7 @@ pub async fn upload_image(
             format!("Upload {} via nostr.blue", media_type),
             50.0,
             server_url,
+            gen,
         )
         .await
 }
@@ -345,14 +360,10 @@ async fn upload_blob_with_auth(
     auth_content: String,
     start_progress: f32,
     server_url: Option<String>,
+    gen: u32,
 ) -> Result<String, String> {
     let signer = nostr_client::get_signer()
         .ok_or("Not authenticated. Please sign in to upload.")?;
-    // Increment generation for this upload and capture it
-    let gen = UPLOAD_PROGRESS_GEN.with_mut(|g| {
-        *g = g.wrapping_add(1);
-        *g
-    });
     UPLOAD_PROGRESS.write().replace(start_progress);
     let server_url = server_url.unwrap_or_else(get_primary_server);
     let url = Url::parse(&server_url).map_err(|e| format!("Invalid server URL: {}", e))?;
@@ -371,9 +382,7 @@ async fn upload_blob_with_auth(
                 .upload_blob(data, Some(content_type), auth_options, Some(&keys))
                 .await
                 .map_err(|e| {
-                    if *UPLOAD_PROGRESS_GEN.read() == gen {
-                        *UPLOAD_PROGRESS.write() = None;
-                    }
+                    clear_progress_if_gen_matches(gen);
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -388,9 +397,7 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    if *UPLOAD_PROGRESS_GEN.read() == gen {
-                        *UPLOAD_PROGRESS.write() = None;
-                    }
+                    clear_progress_if_gen_matches(gen);
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -404,9 +411,7 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    if *UPLOAD_PROGRESS_GEN.read() == gen {
-                        *UPLOAD_PROGRESS.write() = None;
-                    }
+                    clear_progress_if_gen_matches(gen);
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -421,9 +426,7 @@ async fn upload_blob_with_auth(
                 )
                 .await
                 .map_err(|e| {
-                    if *UPLOAD_PROGRESS_GEN.read() == gen {
-                        *UPLOAD_PROGRESS.write() = None;
-                    }
+                    clear_progress_if_gen_matches(gen);
                     format!("Upload failed: {}", e)
                 })?
         }
@@ -433,9 +436,7 @@ async fn upload_blob_with_auth(
     spawn(async move {
         crate::platform::timer::sleep_ms(1000).await;
         // Only clear if generation hasn't changed (no new upload started)
-        if *UPLOAD_PROGRESS_GEN.read() == gen {
-            *UPLOAD_PROGRESS.write() = None;
-        }
+        clear_progress_if_gen_matches(gen);
     });
     Ok(descriptor.url.to_string())
 }
@@ -453,6 +454,7 @@ pub async fn upload_audio(
     content_type: String,
     server_url: Option<String>,
 ) -> Result<String, String> {
+    let gen = next_upload_gen();
     log::info!("Uploading audio: {} bytes, type: {}", data.len(), content_type);
     UPLOAD_PROGRESS.write().replace(0.0);
     upload_blob_with_auth(
@@ -461,6 +463,7 @@ pub async fn upload_audio(
             "Upload voice message via nostr.blue".to_string(),
             25.0,
             server_url,
+            gen,
         )
         .await
 }

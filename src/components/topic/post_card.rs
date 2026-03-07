@@ -12,6 +12,10 @@ use dioxus::web::WebEventExt;
 #[cfg(feature = "web")]
 use wasm_bindgen::JsCast;
 
+#[cfg(feature = "web")]
+const INTERACTIVE_ELEMENT_SELECTOR: &str =
+    "a, button, input, textarea, select, summary, audio, [role=\"button\"], [contenteditable=\"true\"]";
+
 /// Reddit-style topic post card
 #[component]
 pub fn TopicPostCard(
@@ -83,7 +87,7 @@ pub fn TopicPostCard(
                         {
                             if let Some(target) = evt.data.as_web_event().target() {
                                 if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                    if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
+                                    if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some() {
                                         return;
                                     }
                                 }
@@ -101,7 +105,7 @@ pub fn TopicPostCard(
                         {
                             if let Some(target) = _evt.data.as_web_event().target() {
                                 if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                    if element.closest("a, button, input, textarea, select, summary, audio, [role=\"button\"], [contenteditable=\"true\"]").ok().flatten().is_some() {
+                                    if element.closest(INTERACTIVE_ELEMENT_SELECTOR).ok().flatten().is_some() {
                                         return;
                                     }
                                 }

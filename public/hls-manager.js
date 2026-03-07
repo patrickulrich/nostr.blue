@@ -5,7 +5,7 @@
 window.hlsManager = window.hlsManager || {
     instances: new Map(),
     pendingTimeouts: new Map(),
-    pendingRejects: new Map(),
+    pendingResolves: new Map(),
     hlsLoaded: false,
     hlsLoading: null,
     nowPlaying: null, // Current HLS metadata {title, artist}
@@ -61,6 +61,25 @@ window.hlsManager = window.hlsManager || {
         }
     },
 
+    clearPendingAttach(elementId, clearResolve = true) {
+        const pendingTimeout = this.pendingTimeouts.get(elementId);
+        if (pendingTimeout) {
+            clearTimeout(pendingTimeout);
+            this.pendingTimeouts.delete(elementId);
+        }
+        if (clearResolve) {
+            this.pendingResolves.delete(elementId);
+        }
+    },
+
+    settlePendingAttach(elementId, result) {
+        const pendingResolve = this.pendingResolves.get(elementId);
+        if (pendingResolve) {
+            this.pendingResolves.delete(elementId);
+            pendingResolve(result);
+        }
+    },
+
     /**
      * Attach stream to audio or video element
      * Handles both HLS and native playback automatically
@@ -104,7 +123,7 @@ window.hlsManager = window.hlsManager || {
                 this.activeAttachMap.delete(elementId);
             }
             console.error('[HLS Manager] Failed to load HLS:', e);
-            throw e;
+            return { type: 'error', url: streamUrl, error: 'Failed to load hls.js' };
         }
 
         // Check if this attach is still valid after await
@@ -113,7 +132,8 @@ window.hlsManager = window.hlsManager || {
         }
 
         if (!Hls.isSupported()) {
-            throw new Error('HLS not supported in this browser');
+            this.activeAttachMap.delete(elementId);
+            return { type: 'error', url: streamUrl, error: 'HLS not supported in this browser' };
         }
 
         // Cleanup any previous instance before creating new one
@@ -136,7 +156,7 @@ window.hlsManager = window.hlsManager || {
         // Track instance immediately to prevent orphaned workers on timeout
         this.instances.set(elementId, hls);
 
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             // Check if this attach is still valid before setting up
             if (this.activeAttachMap.get(elementId) !== attachId) {
                 hls.destroy();
@@ -144,8 +164,7 @@ window.hlsManager = window.hlsManager || {
                 return;
             }
 
-            // Store reject handler so detach() can reject the promise
-            this.pendingRejects.set(elementId, reject);
+            this.pendingResolves.set(elementId, resolve);
 
             // Capture the current attachId for timeout validation
             const capturedAttachId = attachId;
@@ -154,12 +173,15 @@ window.hlsManager = window.hlsManager || {
                 if (this.activeAttachMap.get(elementId) !== capturedAttachId) {
                     return;
                 }
-                this.pendingRejects.delete(elementId);
                 this.pendingTimeouts.delete(elementId);
                 this.instances.delete(elementId);
                 this.activeAttachMap.delete(elementId);
                 hls.destroy();
-                reject(new Error('HLS stream timeout - stream may be offline'));
+                this.settlePendingAttach(elementId, {
+                    type: 'error',
+                    url: streamUrl,
+                    error: 'HLS stream timeout - stream may be offline'
+                });
             }, 15000);
             this.pendingTimeouts.set(elementId, timeout);
 
@@ -170,7 +192,8 @@ window.hlsManager = window.hlsManager || {
                 if (this.activeAttachMap.get(elementId) !== attachId) {
                     clearTimeout(timeout);
                     hls.destroy();
-                    resolve({ type: 'cancelled', url: streamUrl });
+                    this.pendingTimeouts.delete(elementId);
+                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
                     return;
                 }
                 console.log('[HLS Manager] Media attached, loading source:', streamUrl);
@@ -182,15 +205,20 @@ window.hlsManager = window.hlsManager || {
                 if (this.activeAttachMap.get(elementId) !== attachId) {
                     clearTimeout(timeout);
                     hls.destroy();
-                    resolve({ type: 'cancelled', url: streamUrl });
+                    this.pendingTimeouts.delete(elementId);
+                    this.settlePendingAttach(elementId, { type: 'cancelled', url: streamUrl });
                     return;
                 }
                 clearTimeout(timeout);
                 this.pendingTimeouts.delete(elementId);
-                this.pendingRejects.delete(elementId);
                 console.log('[HLS Manager] Manifest parsed, levels:', data.levels.length);
                 // Instance already tracked above; no need to set again
-                resolve({ type: 'hls.js', levels: data.levels.length, url: streamUrl });
+                this.settlePendingAttach(elementId, {
+                    type: 'success',
+                    backend: 'hls.js',
+                    levels: data.levels.length,
+                    url: streamUrl
+                });
             });
 
             hls.on(Hls.Events.ERROR, (event, data) => {
@@ -201,7 +229,6 @@ window.hlsManager = window.hlsManager || {
                 if (data.fatal) {
                     clearTimeout(timeout);
                     this.pendingTimeouts.delete(elementId);
-                    this.pendingRejects.delete(elementId);
                     console.error('[HLS Manager] Fatal error:', data.type, data.details);
                     hls.destroy();
                     this.instances.delete(elementId);
@@ -216,7 +243,11 @@ window.hlsManager = window.hlsManager || {
                         }
                     }));
 
-                    reject(new Error('HLS error: ' + data.details));
+                    this.settlePendingAttach(elementId, {
+                        type: 'error',
+                        url: streamUrl,
+                        error: 'HLS error: ' + data.details
+                    });
                 } else {
                     // Non-fatal error - hls.js will try to recover
                     console.warn('[HLS Manager] Non-fatal error:', data.details);
@@ -264,22 +295,13 @@ window.hlsManager = window.hlsManager || {
      * Detach and cleanup HLS instance
      */
     detach(elementId) {
-        // Clear any pending initialization timeout to prevent double-destroy
-        const pendingTimeout = this.pendingTimeouts.get(elementId);
-        if (pendingTimeout) {
-            clearTimeout(pendingTimeout);
-            this.pendingTimeouts.delete(elementId);
-        }
+        this.clearPendingAttach(elementId, false);
 
         // Clear active attach token to invalidate pending operations
         this.activeAttachMap.delete(elementId);
 
-        // Reject any pending attach Promise
-        const pendingReject = this.pendingRejects.get(elementId);
-        if (pendingReject) {
-            pendingReject(new Error('HLS stream detached before initialization completed'));
-            this.pendingRejects.delete(elementId);
-        }
+        // Resolve any in-flight attach Promise as cancelled
+        this.settlePendingAttach(elementId, { type: 'cancelled' });
 
         const hls = this.instances.get(elementId);
         if (hls) {

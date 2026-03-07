@@ -242,11 +242,24 @@ pub fn ChannelChat(channel_id: String) -> Element {
             #[cfg(not(feature = "web"))]
             {
                 if msg_count > 0 {
-                    let script = format!(
-                        "(() => {{ const el = document.getElementById({}); if (el) {{ el.scrollTop = el.scrollHeight; }} return true; }})()",
-                        serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string())
+                    let element_id =
+                        serde_json::to_string(&container_id).unwrap_or_else(|_| "\"\"".to_string());
+                    let near_bottom_script = format!(
+                        "(() => {{ const el = document.getElementById({}); if (!el) return false; return (el.scrollHeight - (el.scrollTop + el.clientHeight)) <= 100; }})()",
+                        element_id
                     );
-                    let _ = document::eval(&script).await;
+                    let near_bottom = document::eval(&near_bottom_script)
+                        .await
+                        .ok()
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if *is_first_load.peek() || near_bottom {
+                        let scroll_script = format!(
+                            "(() => {{ const el = document.getElementById({}); if (el) {{ el.scrollTop = el.scrollHeight; return true; }} return false; }})()",
+                            element_id
+                        );
+                        let _ = document::eval(&scroll_script).await;
+                    }
                 }
                 is_first_load.set(false);
             }

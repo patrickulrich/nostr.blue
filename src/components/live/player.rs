@@ -39,6 +39,9 @@ fn build_native_setup_script(
                             if (isHls && window.hlsManager) {{
                                 let result = await window.hlsManager.attachToMedia({video_id}, url);
                                 console.log('[Live] HLS stream {log_msg}:', result);
+                                if (result && result.type === 'error') {{
+                                    return "error:" + (result.error || "Failed to attach HLS stream");
+                                }}
                             }} else {{
                                 video.src = url;
                             }}
@@ -60,6 +63,23 @@ fn build_native_setup_script(
         log_msg = if detach_first { "re-attached" } else { "attached" },
         error_label = if detach_first { "Retry" } else { "Setup" }
     )
+}
+
+#[cfg(feature = "native")]
+async fn ensure_hls_manager() -> Result<(), String> {
+    let check = document::eval("return typeof window.hlsManager !== 'undefined'")
+        .await
+        .map_err(|e| format!("Failed to check HLS manager: {:?}", e))?;
+    let hls_loaded = check.as_bool().unwrap_or(false);
+    if hls_loaded {
+        return Ok(());
+    }
+    log::info!("[Live] Injecting HLS manager into WebView");
+    let hls_js = include_str!("../../../public/hls-manager.js");
+    document::eval(hls_js)
+        .await
+        .map_err(|e| format!("Failed to inject HLS manager: {:?}", e))?;
+    Ok(())
 }
 /// Cleanup guard that destroys player on drop
 #[derive(Clone)]
@@ -302,25 +322,13 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                         return;
                     }
 
-                    // Ensure hlsManager is available
-                    let check = document::eval(
-                        "return typeof window.hlsManager !== 'undefined'",
-                    )
-                    .await;
-                    let hls_loaded =
-                        check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
-                    if !hls_loaded {
-                        log::info!("[Live] Injecting HLS manager into WebView");
-                        let hls_js = include_str!("../../../public/hls-manager.js");
-                        if let Err(e) = document::eval(hls_js).await {
-                            log::error!("[Live] Failed to inject HLS manager: {:?}", e);
-                            error.set(Some(format!(
-                                "Failed to load HLS support: {:?}",
-                                e
-                            )));
+                    if let Err(e) = ensure_hls_manager().await {
+                        log::error!("[Live] {}", e);
+                        if *init_gen.peek() == gen {
+                            error.set(Some(format!("Failed to load HLS support: {}", e)));
                             loading.set(false);
-                            return;
                         }
+                        return;
                     }
 
                     // Set up the video element via eval
@@ -333,7 +341,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
                     match document::eval(&setup_script).await {
                         Ok(val) => {
                             if *init_gen.peek() == gen {
-                                let result = val.as_str().unwrap_or("ok");
+                                let result = val
+                                    .as_str()
+                                    .unwrap_or("error:Unexpected eval result type");
                                 if let Some(err_msg) = result.strip_prefix("error:") {
                                     error.set(Some(err_msg.to_string()));
                                 } else {
@@ -411,24 +421,11 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
             spawn(async move {
                 crate::platform::timer::sleep_ms(100).await;
 
-                // Ensure hlsManager is available
-                let check = document::eval(
-                    "return typeof window.hlsManager !== 'undefined'",
-                )
-                .await;
-                let hls_loaded =
-                    check.ok().and_then(|v| v.as_bool()).unwrap_or(false);
-                if !hls_loaded {
-                    let hls_js = include_str!("../../../public/hls-manager.js");
-                    if let Err(e) = document::eval(hls_js).await {
-                        log::error!("[Live] Failed to inject HLS manager: {:?}", e);
-                        error.set(Some(format!(
-                            "Failed to load HLS support: {:?}",
-                            e
-                        )));
-                        loading.set(false);
-                        return;
-                    }
+                if let Err(e) = ensure_hls_manager().await {
+                    log::error!("[Live] {}", e);
+                    error.set(Some(format!("Failed to load HLS support: {}", e)));
+                    loading.set(false);
+                    return;
                 }
 
                 let setup_script =
@@ -436,7 +433,9 @@ pub fn LiveStreamPlayer(props: LiveStreamPlayerProps) -> Element {
 
                 match document::eval(&setup_script).await {
                     Ok(val) => {
-                        let result = val.as_str().unwrap_or("ok");
+                        let result = val
+                            .as_str()
+                            .unwrap_or("error:Unexpected eval result type");
                         if let Some(err_msg) = result.strip_prefix("error:") {
                             error.set(Some(err_msg.to_string()));
                         } else {

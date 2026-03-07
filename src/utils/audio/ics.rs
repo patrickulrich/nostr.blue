@@ -138,7 +138,7 @@ fn format_timestamp(ts: u64) -> String {
     dt.format("%Y%m%dT%H%M%SZ").to_string()
 }
 /// Format Unix timestamp as ICS local datetime with TZID (YYYYMMDDTHHmmss)
-fn format_local_timestamp(_tzid: &str, ts: u64) -> String {
+fn format_local_timestamp(tzid: &str, ts: u64) -> String {
     use chrono::{TimeZone, Utc};
     const MAX_TIMESTAMP: i64 = 253_402_300_799;
     let ts_i64 = i64::try_from(ts)
@@ -147,7 +147,15 @@ fn format_local_timestamp(_tzid: &str, ts: u64) -> String {
     let Some(dt) = Utc.timestamp_opt(ts_i64, 0).single() else {
         return "19700101T000000".to_string();
     };
-    dt.format("%Y%m%dT%H%M%S").to_string()
+    // TODO: Expand timezone handling policy (aliases/custom TZDB updates) if
+    // calendar interoperability reports require it.
+    match tzid.parse::<chrono_tz::Tz>() {
+        Ok(tz) => dt.with_timezone(&tz).format("%Y%m%dT%H%M%S").to_string(),
+        Err(_) => {
+            log::warn!("Invalid TZID '{}', falling back to UTC ICS timestamp", tzid);
+            dt.format("%Y%m%dT%H%M%S").to_string()
+        }
+    }
 }
 /// Escape special characters in ICS text
 fn escape_ics_text(text: &str) -> String {

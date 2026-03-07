@@ -3,8 +3,6 @@
 //! Displays file content with language detection, line numbers, and copy-to-clipboard.
 //! Shows file metadata including detected language label.
 use dioxus::prelude::*;
-#[cfg(feature = "web")]
-use wasm_bindgen::JsCast;
 /// Extract file extension from filename
 /// Returns empty string for extensionless files or dotfiles (e.g., ".gitignore")
 fn extract_extension(filename: &str) -> &str {
@@ -123,6 +121,7 @@ pub fn CodeFileViewer(
     #[props(default = "".to_string())] git_ref: String,
 ) -> Element {
     let mut copied = use_signal(|| false);
+    let mut copy_error = use_signal(|| false);
     let language = detect_language(&filename);
     let is_binary = is_binary_extension(&filename);
     if is_binary {
@@ -190,12 +189,17 @@ pub fn CodeFileViewer(
                             spawn(async move {
                                 match crate::platform::clipboard::copy_to_clipboard(&content).await {
                                     Ok(_) => {
+                                        copy_error.set(false);
                                         copied.set(true);
                                         crate::platform::timer::sleep_ms(2000).await;
                                         copied.set(false);
                                     }
                                     Err(e) => {
-                                        log::error!("Clipboard write failed: {:?}", e);
+                                        log::error!("Clipboard write failed: {}", e);
+                                        copied.set(false);
+                                        copy_error.set(true);
+                                        crate::platform::timer::sleep_ms(2000).await;
+                                        copy_error.set(false);
                                     }
                                 }
                             });
@@ -216,6 +220,37 @@ pub fn CodeFileViewer(
                             polyline { points: "20 6 9 17 4 12" }
                         }
                         span { "Copied!" }
+                    } else if copy_error() {
+                        svg {
+                            class: "w-4 h-4 text-red-500",
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: "24",
+                            height: "24",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle {
+                                cx: "12",
+                                cy: "12",
+                                r: "10",
+                            }
+                            line {
+                                x1: "12",
+                                y1: "8",
+                                x2: "12",
+                                y2: "12",
+                            }
+                            line {
+                                x1: "12",
+                                y1: "16",
+                                x2: "12.01",
+                                y2: "16",
+                            }
+                        }
+                        span { "Copy failed" }
                     } else {
                         svg {
                             class: "w-4 h-4",
@@ -309,116 +344,12 @@ pub fn RawFileButton(content: String, filename: String) -> Element {
                 move |_| {
                     let _content = content.clone();
                     let _filename = filename.clone();
-                    #[cfg(feature = "web")]
-                    {
-                        let content = _content;
-                        let filename = _filename;
-                        let Some(window) = web_sys::window() else {
-                            log::error!(
-                                "Download failed for '{}': window object not available", filename
-                            );
-                            return;
-                        };
-                        let Some(document) = window.document() else {
-                            log::error!(
-                                "Download failed for '{}': document object not available", filename
-                            );
-                            return;
-                        };
-                        let blob = match web_sys::Blob::new_with_str_sequence(
-                            &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&content)),
-                        ) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                log::error!(
-                                    "Download failed for '{}': blob creation error: {:?}", filename,
-                                    e
-                                );
-                                return;
-                            }
-                        };
-                        let url = match web_sys::Url::create_object_url_with_blob(&blob) {
-                            Ok(u) => u,
-                            Err(e) => {
-                                log::error!(
-                                    "Download failed for '{}': create_object_url error: {:?}",
-                                    filename, e
-                                );
-                                return;
-                            }
-                        };
-                        let a = match document.create_element("a") {
-                            Ok(el) => el,
-                            Err(e) => {
-                                log::error!(
-                                    "Download failed for '{}': create_element error: {:?}", filename,
-                                    e
-                                );
-                                let _ = web_sys::Url::revoke_object_url(&url);
-                                return;
-                            }
-                        };
-                        if let Err(e) = a.set_attribute("href", &url) {
-                            log::error!(
-                                "Download failed for '{}': set href attribute error: {:?}", filename,
-                                e
-                            );
-                            let _ = web_sys::Url::revoke_object_url(&url);
-                            return;
-                        }
-                        if let Err(e) = a.set_attribute("download", &filename) {
-                            log::error!(
-                                "Download failed for '{}': set download attribute error: {:?}",
-                                filename, e
-                            );
-                            let _ = web_sys::Url::revoke_object_url(&url);
-                            return;
-                        }
-                        let Some(body) = document.body() else {
-                            log::error!(
-                                "Download failed for '{}': document body not available", filename
-                            );
-                            let _ = web_sys::Url::revoke_object_url(&url);
-                            return;
-                        };
-                        if let Err(e) = body.append_child(&a) {
-                            log::error!(
-                                "Download failed for '{}': append_child error: {:?}", filename, e
-                            );
-                            let _ = web_sys::Url::revoke_object_url(&url);
-                            return;
-                        }
-                        if let Some(html_a) = a.dyn_ref::<web_sys::HtmlElement>() {
-                            html_a.click();
-                        } else {
-                            web_sys::console::warn_1(&format!("Download: Could not get HtmlElement for '{}'", filename).into());
-                        }
-                        if let Err(e) = body.remove_child(&a) {
-                            log::error!(
-                                "Download cleanup for '{}': remove_child error: {:?}", filename, e
-                            );
-                        }
-                        let url_to_revoke = url.clone();
-                        let filename_for_log = filename.clone();
-                        spawn(async move {
-                            crate::platform::timer::sleep_ms(100).await;
-                            if let Err(e) = web_sys::Url::revoke_object_url(&url_to_revoke) {
-                                log::error!(
-                                    "Download cleanup for '{}': revoke_object_url error: {:?}",
-                                    filename_for_log, e
-                                );
-                            }
-                        });
-                    }
-                    #[cfg(not(feature = "web"))]
-                    {
-                        if let Err(e) = crate::platform::download::save_file(
-                            &_filename,
-                            &_content,
-                            "text/plain;charset=utf-8",
-                        ) {
-                            log::error!("Download failed for '{}': {}", _filename, e);
-                        }
+                    if let Err(e) = crate::platform::download::save_file(
+                        &_filename,
+                        &_content,
+                        "text/plain;charset=utf-8",
+                    ) {
+                        log::error!("Download failed for '{}': {}", _filename, e);
                     }
                 }
             },

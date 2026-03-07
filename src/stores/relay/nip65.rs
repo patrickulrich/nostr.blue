@@ -351,11 +351,10 @@ pub async fn init_user_relay_lists(client: Arc<Client>) -> Result<(), String> {
         }
         Err(e) => {
             log::warn!("No relay lists found: {}, using defaults for Settings", e);
-            let now_secs = crate::platform::timestamp::now_secs();
             let default = RelayListMetadata {
                 relays: default_relays(),
                 dm_relays: default_dm_relays(),
-                updated_at: now_secs,
+                updated_at: 0,
             };
             *USER_RELAY_METADATA.write() = Some(default);
             log::info!(

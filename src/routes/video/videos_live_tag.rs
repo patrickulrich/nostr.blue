@@ -40,6 +40,8 @@ pub fn VideosLiveTag(tag: String) -> Element {
                                 oldest_timestamp.set(Some(last_event.created_at.as_secs()));
                             }
                             has_more.set(hit_limit);
+                            #[cfg(not(feature = "web"))]
+                            has_more.set(false);
                             stream_events.set(events);
                             loading.set(false);
                         }
@@ -135,18 +137,6 @@ pub fn VideosLiveTag(tag: String) -> Element {
                 }
             }
         });
-    }
-    #[cfg(any(feature = "native", feature = "mobile"))]
-    {
-        trigger_load_more_for_platform(
-            tag.clone(),
-            *oldest_timestamp.read(),
-            &fetch_gen,
-            &loading,
-            &has_more,
-            &oldest_timestamp,
-            &stream_events,
-        );
     }
     rsx! {
         div { class: "min-h-screen bg-background",
@@ -265,6 +255,7 @@ async fn trigger_load_more_for_tag(
 }
 
 #[cfg(not(feature = "web"))]
+#[allow(dead_code)]
 fn trigger_load_more_for_platform(
     tag: String,
     until: Option<u64>,

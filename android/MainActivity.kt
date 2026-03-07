@@ -98,12 +98,21 @@ class MainActivity : WryActivity() {
                                 filePickInFlight = false
                                 return@synchronized
                             }
-                            val bytes = stream.readBytes()
-                            if (bytes.size > MAX_UPLOAD_BYTES) {
-                                filePickError = "File too large (max 50MB)"
-                                filePickInFlight = false
-                                return@synchronized
+                            val output = java.io.ByteArrayOutputStream()
+                            val buffer = ByteArray(8 * 1024)
+                            var totalBytes = 0
+                            while (true) {
+                                val read = stream.read(buffer)
+                                if (read <= 0) break
+                                totalBytes += read
+                                if (totalBytes > MAX_UPLOAD_BYTES) {
+                                    filePickError = "File too large (max 50MB)"
+                                    filePickInFlight = false
+                                    return@synchronized
+                                }
+                                output.write(buffer, 0, read)
                             }
+                            val bytes = output.toByteArray()
                             pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                             pendingFileMimeType = mimeType ?: "application/octet-stream"
                             filePickError = null
@@ -171,12 +180,21 @@ class MainActivity : WryActivity() {
                                 filePickInFlight = false
                                 return@synchronized
                             }
-                            val bytes = stream.readBytes()
-                            if (bytes.size > MAX_UPLOAD_BYTES) {
-                                filePickError = "File too large (max 50MB)"
-                                filePickInFlight = false
-                                return@synchronized
+                            val output = java.io.ByteArrayOutputStream()
+                            val buffer = ByteArray(8 * 1024)
+                            var totalBytes = 0
+                            while (true) {
+                                val read = stream.read(buffer)
+                                if (read <= 0) break
+                                totalBytes += read
+                                if (totalBytes > MAX_UPLOAD_BYTES) {
+                                    filePickError = "File too large (max 50MB)"
+                                    filePickInFlight = false
+                                    return@synchronized
+                                }
+                                output.write(buffer, 0, read)
                             }
+                            val bytes = output.toByteArray()
                             pendingFileContent = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
                             pendingFileMimeType = mimeType ?: "image/*"
                             filePickError = null

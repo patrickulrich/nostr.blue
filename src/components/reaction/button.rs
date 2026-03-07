@@ -14,7 +14,8 @@ const PICKER_EDGE_PADDING_PX: f64 = 8.0;
 
 fn compute_picker_position(
     anchor_x: f64,
-    anchor_y: f64,
+    anchor_top: f64,
+    anchor_bottom: f64,
     viewport_width: f64,
     viewport_height: f64,
 ) -> (f64, f64, bool) {
@@ -22,14 +23,14 @@ fn compute_picker_position(
         .max(PICKER_EDGE_PADDING_PX);
     let left = (anchor_x - (PICKER_WIDTH_PX / 2.0))
         .clamp(PICKER_EDGE_PADDING_PX, max_left);
-    let top_candidate = anchor_y - PICKER_HEIGHT_PX - PICKER_GAP_PX;
+    let top_candidate = anchor_top - PICKER_HEIGHT_PX - PICKER_GAP_PX;
     let (top, position_below) = if top_candidate >= PICKER_EDGE_PADDING_PX {
         (top_candidate, false)
     } else {
         let max_top = (viewport_height - PICKER_HEIGHT_PX - PICKER_EDGE_PADDING_PX)
             .max(PICKER_EDGE_PADDING_PX);
         (
-            (anchor_y + PICKER_GAP_PX).clamp(PICKER_EDGE_PADDING_PX, max_top),
+            (anchor_bottom + PICKER_GAP_PX).clamp(PICKER_EDGE_PADDING_PX, max_top),
             true,
         )
     };
@@ -115,6 +116,10 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                     e.stop_propagation();
                     if props.has_signer {
                         let current = *show_picker.peek();
+                        if current {
+                            show_picker.set(false);
+                            return;
+                        }
                         if !current {
                             #[cfg(feature = "web")]
                             {
@@ -134,16 +139,19 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                                                 .and_then(|h| h.as_f64())
                                                 .unwrap_or(800.0);
                                             let anchor_x = rect.left() + (rect.width() / 2.0);
-                                            let anchor_y = rect.top();
+                                            let anchor_top = rect.top();
+                                            let anchor_bottom = rect.bottom();
                                             let (top, left, is_below) = compute_picker_position(
                                                 anchor_x,
-                                                anchor_y,
+                                                anchor_top,
+                                                anchor_bottom,
                                                 viewport_width,
                                                 viewport_height,
                                             );
                                             picker_top.set(top);
                                             picker_left.set(left);
                                             position_below.set(is_below);
+                                            show_picker.set(true);
                                         }
                                     }
                                 }
@@ -151,18 +159,43 @@ pub fn ReactionButton(props: ReactionButtonProps) -> Element {
                             #[cfg(not(feature = "web"))]
                             {
                                 let coords = e.client_coordinates();
-                                let (top, left, is_below) = compute_picker_position(
-                                    coords.x,
-                                    coords.y,
-                                    1024.0,
-                                    800.0,
-                                );
-                                picker_top.set(top);
-                                picker_left.set(left);
-                                position_below.set(is_below);
+                                spawn(async move {
+                                    let result = document::eval(
+                                        "(() => { return [window.innerWidth || 1024, window.innerHeight || 800]; })()",
+                                    )
+                                    .await;
+                                    let (window_width, window_height) = match result {
+                                        Ok(val) => {
+                                            if let Some(arr) = val.as_array() {
+                                                let width = arr
+                                                    .first()
+                                                    .and_then(|v| v.as_f64())
+                                                    .unwrap_or(1024.0);
+                                                let height = arr
+                                                    .get(1)
+                                                    .and_then(|v| v.as_f64())
+                                                    .unwrap_or(800.0);
+                                                (width, height)
+                                            } else {
+                                                (1024.0, 800.0)
+                                            }
+                                        }
+                                        Err(_) => (1024.0, 800.0),
+                                    };
+                                    let (top, left, is_below) = compute_picker_position(
+                                        coords.x,
+                                        coords.y,
+                                        coords.y,
+                                        window_width,
+                                        window_height,
+                                    );
+                                    picker_top.set(top);
+                                    picker_left.set(left);
+                                    position_below.set(is_below);
+                                    show_picker.set(true);
+                                });
                             }
                         }
-                        show_picker.set(!current);
                     }
                 },
                 match &user_reaction {

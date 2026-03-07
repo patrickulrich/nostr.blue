@@ -75,14 +75,15 @@ impl GitService {
         #[cfg(feature = "web")]
         { format!("/repos/{}", id) }
         #[cfg(not(feature = "web"))]
-        {
-            let data_dir = crate::platform::storage::data_dir();
-            let repos_dir = data_dir
-                .join("nostr-blue")
-                .join("repos")
-                .join(&id);
-            repos_dir.to_string_lossy().to_string()
-        }
+        { format!("nostr-blue/repos/{}", id) }
+    }
+
+    #[cfg(not(feature = "web"))]
+    fn native_path(dir: &str) -> String {
+        crate::platform::storage::data_dir()
+            .join(dir)
+            .to_string_lossy()
+            .to_string()
     }
     /// Select the best clone URL for a repository
     ///
@@ -121,13 +122,14 @@ impl GitService {
         }
         #[cfg(not(feature = "web"))]
         {
-            let path = std::path::Path::new(&dir);
+            let native_dir = Self::native_path(&dir);
+            let path = std::path::Path::new(&native_dir);
             if path.join(".git").exists() {
                 return Ok(dir);
             }
             std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
             log::info!("Cloning {} to {}", redact_url_for_log(&clone_url), dir);
-            let dir_clone = dir.clone();
+            let dir_clone = native_dir.clone();
             tokio::task::spawn_blocking(move || {
                 git2::build::RepoBuilder::new()
                     .clone(&clone_url, std::path::Path::new(&dir_clone))
@@ -137,7 +139,7 @@ impl GitService {
             .await
             .map_err(|e| e.to_string())??;
         }
-        log::info!("Clone complete: {}", dir);
+        log::info!("Clone complete for repo dir: {}", dir);
         Ok(dir)
     }
     /// List files in a directory
@@ -157,7 +159,7 @@ impl GitService {
         #[cfg(not(feature = "web"))]
         {
             let path = path.to_string();
-            let dir_clone = dir.clone();
+            let dir_clone = Self::native_path(&dir);
             tokio::task::spawn_blocking(move || {
                 crate::services::git_native::list_files(&dir_clone, &path, &git_ref_str)
             })
@@ -179,7 +181,7 @@ impl GitService {
         #[cfg(not(feature = "web"))]
         {
             let filepath = filepath.to_string();
-            let dir_clone = dir.clone();
+            let dir_clone = Self::native_path(&dir);
             tokio::task::spawn_blocking(move || {
                 crate::services::git_native::read_file(&dir_clone, &filepath, &git_ref_str)
             })
@@ -194,7 +196,7 @@ impl GitService {
         { GitWorkerManager::get_branches(&dir).await }
         #[cfg(not(feature = "web"))]
         {
-            let dir_clone = dir.clone();
+            let dir_clone = Self::native_path(&dir);
             tokio::task::spawn_blocking(move || {
                 crate::services::git_native::get_branches(&dir_clone)
             })
@@ -215,7 +217,7 @@ impl GitService {
         { GitWorkerManager::get_log(&dir, &git_ref_str, count).await }
         #[cfg(not(feature = "web"))]
         {
-            let dir_clone = dir.clone();
+            let dir_clone = Self::native_path(&dir);
             tokio::task::spawn_blocking(move || {
                 crate::services::git_native::get_log(&dir_clone, &git_ref_str, count)
             })
@@ -235,7 +237,7 @@ impl GitService {
         { GitWorkerManager::list_all_paths(&dir, &git_ref_str).await }
         #[cfg(not(feature = "web"))]
         {
-            let dir_clone = dir.clone();
+            let dir_clone = Self::native_path(&dir);
             tokio::task::spawn_blocking(move || {
                 crate::services::git_native::list_all_paths(&dir_clone, &git_ref_str)
             })
@@ -263,7 +265,7 @@ impl GitService {
         }
         #[cfg(not(feature = "web"))]
         {
-            let dir_clone = dir.clone();
+            let dir_clone = Self::native_path(&dir);
             let base_owned = base.to_string();
             let head_owned = head.to_string();
             match tokio::task::spawn_blocking(move || {

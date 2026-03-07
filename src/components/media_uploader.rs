@@ -19,6 +19,8 @@ compile_error!("Must enable exactly one of 'web', 'desktop', or 'mobile' feature
 use wasm_bindgen::JsCast;
 #[cfg(feature = "web")]
 use web_sys::HtmlInputElement;
+
+const MEDIA_ACCEPT: &str = "image/*,video/*";
 #[derive(Props, Clone, PartialEq)]
 pub struct MediaUploaderProps {
     /// Callback when upload completes successfully
@@ -44,6 +46,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
     let show_server_selector = props.show_server_selector;
     let input_id = props.input_id.clone();
     let input_id_for_handler = input_id.clone();
+    #[cfg(feature = "mobile")]
+    let input_id_for_mobile_handler = input_id.clone();
     let input_id_for_upload = input_id.clone();
     let input_id_for_clear_handler = input_id.clone();
     let handle_file_select = move |evt: Event<FormData>| {
@@ -52,19 +56,8 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             error.set(None);
             #[cfg(feature = "mobile")]
             {
-                let _ = evt;
-                match read_file_as_bytes(&input_id).await {
-                    Ok((file_name, data, mime_type)) => {
-                        log::info!(
-                            "File selected: {} ({} bytes)", file_name, data.len()
-                        );
-                        selected_file.set(Some((file_name, data, mime_type)));
-                    }
-                    Err(e) => {
-                        log::error!("Failed to read file: {}", e);
-                        error.set(Some(format!("Failed to read file: {}", e)));
-                    }
-                }
+                let _ = (evt, input_id);
+                // Mobile uses its dedicated picker button path.
             }
             #[cfg(not(feature = "mobile"))]
             {
@@ -72,7 +65,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
                 if files.is_empty() {
                     return;
                 }
-                match read_file_as_bytes(&input_id).await {
+                match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
                     Ok((file_name, data, mime_type)) => {
                         log::info!(
                             "File selected: {} ({} bytes)", file_name, data.len()
@@ -87,6 +80,25 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
             }
         });
     };
+    #[cfg(feature = "mobile")]
+    let handle_mobile_pick = move |_| {
+        let input_id = input_id_for_mobile_handler.clone();
+        spawn(async move {
+            error.set(None);
+            match read_file_as_bytes(&input_id, MEDIA_ACCEPT).await {
+                Ok((file_name, data, mime_type)) => {
+                    log::info!("File selected: {} ({} bytes)", file_name, data.len());
+                    selected_file.set(Some((file_name, data, mime_type)));
+                }
+                Err(e) => {
+                    log::error!("Failed to read file: {}", e);
+                    error.set(Some(format!("Failed to read file: {}", e)));
+                }
+            }
+        });
+    };
+    #[cfg(not(feature = "mobile"))]
+    let handle_mobile_pick = move |_| {};
     let handle_upload = move |_| {
         if let Some((_filename, data, mime_type)) = selected_file.read().clone() {
             let quality_val = *quality.read();
@@ -135,23 +147,39 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
         div { class: "space-y-3",
             if selected_file.read().is_none() {
                 div { class: "flex items-center justify-center w-full",
-                    label { class: "flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:border-gray-600",
-                        div { class: "flex flex-col items-center justify-center pt-5 pb-6",
-                            span { class: "text-4xl mb-2", "📎" }
-                            p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
-                                span { class: "font-semibold", "Click to upload" }
-                                " or drag and drop"
-                            }
-                            p { class: "text-xs text-gray-500 dark:text-gray-400",
-                                "Images (PNG, JPG) or Videos (MP4, MOV)"
+                    if cfg!(feature = "mobile") {
+                        button {
+                            class: "flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:border-gray-600",
+                            onclick: handle_mobile_pick,
+                            div { class: "flex flex-col items-center justify-center pt-5 pb-6",
+                                span { class: "text-4xl mb-2", "📎" }
+                                p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
+                                    span { class: "font-semibold", "Tap to upload" }
+                                }
+                                p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                    "Images (PNG, JPG) or Videos (MP4, MOV)"
+                                }
                             }
                         }
-                        input {
-                            id: "{props.input_id}",
-                            class: "hidden",
-                            r#type: "file",
-                            accept: "image/*,video/*",
-                            onchange: handle_file_select,
+                    } else {
+                        label { class: "flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:border-gray-600",
+                            div { class: "flex flex-col items-center justify-center pt-5 pb-6",
+                                span { class: "text-4xl mb-2", "📎" }
+                                p { class: "mb-2 text-sm text-gray-500 dark:text-gray-400",
+                                    span { class: "font-semibold", "Click to upload" }
+                                    " or drag and drop"
+                                }
+                                p { class: "text-xs text-gray-500 dark:text-gray-400",
+                                    "Images (PNG, JPG) or Videos (MP4, MOV)"
+                                }
+                            }
+                            input {
+                                id: "{props.input_id}",
+                                class: "hidden",
+                                r#type: "file",
+                                accept: "{MEDIA_ACCEPT}",
+                                onchange: handle_file_select,
+                            }
                         }
                     }
                 }
@@ -247,6 +275,7 @@ pub fn MediaUploader(props: MediaUploaderProps) -> Element {
 #[cfg(feature = "web")]
 async fn read_file_as_bytes(
     input_id: &str,
+    accept: &str,
 ) -> Result<(String, Vec<u8>, String), String> {
     use js_sys::{ArrayBuffer, Uint8Array};
     use wasm_bindgen_futures::JsFuture;
@@ -262,6 +291,9 @@ async fn read_file_as_bytes(
     let file = file_list.get(0).ok_or("No file selected")?;
     let file_name = file.name();
     let mime_type = file.type_();
+    if !matches_accept_filter(accept, &mime_type, &file_name) {
+        return Err("Selected file type is not allowed".to_string());
+    }
     let promise = file.array_buffer();
     let array_buffer = JsFuture::from(promise).await.map_err(|_| "Failed to read file")?;
     let array_buffer: ArrayBuffer = array_buffer
@@ -276,14 +308,31 @@ async fn read_file_as_bytes(
 #[cfg(all(feature = "native", not(feature = "mobile")))]
 async fn read_file_as_bytes(
     _input_id: &str,
+    accept: &str,
 ) -> Result<(String, Vec<u8>, String), String> {
-    Err("File reading not supported on this platform".to_string())
+    let file_handle = rfd::FileDialog::new()
+        .set_title("Select media file")
+        .pick_file()
+        .ok_or("No file selected")?;
+    let file_name = file_handle
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("Invalid file name")?
+        .to_string();
+    let data = std::fs::read(&file_handle)
+        .map_err(|e| format!("Failed to read selected file: {}", e))?;
+    let mime_type = mime_type_from_filename(&file_name);
+    if !matches_accept_filter(accept, &mime_type, &file_name) {
+        return Err("Selected file type is not allowed".to_string());
+    }
+    Ok((file_name, data, mime_type))
 }
 
 /// Mobile implementation - uses Android file picker via JNI
 #[cfg(feature = "mobile")]
 async fn read_file_as_bytes(
     _input_id: &str,
+    accept: &str,
 ) -> Result<(String, Vec<u8>, String), String> {
     let (bytes, mime_type) = crate::platform::mobile::pick_file().await?;
     let extension = mime_type
@@ -292,7 +341,60 @@ async fn read_file_as_bytes(
         .map(|s| s.split(';').next().unwrap_or("bin"))
         .unwrap_or("bin");
     let filename = format!("upload.{}", extension);
+    if !matches_accept_filter(accept, &mime_type, &filename) {
+        return Err("Selected file type is not allowed".to_string());
+    }
     Ok((filename, bytes, mime_type))
+}
+
+fn matches_accept_filter(accept: &str, mime_type: &str, filename: &str) -> bool {
+    let mime_type = mime_type.trim().to_lowercase();
+    let filename = filename.to_lowercase();
+    for token in accept.split(',').map(|s| s.trim().to_lowercase()) {
+        if token.is_empty() {
+            continue;
+        }
+        if token == "*/*" {
+            return true;
+        }
+        if let Some(prefix) = token.strip_suffix("/*") {
+            if mime_type.starts_with(&format!("{}/", prefix)) {
+                return true;
+            }
+            continue;
+        }
+        if token.starts_with('.') {
+            if filename.ends_with(&token) {
+                return true;
+            }
+            continue;
+        }
+        if mime_type == token {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(all(feature = "native", not(feature = "mobile")))]
+fn mime_type_from_filename(filename: &str) -> String {
+    match filename
+        .rsplit('.')
+        .next()
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("webm") => "video/webm",
+        Some("mkv") => "video/x-matroska",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 /// Helper function to format file size
 fn format_file_size(bytes: usize) -> String {

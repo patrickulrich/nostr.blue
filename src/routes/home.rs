@@ -48,6 +48,26 @@ impl FeedType {
         }
     }
 }
+
+fn login_method_requires_signer(
+    login_method: Option<&auth_store::LoginMethod>,
+) -> bool {
+    matches!(
+        login_method,
+        Some(auth_store::LoginMethod::BrowserExtension)
+            | Some(auth_store::LoginMethod::PrivateKey)
+            | Some(auth_store::LoginMethod::RemoteSigner)
+    ) || {
+        #[cfg(feature = "mobile")]
+        {
+            matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner))
+        }
+        #[cfg(not(feature = "mobile"))]
+        {
+            false
+        }
+    }
+}
 #[component]
 pub fn Home(list: String) -> Element {
     let mut feed_state = use_signal(|| DataState::<Vec<FeedItem>>::Pending);
@@ -199,17 +219,7 @@ pub fn Home(list: String) -> Element {
         }
         // For authenticated users with signing capability, allow cache display
         // before signer restoration, then do full relay load once signer is ready
-        let requires_signer = matches!(
-            login_method,
-            Some(auth_store::LoginMethod::BrowserExtension)
-                | Some(auth_store::LoginMethod::PrivateKey)
-                | Some(auth_store::LoginMethod::RemoteSigner)
-        ) || {
-            #[cfg(feature = "mobile")]
-            { matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
-            #[cfg(not(feature = "mobile"))]
-            { false }
-        };
+        let requires_signer = login_method_requires_signer(login_method.as_ref());
         let signer_available = !requires_signer || has_signer;
         let cache_only = is_authenticated && requires_signer && !has_signer;
         let (last_refresh, last_feed, last_signer_available) = last_loaded_trigger.peek().clone();
@@ -848,17 +858,7 @@ pub fn Home(list: String) -> Element {
         }
         // For authenticated users with signing capability, wait for signer restoration
         // ReadOnly (npub) users don't need a signer and should bypass this guard
-        let requires_signer = matches!(
-            login_method,
-            Some(auth_store::LoginMethod::BrowserExtension)
-                | Some(auth_store::LoginMethod::PrivateKey)
-                | Some(auth_store::LoginMethod::RemoteSigner)
-        ) || {
-            #[cfg(feature = "mobile")]
-            { matches!(login_method, Some(auth_store::LoginMethod::AndroidSigner)) }
-            #[cfg(not(feature = "mobile"))]
-            { false }
-        };
+        let requires_signer = login_method_requires_signer(login_method.as_ref());
         if is_authenticated && requires_signer && !has_signer {
             log::debug!("Waiting for signer restoration before starting realtime...");
             return;
@@ -921,21 +921,8 @@ pub fn Home(list: String) -> Element {
                 let client = client.clone();
                 let batch_num = batch_idx + 1;
                 if batch_idx > 0 {
-                    #[cfg(feature = "web")]
-                    {
-                        crate::platform::timer::sleep_ms(batch_idx as u32 * BATCH_DELAY_MS as u32)
-                            .await;
-                    }
-                    #[cfg(not(feature = "web"))]
-                    {
-                        use tokio::time::{sleep, Duration as TokioDuration};
-                        sleep(
-                                TokioDuration::from_millis(
-                                    batch_idx as u64 * BATCH_DELAY_MS,
-                                ),
-                            )
-                            .await;
-                    }
+                    let delay = (batch_idx as u32) * (BATCH_DELAY_MS as u32);
+                    crate::platform::timer::sleep_ms(delay).await;
                 }
                 let filter = Filter::new()
                     .kinds(vec![Kind::TextNote, Kind::Repost, Kind::Comment])

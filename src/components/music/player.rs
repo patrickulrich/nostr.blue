@@ -24,6 +24,7 @@ pub fn PersistentMusicPlayer() -> Element {
     let mut is_seeking = use_signal(|| false);
     let mut seek_gen = use_signal(|| 0u32);
     let mut show_share_modal = use_signal(|| false);
+    let mut native_source_bound = use_signal(|| false);
     let audio_id = "global-music-player-audio";
     // Inject HLS manager JS on non-web platforms.
     // On web, it loads via <script> tag in index.html.
@@ -58,6 +59,7 @@ pub fn PersistentMusicPlayer() -> Element {
             let _is_live_stream = track.is_live_stream;
             {
                 spawn(async move {
+                    native_source_bound.set(false);
                     let audio_id_json = serde_json::to_string(&audio_id)
                         .unwrap_or_else(|_| "\"global-music-player-audio\"".to_string());
                     let media_url_json = serde_json::to_string(&media_url)
@@ -85,7 +87,13 @@ pub fn PersistentMusicPlayer() -> Element {
                                     if (window.hlsManager) {{
                                         const result = await window.hlsManager.attachToMedia({audio_id}, {media_url});
                                         console.log('[Radio] Stream attached:', result);
-                                        audio.dataset.currentUrl = {media_url};
+                                        if (result && result.type === 'error') {{
+                                            console.error('[Radio] Stream attach returned error:', result.error || 'unknown');
+                                            return;
+                                        }}
+                                        if (result && result.type !== 'cancelled') {{
+                                            audio.dataset.currentUrl = {media_url};
+                                        }}
                                     }}
                                     if ({is_playing}) {{
                                         audio.play().catch(e => console.log('Play failed:', e));
@@ -114,15 +122,25 @@ pub fn PersistentMusicPlayer() -> Element {
                                 // Use dataset to track current URL (more reliable than audio.src comparison)
                                 const urlChanged = audio.dataset.currentUrl !== {media_url};
 
+                                if (audio._nostrBlueOnCanPlay) {{
+                                    audio.removeEventListener('canplay', audio._nostrBlueOnCanPlay);
+                                    audio._nostrBlueOnCanPlay = null;
+                                }}
+
                                 if (urlChanged) {{
                                     audio.dataset.currentUrl = {media_url};
                                     audio.src = {media_url};
                                     // For live streams, wait for canplay before playing
                                     if ({is_playing}) {{
-                                        audio.addEventListener('canplay', function onCanPlay() {{
+                                        const onCanPlay = function() {{
+                                            if (audio.dataset.currentUrl !== {media_url}) return;
+                                            if (!{is_playing}) return;
                                             audio.removeEventListener('canplay', onCanPlay);
+                                            audio._nostrBlueOnCanPlay = null;
                                             audio.play().catch(e => console.log('Play failed:', e.name, e.message));
-                                        }}, {{ once: true }});
+                                        }};
+                                        audio._nostrBlueOnCanPlay = onCanPlay;
+                                        audio.addEventListener('canplay', onCanPlay);
                                         audio.load();
                                     }}
                                 }} else {{
@@ -140,7 +158,13 @@ pub fn PersistentMusicPlayer() -> Element {
                             is_playing = is_playing_literal,
                         )
                     };
-                    let _ = document::eval(&script);
+                    match document::eval(&script).await {
+                        Ok(_) => native_source_bound.set(true),
+                        Err(e) => {
+                            native_source_bound.set(false);
+                            log::warn!("Failed to apply audio source script: {:?}", e);
+                        }
+                    }
                 });
             }
         }
@@ -355,6 +379,7 @@ pub fn PersistentMusicPlayer() -> Element {
         };
     }
     let track = state.current_track.as_ref().unwrap();
+    let is_hls_track = track.media_url.to_lowercase().contains(".m3u8");
     let (share_url, share_content_type) = match &track.source {
         crate::stores::nostr_music::TrackSource::Wavlake { .. } => {
             (format!("https://nostr.blue/music/track/{}", track.id), ContentType::MusicTrack)
@@ -387,9 +412,12 @@ pub fn PersistentMusicPlayer() -> Element {
     let onerror_handler = move |_evt| {
         // On mobile, playback is managed entirely via document::eval.
         // The RSX audio element has src="" which fires onerror immediately.
-        // Suppress all DOM onerror on mobile — eval handles its own errors.
+        // Suppress placeholder src errors — eval path handles binding/errors.
         #[cfg(not(feature = "web"))]
         {
+            if !*native_source_bound.read() {
+                return;
+            }
             music_player::set_buffering(false);
             music_player::set_playback_error(Some(
                 "Playback error on this platform. Please retry.".to_string(),
@@ -411,7 +439,11 @@ pub fn PersistentMusicPlayer() -> Element {
             style: "display: none;",
             // On mobile, empty src prevents mixed content blocking.
             // The use_effect sets audio.src via document::eval dynamically.
-            src: if cfg!(feature = "web") { track.media_url.as_str() } else { "" },
+            src: if cfg!(feature = "web") && !is_hls_track {
+                track.media_url.as_str()
+            } else {
+                ""
+            },
             ontimeupdate: move |_evt| {
                 if !*is_seeking.read() {
                     #[cfg(feature = "web")]

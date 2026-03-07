@@ -158,6 +158,21 @@ impl EventTime {
         match event_type {
             CalendarEventType::DateBased => {
                 if s.len() == 10 && s.chars().nth(4) == Some('-') && s.chars().nth(7) == Some('-') {
+                    let parts: Vec<&str> = s.split('-').collect();
+                    if parts.len() != 3 {
+                        return None;
+                    }
+                    let year = parts[0].parse::<i32>().ok()?;
+                    let month = parts[1].parse::<i32>().ok()?;
+                    let day = parts[2].parse::<i32>().ok()?;
+                    if year < 1970 || !(1..=12).contains(&month) {
+                        return None;
+                    }
+                    let _is_leap = is_leap_year(year);
+                    let max_day = crate::utils::date_helpers::days_in_month(year, month);
+                    if max_day == 0 || !(1..=max_day).contains(&day) {
+                        return None;
+                    }
                     Some(EventTime::Date(s.to_string()))
                 } else {
                     None
@@ -762,6 +777,10 @@ mod tests {
         assert!(matches!(time, Some(EventTime::Date(_))));
         let time = EventTime::parse("invalid", CalendarEventType::DateBased);
         assert!(time.is_none());
+        let impossible = EventTime::parse("2024-02-30", CalendarEventType::DateBased);
+        assert!(impossible.is_none());
+        let pre_epoch = EventTime::parse("1969-12-31", CalendarEventType::DateBased);
+        assert!(pre_epoch.is_none());
     }
     #[test]
     fn test_event_time_timestamp() {

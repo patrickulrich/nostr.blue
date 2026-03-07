@@ -136,7 +136,13 @@ pub async fn restore_connection() {
     let legacy_uri = if secure_uri.is_none() { load_nwc_uri() } else { None };
     match secure_uri.or_else(|| legacy_uri.clone()) {
         Some(uri) => {
-            log::info!("Restoring NWC connection from secure storage");
+            if legacy_uri.is_some() {
+                log::info!(
+                    "Restoring NWC connection from legacy storage (migrating to secure storage)"
+                );
+            } else {
+                log::info!("Restoring NWC connection from secure storage");
+            }
             if let Err(e) = connect_nwc(&uri, true).await {
                 log::warn!("Failed to restore NWC connection: {}", e);
                 disconnect_nwc(true);

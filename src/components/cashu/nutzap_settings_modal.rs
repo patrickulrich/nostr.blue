@@ -108,8 +108,6 @@ pub fn NutzapSettingsModal(on_close: EventHandler<()>) -> Element {
                         );
                         log::error!("{msg}");
                         error_message.set(Some(msg));
-                        is_publishing.set(false);
-                        return;
                     }
                     *cashu::NUTZAP_AUTO_REDEEM.write() = auto_redeem_setting;
                     success_message

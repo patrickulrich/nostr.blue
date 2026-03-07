@@ -111,6 +111,9 @@ pub fn ArticleNew() -> Element {
         }
     });
     use_effect(move || {
+        if *draft_status.read() == DraftStatus::Saving {
+            return;
+        }
         if !*is_dirty.read() {
             return;
         }
@@ -206,11 +209,18 @@ pub fn ArticleNew() -> Element {
             return;
         }
         let saved_hash = *content_hash.read();
+        let save_gen = auto_save_gen.with_mut(|g| {
+            *g = g.wrapping_add(1);
+            *g
+        });
         draft_status.set(DraftStatus::Saving);
         spawn(async move {
             let now = crate::platform::timestamp::now_secs();
             match save_draft(&draft).await {
                 Ok(event_id) => {
+                    if *auto_save_gen.read() != save_gen {
+                        return;
+                    }
                     last_auto_save.set(now);
                     loaded_draft_id.set(Some(draft.identifier.clone()));
                     last_saved_hash.set(Some(saved_hash));
@@ -222,6 +232,9 @@ pub fn ArticleNew() -> Element {
                         });
                 }
                 Err(e) => {
+                    if *auto_save_gen.read() != save_gen {
+                        return;
+                    }
                     log::error!("Failed to save draft: {}", e);
                     draft_status.set(DraftStatus::Error(e.clone()));
                     error_message.set(Some(format!("Failed to save draft: {}", e)));

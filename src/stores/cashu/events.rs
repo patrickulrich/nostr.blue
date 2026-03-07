@@ -1100,7 +1100,12 @@ pub fn start_pending_events_processor() {
         "Started pending events background processor (adaptive interval + periodic recovery)"
     );
 }
-/// No-op on non-WASM targets (gloo_timers is WASM-only)
+/// Start background pending-event processing on native targets.
+///
+/// Runs continuously in the background, retries pending events with adaptive
+/// sleep intervals, and periodically performs maintenance/recovery when the
+/// queue stays empty. The loop is singleton-guarded and stops with process
+/// termination.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_pending_events_processor() {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1113,11 +1118,55 @@ pub fn start_pending_events_processor() {
         return;
     }
     dioxus::prelude::spawn(async move {
+        let mut recovery_counter: u8 = 0;
         loop {
             if let Err(e) = process_pending_events().await {
                 log::error!("Error processing pending events: {}", e);
             }
             let pending_count = PENDING_NOSTR_EVENTS.read().len();
+            if pending_count == 0 {
+                recovery_counter = recovery_counter.saturating_add(1);
+            } else {
+                recovery_counter = 0;
+            }
+            if recovery_counter >= 6 {
+                recovery_counter = 0;
+                super::signals::cleanup_expired_pending_secrets().await;
+                match reconcile_pending_event_ids().await {
+                    Ok(count) if count > 0 => {
+                        log::info!("Native reconciled {} pending event IDs", count);
+                    }
+                    Err(e) => {
+                        log::debug!("Native pending event ID reconciliation error: {}", e);
+                    }
+                    _ => {}
+                }
+                spawn(async {
+                    use futures::FutureExt;
+                    let recovery_future = super::proof_recovery::run_full_recovery()
+                        .fuse();
+                    let timeout_future = crate::platform::timer::sleep_ms(180_000).fuse();
+                    futures::pin_mut!(recovery_future, timeout_future);
+                    futures::select! {
+                        result = recovery_future => {
+                            if result.recovered_count > 0 || result.spent_count > 0 {
+                                log::info!(
+                                    "Native periodic recovery: {} recovered, {} spent",
+                                    result.recovered_count, result.spent_count
+                                );
+                            }
+                            if !result.errors.is_empty() {
+                                for err in result.errors {
+                                    log::debug!("Native periodic recovery error: {}", err);
+                                }
+                            }
+                        }
+                        _ = timeout_future => {
+                            log::warn!("Native periodic recovery timed out after 3 minutes");
+                        }
+                    }
+                });
+            }
             let interval_ms = if pending_count > 0 { 30_000 } else { 60_000 };
             crate::platform::timer::sleep_ms(interval_ms).await;
         }
